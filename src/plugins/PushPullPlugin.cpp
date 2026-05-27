@@ -175,13 +175,9 @@ private:
 } // anonymous namespace
 
 REGISTER_PLUGIN(PushPull, [](materializr::PluginContext& ctx) {
-    ctx.registerToolbarButton({"Push/Pull", "Feature",
-        materializr::SelectionContext::HasFaces, 401,
-        nullptr,
-        []() -> std::unique_ptr<materializr::InteractiveTool> {
-            return std::make_unique<PushPullTool>();
-        }});
-
+    // Face push/pull is handled by the Application's interactive arrow gizmo (it
+    // needs viewport drag input, which plugin tools don't receive). This plugin
+    // keeps only the sketch-region push/pull.
     ctx.registerToolbarButton({"Push/Pull", "Feature",
         materializr::SelectionContext::HasSketchRegions, 401,
         nullptr,

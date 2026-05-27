@@ -151,17 +151,8 @@ private:
 
 } // anonymous namespace
 
-REGISTER_PLUGIN(Chamfer, [](materializr::PluginContext& ctx) {
-    ctx.registerToolbarButton({"Chamfer", "Edge Ops",
-        materializr::SelectionContext::HasEdges, 601,
-        nullptr,
-        []() -> std::unique_ptr<materializr::InteractiveTool> {
-            return std::make_unique<ChamferTool>();
-        }});
-
-    ctx.registerCommand({"Chamfer", "",
-        [](materializr::PluginContext& ctx) {
-            materializr::PluginRegistry::instance().activateTool(
-                std::make_unique<ChamferTool>(), ctx);
-        }});
+REGISTER_PLUGIN(Chamfer, [](materializr::PluginContext& /*ctx*/) {
+    // Chamfer is now the Application's interactive edge op (drag handle +
+    // measurement + live preview). The toolbar "Chamfer" button lives in the
+    // app's edge tools.
 })

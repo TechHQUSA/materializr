@@ -155,17 +155,8 @@ private:
 
 } // anonymous namespace
 
-REGISTER_PLUGIN(Fillet, [](materializr::PluginContext& ctx) {
-    ctx.registerToolbarButton({"Fillet", "Edge Ops",
-        materializr::SelectionContext::HasEdges, 600,
-        nullptr,
-        []() -> std::unique_ptr<materializr::InteractiveTool> {
-            return std::make_unique<FilletTool>();
-        }});
-
-    ctx.registerCommand({"Fillet", "",
-        [](materializr::PluginContext& ctx) {
-            materializr::PluginRegistry::instance().activateTool(
-                std::make_unique<FilletTool>(), ctx);
-        }});
+REGISTER_PLUGIN(Fillet, [](materializr::PluginContext& /*ctx*/) {
+    // Fillet is now the Application's interactive edge op (drag handle + measurement
+    // + live preview), which needs viewport input the plugin tool can't get. The
+    // toolbar "Fillet" button lives in the app's edge tools.
 })

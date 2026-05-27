@@ -73,6 +73,21 @@ bool Document::isBodyVisible(int id) const {
     return m_bodies[idx].visible;
 }
 
+glm::vec3 Document::getBodyColor(int id) const {
+    int idx = findBodyIndex(id);
+    if (idx < 0) {
+        return glm::vec3(0.80f, 0.80f, 0.82f);
+    }
+    return m_bodies[idx].color;
+}
+
+void Document::setBodyColor(int id, const glm::vec3& color) {
+    int idx = findBodyIndex(id);
+    if (idx >= 0) {
+        m_bodies[idx].color = color;
+    }
+}
+
 std::vector<int> Document::getAllBodyIds() const {
     std::vector<int> ids;
     ids.reserve(m_bodies.size());

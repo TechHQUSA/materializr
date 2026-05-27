@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
 
@@ -12,6 +13,7 @@ struct BodyEntry {
     std::string name;
     TopoDS_Shape shape;
     bool visible = true;
+    glm::vec3 color = glm::vec3(0.80f, 0.80f, 0.82f); // default: light grey
 };
 
 struct PlaneEntry {
@@ -43,6 +45,8 @@ public:
     void setBodyName(int id, const std::string& name);
     void setBodyVisible(int id, bool visible);
     bool isBodyVisible(int id) const;
+    glm::vec3 getBodyColor(int id) const;
+    void setBodyColor(int id, const glm::vec3& color);
     std::vector<int> getAllBodyIds() const;
 
     // Sketch management

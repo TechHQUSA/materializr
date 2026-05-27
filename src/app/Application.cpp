@@ -29,6 +29,7 @@
 #include "modeling/ExtrudeOp.h"
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
+#include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
 #include "modeling/DeleteOp.h"
@@ -56,7 +57,12 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Mat.hxx>
+#include <gp_XYZ.hxx>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -309,7 +315,29 @@ void Application::endFrame() {
 }
 
 void Application::renderDockspace() {
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+    // Host the dockspace in a window inset above the status bar so docked panels
+    // (e.g. the Tools window's bottom Delete button) aren't covered by the
+    // full-width status bar overlay. Reuse the original DockSpaceOverViewport
+    // dockspace id (0x08BD597D) so the saved imgui.ini layout still binds.
+    const float statusBarHeight = 24.0f;
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->WorkPos);
+    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y - statusBarHeight));
+    ImGui::SetNextWindowViewport(vp->ID);
+
+    ImGuiWindowFlags hostFlags =
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoNavFocus;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("DockHost", nullptr, hostFlags);
+    ImGui::PopStyleVar(3);
+    ImGui::DockSpace(0x08BD597Du, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    ImGui::End();
 }
 
 void Application::renderMenuBar() {
@@ -437,6 +465,108 @@ void Application::renderSettings() {
     ImGui::End();
 }
 
+void Application::renderMirrorPopup() {
+    if (m_showMirrorPopup) {
+        ImGui::OpenPopup("MirrorPopup");
+        m_showMirrorPopup = false;
+    }
+    if (ImGui::BeginPopup("MirrorPopup")) {
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Mirror across");
+        ImGui::Separator();
+
+        // Mirror the body across the plane on its own bounding box for the chosen
+        // axis (the copy lands flush beside the original).
+        auto mirrorAxis = [&](int axis) {
+            try {
+                const TopoDS_Shape& shape = m_document->getBody(m_mirrorBodyId);
+                Bnd_Box bb; BRepBndLib::Add(shape, bb);
+                if (bb.IsVoid()) return;
+                double x1, y1, z1, x2, y2, z2; bb.Get(x1, y1, z1, x2, y2, z2);
+                double cx = (x1 + x2) * 0.5, cy = (y1 + y2) * 0.5, cz = (z1 + z2) * 0.5;
+                gp_Pnt pt; gp_Dir dir;
+                if (axis == 0)      { pt = gp_Pnt(x1, cy, cz); dir = gp_Dir(1, 0, 0); }
+                else if (axis == 1) { pt = gp_Pnt(cx, y1, cz); dir = gp_Dir(0, 1, 0); }
+                else                { pt = gp_Pnt(cx, cy, z1); dir = gp_Dir(0, 0, 1); }
+                auto op = std::make_unique<MirrorOp>();
+                op->setBody(m_mirrorBodyId);
+                op->setPlane(MirrorPlane::Custom);
+                op->setCustomPlane(gp_Ax2(pt, dir));
+                op->setKeepOriginal(true);
+                if (m_history->pushOperation(std::move(op), *m_document)) m_meshesDirty = true;
+            } catch (...) {}
+        };
+
+        if (ImGui::Button("X axis", ImVec2(150, 0))) { mirrorAxis(0); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Y axis", ImVec2(150, 0))) { mirrorAxis(1); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Z axis", ImVec2(150, 0))) { mirrorAxis(2); ImGui::CloseCurrentPopup(); }
+        ImGui::Separator();
+        if (ImGui::Button("Across a face…", ImVec2(150, 0))) {
+            m_mirrorPickFace = true; // next planar face click defines the mirror plane
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void Application::renderScalePanel() {
+    // Shown only while the Scale gizmo is active with a body selected.
+    if (m_inSketchMode || !m_selection->hasSelectedBodies()) return;
+    if (m_gizmo->getMode() != GizmoMode::Scale) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 230,
+                                    ImGui::GetWindowPos().y + 50));
+    ImGui::SetNextWindowSize(ImVec2(210, 0));
+    ImGui::Begin("##ScalePanel", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Scale (%% of current)");
+    ImGui::Separator();
+    ImGui::Checkbox("Uniform", &m_scaleUniform);
+
+    // Always show X/Y/Z. Typed decimals are allowed; with Uniform on, editing one
+    // field mirrors it to the others. No +/- step buttons so the row stays narrow.
+    auto box = [&](const char* label, int i) {
+        ImGui::SetNextItemWidth(90.0f);
+        if (ImGui::InputFloat(label, &m_scalePct[i], 0.0f, 0.0f, "%.1f")) {
+            if (m_scaleUniform) { m_scalePct[0] = m_scalePct[1] = m_scalePct[2] = m_scalePct[i]; }
+        }
+    };
+    box("X %", 0);
+    box("Y %", 1);
+    box("Z %", 2);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Apply", ImVec2(90, 0))) {
+        if (m_selection->hasSelectedBodies()) {
+            int bodyId = m_selection->getSelection()[0].bodyId;
+            float sx = m_scalePct[0] / 100.0f;
+            float sy = (m_scaleUniform ? m_scalePct[0] : m_scalePct[1]) / 100.0f;
+            float sz = (m_scaleUniform ? m_scalePct[0] : m_scalePct[2]) / 100.0f;
+            if (sx > 0.001f && sy > 0.001f && sz > 0.001f &&
+                (std::abs(sx - 1) > 1e-4f || std::abs(sy - 1) > 1e-4f || std::abs(sz - 1) > 1e-4f)) {
+                try {
+                    const TopoDS_Shape& shape = m_document->getBody(bodyId);
+                    Bnd_Box bb; BRepBndLib::Add(shape, bb);
+                    double x1, y1, z1, x2, y2, z2; bb.Get(x1, y1, z1, x2, y2, z2);
+                    auto op = std::make_unique<TransformOp>();
+                    op->setBodyId(bodyId);
+                    op->setType(TransformType::Scale);
+                    op->setCenter((x1 + x2) * 0.5, (y1 + y2) * 0.5, (z1 + z2) * 0.5);
+                    op->setScaleXYZ(sx, sy, sz);
+                    if (m_history->pushOperation(std::move(op), *m_document)) m_meshesDirty = true;
+                } catch (...) {}
+            }
+            m_scalePct[0] = m_scalePct[1] = m_scalePct[2] = 100.0f;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset", ImVec2(90, 0))) {
+        m_scalePct[0] = m_scalePct[1] = m_scalePct[2] = 100.0f;
+    }
+    ImGui::End();
+}
+
 void Application::renderInteractionsPanel() {
     // A quick-reference of the viewport interactions, docked above Items. The
     // camera rows reflect the live mouse bindings chosen in File > Settings.
@@ -472,6 +602,23 @@ void Application::renderInteractionsPanel() {
     row("Undo / Redo", "Ctrl+Z / Ctrl+Y");
     row("Command palette", "Ctrl+K");
     ImGui::End();
+}
+
+// Map a screen drag onto a world direction: project the mouse delta onto the
+// screen-space image of `normal` at `origin`. Falls back to vertical drag when
+// that direction is nearly perpendicular to the screen (face head-on) — otherwise
+// normalizing a near-zero vector yields NaN, which propagates into a NaN prism
+// and crashes the boolean kernel.
+static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& normal,
+                                   const glm::vec2& mouseDelta, const glm::mat4& vp) {
+    glm::vec4 o = vp * glm::vec4(origin, 1.0f);
+    glm::vec4 t = vp * glm::vec4(origin + normal, 1.0f);
+    if (o.w <= 1e-5f || t.w <= 1e-5f) return -mouseDelta.y * 0.05f;
+    glm::vec2 os(o.x / o.w, o.y / o.w), ts(t.x / t.w, t.y / t.w);
+    glm::vec2 sd(ts.x - os.x, -(ts.y - os.y)); // screen +y is down
+    float len = glm::length(sd);
+    if (len < 1e-4f) return -mouseDelta.y * 0.05f; // head-on: use vertical drag
+    return glm::dot(mouseDelta, sd / len) * 0.05f;
 }
 
 void Application::renderViewport() {
@@ -664,6 +811,15 @@ void Application::renderViewport() {
                 std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", std::abs(m_extrudeDistance));
                 drawDim(m_extrudeOrigin,
                         m_extrudeOrigin + m_extrudeNormal * m_extrudeDistance, dbuf);
+            } else if (m_pushPullActive && m_pushPullHasArrow) {
+                // Arrow out of the face + signed-distance measurement.
+                std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_pushPullDistance);
+                drawDim(m_pushPullOrigin,
+                        m_pushPullOrigin + m_pushPullNormal * m_pushPullDistance, dbuf);
+            } else if (m_edgeOpActive && m_edgeOpHasHandle) {
+                // Arrow straight out of the edge (outward, perpendicular) + measurement.
+                std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_edgeOpValue);
+                drawDim(m_edgeOpMid, m_edgeOpMid + m_edgeOpOutDir * m_edgeOpValue, dbuf);
             } else if (m_gizmoDragging && glm::length(m_gizmoTotalDelta) > 1e-3f) {
                 // Translate drag: original body centre -> current centre.
                 try {
@@ -680,6 +836,38 @@ void Application::renderViewport() {
                         if (dist > 1e-3f) {
                             std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", dist);
                             drawDim(oc, cc, dbuf);
+                        }
+                    }
+                } catch (...) {}
+            }
+
+            // Rotate (°) / Scale (%) readout near the body during a gizmo drag —
+            // the analogue of the mm readout for moves.
+            if (m_gizmoDragging && (m_gizmo->getMode() == GizmoMode::Rotate ||
+                                    m_gizmo->getMode() == GizmoMode::Scale)) {
+                try {
+                    Bnd_Box gb; BRepBndLib::Add(m_document->getBody(m_gizmoDragBodyId), gb);
+                    if (!gb.IsVoid()) {
+                        double bx1,by1,bz1,bx2,by2,bz2; gb.Get(bx1,by1,bz1,bx2,by2,bz2);
+                        glm::vec3 bc((bx1+bx2)*0.5,(by1+by2)*0.5,(bz1+bz2)*0.5);
+                        ImVec2 sp;
+                        if (toImg(bc, sp)) {
+                            char rb[48];
+                            if (m_gizmo->getMode() == GizmoMode::Rotate) {
+                                // Show the ACTUAL applied angle (after soft 45° snap),
+                                // not the raw mouse angle, so the readout matches the body.
+                                float n = std::round(m_gizmoTotalAngle / 45.0f) * 45.0f;
+                                float shown = (std::abs(m_gizmoTotalAngle - n) < 7.0f) ? n : m_gizmoTotalAngle;
+                                std::snprintf(rb, sizeof(rb), "%.0f deg", shown);
+                            } else
+                                std::snprintf(rb, sizeof(rb), "X %.0f%%  Y %.0f%%  Z %.0f%%",
+                                              m_gizmoTotalScale.x*100, m_gizmoTotalScale.y*100,
+                                              m_gizmoTotalScale.z*100);
+                            ImVec2 ts = ImGui::CalcTextSize(rb);
+                            ImVec2 tp(sp.x - ts.x*0.5f, sp.y - ts.y - 14.0f);
+                            dl->AddRectFilled(ImVec2(tp.x-4, tp.y-2), ImVec2(tp.x+ts.x+4, tp.y+ts.y+2),
+                                              IM_COL32(20,20,28,205), 3.0f);
+                            dl->AddText(tp, IM_COL32(235,235,240,255), rb);
                         }
                     }
                 } catch (...) {}
@@ -745,22 +933,55 @@ void Application::renderViewport() {
 
             // Interactive extrude drag: left-drag moves distance along normal
             if (m_extruding && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                // Project mouse delta onto the screen-space direction of the extrude normal
-                glm::mat4 vp = proj * view;
-                glm::vec3 originScreen = glm::vec3(vp * glm::vec4(m_extrudeOrigin, 1.0f));
-                glm::vec3 normalTip = m_extrudeOrigin + m_extrudeNormal;
-                glm::vec3 tipScreen = glm::vec3(vp * glm::vec4(normalTip, 1.0f));
-                glm::vec2 screenDir = glm::normalize(glm::vec2(tipScreen.x - originScreen.x,
-                                                                 -(tipScreen.y - originScreen.y)));
-                glm::vec2 mouseDelta(io.MouseDelta.x, io.MouseDelta.y);
-                float proj_amount = glm::dot(mouseDelta, screenDir) * 0.05f;
-                m_extrudeDistance += proj_amount;
+                glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
+                m_extrudeDistance += projectDragOntoNormal(m_extrudeOrigin, m_extrudeNormal,
+                                                           md, proj * view);
                 std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf), "%.1f", m_extrudeDistance);
                 updateInteractiveExtrude();
             }
 
-            // Gizmo input + Face hover highlighting + picking (when not in sketch mode)
-            if (!m_inSketchMode && !m_extruding) {
+            // Push/Pull face arrow: left-drag moves the distance along the face normal.
+            if (m_pushPullActive && m_pushPullHasArrow &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
+                // Half the extrude drag speed — push/pull felt too twitchy.
+                m_pushPullDistance += projectDragOntoNormal(m_pushPullOrigin, m_pushPullNormal,
+                                                            md, proj * view) * 0.5f;
+                std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
+                updatePushPull();
+            }
+
+            // Fillet/Chamfer drag handle: left-drag sets the radius/distance to the
+            // perpendicular distance from the edge to the cursor (on a plane through
+            // the edge midpoint facing the camera).
+            if (m_edgeOpActive && m_edgeOpHasHandle &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                ImVec2 mp = ImGui::GetMousePos();
+                ImVec2 wp = ImGui::GetItemRectMin();
+                glm::mat4 invVP = glm::inverse(proj * view);
+                float nx = ((mp.x - wp.x) / contentSize.x) * 2.0f - 1.0f;
+                float ny = 1.0f - ((mp.y - wp.y) / contentSize.y) * 2.0f;
+                glm::vec4 np = invVP * glm::vec4(nx, ny, -1.0f, 1.0f);
+                glm::vec4 fp = invVP * glm::vec4(nx, ny, 1.0f, 1.0f);
+                glm::vec3 ro(np / np.w), rd = glm::normalize(glm::vec3(fp / fp.w) - ro);
+                glm::vec3 camFwd = glm::normalize(cam.getTarget() - cam.getPosition());
+                float denom = glm::dot(rd, camFwd);
+                if (std::abs(denom) > 1e-6f) {
+                    float t = glm::dot(m_edgeOpMid - ro, camFwd) / denom;
+                    glm::vec3 hit = ro + rd * t;
+                    // Signed distance along the outward arrow: dragging away from the
+                    // edge grows the value (≥0.1 mm); dragging back toward/through the
+                    // edge returns to 0 (no change).
+                    float proj = glm::dot(hit - m_edgeOpMid, m_edgeOpOutDir);
+                    m_edgeOpValue = (proj <= 0.0f) ? 0.0f : std::max(0.1f, proj);
+                    std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
+                    updateInteractiveEdgeOp();
+                }
+            }
+
+            // Gizmo input + Face hover highlighting + picking (suppressed while an
+            // interactive op owns the left-drag: extrude, push/pull, fillet/chamfer).
+            if (!m_inSketchMode && !m_extruding && !m_pushPullActive && !m_edgeOpActive) {
                 ImVec2 mousePos = ImGui::GetMousePos();
                 ImVec2 winPos = ImGui::GetItemRectMin();
                 float localX = mousePos.x - winPos.x;
@@ -776,6 +997,17 @@ void Application::renderViewport() {
                         localX, localY, contentSize.x, contentSize.y,
                         mouseDown, mouseJustPressed, cam);
 
+                    // Helpers shared by drag-apply and commit.
+                    auto axisDirOf = [](GizmoAxis a) -> glm::vec3 {
+                        if (a == GizmoAxis::X) return glm::vec3(1, 0, 0);
+                        if (a == GizmoAxis::Y) return glm::vec3(0, 1, 0);
+                        return glm::vec3(0, 0, 1);
+                    };
+                    auto softSnap45 = [](float deg) {
+                        float n = std::round(deg / 45.0f) * 45.0f;
+                        return (std::abs(deg - n) < 7.0f) ? n : deg; // free, snaps near 45°
+                    };
+
                     // Start drag: save original shape and reset accumulators
                     if (gResult.activeAxis != GizmoAxis::None && !m_gizmoDragging) {
                         int bodyId = m_selection->getSelection()[0].bodyId;
@@ -784,111 +1016,115 @@ void Application::renderViewport() {
                             m_gizmoDragBodyId = bodyId;
                             m_gizmoDragging = true;
                             m_gizmoTotalDelta = glm::vec3(0.0f);
+                            m_gizmoTotalAngle = 0.0f;
+                            m_gizmoScaleAccum = glm::vec3(0.0f);
+                            m_gizmoTotalScale = glm::vec3(1.0f);
                         } catch (...) {}
                     }
 
-                    // During drag: apply live preview
+                    // During drag: accumulate totals and (re)apply to the ORIGINAL
+                    // shape each frame, so snapping and per-axis scale stay stable.
                     if (gResult.changed && m_gizmoDragging) {
                         try {
-                            gp_Trsf trsf;
-                            // Whether to apply transform to the ORIGINAL shape or the
-                            // current (already-transformed) shape. Translate snaps the
-                            // total drag delta in absolute world space, so it has to
-                            // re-transform the original each frame. Rotate/Scale stay
-                            // on the existing per-frame approach.
-                            bool applyToOriginal = false;
+                            Bnd_Box ob; BRepBndLib::Add(m_gizmoDragOriginalShape, ob);
+                            double ox1,oy1,oz1,ox2,oy2,oz2; ob.Get(ox1,oy1,oz1,ox2,oy2,oz2);
+                            gp_Pnt center((ox1+ox2)/2,(oy1+oy2)/2,(oz1+oz2)/2);
+
+                            TopoDS_Shape result;
+                            bool applied = false;
 
                             if (gResult.mode == GizmoMode::Translate) {
-                                // Accumulate the per-frame deltas so we always know
-                                // the total movement since the drag started, then snap
-                                // THAT (not per-frame) to grid multiples and apply to
-                                // the original shape. This gives clean integer-multiple
-                                // displacements regardless of where the body started.
                                 m_gizmoTotalDelta += gResult.delta;
                                 glm::vec3 d = m_gizmoTotalDelta;
                                 if (m_snapToGrid && m_sketchGridStep > 0.0f) {
-                                    float step = m_sketchGridStep;
-                                    float thr = step * 0.4f;
-                                    auto snap1d = [&](float v) {
-                                        float nearest = std::round(v / step) * step;
-                                        return (std::abs(v - nearest) < thr) ? nearest : v;
-                                    };
-                                    d.x = snap1d(d.x);
-                                    d.y = snap1d(d.y);
-                                    d.z = snap1d(d.z);
+                                    float step = m_sketchGridStep, thr = step * 0.4f;
+                                    auto s1 = [&](float v){ float n=std::round(v/step)*step; return std::abs(v-n)<thr?n:v; };
+                                    d.x = s1(d.x); d.y = s1(d.y); d.z = s1(d.z);
                                 }
-                                trsf.SetTranslation(gp_Vec(d.x, d.y, d.z));
-                                applyToOriginal = true;
+                                gp_Trsf trsf; trsf.SetTranslation(gp_Vec(d.x, d.y, d.z));
+                                BRepBuilderAPI_Transform xf(m_gizmoDragOriginalShape, trsf, true);
+                                if (xf.IsDone()) { result = xf.Shape(); applied = true; }
                             } else if (gResult.mode == GizmoMode::Rotate) {
-                                double angle = glm::length(gResult.delta);
-                                if (angle > 1e-6) {
-                                    glm::vec3 axis = glm::normalize(gResult.delta);
-                                    const TopoDS_Shape& cur = m_document->getBody(m_gizmoDragBodyId);
-                                    Bnd_Box bbox;
-                                    BRepBndLib::Add(cur, bbox);
-                                    double xmin,ymin,zmin,xmax,ymax,zmax;
-                                    bbox.Get(xmin,ymin,zmin,xmax,ymax,zmax);
-                                    gp_Pnt center((xmin+xmax)/2,(ymin+ymax)/2,(zmin+zmax)/2);
-                                    trsf.SetRotation(gp_Ax1(center, gp_Dir(axis.x, axis.y, axis.z)),
-                                                     angle * M_PI / 180.0);
+                                glm::vec3 ad = axisDirOf(gResult.activeAxis);
+                                m_gizmoRotAxis = ad;
+                                m_gizmoTotalAngle += glm::dot(gResult.delta, ad);
+                                float ang = softSnap45(m_gizmoTotalAngle);
+                                gp_Trsf trsf;
+                                trsf.SetRotation(gp_Ax1(center, gp_Dir(ad.x, ad.y, ad.z)),
+                                                 ang * M_PI / 180.0);
+                                BRepBuilderAPI_Transform xf(m_gizmoDragOriginalShape, trsf, true);
+                                if (xf.IsDone()) { result = xf.Shape(); applied = true; }
+                            } else { // Scale — per-axis, non-uniform about the centre
+                                float os = static_cast<float>(glm::length(
+                                    glm::vec3(ox2-ox1, oy2-oy1, oz2-oz1)));
+                                if (os < 0.001f) os = 1.0f;
+                                int ai = gResult.activeAxis == GizmoAxis::X ? 0
+                                       : gResult.activeAxis == GizmoAxis::Y ? 1 : 2;
+                                m_gizmoScaleAccum[ai] += (ai==0?gResult.delta.x:ai==1?gResult.delta.y:gResult.delta.z);
+                                if (m_scaleUniform) {
+                                    // Drive all axes from the dragged axis's factor.
+                                    float f = glm::clamp(1.0f + m_gizmoScaleAccum[ai]/os, 0.05f, 20.0f);
+                                    f = std::round(f * 100.0f) / 100.0f; // snap to 1%
+                                    m_gizmoTotalScale = glm::vec3(f);
+                                } else {
+                                    for (int k = 0; k < 3; ++k) {
+                                        float f = glm::clamp(1.0f + m_gizmoScaleAccum[k]/os, 0.05f, 20.0f);
+                                        m_gizmoTotalScale[k] = std::round(f * 100.0f) / 100.0f; // snap to 1%
+                                    }
                                 }
-                            } else if (gResult.mode == GizmoMode::Scale) {
-                                float axisDelta = 0.0f;
-                                if (gResult.activeAxis == GizmoAxis::X) axisDelta = gResult.delta.x;
-                                else if (gResult.activeAxis == GizmoAxis::Y) axisDelta = gResult.delta.y;
-                                else if (gResult.activeAxis == GizmoAxis::Z) axisDelta = gResult.delta.z;
-
-                                const TopoDS_Shape& cur = m_document->getBody(m_gizmoDragBodyId);
-                                Bnd_Box bbox;
-                                BRepBndLib::Add(cur, bbox);
-                                double xmin,ymin,zmin,xmax,ymax,zmax;
-                                bbox.Get(xmin,ymin,zmin,xmax,ymax,zmax);
-                                float bodySize = static_cast<float>(glm::length(
-                                    glm::vec3(xmax-xmin, ymax-ymin, zmax-zmin)));
-                                if (bodySize < 0.001f) bodySize = 1.0f;
-
-                                double factor = 1.0 + static_cast<double>(axisDelta) / bodySize;
-                                factor = glm::clamp(factor, 0.1, 10.0);
-                                gp_Pnt center((xmin+xmax)/2,(ymin+ymax)/2,(zmin+zmax)/2);
-                                trsf.SetScale(center, factor);
+                                gp_GTrsf gt;
+                                gt.SetVectorialPart(gp_Mat(m_gizmoTotalScale.x,0,0, 0,m_gizmoTotalScale.y,0, 0,0,m_gizmoTotalScale.z));
+                                double cx=center.X(), cy=center.Y(), cz=center.Z();
+                                gt.SetTranslationPart(gp_XYZ(cx - m_gizmoTotalScale.x*cx,
+                                                             cy - m_gizmoTotalScale.y*cy,
+                                                             cz - m_gizmoTotalScale.z*cz));
+                                BRepBuilderAPI_GTransform xf(m_gizmoDragOriginalShape, gt, true);
+                                if (xf.IsDone()) { result = xf.Shape(); applied = true; }
                             }
 
-                            const TopoDS_Shape& base = applyToOriginal
-                                ? m_gizmoDragOriginalShape
-                                : m_document->getBody(m_gizmoDragBodyId);
-                            BRepBuilderAPI_Transform xform(base, trsf, true);
-                            if (xform.IsDone()) {
-                                m_document->updateBody(m_gizmoDragBodyId, xform.Shape());
+                            if (applied) {
+                                m_document->updateBody(m_gizmoDragBodyId, result);
                                 m_meshesDirty = true;
                             }
                         } catch (...) {}
                         gizmoConsumedInput = true;
                     }
 
-                    // End drag: commit to history as a TransformOp
+                    // End drag: commit the right TransformOp for the gizmo's mode.
                     if (m_gizmoDragging && gResult.activeAxis == GizmoAxis::None && !mouseDown) {
                         try {
-                            // Capture the final transformed shape
-                            TopoDS_Shape finalShape = m_document->getBody(m_gizmoDragBodyId);
-                            // Restore original so the op's execute() saves it for undo
+                            // Restore original so the op's execute() saves it for undo.
                             m_document->updateBody(m_gizmoDragBodyId, m_gizmoDragOriginalShape);
-
-                            // Compute centroid delta for the TransformOp
-                            Bnd_Box origBox, finalBox;
-                            BRepBndLib::Add(m_gizmoDragOriginalShape, origBox);
-                            BRepBndLib::Add(finalShape, finalBox);
-                            double ox1,oy1,oz1,ox2,oy2,oz2, fx1,fy1,fz1,fx2,fy2,fz2;
-                            origBox.Get(ox1,oy1,oz1,ox2,oy2,oz2);
-                            finalBox.Get(fx1,fy1,fz1,fx2,fy2,fz2);
-                            double dx = ((fx1+fx2)-(ox1+ox2))/2;
-                            double dy = ((fy1+fy2)-(oy1+oy2))/2;
-                            double dz = ((fz1+fz2)-(oz1+oz2))/2;
+                            Bnd_Box ob; BRepBndLib::Add(m_gizmoDragOriginalShape, ob);
+                            double ox1,oy1,oz1,ox2,oy2,oz2; ob.Get(ox1,oy1,oz1,ox2,oy2,oz2);
+                            gp_Pnt center((ox1+ox2)/2,(oy1+oy2)/2,(oz1+oz2)/2);
 
                             auto op = std::make_unique<TransformOp>();
                             op->setBodyId(m_gizmoDragBodyId);
-                            op->setType(TransformType::Translate);
-                            op->setTranslation(dx, dy, dz);
-                            m_history->pushOperation(std::move(op), *m_document);
+                            op->setCenter(center.X(), center.Y(), center.Z());
+                            bool valid = true;
+                            GizmoMode gm = m_gizmo->getMode();
+                            if (gm == GizmoMode::Translate) {
+                                glm::vec3 d = m_gizmoTotalDelta; // match the snapped drag
+                                if (m_snapToGrid && m_sketchGridStep > 0.0f) {
+                                    float step = m_sketchGridStep, thr = step * 0.4f;
+                                    auto s1 = [&](float v){ float n=std::round(v/step)*step; return std::abs(v-n)<thr?n:v; };
+                                    d.x = s1(d.x); d.y = s1(d.y); d.z = s1(d.z);
+                                }
+                                op->setType(TransformType::Translate);
+                                op->setTranslation(d.x, d.y, d.z);
+                                valid = glm::length(d) > 1e-4f;
+                            } else if (gm == GizmoMode::Rotate) {
+                                float ang = softSnap45(m_gizmoTotalAngle);
+                                op->setType(TransformType::Rotate);
+                                op->setRotation(m_gizmoRotAxis.x, m_gizmoRotAxis.y, m_gizmoRotAxis.z, ang);
+                                valid = std::abs(ang) > 1e-3f;
+                            } else {
+                                op->setType(TransformType::Scale);
+                                op->setScaleXYZ(m_gizmoTotalScale.x, m_gizmoTotalScale.y, m_gizmoTotalScale.z);
+                                valid = glm::length(m_gizmoTotalScale - glm::vec3(1.0f)) > 1e-3f;
+                            }
+                            if (valid) m_history->pushOperation(std::move(op), *m_document);
                             m_meshesDirty = true;
                         } catch (...) {}
 
@@ -940,6 +1176,31 @@ void Application::renderViewport() {
                             m_selection->select(entry);
                         }
                         regionConsumedClick = true;
+                    }
+
+                    // Mirror "across a face" mode: the next planar face click
+                    // defines the mirror plane (Esc cancels via handleShortcuts).
+                    if (m_mirrorPickFace && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        if (result.hit && !result.pickedShape.IsNull() &&
+                            result.pickedShape.ShapeType() == TopAbs_FACE && m_mirrorBodyId >= 0) {
+                            try {
+                                TopoDS_Face face = TopoDS::Face(result.pickedShape);
+                                Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+                                if (!surf.IsNull() && surf->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                                    gp_Pln pln = Handle(Geom_Plane)::DownCast(surf)->Pln();
+                                    const gp_Ax3& ax = pln.Position();
+                                    auto op = std::make_unique<MirrorOp>();
+                                    op->setBody(m_mirrorBodyId);
+                                    op->setPlane(MirrorPlane::Custom);
+                                    op->setCustomPlane(gp_Ax2(ax.Location(), ax.Direction()));
+                                    op->setKeepOriginal(true);
+                                    if (m_history->pushOperation(std::move(op), *m_document))
+                                        m_meshesDirty = true;
+                                }
+                            } catch (...) {}
+                        }
+                        m_mirrorPickFace = false;
+                        regionConsumedClick = true; // don't also change selection
                     }
 
                     // Double-click to select body, single-click to select face
@@ -1239,6 +1500,9 @@ void Application::renderViewport() {
         ImGui::End();
     }
 
+    // Scale gizmo side panel (X/Y/Z % + uniform + Apply), shown in Scale mode.
+    renderScalePanel();
+
     // Sketch mode indicator
     if (m_inSketchMode) {
         ImGui::SetCursorPos(ImVec2(10, 30));
@@ -1392,6 +1656,25 @@ void Application::handleToolAction(int action) {
             m_gizmo->setMode(GizmoMode::Translate);
             break;
         }
+        case ToolAction::Rotate: {
+            if (!m_selection->hasSelectedBodies()) break;
+            m_gizmo->setMode(GizmoMode::Rotate);
+            break;
+        }
+        case ToolAction::Scale: {
+            if (!m_selection->hasSelectedBodies()) break;
+            m_gizmo->setMode(GizmoMode::Scale);
+            break;
+        }
+        case ToolAction::Mirror: {
+            const auto& sel = m_selection->getSelection();
+            if (!sel.empty() && sel[0].bodyId >= 0) {
+                m_mirrorBodyId = sel[0].bodyId;
+                m_mirrorPickFace = false;
+                m_showMirrorPopup = true;
+            }
+            break;
+        }
 
         case ToolAction::Extrude: {
             const auto& sel = m_selection->getSelection();
@@ -1464,7 +1747,9 @@ void Application::handleShortcuts() {
         loadProject();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        if (m_gizmoDragging) {
+        if (m_mirrorPickFace) {
+            m_mirrorPickFace = false; // cancel "mirror across a face" mode
+        } else if (m_gizmoDragging) {
             // Revert the body to where the drag started — same idea as cancelling
             // any other in-progress operation. Also cancel the gizmo's own drag
             // state so it doesn't keep dragging once the mouse moves again.
@@ -1559,14 +1844,14 @@ void Application::rebuildMeshes() {
     m_shapeRenderer->clear();
     m_edgeRenderer->clear();
     auto ids = m_document->getAllBodyIds();
-    int colorIdx = 0;
     for (int id : ids) {
         if (!m_document->isBodyVisible(id)) continue;
         const TopoDS_Shape& shape = m_document->getBody(id);
         int idx = m_shapeRenderer->tessellate(shape, 0.1f);
         if (idx >= 0) {
-            m_shapeRenderer->setColor(idx, ShapeRenderer::bodyColor(colorIdx));
-            colorIdx++;
+            // Use the body's own colour (defaults to light grey) instead of an
+            // index-based palette, so colours are stable and user-controllable.
+            m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
         }
         m_edgeRenderer->addShape(shape, 0.1f);
     }
@@ -2007,7 +2292,7 @@ void Application::beginInteractiveEdgeOp(EdgeOpType type) {
     m_edgeOpActive = true;
     m_edgeOpBodyId = bodyId;
     m_edgeOpEdges = edges;
-    m_edgeOpValue = 1.0f;
+    m_edgeOpValue = 0.0f; // start at no change; drag the arrow outward or type a value
     std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
     m_edgeOpInputFocus = true;
 
@@ -2016,15 +2301,40 @@ void Application::beginInteractiveEdgeOp(EdgeOpType type) {
         m_edgeOpPreviousShape = m_document->getBody(bodyId);
     } catch (...) { m_edgeOpActive = false; return; }
 
+    // First edge's midpoint + tangent, for the drag handle / measurement.
+    m_edgeOpHasHandle = false;
+    try {
+        BRepAdaptor_Curve curve(TopoDS::Edge(edges.front()));
+        double t = (curve.FirstParameter() + curve.LastParameter()) * 0.5;
+        gp_Pnt p; gp_Vec tan;
+        curve.D1(t, p, tan);
+        m_edgeOpMid = glm::vec3(p.X(), p.Y(), p.Z());
+        if (tan.Magnitude() > 1e-9) {
+            m_edgeOpDir = glm::normalize(glm::vec3(tan.X(), tan.Y(), tan.Z()));
+            // Outward handle direction: from the body centre to the edge, made
+            // perpendicular to the edge, so the arrow faces straight out of the edge.
+            Bnd_Box bb; BRepBndLib::Add(m_edgeOpPreviousShape, bb);
+            if (!bb.IsVoid()) {
+                double x1,y1,z1,x2,y2,z2; bb.Get(x1,y1,z1,x2,y2,z2);
+                glm::vec3 c((x1+x2)*0.5f, (y1+y2)*0.5f, (z1+z2)*0.5f);
+                glm::vec3 out = m_edgeOpMid - c;
+                out -= glm::dot(out, m_edgeOpDir) * m_edgeOpDir; // perpendicular to edge
+                if (glm::length(out) > 1e-5f) m_edgeOpOutDir = glm::normalize(out);
+            }
+            m_edgeOpHasHandle = true;
+        }
+    } catch (...) {}
+
     updateInteractiveEdgeOp();
 }
 
 void Application::updateInteractiveEdgeOp() {
     if (!m_edgeOpActive || m_edgeOpBodyId < 0) return;
-    if (m_edgeOpValue < 0.01f) return;
 
-    // Restore original shape before re-applying
+    // Restore original first, so dragging back to ~0 shows no fillet/chamfer.
     m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);
+    m_meshesDirty = true;
+    if (m_edgeOpValue < 0.01f) return;
 
     try {
         if (m_edgeOpType == EdgeOpType::Fillet) {
@@ -2061,6 +2371,16 @@ void Application::updateInteractiveEdgeOp() {
 void Application::commitInteractiveEdgeOp() {
     // Restore original, then do it properly through history
     m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);
+
+    // Confirming with no size set is a no-op — just cancel out.
+    if (m_edgeOpValue < 0.01f) {
+        m_edgeOpActive = false;
+        m_edgeOpEdges.clear();
+        m_edgeOpPreviousShape.Nullify();
+        m_edgeOpType = EdgeOpType::None;
+        m_meshesDirty = true;
+        return;
+    }
 
     if (m_edgeOpType == EdgeOpType::Fillet) {
         auto op = std::make_unique<FilletOp>();
@@ -2137,6 +2457,7 @@ void Application::beginInteractiveExtrude(const TopoDS_Shape& profile) {
 
 void Application::updateInteractiveExtrude() {
     if (!m_extruding || m_extrudePreviewBodyId < 0) return;
+    if (!std::isfinite(m_extrudeDistance)) { m_extrudeDistance = 0.0f; return; }
 
     // Remove old preview and create new one at current distance
     m_document->removeBody(m_extrudePreviewBodyId);
@@ -2293,8 +2614,27 @@ void Application::beginPushPull() {
         return;
     }
 
+    // Arrow along the first target's outward normal, at its centre — the user
+    // drags this to set the distance (and a measurement reads off it).
+    m_pushPullHasArrow = false;
+    try {
+        const TopoDS_Face& f = m_pushPullTargets.front().profile;
+        if (!f.IsNull()) {
+            BRepGProp_Face prop(f);
+            double u1, u2, v1, v2;
+            prop.Bounds(u1, u2, v1, v2);
+            gp_Pnt c; gp_Vec n;
+            prop.Normal((u1 + u2) * 0.5, (v1 + v2) * 0.5, c, n);
+            if (n.Magnitude() > 1e-10) {
+                m_pushPullNormal = glm::normalize(glm::vec3(n.X(), n.Y(), n.Z()));
+                m_pushPullOrigin = glm::vec3(c.X(), c.Y(), c.Z());
+                m_pushPullHasArrow = true;
+            }
+        }
+    } catch (...) {}
+
     m_pushPullActive = true;
-    m_pushPullDistance = 5.0f;
+    m_pushPullDistance = 0.0f; // start at no change; drag the arrow or type a value
     std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
     m_pushPullInputFocus = true;
 
@@ -2303,6 +2643,7 @@ void Application::beginPushPull() {
 
 void Application::updatePushPull() {
     if (!m_pushPullActive) return;
+    if (!std::isfinite(m_pushPullDistance)) { m_pushPullDistance = 0.0f; return; }
 
     // Only undo OUR previous preview — not any other pushpull that may already be
     // committed at the top of the history.
@@ -2420,6 +2761,7 @@ void Application::run() {
 
             renderInteractionsPanel();
             renderSettings();
+            renderMirrorPopup();
 
             if (m_historyPanel->render()) {
                 m_meshesDirty = true;

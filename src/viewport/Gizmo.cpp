@@ -177,11 +177,26 @@ void Gizmo::buildRingMesh() {
 }
 
 void Gizmo::buildCubeMesh() {
-    // Small cube centered at (0, 0, kCubeOffset)
+    // A shaft along +Z with a small cube at the end (mirrors the move arrow's
+    // shaft+cone, so scale handles read as bars with a knob).
     std::vector<float> verts;
     auto addTri = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
         verts.insert(verts.end(), {a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z});
     };
+
+    // Shaft cylinder from origin to the cube.
+    for (int i = 0; i < kSegments; ++i) {
+        float a1 = 2.0f * (float)M_PI * i / kSegments;
+        float a2 = 2.0f * (float)M_PI * (i + 1) / kSegments;
+        float c1 = std::cos(a1), s1 = std::sin(a1);
+        float c2 = std::cos(a2), s2 = std::sin(a2);
+        glm::vec3 p0(kShaftRadius*c1, kShaftRadius*s1, 0.0f);
+        glm::vec3 p1(kShaftRadius*c2, kShaftRadius*s2, 0.0f);
+        glm::vec3 p2(kShaftRadius*c2, kShaftRadius*s2, kCubeOffset);
+        glm::vec3 p3(kShaftRadius*c1, kShaftRadius*s1, kCubeOffset);
+        addTri(p0, p1, p2);
+        addTri(p0, p2, p3);
+    }
 
     float s = kCubeSize;
     glm::vec3 o(0, 0, kCubeOffset);
@@ -282,6 +297,7 @@ void Gizmo::render(const glm::mat4& view, const glm::mat4& projection) {
     glUseProgram(m_program);
 
     for (const auto& d : draws) {
+        if (d.mode != m_mode) continue; // only the active mode's handles
         glm::mat4 model = glm::translate(glm::mat4(1.0f), m_position)
                         * glm::scale(glm::mat4(1.0f), glm::vec3(scale))
                         * d.rotation;
@@ -326,7 +342,10 @@ Gizmo::PickResult Gizmo::pickNearest(float mx, float my, float vpW, float vpH,
     glm::vec3 axisDirs[3] = {{1,0,0}, {0,1,0}, {0,0,1}};
     GizmoAxis axisIds[3] = {GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z};
 
+    // Only the active mode's handles are pickable — otherwise the long translate
+    // arrow lines would steal clicks meant for the scale cubes / rotate rings.
     // Test translate arrows (line from origin to tip)
+    if (m_mode == GizmoMode::Translate)
     for (int i = 0; i < 3; i++) {
         glm::vec3 tip = m_position + axisDirs[i] * scale * (kAxisLength + kConeHeight);
         glm::vec2 tipNDC = worldToNDC(tip, vp);
@@ -339,6 +358,7 @@ Gizmo::PickResult Gizmo::pickNearest(float mx, float my, float vpW, float vpH,
     }
 
     // Test scale cubes (small region around cube endpoint)
+    if (m_mode == GizmoMode::Scale)
     for (int i = 0; i < 3; i++) {
         glm::vec3 cubePos = m_position + axisDirs[i] * scale * kCubeOffset;
         glm::vec2 cubeNDC = worldToNDC(cubePos, vp);
@@ -351,6 +371,7 @@ Gizmo::PickResult Gizmo::pickNearest(float mx, float my, float vpW, float vpH,
     }
 
     // Test rotate rings (sample points along the arc)
+    if (m_mode == GizmoMode::Rotate) {
     glm::mat4 ringRots[3] = {
         glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0,1,0)),
         glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1,0,0)),
@@ -382,6 +403,7 @@ Gizmo::PickResult Gizmo::pickNearest(float mx, float my, float vpW, float vpH,
             prevNDC = ptNDC;
         }
     }
+    } // m_mode == Rotate
 
     return best;
 }
@@ -415,6 +437,31 @@ glm::vec3 Gizmo::projectOnAxis(float mx, float my, float vpW, float vpH,
     return m_position + t * axisDir;
 }
 
+bool Gizmo::ringAngle(float mx, float my, float vpW, float vpH,
+                      const Camera& camera, GizmoAxis axis, float& outDeg) {
+    glm::mat4 invVP = glm::inverse(camera.getProjectionMatrix() * camera.getViewMatrix());
+    float ndcX = (mx / vpW) * 2.0f - 1.0f;
+    float ndcY = 1.0f - (my / vpH) * 2.0f;
+    glm::vec4 nearClip = invVP * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+    glm::vec4 farClip  = invVP * glm::vec4(ndcX, ndcY,  1.0f, 1.0f);
+    glm::vec3 rayOrigin = glm::vec3(nearClip) / nearClip.w;
+    glm::vec3 rayDir = glm::normalize(glm::vec3(farClip) / farClip.w - rayOrigin);
+
+    // Axis (plane normal) and an in-plane basis (u, v) with u x v = axis.
+    glm::vec3 n, u, v;
+    if (axis == GizmoAxis::X)      { n = {1,0,0}; u = {0,1,0}; v = {0,0,1}; }
+    else if (axis == GizmoAxis::Y) { n = {0,1,0}; u = {0,0,1}; v = {1,0,0}; }
+    else                           { n = {0,0,1}; u = {1,0,0}; v = {0,1,0}; }
+
+    float denom = glm::dot(rayDir, n);
+    if (std::abs(denom) < 1e-6f) return false; // ray parallel to the ring plane
+    float t = glm::dot(m_position - rayOrigin, n) / denom;
+    glm::vec3 hit = rayOrigin + rayDir * t;
+    glm::vec3 vec = hit - m_position;
+    outDeg = glm::degrees(std::atan2(glm::dot(vec, v), glm::dot(vec, u)));
+    return true;
+}
+
 GizmoResult Gizmo::handleInput(float mouseX, float mouseY,
                                 float vpWidth, float vpHeight,
                                 bool mouseDown, bool mouseJustPressed,
@@ -427,20 +474,43 @@ GizmoResult Gizmo::handleInput(float mouseX, float mouseY,
         if (pick.axis != GizmoAxis::None) {
             m_draggingAxis = pick.axis;
             m_draggingMode = pick.mode;
-            m_lastDragPos = projectOnAxis(mouseX, mouseY, vpWidth, vpHeight, camera, pick.axis);
+            if (pick.mode == GizmoMode::Rotate) {
+                ringAngle(mouseX, mouseY, vpWidth, vpHeight, camera, pick.axis, m_lastDragAngle);
+            } else {
+                m_lastDragPos = projectOnAxis(mouseX, mouseY, vpWidth, vpHeight, camera, pick.axis);
+            }
         }
     }
 
     if (mouseDown && m_draggingAxis != GizmoAxis::None) {
-        glm::vec3 currentPos = projectOnAxis(mouseX, mouseY, vpWidth, vpHeight,
-                                              camera, m_draggingAxis);
-        glm::vec3 delta = currentPos - m_lastDragPos;
-        m_lastDragPos = currentPos;
-
-        result.changed = true;
-        result.activeAxis = m_draggingAxis;
-        result.mode = m_draggingMode;
-        result.delta = delta;
+        glm::vec3 axisDir = (m_draggingAxis == GizmoAxis::X) ? glm::vec3(1,0,0)
+                          : (m_draggingAxis == GizmoAxis::Y) ? glm::vec3(0,1,0)
+                                                             : glm::vec3(0,0,1);
+        if (m_draggingMode == GizmoMode::Rotate) {
+            // Rotation: signed angle change as the mouse goes around the ring,
+            // encoded as axisDir * degrees so the app reads it via dot(delta,axis).
+            float ang;
+            if (ringAngle(mouseX, mouseY, vpWidth, vpHeight, camera, m_draggingAxis, ang)) {
+                float dDeg = ang - m_lastDragAngle;
+                while (dDeg > 180.0f) dDeg -= 360.0f;   // shortest direction
+                while (dDeg < -180.0f) dDeg += 360.0f;
+                m_lastDragAngle = ang;
+                result.changed = true;
+                result.activeAxis = m_draggingAxis;
+                result.mode = m_draggingMode;
+                result.delta = axisDir * dDeg;
+            }
+        } else {
+            // Translate / Scale: movement along the axis line.
+            glm::vec3 currentPos = projectOnAxis(mouseX, mouseY, vpWidth, vpHeight,
+                                                  camera, m_draggingAxis);
+            glm::vec3 delta = currentPos - m_lastDragPos;
+            m_lastDragPos = currentPos;
+            result.changed = true;
+            result.activeAxis = m_draggingAxis;
+            result.mode = m_draggingMode;
+            result.delta = delta;
+        }
     }
 
     if (!mouseDown) {

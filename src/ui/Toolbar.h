@@ -16,8 +16,8 @@ enum class ToolAction {
     FinishSketch, EditSketch, ExtrudeSketch, PushPull, LookAtSketch,
     // 3D tools that still need the old dispatch path
     Extrude, Fillet, Chamfer,
-    // Gizmo
-    Move,
+    // Gizmo modes + Mirror
+    Move, Rotate, Scale, Mirror,
     // General
     Measure, ResetCamera
 };

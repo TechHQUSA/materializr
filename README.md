@@ -34,17 +34,18 @@ Requires Docker with BuildKit enabled.
 
 ### Modeling Operations
 
-- **Push / Pull** — unified extrude/cut. Drag a positive distance to add
-  material, negative to cut into the source body. Works on sketch regions
-  *and* body faces. Unions auto-merge coplanar/cotangent faces so seams
-  disappear from the merged result.
+- **Push / Pull** — unified extrude/cut. Select a body face → **Push/Pull** → an
+  arrow points out along the face normal; drag it (or type) to add material
+  (positive) or cut in (negative), with a live mm measurement. Also works on
+  sketch regions. Unions auto-merge coplanar/cotangent faces so seams disappear.
 - **Extrude** — interactive extrude with live preview, draft angle,
   boolean modes
 - **Revolve** — profile around an axis, 0–360°
 - **Sweep** — profile along a path curve
 - **Loft** — through multiple cross-section profiles
-- **Fillet** — interactive radius input with live preview
-- **Chamfer** — interactive distance input with live preview
+- **Fillet** — pick edge(s) → **Fillet** → drag the outward handle (or type) to
+  set the radius, with live preview and a measurement readout
+- **Chamfer** — same flow as Fillet for a chamfer distance
 - **Shell** — hollow a solid with uniform wall thickness
 - **Offset Face** — push or pull individual faces
 - **Split X / Y / Z** — divide the selected body with a plane through its
@@ -52,11 +53,12 @@ Requires Docker with BuildKit enabled.
 - **Boolean** — Union, Subtract, Intersect (Ctrl+click two bodies); unions
   are post-processed with `ShapeUpgrade_UnifySameDomain` so smooth merges
   don't leave a seam edge between the original bodies
-- **Move** — via the 3D translate gizmo with optional grid snap
-- **Rotate / Scale** — via the 3-axis gizmo
-- **Mirror X / Y / Z** — reflect the body across its own bounding plane on the
-  chosen axis (the copy lands flush beside it); **Mirror across Face** reflects
-  across a selected planar face
+- **Move / Rotate / Scale** — interactive gizmos selected from the Transform group:
+  arrows (move), rings (rotate, **soft-snaps to 45°**), cubes (scale, **per-axis or
+  uniform**); each shows a live mm / degree / percent readout while dragging. Scale
+  also has a side panel for exact X/Y/Z percentages.
+- **Mirror** — one **Mirror** button → popup to mirror across **X / Y / Z** or
+  **a face you then click**
 - **Linear Pattern** — repeat along a direction
 - **Radial Pattern** — repeat around an axis
 - **Copy / Duplicate** — clone selected bodies
@@ -139,16 +141,19 @@ solid can't be picked through it — only what's visible is selectable.
 
 ### Interactive Tools
 
-All major operations provide **live preview** as you adjust values:
+All major operations provide **live preview** and an on-screen **measurement**
+as you drag or type:
 
-- **Push/Pull**: positive distance extrudes outward, negative cuts inward.
-  Works on selected sketch regions and on body faces. Multi-region in one op.
+- **Push/Pull**: a face-normal arrow you drag (or type a distance); a mm readout
+  follows it. Starts at 0 (no change). Also works on selected sketch regions.
 - **Extrude**: drag in viewport or type distance (mm), slider, Enter to confirm
-- **Fillet**: type radius or use slider (0.1–20 mm), live preview on edges
-- **Chamfer**: type distance or use slider, live preview
-- **Move (Gizmo)**: 3-axis arrows with threshold-based grid snap; the body
-  jumps in step-sized increments around the snap point and is otherwise free
-- **Rotate / Scale (Gizmo)**: rings and cubes on the same gizmo
+- **Fillet / Chamfer**: an outward drag handle on the edge sets the radius/distance
+  (drag away from the edge to grow, from 0.1 mm), with a measurement and live
+  preview; or type the value. Starts at 0 (no change).
+- **Move (Gizmo)**: 3-axis arrows with threshold-based grid snap; mm readout.
+- **Rotate (Gizmo)**: rings; free rotation that soft-snaps to 45°, degree readout.
+- **Scale (Gizmo)**: per-axis cubes-on-bars (or uniform), 1% snap, percent readout,
+  plus a side panel for exact X/Y/Z percentages.
 - **Cancel mid-drag with Escape** — pressing Escape while still dragging
   a gizmo, an extrude, a push/pull, a fillet/chamfer, or a sketch tool
   reverts the body / cancels the preview so the model returns to exactly
@@ -157,13 +162,15 @@ All major operations provide **live preview** as you adjust values:
 ### Rendering
 
 - PBR Cook-Torrance BRDF shading with tone mapping
+- **Per-body colour** — bodies default to a uniform light grey; each row in the
+  Items panel has a colour swatch that opens a hue-wheel picker
 - 12 material presets (Steel, Aluminum, Copper, Gold, Plastics, Wood,
   Glass, Rubber, Ceramic, Concrete)
 - Gradient background
 - Edge wireframe overlay
 - Per-face / per-edge / per-body / per-region selection highlighting
   (outline only, no z-fighting)
-- Infinite grid with red X-axis and blue Z-axis
+- Infinite grid (renders on the active sketch plane; emphasized every-10th lines)
 - Construction plane visualization
 
 ### UI / UX
@@ -173,8 +180,8 @@ All major operations provide **live preview** as you adjust values:
 - **Design History** — every operation recorded, undo/redo (Ctrl+Z / Y),
   breakpoints. Includes Push/Pull, deletes, gizmo moves, and sketch ops
 - **Items panel** — bodies *and* sketches with visibility, rename (double-click
-  or right-click), and delete (Delete key or right-click). Body deletes are
-  undoable.
+  or right-click), delete (Delete key or right-click), and a per-body **colour
+  swatch** (right edge) that opens a hue-wheel picker. Body deletes are undoable.
 - **Interactions panel** — a live reference of the viewport controls
   (camera / select / transform / sketch), docked above the Items panel; the
   camera rows reflect the current mouse bindings
@@ -302,7 +309,9 @@ the user only needs base OpenGL/X11 drivers.
 1. **Click near an edge** (within ~8 px) — edge highlights in green
 2. **Ctrl+click** more edges to add to selection
 3. Click **Fillet** or **Chamfer** in the toolbar
-4. Type radius/distance or drag the slider — live preview updates
+4. **Drag the outward handle** away from the edge to set the radius/distance
+   (from 0.1 mm, with a measurement), or type a value / use the slider — live
+   preview updates
 5. **Enter** to confirm, **Escape** to cancel
 
 ### Transform with Gizmo

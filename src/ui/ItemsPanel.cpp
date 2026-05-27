@@ -4,6 +4,7 @@
 #include "../core/SelectionManager.h"
 #include "../modeling/DeleteOp.h"
 #include <imgui.h>
+#include <glm/glm.hpp>
 #include <cstring>
 #include <cstdio>
 #include <memory>
@@ -33,6 +34,8 @@ bool ItemsPanel::render() {
         ImGui::End();
         return false;
     }
+
+    bool colorChanged = false; // a body colour edit also needs a mesh rebuild
 
     // Filter toggles at top
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Filter");
@@ -95,9 +98,12 @@ bool ItemsPanel::render() {
                     m_renamingId = -1;
                 }
             } else {
-                // Selectable body name
+                // Selectable body name, leaving room on the right for a colour swatch.
+                float swatchW = ImGui::GetFrameHeight();
+                float nameW = ImGui::GetContentRegionAvail().x - swatchW - 6.0f;
                 std::string name = m_document->getBodyName(id);
-                if (ImGui::Selectable(name.c_str(), isSelected)) {
+                if (ImGui::Selectable(name.c_str(), isSelected, 0,
+                                      ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f))) {
                     // Select this body
                     if (m_selection) {
                         SelectionEntry entry;
@@ -153,6 +159,16 @@ bool ItemsPanel::render() {
                         }
                     }
                     ImGui::EndPopup();
+                }
+
+                // Per-body colour swatch on the right; click opens a colour wheel.
+                ImGui::SameLine();
+                glm::vec3 col = m_document->getBodyColor(id);
+                if (ImGui::ColorEdit3("##bodycolor", &col.x,
+                        ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
+                        ImGuiColorEditFlags_PickerHueWheel)) {
+                    m_document->setBodyColor(id, col);
+                    colorChanged = true;
                 }
             }
 
@@ -264,7 +280,7 @@ bool ItemsPanel::render() {
     ImGui::Text("%s", countText);
 
     ImGui::End();
-    return m_bodyDeleted;
+    return m_bodyDeleted || colorChanged;
 }
 
 } // namespace materializr

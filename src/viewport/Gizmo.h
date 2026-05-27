@@ -52,6 +52,7 @@ private:
     GizmoAxis m_hoveredAxis = GizmoAxis::None;
     GizmoMode m_hoveredMode = GizmoMode::Translate;
     glm::vec3 m_lastDragPos{0};
+    float m_lastDragAngle = 0.0f; // last ring angle (deg), for rotate drags
 
     // GL resources
     unsigned int m_program = 0;
@@ -77,6 +78,11 @@ private:
     PickResult pickNearest(float mx, float my, float vpW, float vpH, const Camera& camera);
     glm::vec3 projectOnAxis(float mx, float my, float vpW, float vpH,
                             const Camera& camera, GizmoAxis axis);
+    // Angle (degrees) of the mouse around the rotation ring for `axis`, measured
+    // in the plane through the gizmo perpendicular to that axis. Returns false if
+    // the view ray is parallel to the plane.
+    bool ringAngle(float mx, float my, float vpW, float vpH,
+                   const Camera& camera, GizmoAxis axis, float& outDeg);
     float screenDistToSegment(glm::vec2 mouse, glm::vec2 a, glm::vec2 b);
     glm::vec2 worldToNDC(glm::vec3 pos, const glm::mat4& vp);
 };

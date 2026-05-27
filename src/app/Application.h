@@ -63,6 +63,8 @@ private:
     void renderMenuBar();
     void renderInteractionsPanel();
     void renderSettings();
+    void renderMirrorPopup();
+    void renderScalePanel();
     void handleToolAction(int action);
     void handleShortcuts();
     void handleViewCubeAction(int action);
@@ -163,6 +165,11 @@ private:
     float m_pushPullDistance = 5.0f;
     char m_pushPullInputBuf[32] = "5.0";
     bool m_pushPullInputFocus = true;
+    // Face arrow: drag along this normal to drive the distance (set from the first
+    // face target). m_pushPullHasArrow is false for sketch-region-only push/pull.
+    glm::vec3 m_pushPullOrigin{0.0f};
+    glm::vec3 m_pushPullNormal{0.0f, 0.0f, 1.0f};
+    bool m_pushPullHasArrow = false;
 
     // Snap-to-grid for gizmo translate (shares the grid step with the sketch grid).
     bool m_snapToGrid = true;
@@ -197,6 +204,21 @@ private:
     // Accumulated delta from drag start (translate only). Used so snap-to-grid
     // can snap the absolute position rather than each per-frame increment.
     glm::vec3 m_gizmoTotalDelta{0.0f};
+    // Accumulated rotation (deg, about m_gizmoRotAxis) from drag start, for soft
+    // 45° snapping; and accumulated per-axis scale (raw drag deltas → factors).
+    float m_gizmoTotalAngle = 0.0f;
+    glm::vec3 m_gizmoRotAxis{0.0f, 1.0f, 0.0f};
+    glm::vec3 m_gizmoScaleAccum{0.0f}; // accumulated per-axis drag distance
+    glm::vec3 m_gizmoTotalScale{1.0f, 1.0f, 1.0f}; // derived per-axis factors
+
+    // Mirror: single button opens a popup; "across a face" arms face-pick mode.
+    bool m_showMirrorPopup = false;
+    bool m_mirrorPickFace = false;
+    int m_mirrorBodyId = -1;
+
+    // Scale side panel (shown in Scale gizmo mode): X/Y/Z percentages + uniform.
+    float m_scalePct[3] = {100.0f, 100.0f, 100.0f};
+    bool m_scaleUniform = true;
 
     // Interactive fillet/chamfer state
     enum class EdgeOpType { None, Fillet, Chamfer };
@@ -208,6 +230,12 @@ private:
     char m_edgeOpInputBuf[32] = "1.0";
     bool m_edgeOpInputFocus = true;
     TopoDS_Shape m_edgeOpPreviousShape;
+    // First selected edge's midpoint + direction, for the drag handle and the
+    // radius/distance measurement readout.
+    glm::vec3 m_edgeOpMid{0.0f};
+    glm::vec3 m_edgeOpDir{1.0f, 0.0f, 0.0f};   // along the edge
+    glm::vec3 m_edgeOpOutDir{0.0f, 0.0f, 1.0f}; // perpendicular, pointing out of the body
+    bool m_edgeOpHasHandle = false;
 
     void beginInteractiveEdgeOp(EdgeOpType type);
     void updateInteractiveEdgeOp();

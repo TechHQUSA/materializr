@@ -16,7 +16,11 @@ public:
     void setType(TransformType type);
     void setTranslation(double dx, double dy, double dz);
     void setRotation(double ax, double ay, double az, double angleDeg);
-    void setScale(double factor);
+    void setScale(double factor);                       // uniform
+    void setScaleXYZ(double sx, double sy, double sz);  // per-axis (non-uniform)
+    // Centre for Rotate/Scale (default world origin). Gizmo transforms use the
+    // body's bounding-box centre so it rotates/scales in place.
+    void setCenter(double cx, double cy, double cz);
 
     // Getters
     int getBodyId() const { return m_bodyId; }
@@ -36,5 +40,8 @@ private:
     double m_dx = 0, m_dy = 0, m_dz = 0;
     double m_ax = 0, m_ay = 1, m_az = 0, m_angle = 0;
     double m_scale = 1.0;
+    double m_sx = 1.0, m_sy = 1.0, m_sz = 1.0; // per-axis scale
+    bool m_nonUniform = false;
+    double m_cx = 0, m_cy = 0, m_cz = 0;       // centre for rotate/scale
     TopoDS_Shape m_previousShape;
 };

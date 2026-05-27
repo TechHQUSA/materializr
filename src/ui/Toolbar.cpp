@@ -158,8 +158,14 @@ ToolAction Toolbar::renderBodyTools() {
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Transform");
     ImGui::Separator();
 
-    if (ImGui::Button("Move", ImVec2(-1, 30)))
-        action = ToolAction::Move;
+    // Gizmo modes side by side, then Mirror.
+    float third = (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x) / 3.0f;
+    if (ImGui::Button("Move", ImVec2(third, 30)))   action = ToolAction::Move;
+    ImGui::SameLine();
+    if (ImGui::Button("Rotate", ImVec2(third, 30))) action = ToolAction::Rotate;
+    ImGui::SameLine();
+    if (ImGui::Button("Scale", ImVec2(third, 30)))  action = ToolAction::Scale;
+    if (ImGui::Button("Mirror", ImVec2(-1, 30)))    action = ToolAction::Mirror;
 
     ImGui::Checkbox("Snap to grid", &m_snapToGrid);
     const float gridSteps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
@@ -190,6 +196,8 @@ ToolAction Toolbar::renderFaceTools() {
 
     if (ImGui::Button("Sketch on Face", ImVec2(-1, 30)))
         action = ToolAction::SketchOnFace;
+    if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
+        action = ToolAction::PushPull;
 
     // Plugin buttons for HasFaces context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasFaces));
@@ -240,6 +248,11 @@ ToolAction Toolbar::renderSketchRegionTools() {
 
 ToolAction Toolbar::renderEdgeTools() {
     ToolAction action = ToolAction::None;
+
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Edge Ops");
+    ImGui::Separator();
+    if (ImGui::Button("Fillet", ImVec2(-1, 30)))  action = ToolAction::Fillet;
+    if (ImGui::Button("Chamfer", ImVec2(-1, 30))) action = ToolAction::Chamfer;
 
     // Plugin buttons for HasEdges context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasEdges));
