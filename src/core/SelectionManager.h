@@ -2,6 +2,8 @@
 #include <vector>
 #include <TopoDS_Shape.hxx>
 
+namespace materializr { class EventBus; }
+
 enum class SelectionType {
     None,
     Body,
@@ -42,6 +44,8 @@ public:
     int selectedSketchCount() const;
     int selectedSketchRegionCount() const;
 
+    void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
+
     // For adaptive toolbar
     bool hasSelectedBodies() const;
     bool hasSelectedFaces() const;
@@ -51,6 +55,8 @@ public:
 
 private:
     int findEntry(const SelectionEntry& entry) const;
+    void publishChanged();
 
     std::vector<SelectionEntry> m_selection;
+    materializr::EventBus* m_eventBus = nullptr;
 };

@@ -1,5 +1,8 @@
 #include "Toolbar.h"
 #include "../core/SelectionManager.h"
+#include "../plugin/PluginRegistry.h"
+#include "../plugin/PluginContext.h"
+#include "../plugin/Contributions.h"
 #include <imgui.h>
 #include <cmath>
 
@@ -49,13 +52,50 @@ bool Toolbar::isSketchMode() const {
     return m_sketchMode;
 }
 
+// Render plugin-contributed buttons matching any of the given contexts.
+// contextMask is a bitmask: bit N = SelectionContext(N).
+void Toolbar::renderPluginButtons(int contextMask) {
+    if (!m_pluginCtx) return;
+    auto& contribs = PluginRegistry::instance().toolbarContributions();
+    std::string lastSection;
+    for (size_t i = 0; i < contribs.size(); ++i) {
+        auto& c = contribs[i];
+        if (!((1 << static_cast<int>(c.context)) & contextMask)) continue;
+        if (c.section != lastSection) {
+            if (!lastSection.empty()) ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "%s", c.section.c_str());
+            ImGui::Separator();
+            lastSection = c.section;
+        }
+        ImGui::PushID(static_cast<int>(i + 10000));
+        if (ImGui::Button(c.name.c_str(), ImVec2(-1, 30))) {
+            if (c.toolFactory) {
+                PluginRegistry::instance().activateTool(c.toolFactory(), *m_pluginCtx);
+            } else if (c.action) {
+                c.action(*m_pluginCtx);
+            }
+        }
+        ImGui::PopID();
+    }
+}
+
+void Toolbar::renderGeneralSection() {
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
+    ImGui::Separator();
+
+    if (ImGui::Button("Measure", ImVec2(-1, 30)))
+        ; // ToolAction::Measure handled elsewhere
+    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
+        ; // handled via shortcut / command palette
+}
+
 ToolAction Toolbar::renderSketchTools() {
     ToolAction action = ToolAction::None;
 
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Sketch Tools");
     ImGui::Separator();
 
-    // Grid step selector — drives both the visual face grid and snap-to-line behaviour
     ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Grid:");
     const float steps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
     const char* labels[] = { "0.1", "0.5", "1", "10" };
@@ -68,20 +108,14 @@ ToolAction Toolbar::renderSketchTools() {
     }
     ImGui::Separator();
 
-    if (ImGui::Button("Line", ImVec2(-1, 30)))
-        action = ToolAction::Line;
-    if (ImGui::Button("Circle", ImVec2(-1, 30)))
-        action = ToolAction::Circle;
-    if (ImGui::Button("Rectangle", ImVec2(-1, 30)))
-        action = ToolAction::Rectangle;
-    if (ImGui::Button("Arc", ImVec2(-1, 30)))
-        action = ToolAction::Arc;
-    if (ImGui::Button("Spline", ImVec2(-1, 30)))
-        action = ToolAction::Spline;
-    if (ImGui::Button("Polygon", ImVec2(-1, 30)))
-        action = ToolAction::Polygon;
-    if (ImGui::Button("Trim", ImVec2(-1, 30)))
-        action = ToolAction::Trim;
+    if (ImGui::Button("Line", ImVec2(-1, 30)))      action = ToolAction::Line;
+    if (ImGui::Button("Circle", ImVec2(-1, 30)))    action = ToolAction::Circle;
+    if (ImGui::Button("Rectangle", ImVec2(-1, 30))) action = ToolAction::Rectangle;
+    if (ImGui::Button("Arc", ImVec2(-1, 30)))       action = ToolAction::Arc;
+    if (ImGui::Button("Spline", ImVec2(-1, 30)))    action = ToolAction::Spline;
+    if (ImGui::Button("Polygon", ImVec2(-1, 30)))   action = ToolAction::Polygon;
+    if (ImGui::Button("Trim", ImVec2(-1, 30)))      action = ToolAction::Trim;
+
     if (!m_cameraOrtho) {
         ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.85f, 1.0f));
@@ -94,14 +128,8 @@ ToolAction Toolbar::renderSketchTools() {
     if (ImGui::Button("Finish Sketch", ImVec2(-1, 30)))
         action = ToolAction::FinishSketch;
 
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons for InSketchMode context
+    renderPluginButtons(1 << static_cast<int>(SelectionContext::InSketchMode));
 
     return action;
 }
@@ -109,35 +137,10 @@ ToolAction Toolbar::renderSketchTools() {
 ToolAction Toolbar::renderNoSelectionTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Create");
-    ImGui::Separator();
-
-    if (ImGui::Button("Start Sketch", ImVec2(-1, 30)))
-        action = ToolAction::StartSketch;
-    if (ImGui::Button("Import", ImVec2(-1, 30)))
-        action = ToolAction::Import;
-    if (ImGui::Button("Construction Plane", ImVec2(-1, 30)))
-        action = ToolAction::ConstructionPlane;
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Advanced");
-    ImGui::Separator();
-
-    if (ImGui::Button("Sweep", ImVec2(-1, 30)))
-        action = ToolAction::Sweep;
-    if (ImGui::Button("Loft", ImVec2(-1, 30)))
-        action = ToolAction::Loft;
-    if (ImGui::Button("Split Body", ImVec2(-1, 30)))
-        action = ToolAction::SplitBody;
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons: NoSelection + Always
+    int mask = (1 << static_cast<int>(SelectionContext::NoSelection))
+             | (1 << static_cast<int>(SelectionContext::Always));
+    renderPluginButtons(mask);
 
     return action;
 }
@@ -150,14 +153,7 @@ ToolAction Toolbar::renderBodyTools() {
 
     if (ImGui::Button("Move", ImVec2(-1, 30)))
         action = ToolAction::Move;
-    if (ImGui::Button("Rotate", ImVec2(-1, 30)))
-        action = ToolAction::Rotate;
-    if (ImGui::Button("Mirror", ImVec2(-1, 30)))
-        action = ToolAction::Mirror;
-    if (ImGui::Button("Scale", ImVec2(-1, 30)))
-        action = ToolAction::Scale;
 
-    // Shared snap-to-grid controls for the gizmo translate (uses the sketch grid step).
     ImGui::Checkbox("Snap to grid", &m_snapToGrid);
     const float gridSteps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
     const char* gridLabels[] = { "0.1", "0.5", "1", "10" };
@@ -171,45 +167,10 @@ ToolAction Toolbar::renderBodyTools() {
         if (selected) ImGui::PopStyleColor();
     }
 
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Boolean");
-    ImGui::Separator();
-
-    bool multipleSelected = m_selection && m_selection->selectedBodyCount() >= 2;
-
-    ImGui::BeginDisabled(!multipleSelected);
-    if (ImGui::Button("Union", ImVec2(-1, 30)))
-        action = ToolAction::BoolUnion;
-    if (ImGui::Button("Subtract", ImVec2(-1, 30)))
-        action = ToolAction::BoolSubtract;
-    if (ImGui::Button("Intersect", ImVec2(-1, 30)))
-        action = ToolAction::BoolIntersect;
-    ImGui::EndDisabled();
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Modify");
-    ImGui::Separator();
-
-    if (ImGui::Button("Shell", ImVec2(-1, 30)))
-        action = ToolAction::Shell;
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Pattern");
-    ImGui::Separator();
-
-    if (ImGui::Button("Linear Pattern", ImVec2(-1, 30)))
-        action = ToolAction::LinearPattern;
-    if (ImGui::Button("Radial Pattern", ImVec2(-1, 30)))
-        action = ToolAction::RadialPattern;
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons: HasBodies + MultipleBodies
+    int mask = (1 << static_cast<int>(SelectionContext::HasBodies))
+             | (1 << static_cast<int>(SelectionContext::MultipleBodies));
+    renderPluginButtons(mask);
 
     return action;
 }
@@ -222,25 +183,9 @@ ToolAction Toolbar::renderFaceTools() {
 
     if (ImGui::Button("Sketch on Face", ImVec2(-1, 30)))
         action = ToolAction::SketchOnFace;
-    if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
-        action = ToolAction::PushPull;
-    if (ImGui::Button("Extrude", ImVec2(-1, 30)))
-        action = ToolAction::Extrude;
-    if (ImGui::Button("Revolve", ImVec2(-1, 30)))
-        action = ToolAction::Revolve;
-    if (ImGui::Button("Offset Face", ImVec2(-1, 30)))
-        action = ToolAction::OffsetFace;
-    if (ImGui::Button("Shell", ImVec2(-1, 30)))
-        action = ToolAction::Shell;
 
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons for HasFaces context
+    renderPluginButtons(1 << static_cast<int>(SelectionContext::HasFaces));
 
     return action;
 }
@@ -257,17 +202,9 @@ ToolAction Toolbar::renderSketchSelectedTools() {
         action = ToolAction::EditSketch;
     if (ImGui::Button("Extrude Sketch", ImVec2(-1, 30)))
         action = ToolAction::ExtrudeSketch;
-    if (ImGui::Button("Revolve", ImVec2(-1, 30)))
-        action = ToolAction::Revolve;
 
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons for HasSketches context
+    renderPluginButtons(1 << static_cast<int>(SelectionContext::HasSketches));
 
     return action;
 }
@@ -281,20 +218,11 @@ ToolAction Toolbar::renderSketchRegionTools() {
     ImGui::Text("%d region%s selected", n, n == 1 ? "" : "s");
     ImGui::Spacing();
 
-    if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
-        action = ToolAction::PushPull;
+    // Plugin buttons for HasSketchRegions context
+    renderPluginButtons(1 << static_cast<int>(SelectionContext::HasSketchRegions));
 
     ImGui::Spacing();
     ImGui::TextWrapped("Drag positive distance to extrude, negative to cut into the body the sketch sits on.");
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
 
     return action;
 }
@@ -302,22 +230,8 @@ ToolAction Toolbar::renderSketchRegionTools() {
 ToolAction Toolbar::renderEdgeTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Edge Operations");
-    ImGui::Separator();
-
-    if (ImGui::Button("Fillet", ImVec2(-1, 30)))
-        action = ToolAction::Fillet;
-    if (ImGui::Button("Chamfer", ImVec2(-1, 30)))
-        action = ToolAction::Chamfer;
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        action = ToolAction::Measure;
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        action = ToolAction::ResetCamera;
+    // Plugin buttons for HasEdges context
+    renderPluginButtons(1 << static_cast<int>(SelectionContext::HasEdges));
 
     return action;
 }

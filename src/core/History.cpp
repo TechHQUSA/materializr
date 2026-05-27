@@ -1,4 +1,6 @@
 #include "History.h"
+#include "EventBus.h"
+#include "Events.h"
 
 History::History() = default;
 
@@ -21,6 +23,7 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     m_operations.push_back(std::move(op));
     m_currentIndex = static_cast<int>(m_operations.size()) - 1;
 
+    if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
     return true;
 }
 
@@ -31,6 +34,7 @@ void History::pushExecuted(std::unique_ptr<Operation> op) {
     }
     m_operations.push_back(std::move(op));
     m_currentIndex = static_cast<int>(m_operations.size()) - 1;
+    if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
 }
 
 bool History::canUndo() const {
@@ -52,6 +56,7 @@ bool History::undo(Document& doc) {
     }
 
     m_currentIndex--;
+    if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
     return true;
 }
 
@@ -63,11 +68,11 @@ bool History::redo(Document& doc) {
     m_currentIndex++;
     Operation* op = m_operations[m_currentIndex].get();
     if (!op->execute(doc)) {
-        // Roll back the index if execution fails
         m_currentIndex--;
         return false;
     }
 
+    if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
     return true;
 }
 

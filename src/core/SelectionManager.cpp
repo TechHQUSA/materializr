@@ -1,19 +1,27 @@
 #include "SelectionManager.h"
+#include "EventBus.h"
+#include "Events.h"
 #include <algorithm>
+
+void SelectionManager::publishChanged() {
+    if (m_eventBus) m_eventBus->publish(materializr::SelectionChangedEvent{});
+}
 
 void SelectionManager::clear() {
     m_selection.clear();
+    publishChanged();
 }
 
 void SelectionManager::select(const SelectionEntry& entry) {
     m_selection.clear();
     m_selection.push_back(entry);
+    publishChanged();
 }
 
 void SelectionManager::addToSelection(const SelectionEntry& entry) {
-    // Don't add duplicates
     if (findEntry(entry) < 0) {
         m_selection.push_back(entry);
+        publishChanged();
     }
 }
 
@@ -21,6 +29,7 @@ void SelectionManager::removeFromSelection(const SelectionEntry& entry) {
     int idx = findEntry(entry);
     if (idx >= 0) {
         m_selection.erase(m_selection.begin() + idx);
+        publishChanged();
     }
 }
 
@@ -31,6 +40,7 @@ void SelectionManager::toggleSelection(const SelectionEntry& entry) {
     } else {
         m_selection.push_back(entry);
     }
+    publishChanged();
 }
 
 bool SelectionManager::hasSelection() const {

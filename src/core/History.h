@@ -4,10 +4,14 @@
 #include "Operation.h"
 #include "Document.h"
 
+namespace materializr { class EventBus; }
+
 class History {
 public:
     History();
     ~History() = default;
+
+    void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
 
     // Add a new operation (executes it and pushes to stack)
     bool pushOperation(std::unique_ptr<Operation> op, Document& doc);
@@ -47,6 +51,7 @@ public:
 
 private:
     std::vector<std::unique_ptr<Operation>> m_operations;
-    int m_currentIndex = -1; // index of last executed operation (-1 = none)
-    int m_breakpoint = -1;   // -1 = no breakpoint
+    int m_currentIndex = -1;
+    int m_breakpoint = -1;
+    materializr::EventBus* m_eventBus = nullptr;
 };

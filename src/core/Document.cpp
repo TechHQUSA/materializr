@@ -1,4 +1,6 @@
 #include "Document.h"
+#include "EventBus.h"
+#include "Events.h"
 #include "../modeling/Sketch.h"
 #include <algorithm>
 #include <stdexcept>
@@ -13,6 +15,7 @@ int Document::addBody(const TopoDS_Shape& shape, const std::string& name) {
     entry.shape = shape;
     entry.visible = true;
     m_bodies.push_back(std::move(entry));
+    if (m_eventBus) m_eventBus->publish(materializr::DocumentModifiedEvent{true});
     return m_bodies.back().id;
 }
 
@@ -20,6 +23,7 @@ void Document::removeBody(int id) {
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         m_bodies.erase(m_bodies.begin() + idx);
+        if (m_eventBus) m_eventBus->publish(materializr::DocumentModifiedEvent{true});
     }
 }
 
@@ -27,6 +31,7 @@ void Document::updateBody(int id, const TopoDS_Shape& shape) {
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         m_bodies[idx].shape = shape;
+        if (m_eventBus) m_eventBus->publish(materializr::DocumentModifiedEvent{true});
     }
 }
 

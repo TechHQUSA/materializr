@@ -114,6 +114,31 @@ add_executable(materializr
     src/main.cpp
     src/app/Application.cpp
     src/app/Window.cpp
+    src/plugin/PluginContext.cpp
+    src/plugin/PluginRegistry.cpp
+    src/plugins/ForceLink.cpp
+    src/plugins/CoreCommandsPlugin.cpp
+    src/plugins/StepIOPlugin.cpp
+    src/plugins/IgesIOPlugin.cpp
+    src/plugins/StlExportPlugin.cpp
+    src/plugins/GltfExportPlugin.cpp
+    src/plugins/ImageExportPlugin.cpp
+    src/plugins/BooleanPlugin.cpp
+    src/plugins/DeletePlugin.cpp
+    src/plugins/TransformPlugin.cpp
+    src/plugins/MirrorPlugin.cpp
+    src/plugins/CopyPlugin.cpp
+    src/plugins/PatternPlugin.cpp
+    src/plugins/ShellPlugin.cpp
+    src/plugins/OffsetFacePlugin.cpp
+    src/plugins/SplitBodyPlugin.cpp
+    src/plugins/ConstructionPlanePlugin.cpp
+    src/plugins/FilletPlugin.cpp
+    src/plugins/ChamferPlugin.cpp
+    src/plugins/ExtrudePlugin.cpp
+    src/plugins/PushPullPlugin.cpp
+    src/plugins/SketchPlugin.cpp
+    src/plugins/GizmoDragPlugin.cpp
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp

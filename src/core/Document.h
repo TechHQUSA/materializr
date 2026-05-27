@@ -5,7 +5,7 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
 
-namespace materializr { class Sketch; }
+namespace materializr { class Sketch; class EventBus; }
 
 struct BodyEntry {
     int id;
@@ -31,6 +31,8 @@ class Document {
 public:
     Document();
     ~Document();
+
+    void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
 
     // Body management
     int addBody(const TopoDS_Shape& shape, const std::string& name = "");
@@ -73,4 +75,5 @@ private:
     int m_nextBodyId = 1;
     int m_nextPlaneId = 1;
     int m_nextSketchId = 1;
+    materializr::EventBus* m_eventBus = nullptr;
 };

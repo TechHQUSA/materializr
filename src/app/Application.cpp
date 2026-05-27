@@ -28,7 +28,6 @@
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
 #include "modeling/PushPullOp.h"
-#include "modeling/BooleanOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
@@ -38,6 +37,11 @@
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
 #include "io/ProjectIO.h"
+#include "core/EventBus.h"
+#include "plugin/PluginContext.h"
+#include "plugin/PluginRegistry.h"
+
+namespace materializr { namespace force_link { void linkAll(); } }
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -74,6 +78,8 @@ Application::Application() {
     m_document = std::make_unique<Document>();
     m_history = std::make_unique<History>();
     m_selection = std::make_unique<SelectionManager>();
+    m_eventBus = std::make_unique<EventBus>();
+    m_pluginContext = std::make_unique<PluginContext>();
 
     m_toolbar = std::make_unique<Toolbar>();
     m_historyPanel = std::make_unique<HistoryPanel>();
@@ -91,6 +97,7 @@ Application::Application() {
 
     // Wire up references
     m_toolbar->setSelectionManager(m_selection.get());
+    m_toolbar->setPluginContext(m_pluginContext.get());
     m_historyPanel->setHistory(m_history.get());
     m_historyPanel->setDocument(m_document.get());
     m_itemsPanel->setDocument(m_document.get());
@@ -106,9 +113,29 @@ Application::Application() {
     m_themeManager->apply();
     initRenderers();
     setupCommands();
+
+    // Wire EventBus into core services
+    m_document->setEventBus(m_eventBus.get());
+    m_history->setEventBus(m_eventBus.get());
+    m_selection->setEventBus(m_eventBus.get());
+
+    // Plugin system
+    m_pluginContext->_bind(m_document.get(), m_history.get(), m_selection.get(),
+                          m_eventBus.get(), &m_viewport->getCamera(), &m_meshesDirty);
+    materializr::force_link::linkAll();
+    PluginRegistry::instance().initAll(*m_pluginContext);
+
+    // Register plugin commands in the command palette
+    for (auto& cmd : PluginRegistry::instance().commandContributions()) {
+        auto* ctxPtr = m_pluginContext.get();
+        m_commandPalette->addCommand(cmd.name, cmd.shortcut, [&cmd, ctxPtr]() {
+            if (cmd.action) cmd.action(*ctxPtr);
+        });
+    }
 }
 
 Application::~Application() {
+    PluginRegistry::instance().shutdownAll();
     m_backgroundRenderer.reset();
     m_planeRenderer.reset();
     m_edgeRenderer.reset();
@@ -250,28 +277,8 @@ void Application::initRenderers() {
 }
 
 void Application::setupCommands() {
-    m_commandPalette->addCommand("Undo", "Ctrl+Z", [this]() {
-        if (m_history->canUndo()) m_history->undo(*m_document);
-        m_meshesDirty = true;
-    });
-    m_commandPalette->addCommand("Redo", "Ctrl+Y", [this]() {
-        if (m_history->canRedo()) m_history->redo(*m_document);
-        m_meshesDirty = true;
-    });
-    m_commandPalette->addCommand("Import STEP", "Ctrl+I", [this]() { importStepFile(); });
-    m_commandPalette->addCommand("Export STEP", "Ctrl+E", [this]() { exportStepFile(); });
-    m_commandPalette->addCommand("Export STL", "", [this]() { exportStlFile(); });
-    m_commandPalette->addCommand("New Sketch", "S", [this]() { enterSketchMode(); });
-    m_commandPalette->addCommand("Reset Camera", "Home", [this]() { m_viewport->getCamera().reset(); });
-    m_commandPalette->addCommand("Line Tool", "L", [this]() {
-        if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Line);
-    });
-    m_commandPalette->addCommand("Circle Tool", "C", [this]() {
-        if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Circle);
-    });
-    m_commandPalette->addCommand("Rectangle Tool", "R", [this]() {
-        if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Rectangle);
-    });
+    // Commands are now registered by plugins via PluginRegistry.
+    // Plugin commands are added to the command palette after initAll().
 }
 
 void Application::beginFrame() {
@@ -293,11 +300,45 @@ void Application::renderMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
-            if (ImGui::MenuItem("Save Project...", "Ctrl+S")) saveProject();
+            if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
+            if (ImGui::MenuItem("Save Project As...")) saveProject();
             ImGui::Separator();
-            if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) importStepFile();
-            if (ImGui::MenuItem("Export STEP...", "Ctrl+E")) exportStepFile();
-            if (ImGui::MenuItem("Export STL...")) exportStlFile();
+
+            // Build Import submenu from IOFormat contributions
+            auto& formats = PluginRegistry::instance().ioFormats();
+            bool hasImporters = false;
+            for (auto& fmt : formats) { if (fmt.canImport) { hasImporters = true; break; } }
+            if (hasImporters && ImGui::BeginMenu("Import")) {
+                for (size_t i = 0; i < formats.size(); ++i) {
+                    auto& fmt = formats[i];
+                    if (!fmt.canImport || !fmt.importFn) continue;
+                    ImGui::PushID(static_cast<int>(i));
+                    std::string label = fmt.name + "...";
+                    if (ImGui::MenuItem(label.c_str())) {
+                        fmt.importFn(*m_pluginContext, "");
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndMenu();
+            }
+
+            // Build Export submenu from IOFormat contributions
+            bool hasExporters = false;
+            for (auto& fmt : formats) { if (fmt.canExport) { hasExporters = true; break; } }
+            if (hasExporters && ImGui::BeginMenu("Export")) {
+                for (size_t i = 0; i < formats.size(); ++i) {
+                    auto& fmt = formats[i];
+                    if (!fmt.canExport || !fmt.exportFn) continue;
+                    ImGui::PushID(static_cast<int>(i) + 1000);
+                    std::string label = fmt.name + "...";
+                    if (ImGui::MenuItem(label.c_str())) {
+                        fmt.exportFn(*m_pluginContext, "");
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndMenu();
+            }
+
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) glfwSetWindowShouldClose(m_window->handle(), true);
             ImGui::EndMenu();
@@ -1067,102 +1108,14 @@ void Application::handleToolAction(int action) {
         case ToolAction::Trim:
             if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Trim);
             break;
-        case ToolAction::Import: importStepFile(); break;
         case ToolAction::ResetCamera: m_viewport->getCamera().reset(); break;
 
-        // Boolean operations: require 2 distinct bodies selected (via face or body clicks)
-        case ToolAction::BoolUnion:
-        case ToolAction::BoolSubtract:
-        case ToolAction::BoolIntersect: {
-            const auto& sel = m_selection->getSelection();
-            // Collect distinct body IDs from selection
-            std::vector<int> distinctBodies;
-            for (const auto& s : sel) {
-                if (s.bodyId >= 0) {
-                    bool found = false;
-                    for (int b : distinctBodies) { if (b == s.bodyId) { found = true; break; } }
-                    if (!found) distinctBodies.push_back(s.bodyId);
-                }
-            }
-            if (distinctBodies.size() >= 2) {
-                auto op = std::make_unique<BooleanOp>();
-                op->setTargetBodyId(distinctBodies[0]);
-                op->setToolBodyId(distinctBodies[1]);
-                if (a == ToolAction::BoolUnion)
-                    op->setMode(BooleanMode::Union);
-                else if (a == ToolAction::BoolSubtract)
-                    op->setMode(BooleanMode::Subtract);
-                else
-                    op->setMode(BooleanMode::Intersect);
-
-                if (m_history->pushOperation(std::move(op), *m_document)) {
-                    m_meshesDirty = true;
-                    m_selection->clear();
-                    std::fprintf(stdout, "Boolean operation completed\n");
-                } else {
-                    std::fprintf(stderr, "Boolean operation failed\n");
-                }
-            } else {
-                std::fprintf(stderr, "Boolean requires 2 selected bodies (Ctrl+click to multi-select)\n");
-            }
-            break;
-        }
-
-        // Transform: Move with default delta (1, 0, 0)
         case ToolAction::Move: {
-            // Move via the existing 3D translate gizmo. The gizmo is already shown
-            // when a body is selected; just make sure it's in Translate mode.
-            if (!m_selection->hasSelectedBodies()) {
-                std::fprintf(stderr, "Move requires a selected body\n");
-                break;
-            }
+            if (!m_selection->hasSelectedBodies()) break;
             m_gizmo->setMode(GizmoMode::Translate);
             break;
         }
 
-        // Transform: Rotate by 45 degrees around Y axis
-        case ToolAction::Rotate: {
-            const auto& sel = m_selection->getSelection();
-            if (!sel.empty() && sel[0].bodyId >= 0) {
-                auto op = std::make_unique<TransformOp>();
-                op->setBodyId(sel[0].bodyId);
-                op->setType(TransformType::Rotate);
-                op->setRotation(0.0, 1.0, 0.0, 45.0);
-
-                if (m_history->pushOperation(std::move(op), *m_document)) {
-                    m_meshesDirty = true;
-                    std::fprintf(stdout, "Rotate completed\n");
-                } else {
-                    std::fprintf(stderr, "Rotate failed\n");
-                }
-            } else {
-                std::fprintf(stderr, "Rotate requires a selected body\n");
-            }
-            break;
-        }
-
-        // Transform: Scale by 1.5
-        case ToolAction::Scale: {
-            const auto& sel = m_selection->getSelection();
-            if (!sel.empty() && sel[0].bodyId >= 0) {
-                auto op = std::make_unique<TransformOp>();
-                op->setBodyId(sel[0].bodyId);
-                op->setType(TransformType::Scale);
-                op->setScale(1.5);
-
-                if (m_history->pushOperation(std::move(op), *m_document)) {
-                    m_meshesDirty = true;
-                    std::fprintf(stdout, "Scale completed\n");
-                } else {
-                    std::fprintf(stderr, "Scale failed\n");
-                }
-            } else {
-                std::fprintf(stderr, "Scale requires a selected body\n");
-            }
-            break;
-        }
-
-        // Extrude: if a face is selected, extrude it
         case ToolAction::Extrude: {
             const auto& sel = m_selection->getSelection();
             if (m_selection->selectedFaceCount() >= 1) {
@@ -1172,27 +1125,19 @@ void Application::handleToolAction(int action) {
                         break;
                     }
                 }
-            } else {
-                std::fprintf(stderr, "Extrude requires a selected face\n");
             }
             break;
         }
 
         case ToolAction::Fillet: {
-            if (m_selection->selectedEdgeCount() >= 1) {
+            if (m_selection->selectedEdgeCount() >= 1)
                 beginInteractiveEdgeOp(EdgeOpType::Fillet);
-            } else {
-                std::fprintf(stderr, "Fillet requires selected edges\n");
-            }
             break;
         }
 
         case ToolAction::Chamfer: {
-            if (m_selection->selectedEdgeCount() >= 1) {
+            if (m_selection->selectedEdgeCount() >= 1)
                 beginInteractiveEdgeOp(EdgeOpType::Chamfer);
-            } else {
-                std::fprintf(stderr, "Chamfer requires selected edges\n");
-            }
             break;
         }
 
@@ -2129,6 +2074,15 @@ void Application::run() {
             m_snapToGrid = m_toolbar->getSnapToGrid();
             if (action != ToolAction::None) {
                 handleToolAction(static_cast<int>(action));
+            }
+
+            // Active interactive tool (plugin system)
+            if (auto* tool = PluginRegistry::instance().activeTool()) {
+                if (!tool->update(*m_pluginContext)) {
+                    PluginRegistry::instance().deactivateTool(*m_pluginContext);
+                } else {
+                    tool->renderOverlay(*m_pluginContext);
+                }
             }
 
             if (m_historyPanel->render()) {

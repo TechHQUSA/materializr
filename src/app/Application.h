@@ -32,6 +32,8 @@ class PropertiesPanel;
 class Sketch;
 class SketchSolver;
 class SketchTool;
+class EventBus;
+class PluginContext;
 
 } // namespace materializr
 
@@ -121,6 +123,8 @@ private:
     std::unique_ptr<Document> m_document;
     std::unique_ptr<History> m_history;
     std::unique_ptr<SelectionManager> m_selection;
+    std::unique_ptr<EventBus> m_eventBus;
+    std::unique_ptr<PluginContext> m_pluginContext;
 
     // UI panels
     std::unique_ptr<Toolbar> m_toolbar;
