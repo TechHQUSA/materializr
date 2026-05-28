@@ -7,7 +7,10 @@
 #include <ctime>
 #include <cstring>
 #include <sys/stat.h>
-#include <dirent.h>
+
+#ifdef _WIN32
+#include <direct.h>   // _mkdir (Windows-only)
+#endif
 
 namespace materializr {
 
@@ -29,7 +32,7 @@ void VersionManager::ensureVersionsDir() {
     if (stat(m_versionsDir.c_str(), &st) != 0) {
         // Directory does not exist, create it
 #ifdef _WIN32
-        mkdir(m_versionsDir.c_str());
+        _mkdir(m_versionsDir.c_str());
 #else
         mkdir(m_versionsDir.c_str(), 0755);
 #endif
