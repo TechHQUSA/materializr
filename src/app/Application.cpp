@@ -1,5 +1,7 @@
 #include "gl_common.h"
 
+#include <cstdlib>
+#include <filesystem>
 #include <map>
 
 #include "app/Application.h"
@@ -218,6 +220,33 @@ DockSpace       ID=0x08BD597D Window=0x1BBC0F80 Pos=0,19 Size=1600,881 Split=X
       DockNode  ID=0x00000006 Parent=0x00000002 SizeRef=148,370 Selected=0x8C72BEA8
 )";
 
+// Where to read/write imgui.ini. On Linux we keep the relative "imgui.ini" path
+// (the AppImage runs from a user-writable cwd, which is the existing behaviour
+// the user prefers). On Windows the exe usually launches from Program Files,
+// which is read-only without admin — the write would silently fail and ImGui
+// would fall back to its tiny "everything stacked at (0,0)" defaults. Anchor
+// the file under %APPDATA% there so it's both writable and per-user.
+static std::string s_imguiIniPath;
+static const char* computeImguiIniPath() {
+#ifdef _WIN32
+    std::string base;
+    if (const char* appdata = std::getenv("APPDATA"); appdata && *appdata) {
+        base = std::string(appdata) + "\\materializr";
+    } else if (const char* up = std::getenv("USERPROFILE"); up && *up) {
+        base = std::string(up) + "\\materializr";
+    } else {
+        s_imguiIniPath = "imgui.ini";
+        return s_imguiIniPath.c_str();
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(base, ec);
+    s_imguiIniPath = base + "\\imgui.ini";
+#else
+    s_imguiIniPath = "imgui.ini";
+#endif
+    return s_imguiIniPath.c_str();
+}
+
 void Application::initImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -225,9 +254,10 @@ void Application::initImGui() {
     // Write the default layout when imgui.ini is missing, or migrate a layout
     // saved before the Interactions panel existed (detected by its window name)
     // so the panel actually appears docked above Items rather than not at all.
+    const char* iniPath = computeImguiIniPath();
     {
         bool needDefault = true;
-        if (std::FILE* f = std::fopen("imgui.ini", "r")) {
+        if (std::FILE* f = std::fopen(iniPath, "r")) {
             std::string ini;
             char buf[4096];
             size_t n;
@@ -236,7 +266,7 @@ void Application::initImGui() {
             if (ini.find("[Window][Interactions]") != std::string::npos) needDefault = false;
         }
         if (needDefault) {
-            if (std::FILE* f = std::fopen("imgui.ini", "w")) {
+            if (std::FILE* f = std::fopen(iniPath, "w")) {
                 std::fputs(s_defaultLayout, f);
                 std::fclose(f);
             }
@@ -244,6 +274,10 @@ void Application::initImGui() {
     }
 
     ImGuiIO& io = ImGui::GetIO();
+    // Point ImGui at the chosen ini path BEFORE the first NewFrame so it loads
+    // the default layout we just wrote. The string is owned by s_imguiIniPath
+    // and stays alive for the program's lifetime.
+    io.IniFilename = iniPath;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
