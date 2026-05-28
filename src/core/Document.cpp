@@ -35,6 +35,23 @@ void Document::updateBody(int id, const TopoDS_Shape& shape) {
     }
 }
 
+void Document::putBody(int id, const TopoDS_Shape& shape, const std::string& name) {
+    int idx = findBodyIndex(id);
+    if (idx >= 0) {
+        m_bodies[idx].shape = shape;
+        if (!name.empty()) m_bodies[idx].name = name;
+    } else {
+        BodyEntry entry;
+        entry.id = id;
+        entry.name = name.empty() ? ("Body " + std::to_string(id)) : name;
+        entry.shape = shape;
+        entry.visible = true;
+        m_bodies.push_back(std::move(entry));
+    }
+    if (id >= m_nextBodyId) m_nextBodyId = id + 1;
+    if (m_eventBus) m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+}
+
 const TopoDS_Shape& Document::getBody(int id) const {
     int idx = findBodyIndex(id);
     if (idx < 0) {

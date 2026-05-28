@@ -28,10 +28,15 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "chamfer"; }
+    bool ownsFace(const TopoDS_Shape& face) const override;
+    OperationDiff captureDiff() const override;
 
 private:
     int m_bodyId = -1;
     std::vector<TopoDS_Edge> m_edges;
     double m_distance = 1.0;
     TopoDS_Shape m_previousShape; // for undo
+    // Chamfer faces produced by the last execute(), so a clicked face can be
+    // mapped back to this op for re-editing.
+    std::vector<TopoDS_Shape> m_generatedFaces;
 };

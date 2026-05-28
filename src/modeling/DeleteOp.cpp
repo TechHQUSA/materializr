@@ -63,3 +63,10 @@ void DeleteOp::renderProperties() {
         ImGui::Text("Name: %s", m_deletedName.c_str());
     }
 }
+
+OperationDiff DeleteOp::captureDiff() const {
+    OperationDiff d;
+    if (m_bodyId >= 0 && !m_deletedShape.IsNull())
+        d.deletedBefore.push_back({m_bodyId, m_deletedShape});
+    return d;
+}

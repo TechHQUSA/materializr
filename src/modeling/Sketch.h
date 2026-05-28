@@ -131,6 +131,18 @@ public:
     int elementCount() const;
     int pointCount() const;
 
+    // --- Serialization helpers (used by ProjectIO) ---
+    // Append elements directly, preserving their stored ids and construction
+    // flags, so a sketch can be reloaded exactly as it was saved.
+    void addRawPoint(const SketchPoint& p)     { m_points.push_back(p); }
+    void addRawLine(const SketchLine& l)       { m_lines.push_back(l); }
+    void addRawCircle(const SketchCircle& c)   { m_circles.push_back(c); }
+    void addRawArc(const SketchArc& a)         { m_arcs.push_back(a); }
+    void addRawSpline(const SketchSpline& s)   { m_splines.push_back(s); }
+    void addRawPolygon(const SketchPolygon& p) { m_polygons.push_back(p); }
+    void setNextId(int n) { m_nextId = n; }
+    int  getNextId() const { return m_nextId; }
+
 private:
     int m_nextId = 1;
     std::string m_name = "Sketch";

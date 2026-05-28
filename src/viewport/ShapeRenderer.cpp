@@ -173,10 +173,14 @@ bool ShapeRenderer::initialize()
     return true;
 }
 
-int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection)
+int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
+                              float angularDeflection)
 {
-    // Perform tessellation
-    BRepMesh_IncrementalMesh meshGen(shape, deflection);
+    // Perform tessellation. The angular deflection subdivides curved surfaces by
+    // normal angle, so rounded edges/holes get more facets (smoother) while flat
+    // faces stay cheap. Run in parallel to absorb the extra triangles.
+    BRepMesh_IncrementalMesh meshGen(shape, deflection, Standard_False,
+                                     angularDeflection, Standard_True);
     meshGen.Perform();
 
     // Collect all triangle vertices (position + normal)

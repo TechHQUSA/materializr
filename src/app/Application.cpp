@@ -1,5 +1,7 @@
 #include "gl_common.h"
 
+#include <map>
+
 #include "app/Application.h"
 #include "app/Window.h"
 #include "viewport/Viewport.h"
@@ -27,6 +29,7 @@
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
+#include "modeling/ReplayOp.h"
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/MirrorOp.h"
@@ -38,6 +41,7 @@
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
 #include "io/ProjectIO.h"
+#include "io/Settings.h"
 #include "core/EventBus.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
@@ -117,6 +121,7 @@ Application::Application() {
     m_propertiesPanel->setSelectionManager(m_selection.get());
 
     initImGui();
+    loadAppSettings(); // restore persisted preferences before the theme is applied
     m_themeManager->apply();
     initRenderers();
     setupCommands();
@@ -290,10 +295,21 @@ void Application::initRenderers() {
         std::fprintf(stderr, "Failed to initialize plane renderer\n");
     }
 
-    // Create a demo box so there's something to see
-    TopoDS_Shape box = BRepPrimAPI_MakeBox(4.0, 2.0, 3.0).Shape();
+    // Create a demo box so there's something to see (a 20 mm cube).
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
     m_document->addBody(box, "Demo Box");
     m_meshesDirty = true;
+
+    // Frame it so the larger cube isn't clipped by the default camera distance.
+    try {
+        Bnd_Box bbox;
+        BRepBndLib::Add(box, bbox);
+        double x0, y0, z0, x1, y1, z1;
+        bbox.Get(x0, y0, z0, x1, y1, z1);
+        m_viewport->getCamera().zoomToFit(
+            glm::vec3(static_cast<float>(x0), static_cast<float>(y0), static_cast<float>(z0)),
+            glm::vec3(static_cast<float>(x1), static_cast<float>(y1), static_cast<float>(z1)));
+    } catch (...) {}
 
     m_renderersReady = true;
 }
@@ -427,10 +443,42 @@ static const char* mouseButtonName(int b) {
     }
 }
 
+void Application::loadAppSettings() {
+    AppSettings s = SettingsIO::load(SettingsIO::defaultPath());
+    m_themeManager->setTheme(s.theme == 1 ? Theme::Light : Theme::Dark);
+    m_orbitButton = s.orbitButton;
+    m_panButton = s.panButton;
+    m_settingsOrbitButton = s.orbitButton;
+    m_settingsPanButton = s.panButton;
+    m_viewport->getCamera().setLevelOrbit(s.levelOrbit);
+    m_autosaveEnabled = s.autosaveEnabled;
+    m_autosaveIntervalSec = static_cast<float>(s.autosaveIntervalSec);
+}
+
+void Application::saveAppSettings() {
+    AppSettings s;
+    s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
+    s.orbitButton = m_orbitButton;
+    s.panButton = m_panButton;
+    s.levelOrbit = m_viewport->getCamera().isLevelOrbit();
+    s.autosaveEnabled = m_autosaveEnabled;
+    s.autosaveIntervalSec = static_cast<int>(m_autosaveIntervalSec);
+    SettingsIO::save(SettingsIO::defaultPath(), s);
+}
+
 void Application::renderSettings() {
     if (!m_showSettings) return;
     ImGui::SetNextWindowSize(ImVec2(320, 0), ImGuiCond_Appearing);
     if (ImGui::Begin("Settings", &m_showSettings)) {
+        bool changed = false; // any change persists the settings file
+
+        ImGui::SeparatorText("Appearance");
+        // Theme selector (the existing one in the View menu mirrors this).
+        if (m_themeManager->renderSelector()) {
+            m_themeManager->apply();
+            changed = true;
+        }
+
         ImGui::SeparatorText("Mouse — Camera");
         ImGui::TextWrapped("Choose which mouse button orbits and which pans. "
                            "Zoom is always the scroll wheel.");
@@ -451,16 +499,45 @@ void Application::renderSettings() {
                 "Note: Left is also used to select; assigning it here may conflict.");
         }
 
+        // Level (turntable) orbit toggle — applied live.
+        bool level = m_viewport->getCamera().isLevelOrbit();
+        if (ImGui::Checkbox("Level orbit (keep horizon flat)", &level)) {
+            m_viewport->getCamera().setLevelOrbit(level);
+            changed = true;
+        }
+        ImGui::TextWrapped("On: orbiting is a level turntable. Off: free trackball "
+                           "that can tumble in any direction.");
+
+        ImGui::Spacing();
+        ImGui::SeparatorText("Autosave");
+        if (ImGui::Checkbox("Autosave saved projects", &m_autosaveEnabled)) changed = true;
+        ImGui::TextWrapped("Periodically re-saves the project once it has been "
+                           "saved to a file at least once.");
+        ImGui::BeginDisabled(!m_autosaveEnabled);
+        int interval = static_cast<int>(m_autosaveIntervalSec);
+        if (ImGui::SliderInt("Interval (s)", &interval, 15, 600, "%d s")) {
+            m_autosaveIntervalSec = static_cast<float>(interval);
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        if (m_autosaveEnabled && m_currentProjectPath.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                "Save the project once to start autosaving.");
+        }
+
         ImGui::Spacing();
         ImGui::Separator();
         if (ImGui::Button("Apply", ImVec2(90, 0))) {
             m_orbitButton = m_settingsOrbitButton;
             m_panButton = m_settingsPanButton;
+            changed = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("Close", ImVec2(90, 0))) {
             m_showSettings = false;
         }
+
+        if (changed) saveAppSettings();
     }
     ImGui::End();
 }
@@ -1217,6 +1294,7 @@ void Application::renderViewport() {
                             }
                         }
                     } else if (!regionConsumedClick && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        int ownerStep = -1; // fillet/chamfer step to open in the editor
                         if (result.hit) {
                             SelectionEntry entry;
                             // If click is near an edge (<8px), select edge; otherwise face
@@ -1229,6 +1307,18 @@ void Application::renderViewport() {
                                 entry.bodyId = result.bodyId;
                                 entry.subShapeIndex = result.faceIndex;
                                 entry.shape = result.pickedShape;
+                                // Trace a clicked face back to the fillet/chamfer that
+                                // produced it, so the user can re-edit it after the fact.
+                                if (!entry.shape.IsNull()) {
+                                    int upTo = m_history->currentStep();
+                                    for (int s = 0; s <= upTo; ++s) {
+                                        const Operation* op = m_history->getStep(s);
+                                        if (op && op->isEnabled() && op->ownsFace(entry.shape)) {
+                                            ownerStep = s;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             if (io.KeyCtrl) {
                                 m_selection->addToSelection(entry);
@@ -1238,6 +1328,9 @@ void Application::renderViewport() {
                         } else {
                             m_selection->clear();
                         }
+                        // Open the owning fillet/chamfer in the History editor, or
+                        // close that editor when clicking anything else.
+                        m_historyPanel->setEditingStep(ownerStep);
                     }
 
                     // Right click on a face: context menu (only if not a pan drag)
@@ -1897,7 +1990,8 @@ void Application::saveProject() {
         {{"Materializr Project", "*.materializr"}},
         [this](const std::string& path) {
             if (path.empty()) return;
-            auto result = ProjectIO::save(path, *m_document);
+            ProjectHistory hist = captureProjectHistory();
+            auto result = ProjectIO::save(path, *m_document, &hist);
             if (result.success) {
                 m_currentProjectPath = path;
                 markSaved();
@@ -1915,7 +2009,8 @@ void Application::saveProjectQuick() {
         saveProject();
         return;
     }
-    auto result = ProjectIO::save(m_currentProjectPath, *m_document);
+    ProjectHistory hist = captureProjectHistory();
+    auto result = ProjectIO::save(m_currentProjectPath, *m_document, &hist);
     if (result.success) {
         markSaved();
         std::fprintf(stdout, "Project saved to %s\n", m_currentProjectPath.c_str());
@@ -1926,6 +2021,79 @@ void Application::saveProjectQuick() {
     m_closeAfterSave = false;
 }
 
+ProjectHistory Application::captureProjectHistory() {
+    ProjectHistory h;
+    int n = m_history->currentStep() + 1; // number of applied steps
+    if (n <= 0) return h;                  // nothing to persist
+
+    // Current full body set (id -> shape): the state after the last applied step.
+    std::map<int, TopoDS_Shape> cur;
+    for (int id : m_document->getAllBodyIds()) cur[id] = m_document->getBody(id);
+
+    // Walk the steps backward, reading each op's stored before-shapes. This is
+    // non-destructive (unlike undo()) and never recomputes geometry.
+    std::vector<ProjectHistoryStep> steps(n);
+    for (int i = n - 1; i >= 0; --i) {
+        const Operation* op = m_history->getStep(i);
+        if (!op) continue;
+        steps[i].typeId = op->typeId();
+        steps[i].name = op->name();
+        steps[i].description = op->description();
+        steps[i].enabled = op->isEnabled();
+        if (!op->isEnabled()) continue; // a disabled step changed nothing
+
+        OperationDiff d = op->captureDiff();
+        for (const auto& [id, before] : d.modifiedBefore) {
+            auto it = cur.find(id);
+            if (it != cur.end()) steps[i].changed.push_back({id, it->second}); // after
+            cur[id] = before;                                                  // step back
+        }
+        for (int id : d.created) {
+            auto it = cur.find(id);
+            if (it != cur.end()) steps[i].changed.push_back({id, it->second}); // after
+            cur.erase(id);                                                     // didn't exist before
+        }
+        for (const auto& [id, before] : d.deletedBefore) {
+            steps[i].deleted.push_back(id); // gone after this step
+            cur[id] = before;               // existed before
+        }
+    }
+
+    // `cur` is now the initial state (before step 0).
+    h.present = true;
+    for (const auto& [id, shape] : cur) h.initialState.push_back({id, shape});
+    h.steps = std::move(steps);
+    return h;
+}
+
+void Application::rebuildHistoryFromProject(const ProjectHistory& hist) {
+    m_history->clear();
+    if (!hist.present) return;
+
+    // Accumulate full states forward from the initial snapshot, giving each
+    // reloaded step a ReplayOp that knows its complete before/after body set.
+    std::map<int, TopoDS_Shape> running;
+    for (const auto& [id, shape] : hist.initialState) running[id] = shape;
+
+    auto toVec = [](const std::map<int, TopoDS_Shape>& m) {
+        ReplayOp::BodyState v; v.reserve(m.size());
+        for (const auto& [id, s] : m) v.push_back({id, s});
+        return v;
+    };
+
+    for (const auto& st : hist.steps) {
+        ReplayOp::BodyState before = toVec(running);
+        for (const auto& [id, shape] : st.changed) running[id] = shape;
+        for (int id : st.deleted) running.erase(id);
+        ReplayOp::BodyState after = toVec(running);
+
+        auto op = std::make_unique<ReplayOp>(st.typeId, st.name, st.description,
+                                             std::move(before), std::move(after));
+        op->setEnabled(st.enabled);
+        m_history->pushExecuted(std::move(op));
+    }
+}
+
 void Application::loadProject() {
     FileDialogs::openFile("Open Project",
         {{"Materializr Project", "*.materializr"}},
@@ -1934,12 +2102,16 @@ void Application::loadProject() {
             m_document->clear();
             m_history->clear();
             m_selection->clear();
-            auto result = ProjectIO::load(path, *m_document);
+            ProjectHistory hist;
+            auto result = ProjectIO::load(path, *m_document, &hist);
             if (result.success) {
+                rebuildHistoryFromProject(hist);
                 m_currentProjectPath = path;
                 markSaved();
                 m_meshesDirty = true;
-                std::fprintf(stdout, "Loaded %d bodies from %s\n", result.bodiesLoaded, path.c_str());
+                std::fprintf(stdout, "Loaded %d bodies, %d history steps from %s\n",
+                             result.bodiesLoaded, static_cast<int>(hist.steps.size()),
+                             path.c_str());
             } else {
                 std::fprintf(stderr, "Load failed: %s\n", result.errorMessage.c_str());
             }
@@ -2783,6 +2955,25 @@ void Application::run() {
             handleShortcuts();
         }
 
+        // Autosave: only for projects already on disk, and only when there are
+        // pending changes. The timer counts from the last save, so a quiet model
+        // never gets written and the interval is measured from when edits begin.
+        {
+            double now = ImGui::GetTime();
+            if (m_autosaveEnabled && !m_currentProjectPath.empty()) {
+                if (isDirty()) {
+                    if (now - m_lastAutosaveTime >= m_autosaveIntervalSec) {
+                        saveProjectQuick();
+                        m_lastAutosaveTime = now;
+                    }
+                } else {
+                    m_lastAutosaveTime = now;
+                }
+            } else {
+                m_lastAutosaveTime = now;
+            }
+        }
+
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -2790,6 +2981,9 @@ void Application::run() {
 
         m_window->swapBuffers();
     }
+
+    // Persist preferences on a clean exit (in addition to saving on each change).
+    saveAppSettings();
 }
 
 } // namespace materializr

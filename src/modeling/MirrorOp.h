@@ -31,6 +31,7 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "mirror"; }
+    OperationDiff captureDiff() const override;
 
 private:
     gp_Ax2 getMirrorAxis() const;

@@ -1,7 +1,28 @@
 #include "FilletOp.h"
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <BRepGProp_Face.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
 #include <imgui.h>
+
+namespace {
+// Representative point on a face (midpoint of its UV bounds). Stable for the
+// same face geometry, so it survives re-tessellation between picks.
+bool faceCenter(const TopoDS_Face& face, gp_Pnt& out) {
+    try {
+        BRepGProp_Face gp(face);
+        Standard_Real u0, u1, v0, v1;
+        gp.Bounds(u0, u1, v0, v1);
+        gp_Vec n;
+        gp.Normal((u0 + u1) * 0.5, (v0 + v1) * 0.5, out, n);
+        return true;
+    } catch (...) { return false; }
+}
+} // namespace
 
 FilletOp::FilletOp() = default;
 
@@ -38,6 +59,19 @@ bool FilletOp::execute(Document& doc) {
             return false;
         }
 
+        // Record the blend faces generated from each input edge so a later face
+        // click can be traced back to this fillet for re-editing.
+        m_generatedFaces.clear();
+        for (const auto& edge : m_edges) {
+            try {
+                const TopTools_ListOfShape& gen = fillet.Generated(edge);
+                for (TopTools_ListIteratorOfListOfShape it(gen); it.More(); it.Next()) {
+                    if (it.Value().ShapeType() == TopAbs_FACE)
+                        m_generatedFaces.push_back(it.Value());
+                }
+            } catch (...) {}
+        }
+
         // Update the body with the filleted shape
         doc.updateBody(m_bodyId, fillet.Shape());
         return true;
@@ -72,4 +106,27 @@ void FilletOp::renderProperties() {
 
     ImGui::Text("Edges: %d selected", static_cast<int>(m_edges.size()));
     ImGui::Text("Body ID: %d", m_bodyId);
+}
+
+OperationDiff FilletOp::captureDiff() const {
+    OperationDiff d;
+    if (m_bodyId >= 0 && !m_previousShape.IsNull())
+        d.modifiedBefore.push_back({m_bodyId, m_previousShape});
+    return d;
+}
+
+bool FilletOp::ownsFace(const TopoDS_Shape& face) const {
+    if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return false;
+    for (const auto& f : m_generatedFaces) {
+        if (f.IsSame(face)) return true;
+    }
+    // Geometric fallback for when the body's faces were rebuilt (e.g. after a
+    // replay) and are no longer IsSame to the stored ones.
+    gp_Pnt q;
+    if (!faceCenter(TopoDS::Face(face), q)) return false;
+    for (const auto& f : m_generatedFaces) {
+        gp_Pnt p;
+        if (faceCenter(TopoDS::Face(f), p) && p.Distance(q) < 1e-4) return true;
+    }
+    return false;
 }

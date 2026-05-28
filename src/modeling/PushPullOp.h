@@ -27,6 +27,7 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "pushpull"; }
+    OperationDiff captureDiff() const override;
 
 private:
     std::vector<Target> m_targets;

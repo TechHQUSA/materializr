@@ -4,8 +4,27 @@
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <BRepGProp_Face.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
 #include <imgui.h>
+
+namespace {
+// Representative point on a face (midpoint of its UV bounds).
+bool faceCenter(const TopoDS_Face& face, gp_Pnt& out) {
+    try {
+        BRepGProp_Face gp(face);
+        Standard_Real u0, u1, v0, v1;
+        gp.Bounds(u0, u1, v0, v1);
+        gp_Vec n;
+        gp.Normal((u0 + u1) * 0.5, (v0 + v1) * 0.5, out, n);
+        return true;
+    } catch (...) { return false; }
+}
+} // namespace
 
 ChamferOp::ChamferOp() = default;
 
@@ -53,6 +72,19 @@ bool ChamferOp::execute(Document& doc) {
             return false;
         }
 
+        // Record the chamfer faces generated from each input edge so a later
+        // face click can be traced back to this op for re-editing.
+        m_generatedFaces.clear();
+        for (const auto& edge : m_edges) {
+            try {
+                const TopTools_ListOfShape& gen = chamfer.Generated(edge);
+                for (TopTools_ListIteratorOfListOfShape it(gen); it.More(); it.Next()) {
+                    if (it.Value().ShapeType() == TopAbs_FACE)
+                        m_generatedFaces.push_back(it.Value());
+                }
+            } catch (...) {}
+        }
+
         // Update the body with the chamfered shape
         doc.updateBody(m_bodyId, chamfer.Shape());
         return true;
@@ -87,4 +119,25 @@ void ChamferOp::renderProperties() {
 
     ImGui::Text("Edges: %d selected", static_cast<int>(m_edges.size()));
     ImGui::Text("Body ID: %d", m_bodyId);
+}
+
+OperationDiff ChamferOp::captureDiff() const {
+    OperationDiff d;
+    if (m_bodyId >= 0 && !m_previousShape.IsNull())
+        d.modifiedBefore.push_back({m_bodyId, m_previousShape});
+    return d;
+}
+
+bool ChamferOp::ownsFace(const TopoDS_Shape& face) const {
+    if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return false;
+    for (const auto& f : m_generatedFaces) {
+        if (f.IsSame(face)) return true;
+    }
+    gp_Pnt q;
+    if (!faceCenter(TopoDS::Face(face), q)) return false;
+    for (const auto& f : m_generatedFaces) {
+        gp_Pnt p;
+        if (faceCenter(TopoDS::Face(f), p) && p.Distance(q) < 1e-4) return true;
+    }
+    return false;
 }

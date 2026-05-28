@@ -147,6 +147,7 @@ add_executable(materializr
     src/core/VersionManager.cpp
     src/modeling/ExtrudeOp.cpp
     src/modeling/PushPullOp.cpp
+    src/modeling/ReplayOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp
     src/modeling/BooleanOp.cpp
@@ -201,6 +202,7 @@ add_executable(materializr
     src/ui/ShortcutsPanel.cpp
     src/ui/AboutDialog.cpp
     src/io/ProjectIO.cpp
+    src/io/Settings.cpp
     src/io/StepIO.cpp
     src/io/StlExport.cpp
     src/io/IgesIO.cpp

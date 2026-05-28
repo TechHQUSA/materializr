@@ -249,3 +249,13 @@ void ExtrudeOp::renderProperties() {
         ImGui::InputInt("Target Body ID", &m_targetBodyId);
     }
 }
+
+OperationDiff ExtrudeOp::captureDiff() const {
+    OperationDiff d;
+    if (m_mode == ExtrudeMode::NewBody) {
+        if (m_createdBodyId >= 0) d.created.push_back(m_createdBodyId);
+    } else if (m_targetBodyId >= 0 && !m_previousTargetShape.IsNull()) {
+        d.modifiedBefore.push_back({m_targetBodyId, m_previousTargetShape});
+    }
+    return d;
+}

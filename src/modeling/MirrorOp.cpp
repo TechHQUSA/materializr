@@ -124,3 +124,13 @@ void MirrorOp::renderProperties() {
         ImGui::Text("Mirrored body ID: %d", m_mirroredBodyId);
     }
 }
+
+OperationDiff MirrorOp::captureDiff() const {
+    OperationDiff d;
+    if (m_keepOriginal) {
+        if (m_mirroredBodyId >= 0) d.created.push_back(m_mirroredBodyId);
+    } else if (m_bodyId >= 0 && !m_previousShape.IsNull()) {
+        d.modifiedBefore.push_back({m_bodyId, m_previousShape});
+    }
+    return d;
+}

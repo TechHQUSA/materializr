@@ -25,6 +25,7 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "split_body"; }
+    OperationDiff captureDiff() const override;
 
 private:
     int m_bodyId = -1;

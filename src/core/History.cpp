@@ -124,6 +124,63 @@ bool History::editStep(int index, Document& doc) {
     return true;
 }
 
+bool History::removeStep(int index, Document& doc) {
+    int count = static_cast<int>(m_operations.size());
+    if (index < 0 || index >= count) return false;
+
+    // If the step is beyond the current state (in the redo region) it has no
+    // effect on the document right now — just drop it.
+    if (index > m_currentIndex) {
+        m_operations.erase(m_operations.begin() + index);
+        if (m_breakpoint > index) m_breakpoint--;
+        else if (m_breakpoint == index) m_breakpoint = -1;
+        return true;
+    }
+
+    // Roll the document back to just before `index` by undoing applied ops.
+    for (int i = m_currentIndex; i >= index; --i) {
+        Operation* op = m_operations[i].get();
+        if (op->isEnabled()) op->undo(doc);
+    }
+
+    // Detach the op so we can restore it if a later dependent op fails.
+    std::unique_ptr<Operation> removed = std::move(m_operations[index]);
+    m_operations.erase(m_operations.begin() + index);
+
+    int savedCurrent = m_currentIndex;
+    int savedBreak = m_breakpoint;
+    m_currentIndex--; // one fewer applied op
+    if (m_breakpoint > index) m_breakpoint--;
+    else if (m_breakpoint == index) m_breakpoint = -1;
+
+    // Re-execute the remaining ops from `index` forward.
+    for (int i = index; i <= m_currentIndex; ++i) {
+        Operation* op = m_operations[i].get();
+        if (op->isEnabled()) {
+            if (!op->execute(doc)) {
+                // Conflict: a later op depended on the removed one. Roll back the
+                // partial rebuild, reinsert the removed op, and replay the
+                // original chain so the model is left exactly as it was.
+                for (int j = i - 1; j >= index; --j) {
+                    Operation* o = m_operations[j].get();
+                    if (o->isEnabled()) o->undo(doc);
+                }
+                m_operations.insert(m_operations.begin() + index, std::move(removed));
+                m_currentIndex = savedCurrent;
+                m_breakpoint = savedBreak;
+                for (int j = index; j <= m_currentIndex; ++j) {
+                    Operation* o = m_operations[j].get();
+                    if (o->isEnabled()) o->execute(doc);
+                }
+                return false;
+            }
+        }
+    }
+
+    if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    return true;
+}
+
 void History::setBreakpoint(int index) {
     m_breakpoint = index;
 }

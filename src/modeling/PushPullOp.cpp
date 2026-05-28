@@ -129,3 +129,12 @@ void PushPullOp::renderProperties() {
     ImGui::InputDouble("Distance", &m_distance, 0.1, 1.0, "%.3f");
     ImGui::Text("Regions: %zu", m_targets.size());
 }
+
+OperationDiff PushPullOp::captureDiff() const {
+    OperationDiff d;
+    for (const auto& [id, shape] : m_previousBodies)
+        if (id >= 0 && !shape.IsNull()) d.modifiedBefore.push_back({id, shape});
+    for (int id : m_createdBodyIds)
+        if (id >= 0) d.created.push_back(id);
+    return d;
+}

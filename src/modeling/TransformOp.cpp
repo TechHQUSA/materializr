@@ -171,3 +171,10 @@ void TransformOp::renderProperties() {
             break;
     }
 }
+
+OperationDiff TransformOp::captureDiff() const {
+    OperationDiff d;
+    if (m_bodyId >= 0 && !m_previousShape.IsNull())
+        d.modifiedBefore.push_back({m_bodyId, m_previousShape});
+    return d;
+}

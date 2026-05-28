@@ -63,9 +63,22 @@ public:
     void setOrthographic(bool ortho) { m_orthographic = ortho; }
     bool isOrthographic() const { return m_orthographic; }
 
+private:
+    /// Turntable orbit around the world up axis (Y). Yaw spins around Y; pitch
+    /// changes elevation, clamped short of the poles. The up vector is held level
+    /// with the ground (never rolls), so the horizon stays flat.
+    void orbitLevel(float yawDelta, float pitchDelta);
+
+public:
+
     /// Half-height (world units) of the ortho view box. Width is derived from aspect.
     void setOrthoSize(float halfHeight) { m_orthoSize = halfHeight; }
     float getOrthoSize() const { return m_orthoSize; }
+
+    /// When true (default), orbiting is a level turntable around world up (the
+    /// horizon never rolls). When false, orbiting is a free trackball.
+    void setLevelOrbit(bool level) { m_levelOrbit = level; }
+    bool isLevelOrbit() const { return m_levelOrbit; }
 
 private:
     glm::vec3 m_position;
@@ -79,6 +92,7 @@ private:
 
     bool m_orthographic = false;
     float m_orthoSize = 10.0f; // half-height in world units
+    bool m_levelOrbit = true;  // turntable (level) vs free trackball orbit
 
     // Orbit sensitivity
     float m_orbitSpeed;

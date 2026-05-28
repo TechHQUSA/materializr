@@ -1,9 +1,20 @@
 #pragma once
 #include <string>
 #include <memory>
+#include <vector>
+#include <utility>
 #include <TopoDS_Shape.hxx>
 
 class Document; // forward declare
+
+// A non-destructive description of the body changes an operation made, read
+// straight from the op's stored undo data. Used to serialize history without
+// calling undo()/execute() (which mutate op state and recompute geometry).
+struct OperationDiff {
+    std::vector<std::pair<int, TopoDS_Shape>> modifiedBefore; // body id -> shape BEFORE this op
+    std::vector<int> created;                                 // ids this op created
+    std::vector<std::pair<int, TopoDS_Shape>> deletedBefore;  // id -> shape this op deleted
+};
 
 class Operation {
 public:
@@ -19,6 +30,21 @@ public:
 
     // Unique type identifier for serialization
     virtual std::string typeId() const = 0;
+
+    // True if this operation produced the given face (e.g. a fillet/chamfer
+    // blend surface). Lets the UI map a clicked face back to the op that made
+    // it so the user can re-edit it. Default: operations own no faces.
+    virtual bool ownsFace(const TopoDS_Shape& /*face*/) const { return false; }
+
+    // Report the body changes this op made, read from its stored undo data.
+    // Non-destructive (unlike undo()). Default: no body changes (e.g. a sketch
+    // edit). Used to persist the operation history in the project file.
+    virtual OperationDiff captureDiff() const { return {}; }
+
+    // True for a step reconstructed from a saved project: it replays stored
+    // geometry for undo/redo but its parameters can't be re-edited. Lets the UI
+    // flag such steps after a project is reopened.
+    virtual bool isReloaded() const { return false; }
 
     bool isEnabled() const { return m_enabled; }
     void setEnabled(bool enabled) { m_enabled = enabled; }

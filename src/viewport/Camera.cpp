@@ -20,13 +20,11 @@ Camera::Camera()
 {
 }
 
-// Trackball rotation: yaw around the camera's CURRENT up vector, pitch around
-// the camera's CURRENT right vector. Independent of any fixed world axis, so
-// it behaves correctly when exiting orthographic sketch views where the camera
-// is pointed straight down a non-Y face (the old Y-up spherical math hit a
-// singularity there and the first drag would feel 90° off).
+// Free trackball rotation: yaw around the camera's CURRENT up vector, pitch
+// around its CURRENT right vector. Allows full 3D tumbling (the view can roll).
+// Used when level-orbit is turned off in Settings.
 static void trackballRotate(glm::vec3& position, const glm::vec3& target, glm::vec3& upInOut,
-                             float yaw, float pitch)
+                            float yaw, float pitch)
 {
     glm::vec3 offset = position - target;
     if (glm::length(offset) < 1e-6f) return;
@@ -34,7 +32,6 @@ static void trackballRotate(glm::vec3& position, const glm::vec3& target, glm::v
     glm::vec3 forward = -glm::normalize(offset);
     glm::vec3 right = glm::cross(forward, upInOut);
     if (glm::length(right) < 1e-6f) {
-        // Degenerate (up parallel to forward); fall back to a world axis to recover.
         right = glm::cross(forward, glm::vec3(0, 1, 0));
         if (glm::length(right) < 1e-6f) right = glm::cross(forward, glm::vec3(1, 0, 0));
     }
@@ -45,27 +42,62 @@ static void trackballRotate(glm::vec3& position, const glm::vec3& target, glm::v
     glm::mat4 rotPitch = glm::rotate(glm::mat4(1.0f), pitch, right);
     glm::mat4 rot = rotPitch * rotYaw;
 
-    glm::vec3 newOffset = glm::vec3(rot * glm::vec4(offset, 0.0f));
-    glm::vec3 newUp = glm::vec3(rot * glm::vec4(up, 0.0f));
-
-    position = target + newOffset;
-    upInOut = glm::normalize(newUp);
+    position = target + glm::vec3(rot * glm::vec4(offset, 0.0f));
+    upInOut = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
 }
 
-void Camera::orbit(float deltaX, float deltaY)
+void Camera::orbitLevel(float yawDelta, float pitchDelta)
 {
     // Orbiting implies free 3D rotation, so drop the ortho lock if it was set
     // by entering a sketch. Pan and zoom intentionally keep ortho mode on.
     m_orthographic = false;
 
-    trackballRotate(m_position, m_target, m_up,
-                    -deltaX * m_orbitSpeed, -deltaY * m_orbitSpeed);
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    glm::vec3 offset = m_position - m_target; // target -> camera
+    float radius = glm::length(offset);
+    if (radius < 1e-6f) return;
+    glm::vec3 dir = offset / radius;
+
+    // Decompose into yaw (around world Y) and pitch (elevation above the ground
+    // plane). Rebuilding the offset from these keeps the view level — there is
+    // no roll term, so the horizon stays flat no matter how far we orbit.
+    float yaw = std::atan2(dir.z, dir.x);
+    float pitch = std::asin(glm::clamp(dir.y, -1.0f, 1.0f));
+
+    yaw += yawDelta;
+    pitch += pitchDelta;
+
+    // Stop just short of straight up/down so the up vector never becomes
+    // parallel to the view direction (which would make lookAt degenerate).
+    const float lim = glm::radians(89.0f);
+    pitch = glm::clamp(pitch, -lim, lim);
+
+    glm::vec3 newDir(std::cos(pitch) * std::cos(yaw),
+                     std::sin(pitch),
+                     std::cos(pitch) * std::sin(yaw));
+    m_position = m_target + newDir * radius;
+    m_up = worldUp;
+}
+
+void Camera::orbit(float deltaX, float deltaY)
+{
+    if (m_levelOrbit) {
+        orbitLevel(deltaX * m_orbitSpeed, deltaY * m_orbitSpeed);
+    } else {
+        m_orthographic = false;
+        trackballRotate(m_position, m_target, m_up,
+                        -deltaX * m_orbitSpeed, -deltaY * m_orbitSpeed);
+    }
 }
 
 void Camera::rotateAroundTarget(float yawRadians, float pitchRadians)
 {
-    m_orthographic = false;
-    trackballRotate(m_position, m_target, m_up, -yawRadians, -pitchRadians);
+    if (m_levelOrbit) {
+        orbitLevel(yawRadians, pitchRadians);
+    } else {
+        m_orthographic = false;
+        trackballRotate(m_position, m_target, m_up, -yawRadians, -pitchRadians);
+    }
 }
 
 void Camera::pan(float deltaX, float deltaY)

@@ -175,16 +175,11 @@ private:
 } // anonymous namespace
 
 REGISTER_PLUGIN(PushPull, [](materializr::PluginContext& ctx) {
-    // Face push/pull is handled by the Application's interactive arrow gizmo (it
-    // needs viewport drag input, which plugin tools don't receive). This plugin
-    // keeps only the sketch-region push/pull.
-    ctx.registerToolbarButton({"Push/Pull", "Feature",
-        materializr::SelectionContext::HasSketchRegions, 401,
-        nullptr,
-        []() -> std::unique_ptr<materializr::InteractiveTool> {
-            return std::make_unique<PushPullTool>();
-        }});
-
+    // Both face and sketch-region push/pull are handled by the Application's
+    // interactive arrow gizmo (default 0, click-drag to extrude/cut, with a live
+    // measurement). That path needs viewport drag input, which plugin tools
+    // don't receive, so there is no toolbar button here. We keep a Command
+    // Palette entry as a fallback (it uses the typed popup).
     ctx.registerCommand({"Push/Pull", "",
         [](materializr::PluginContext& ctx) {
             materializr::PluginRegistry::instance().activateTool(

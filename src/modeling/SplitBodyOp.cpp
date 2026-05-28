@@ -113,3 +113,11 @@ void SplitBodyOp::renderProperties() {
         ImGui::Text("Second body ID: %d", m_secondBodyId);
     }
 }
+
+OperationDiff SplitBodyOp::captureDiff() const {
+    OperationDiff d;
+    if (m_bodyId >= 0 && !m_previousShape.IsNull())
+        d.modifiedBefore.push_back({m_bodyId, m_previousShape});
+    if (m_secondBodyId >= 0) d.created.push_back(m_secondBodyId);
+    return d;
+}

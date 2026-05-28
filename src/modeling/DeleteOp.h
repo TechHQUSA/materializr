@@ -21,6 +21,7 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "delete"; }
+    OperationDiff captureDiff() const override;
 
 private:
     int m_bodyId = -1;

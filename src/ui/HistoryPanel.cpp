@@ -35,8 +35,26 @@ bool HistoryPanel::render() {
     int currentStep = m_history->currentStep();
     int breakpoint = m_history->getBreakpoint();
 
+    // If any step came from a reopened project, explain that those steps replay
+    // saved geometry and can't have their parameters re-edited.
+    bool anyReloaded = false;
+    for (int i = 0; i < stepCount; ++i) {
+        const Operation* op = m_history->getStep(i);
+        if (op && op->isReloaded()) { anyReloaded = true; break; }
+    }
+    if (anyReloaded) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f),
+            "Steps marked (reloaded) were restored from the saved project. "
+            "Undo/redo work, but their parameters can't be edited.");
+        ImGui::PopTextWrapPos();
+        ImGui::Separator();
+    }
+
     // Step list
     ImGui::BeginChild("StepList", ImVec2(0, -60), true);
+
+    int deleteIndex = -1; // set by the context menu, applied after the loop
 
     for (int i = 0; i < stepCount; i++) {
         const Operation* op = m_history->getStep(i);
@@ -68,17 +86,19 @@ bool HistoryPanel::render() {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
         }
 
-        // Format label: index + name + enabled state
+        // Format label: index + name + enabled / reloaded state
         char label[256];
-        std::snprintf(label, sizeof(label), "%d. %s%s",
+        std::snprintf(label, sizeof(label), "%d. %s%s%s",
                       i + 1,
                       op->name().c_str(),
-                      isDisabled ? " [disabled]" : "");
+                      isDisabled ? " [disabled]" : "",
+                      op->isReloaded() ? " (reloaded)" : "");
 
         bool selected = (i == m_editingStep);
         if (ImGui::Selectable(label, selected)) {
             m_editingStep = i;
             m_showProperties = true;
+            m_deleteConflict = false;
         }
 
         // Pop text color
@@ -110,10 +130,33 @@ bool HistoryPanel::render() {
                 m_history->setBreakpoint(-1);
                 modified = true;
             }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Delete")) {
+                deleteIndex = i; // applied after the loop (mutates the list)
+            }
             ImGui::EndPopup();
         }
 
         ImGui::PopID();
+    }
+
+    // Apply a queued delete now that we're done iterating the (about-to-change)
+    // list. removeStep rebuilds in place and refuses (returns false) if a later
+    // operation depends on the one being removed.
+    if (deleteIndex >= 0) {
+        if (m_history->removeStep(deleteIndex, *m_document)) {
+            if (m_editingStep == deleteIndex) { m_editingStep = -1; m_showProperties = false; }
+            else if (m_editingStep > deleteIndex) m_editingStep--;
+            m_deleteConflict = false;
+        } else {
+            m_deleteConflict = true; // a dependent step blocked the removal
+        }
+        modified = true;
+    }
+
+    if (m_deleteConflict) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                           "Can't delete: a later operation depends on it.");
     }
 
     // Draw breakpoint line at the end if breakpoint is at last step

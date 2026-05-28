@@ -23,7 +23,11 @@ public:
 
     /// Tessellate a TopoDS_Shape and store the resulting mesh.
     /// Returns the mesh index (for later color/selection control).
-    int tessellate(const TopoDS_Shape& shape, float deflection = 0.1f);
+    /// `angularDeflection` (radians) controls faceting of curved surfaces — a
+    /// tighter angle makes fillets/holes/cylinders visibly smoother while adding
+    /// almost no triangles to flat faces.
+    int tessellate(const TopoDS_Shape& shape, float deflection = 0.1f,
+                   float angularDeflection = 0.2f);
 
     /// Render all meshes.
     void render(const glm::mat4& view, const glm::mat4& projection,

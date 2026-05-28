@@ -44,6 +44,8 @@ class SelectionManager;
 
 namespace materializr {
 
+struct ProjectHistory; // io/ProjectIO.h
+
 class Application {
 public:
     Application();
@@ -63,6 +65,8 @@ private:
     void renderMenuBar();
     void renderInteractionsPanel();
     void renderSettings();
+    void loadAppSettings();   // restore persisted preferences at startup
+    void saveAppSettings();   // write persisted preferences
     void renderMirrorPopup();
     void renderScalePanel();
     void handleToolAction(int action);
@@ -77,6 +81,10 @@ private:
     void saveProject();         // Save dialog (Save As behavior)
     void saveProjectQuick();    // Save to current path if known, else falls through to saveProject
     void loadProject();
+    // Snapshot the operation history (parameters + per-step body diffs) for the
+    // project file, and rebuild a replayable history from a loaded project.
+    ProjectHistory captureProjectHistory();
+    void rebuildHistoryFromProject(const ProjectHistory& hist);
 
     // Dirty tracking + unsaved-changes prompt
     bool isDirty() const;
@@ -181,6 +189,12 @@ private:
     bool m_showSettings = false;
     int m_settingsOrbitButton = 2; // staged value in the Settings dialog
     int m_settingsPanButton = 1;
+
+    // Autosave: once the project has been saved at least once (has a path on
+    // disk), periodically re-save dirty changes. Toggled in File > Settings.
+    bool m_autosaveEnabled = false;
+    float m_autosaveIntervalSec = 120.0f;
+    double m_lastAutosaveTime = 0.0;
     // Each entry: a separate region operation to perform on commit
     struct PushPullTarget {
         int sketchId;

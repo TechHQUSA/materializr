@@ -233,7 +233,12 @@ ToolAction Toolbar::renderSketchRegionTools() {
     ImGui::Text("%d region%s selected", n, n == 1 ? "" : "s");
     ImGui::Spacing();
 
-    // Plugin buttons for HasSketchRegions context (Push/Pull etc.)
+    // Push/Pull routes through the app's interactive arrow gizmo (default 0,
+    // drag to extrude/cut) — same as a body face.
+    if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
+        action = ToolAction::PushPull;
+
+    // Any remaining HasSketchRegions plugin buttons.
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasSketchRegions));
 
     // Edit the sketch this region belongs to — re-enter sketch mode to revise it.

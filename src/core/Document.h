@@ -40,6 +40,10 @@ public:
     int addBody(const TopoDS_Shape& shape, const std::string& name = "");
     void removeBody(int id);
     void updateBody(int id, const TopoDS_Shape& shape);
+    // Add a body with an explicit id, or update the body that already has that
+    // id. Keeps ids stable across save/load and history replay; bumps the id
+    // counter so later auto-assigned ids don't collide.
+    void putBody(int id, const TopoDS_Shape& shape, const std::string& name = "");
     const TopoDS_Shape& getBody(int id) const;
     std::string getBodyName(int id) const;
     void setBodyName(int id, const std::string& name);

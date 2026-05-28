@@ -36,6 +36,11 @@ public:
     // Edit a historical step's parameters and replay
     bool editStep(int index, Document& doc);
 
+    // Remove a step entirely (delete that operation), rebuilding the model in
+    // place. Returns false and leaves the model unchanged if removing the step
+    // makes a later, dependent operation fail (a conflict).
+    bool removeStep(int index, Document& doc);
+
     // Breakpoint: suppress all steps after this index
     void setBreakpoint(int index); // -1 = no breakpoint
     int getBreakpoint() const;
