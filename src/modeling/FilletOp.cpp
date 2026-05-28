@@ -3,7 +3,6 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopTools_ListOfShape.hxx>
-#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <BRepGProp_Face.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
@@ -65,9 +64,11 @@ bool FilletOp::execute(Document& doc) {
         for (const auto& edge : m_edges) {
             try {
                 const TopTools_ListOfShape& gen = fillet.Generated(edge);
-                for (TopTools_ListIteratorOfListOfShape it(gen); it.More(); it.Next()) {
-                    if (it.Value().ShapeType() == TopAbs_FACE)
-                        m_generatedFaces.push_back(it.Value());
+                // Range-based loop instead of TopTools_ListIteratorOfListOfShape,
+                // whose header was removed in OCCT 8.0 (still works on 7.x).
+                for (const TopoDS_Shape& s : gen) {
+                    if (s.ShapeType() == TopAbs_FACE)
+                        m_generatedFaces.push_back(s);
                 }
             } catch (...) {}
         }
