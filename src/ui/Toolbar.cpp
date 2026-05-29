@@ -81,18 +81,6 @@ void Toolbar::renderPluginButtons(int contextMask) {
     }
 }
 
-void Toolbar::renderGeneralSection() {
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "General");
-    ImGui::Separator();
-
-    if (ImGui::Button("Measure", ImVec2(-1, 30)))
-        ; // intentional no-op — dead code; real Measure button lives in
-          // renderNoSelectionTools / renderSketchTools.
-    if (ImGui::Button("Reset Camera", ImVec2(-1, 30)))
-        ; // handled via shortcut / command palette
-}
-
 ToolAction Toolbar::renderSketchTools() {
     ToolAction action = ToolAction::None;
 
@@ -218,6 +206,8 @@ ToolAction Toolbar::renderFaceTools() {
         action = ToolAction::SketchOnFace;
     if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
         action = ToolAction::PushPull;
+    if (ImGui::Button("Shell", ImVec2(-1, 30)))
+        action = ToolAction::Shell;
     if (m_canEditDiameter &&
         ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
         action = ToolAction::EditDiameter;

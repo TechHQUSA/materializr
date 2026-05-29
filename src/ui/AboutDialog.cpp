@@ -50,7 +50,7 @@ void AboutDialog::render() {
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(420, 340), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(420, 400), ImGuiCond_Appearing);
 
     if (ImGui::BeginPopupModal("About Materializr", &m_visible,
                                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
@@ -92,13 +92,32 @@ void AboutDialog::render() {
         ImGui::Spacing();
 
         const char* repoUrl = "https://github.com/materializr-cad/materializr";
-        float btnW = 170.0f;
+        float btnW = 200.0f;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - btnW) * 0.5f);
         if (ImGui::Button("Open Project on GitHub", ImVec2(btnW, 0))) {
             openInBrowser(repoUrl);
         }
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize(repoUrl).x) * 0.5f);
         ImGui::TextDisabled("%s", repoUrl);
+
+        ImGui::Spacing();
+
+        // Buy Me a Coffee — proceeds split between stevebushwa and R4stl1n
+        // (stevebushwa just runs the page). Coloured in the BMC brand yellow
+        // so it reads as a separate "support" action rather than another
+        // navigation button.
+        const char* bmcUrl = "https://www.buymeacoffee.com/stevebushwa";
+        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(1.00f, 0.87f, 0.00f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.00f, 0.92f, 0.30f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.85f, 0.74f, 0.00f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - btnW) * 0.5f);
+        if (ImGui::Button("Buy us a Coffee", ImVec2(btnW, 0))) {
+            openInBrowser(bmcUrl);
+        }
+        ImGui::PopStyleColor(4);
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize(bmcUrl).x) * 0.5f);
+        ImGui::TextDisabled("%s", bmcUrl);
 
         ImGui::Spacing();
         float closeW = 100.0f;

@@ -418,6 +418,23 @@ private:
     void cancelResizeCylindrical();
     void renderResizeCylindricalPanel();
 
+    // Interactive Shell (hollow a body by removing a picked face and offsetting
+    // the remaining shell inward). Same popup-with-live-preview pattern as
+    // push/pull and fillet/chamfer.
+    bool m_shellActive = false;
+    int  m_shellBodyId = -1;
+    TopoDS_Face m_shellFace;
+    float m_shellThickness = 1.0f;
+    char m_shellInputBuf[32] = "1.0";
+    bool m_shellInputFocus = true;
+    TopoDS_Shape m_shellPreviousShape;
+
+    void beginInteractiveShell();
+    void updateInteractiveShell();
+    void commitInteractiveShell();
+    void cancelInteractiveShell();
+    void renderShellPanel();
+
     // Interactive extrude state
     bool m_extruding = false;
     TopoDS_Shape m_extrudeProfile;

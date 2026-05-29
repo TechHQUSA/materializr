@@ -3,6 +3,49 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.2.2] — 2026-05-29
+
+Incremental polish on top of 0.2.1 plus the first batch of contributions
+from R4stl1n landing back upstream.
+
+### Added
+
+- **Interactive Shell tool with thickness popup.** Picks up the existing
+  `ShellOp` (hollow a body, remove the picked face) and wraps it in the
+  same popup-with-live-preview pattern as push/pull and edit-diameter.
+  Defaults to 1.0 mm with a slider that scrubs 0.1–20 mm; Enter / Apply
+  commits, Esc reverts. Replaces the prior one-shot "always 1 mm" plugin
+  button.
+- **Configurable rendering settings** (from R4stl1n): the Settings panel
+  grew a Rendering section with ambient-light slider, headlight (light
+  follows camera) toggle, fill-light toggle, multisample anti-aliasing
+  selector (Off / 2x / 4x / 8x), and a mesh-quality / OCCT-deflection
+  control. Tames the harsh single-direction shadows and lets you trade
+  detail for performance on heavier models.
+- **Subtract sketch tool** (from R4stl1n): an extrude-cut with a red
+  preview tied to the source body the sketch was drawn on. Lives on the
+  sketch region toolbar so a region click can drive it directly without
+  having to enter the body's face flow.
+- **"Buy us a Coffee" button** in the About dialog. Proceeds are split
+  between stevebushwa and R4stl1n — stevebushwa just runs the page.
+  Coloured in the BMC brand yellow so it reads as a separate "support"
+  action rather than another navigation button.
+
+### Changed
+
+- **Application.cpp slimmed by ~31 %** (2,698 → 1,851 lines). All
+  interactive-op state machines (Fillet/Chamfer + Edit, Edit Diameter,
+  Shell, Extrude, Push/Pull) moved into a new
+  `Application_InteractiveOps.cpp`, mirroring the existing
+  `Application_Viewport.cpp` / `Application_Dialogs.cpp` split. Pure
+  mechanical relocation — no behaviour changes.
+- **Slimmed Fillet and Chamfer plugin files** (from R4stl1n): the
+  duplicate interactive paths that were shadowed by the inline app-level
+  code got removed. `FilletPlugin.cpp` 165 → 56 lines,
+  `ChamferPlugin.cpp` 169 → 56 lines.
+- `Toolbar::renderGeneralSection` removed (dead method, defined but
+  never called; its body was an intentional no-op).
+
 ## [0.2.1] — 2026-05-29
 
 CI hotfix: the v0.2.0 Linux Build workflow couldn't execute

@@ -574,6 +574,61 @@ void Application::renderResizeCylindricalPanel() {
     ImGui::End();
 }
 
+void Application::renderShellPanel() {
+    if (!m_shellActive) return;
+
+    // Same pinned top-right anchor + flag set as the push/pull and resize
+    // popups — known stable, no hover flicker.
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260,
+                                    ImGui::GetWindowPos().y + 50));
+    ImGui::SetNextWindowSize(ImVec2(240, 0));
+    ImGui::Begin("##ShellPanel", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Shell");
+    ImGui::TextDisabled("Hollows the body and removes the picked face.");
+    ImGui::Separator();
+
+    if (m_shellInputFocus) {
+        ImGui::SetKeyboardFocusHere();
+        m_shellInputFocus = false;
+    }
+
+    ImGui::SetNextItemWidth(140);
+    if (ImGui::InputText("##shellThickness", m_shellInputBuf,
+                         sizeof(m_shellInputBuf),
+                         ImGuiInputTextFlags_EnterReturnsTrue |
+                         ImGuiInputTextFlags_CharsDecimal)) {
+        m_shellThickness = static_cast<float>(std::atof(m_shellInputBuf));
+        commitInteractiveShell();
+        ImGui::End();
+        return;
+    } else {
+        float parsed = static_cast<float>(std::atof(m_shellInputBuf));
+        if (std::abs(parsed - m_shellThickness) > 0.001f) {
+            m_shellThickness = parsed;
+            updateInteractiveShell();
+        }
+    }
+    ImGui::SameLine();
+    ImGui::Text("mm");
+
+    // Slider as a quick scrub.
+    if (ImGui::SliderFloat("##shellSlider", &m_shellThickness, 0.1f, 20.0f, "%.2f mm")) {
+        std::snprintf(m_shellInputBuf, sizeof(m_shellInputBuf), "%.2f", m_shellThickness);
+        updateInteractiveShell();
+    }
+
+    ImGui::Spacing();
+    if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) commitInteractiveShell();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel (Esc)",    ImVec2(110, 0))) cancelInteractiveShell();
+
+    ImGui::End();
+}
+
 void Application::renderScalePanel() {
     // Shown only while the Scale gizmo is active with a body selected.
     if (m_inSketchMode || !m_selection->hasSelectedBodies()) return;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 0.2.1 LANGUAGES CXX)
+project(Materializr VERSION 0.2.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -122,6 +122,7 @@ add_executable(materializr
     src/main.cpp
     src/app/Application.cpp
     src/app/Application_Dialogs.cpp
+    src/app/Application_InteractiveOps.cpp
     src/app/Application_Viewport.cpp
     src/app/Window.cpp
     src/plugin/PluginContext.cpp
