@@ -103,8 +103,9 @@ were tracked down along the way, including one data-loss case in undo replay.
   refinement is affected. Esc reverts and exits. To be fixed by porting the
   popup to true ImGui popup semantics (`OpenPopup` / `BeginPopup`) in a
   follow-up.
-- **Push/pull multi-target preview artifacting** (not reliably reproducible)
-  remains deferred.
+- **Push/pull multi-target preview artifacting on ARM** — visible on aarch64
+  builds, not reproducible on x86_64. Deferred until a reliable repro path is
+  found.
 - **Ortho view entry rotates counter-clockwise** relative to expectation in
   some camera states. Exit is clean. Deferred for a separate pass.
 
@@ -112,4 +113,4 @@ were tracked down along the way, including one data-loss case in undo replay.
 
 Initial Materializr release. Parametric 3D CAD on OCCT with sketches, extrude,
 push/pull, fillet, chamfer, transforms, plugin system, project save/load,
-ViewCube, settings, Linux AppImage + Windows + macOS packaging.
+ViewCube, settings, Linux AppImage and Windows packaging.

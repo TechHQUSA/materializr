@@ -51,6 +51,7 @@ Latest builds are on the
   and Windows (MSVC + vcpkg).
 - **[Architecture](docs/architecture.md)** — code layout, design patterns,
   tech stack.
+- **[Changelog](docs/changelog.md)** — release notes and known issues.
 
 The app also ships an in-app **Help → User Guide**, a **Keyboard Shortcuts**
 panel, and **Help → Check for Updates** that queries this repo's releases API.
