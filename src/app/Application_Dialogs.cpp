@@ -173,6 +173,50 @@ void Application::renderSettings() {
         }
 
         ImGui::Spacing();
+        ImGui::SeparatorText("Rendering");
+
+        // Lighting — tame the harsh single-direction shadows.
+        ImGui::TextWrapped("Lighting controls how evenly the model is lit.");
+        if (ImGui::SliderFloat("Ambient", &m_lightAmbient, 0.0f, 1.0f, "%.2f")) {
+            applyRenderingSettings();
+            changed = true;
+        }
+        ImGui::SetItemTooltip("Higher values brighten shadowed faces for more uniform lighting.");
+        if (ImGui::Checkbox("Headlight (light follows camera)", &m_lightHeadlight)) {
+            applyRenderingSettings();
+            changed = true;
+        }
+        ImGui::SetItemTooltip("The face you're looking at is always lit; removes large cast shadows.");
+        if (ImGui::Checkbox("Fill light (soften opposite side)", &m_lightFill)) {
+            applyRenderingSettings();
+            changed = true;
+        }
+
+        ImGui::Spacing();
+        // Anti-aliasing.
+        const char* aaItems[] = { "Off", "2x", "4x", "8x" };
+        auto samplesToIdx = [](int s) { return s >= 8 ? 3 : (s >= 4 ? 2 : (s >= 2 ? 1 : 0)); };
+        const int idxToSamples[] = { 0, 2, 4, 8 };
+        int aaIdx = samplesToIdx(m_msaaSamples);
+        if (ImGui::Combo("Anti-aliasing", &aaIdx, aaItems, 4)) {
+            m_msaaSamples = idxToSamples[aaIdx];
+            applyRenderingSettings();
+            changed = true;
+        }
+        ImGui::SetItemTooltip("Multisampling (MSAA) smooths jagged edges in the viewport.");
+
+        ImGui::Spacing();
+        // Mesh quality — denser tessellation for smoother curved surfaces.
+        const char* mqItems[] = { "Low", "Medium", "High", "Ultra" };
+        if (ImGui::Combo("Mesh quality", &m_meshQuality, mqItems, 4)) {
+            if (m_meshQuality < 0) m_meshQuality = 0;
+            if (m_meshQuality > 3) m_meshQuality = 3;
+            m_meshesDirty = true; // re-tessellate at the new density
+            changed = true;
+        }
+        ImGui::SetItemTooltip("Higher quality uses more polygons, smoothing curves and holes.");
+
+        ImGui::Spacing();
         ImGui::Separator();
         if (ImGui::Button("Apply", ImVec2(90, 0))) {
             m_orbitButton = m_settingsOrbitButton;

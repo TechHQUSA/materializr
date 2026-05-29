@@ -20,8 +20,14 @@ public:
     /// Bind the viewport FBO for off-screen rendering.
     void bind();
 
-    /// Unbind the viewport FBO (restore default framebuffer).
+    /// Unbind the viewport FBO (restore default framebuffer). When MSAA is on,
+    /// this also resolves the multisampled buffer into the displayed texture.
     void unbind();
+
+    /// Set the MSAA sample count (0 = off; clamped to the GL maximum). Recreates
+    /// the framebuffer when the count changes.
+    void setSamples(int samples);
+    int getSamples() const { return m_samples; }
 
     /// Get the color texture ID for ImGui::Image().
     unsigned int getTextureID() const { return m_colorTexture; }
@@ -47,6 +53,13 @@ private:
     unsigned int m_fbo = 0;
     unsigned int m_colorTexture = 0;
     unsigned int m_depthRenderbuffer = 0;
+
+    // Multisampled render target (only created when m_samples > 0). The scene is
+    // drawn here, then blitted ("resolved") into m_fbo/m_colorTexture for display.
+    unsigned int m_msaaFbo = 0;
+    unsigned int m_msaaColor = 0;
+    unsigned int m_msaaDepth = 0;
+    int m_samples = 0;
 
     int m_width = 1280;
     int m_height = 720;

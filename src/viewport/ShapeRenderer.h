@@ -13,6 +13,15 @@ namespace materializr {
 
 /// Renders OCCT TopoDS_Shape objects as OpenGL meshes using Blinn-Phong shading.
 /// Supports selection highlighting with outline via stencil technique.
+/// Configurable lighting controls. Tuned to reduce the harsh single-direction
+/// shadowing the default scene used to have.
+struct LightingParams {
+    float ambient      = 0.40f; // 0..1 base illumination; higher = softer shadows
+    bool  headlight    = false; // key light tracks the camera
+    bool  fill         = true;  // enable the soft opposing fill light
+    float fillStrength = 0.35f; // contribution of the fill light when enabled
+};
+
 class ShapeRenderer {
 public:
     ShapeRenderer();
@@ -41,6 +50,9 @@ public:
 
     /// Set the selection state for a specific mesh.
     void setSelected(int meshIndex, bool selected);
+
+    /// Update the scene lighting parameters (applied on the next render).
+    void setLighting(const LightingParams& params) { m_lighting = params; }
 
     /// Remove all meshes.
     void clear();
@@ -75,8 +87,12 @@ private:
     int m_meshLoc_projection = -1;
     int m_meshLoc_viewPos = -1;
     int m_meshLoc_lightDir = -1;
+    int m_meshLoc_fillDir = -1;
     int m_meshLoc_objectColor = -1;
     int m_meshLoc_selected = -1;
+    int m_meshLoc_ambient = -1;
+    int m_meshLoc_headlight = -1;
+    int m_meshLoc_fillStrength = -1;
 
     // Outline shader program
     unsigned int m_outlineProgram = 0;
@@ -86,8 +102,11 @@ private:
     int m_outlineLoc_outlineColor = -1;
     int m_outlineLoc_outlineWidth = -1;
 
-    // Fixed directional light from upper-right
+    // Key directional light from upper-right; fill light from the opposite side
+    // and slightly below to lift the shadowed faces.
     glm::vec3 m_lightDir = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
+    glm::vec3 m_fillDir = glm::normalize(glm::vec3(-1.0f, 0.3f, -0.5f));
+    LightingParams m_lighting{};
     glm::vec4 m_outlineColor = glm::vec4(0.2f, 0.5f, 1.0f, 1.0f);
     float m_outlineWidth = 0.02f;
 };

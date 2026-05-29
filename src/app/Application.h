@@ -268,6 +268,17 @@ private:
 
     // Invert the cube-drag → orbit direction (Settings).
     bool m_invertCubeDrag = false;
+
+    // Rendering preferences (File > Settings → Rendering). Persisted.
+    float m_lightAmbient = 0.40f;   // base illumination; higher = softer shadows
+    bool  m_lightHeadlight = false; // key light tracks the camera
+    bool  m_lightFill = true;       // soft opposing fill light
+    int   m_msaaSamples = 4;        // viewport anti-aliasing: 0=off, 2, 4, 8
+    int   m_meshQuality = 1;        // tessellation density: 0=Low..3=Ultra
+    // Apply m_light*/m_msaaSamples to the renderer + viewport.
+    void applyRenderingSettings();
+    // Map m_meshQuality to OCCT tessellation parameters.
+    void meshQualityParams(float& deflection, float& angularDeflection) const;
     // Each entry: a separate region operation to perform on commit
     struct PushPullTarget {
         int sketchId;

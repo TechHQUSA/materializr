@@ -27,6 +27,12 @@ void readInt(const std::map<std::string, std::string>& kv, const char* key, int&
     try { out = std::stoi(it->second); } catch (...) { /* keep default */ }
 }
 
+void readFloat(const std::map<std::string, std::string>& kv, const char* key, float& out) {
+    auto it = kv.find(key);
+    if (it == kv.end()) return;
+    try { out = std::stof(it->second); } catch (...) { /* keep default */ }
+}
+
 void readBool(const std::map<std::string, std::string>& kv, const char* key, bool& out) {
     auto it = kv.find(key);
     if (it == kv.end()) return;
@@ -88,6 +94,11 @@ AppSettings SettingsIO::load(const std::string& path) {
     readBool(kv, "autosaveEnabled",      s.autosaveEnabled);
     readInt (kv, "autosaveIntervalSec",  s.autosaveIntervalSec);
     readBool(kv, "invertCubeDrag",       s.invertCubeDrag);
+    readFloat(kv, "lightAmbient",        s.lightAmbient);
+    readBool(kv, "lightHeadlight",       s.lightHeadlight);
+    readBool(kv, "lightFill",            s.lightFill);
+    readInt (kv, "msaaSamples",          s.msaaSamples);
+    readInt (kv, "meshQuality",          s.meshQuality);
 
     return s;
 }
@@ -113,6 +124,11 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "autosaveEnabled = "     << (s.autosaveEnabled ? "true" : "false") << "\n";
     ofs << "autosaveIntervalSec = " << s.autosaveIntervalSec << "\n";
     ofs << "invertCubeDrag = "      << (s.invertCubeDrag ? "true" : "false") << "\n";
+    ofs << "lightAmbient = "        << s.lightAmbient        << "\n";
+    ofs << "lightHeadlight = "      << (s.lightHeadlight ? "true" : "false") << "\n";
+    ofs << "lightFill = "           << (s.lightFill ? "true" : "false") << "\n";
+    ofs << "msaaSamples = "         << s.msaaSamples         << "\n";
+    ofs << "meshQuality = "         << s.meshQuality         << "\n";
 
     return ofs.good();
 }

@@ -32,13 +32,41 @@ void Viewport::resize(int width, int height)
 void Viewport::bind()
 {
     // NOTE: glBindFramebuffer requires glad or GL 3.0+ function pointer
-    glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    if (m_samples > 0 && m_msaaFbo) {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_msaaFbo);
+        glEnable(GL_MULTISAMPLE);
+    } else {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
+    }
     glViewport(0, 0, m_width, m_height);
 }
 
 void Viewport::unbind()
 {
+    // Resolve the multisampled buffer into the single-sample texture ImGui shows.
+    if (m_samples > 0 && m_msaaFbo) {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msaaFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
+        glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
+                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void Viewport::setSamples(int samples)
+{
+    // Clamp to what the driver supports (and to sane values).
+    if (samples < 0) samples = 0;
+    if (samples > 0) {
+        GLint maxSamples = 0;
+        glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+        if (samples > maxSamples) samples = maxSamples;
+    }
+    if (samples == m_samples) return;
+
+    m_samples = samples;
+    destroyFramebuffer();
+    createFramebuffer();
 }
 
 void Viewport::renderImGuiWindow()
@@ -135,6 +163,27 @@ void Viewport::createFramebuffer()
     // GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     // assert(status == GL_FRAMEBUFFER_COMPLETE);
 
+    // Multisampled render target. The scene draws here (color + depth/stencil as
+    // multisampled renderbuffers) and is resolved into m_fbo on unbind().
+    if (m_samples > 0) {
+        glGenFramebuffers(1, &m_msaaFbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_msaaFbo);
+
+        glGenRenderbuffers(1, &m_msaaColor);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msaaColor);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8,
+                                         m_width, m_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                  GL_RENDERBUFFER, m_msaaColor);
+
+        glGenRenderbuffers(1, &m_msaaDepth);
+        glBindRenderbuffer(GL_RENDERBUFFER, m_msaaDepth);
+        glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples,
+                                         GL_DEPTH24_STENCIL8, m_width, m_height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                                  GL_RENDERBUFFER, m_msaaDepth);
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
@@ -151,6 +200,18 @@ void Viewport::destroyFramebuffer()
     if (m_fbo) {
         glDeleteFramebuffers(1, &m_fbo);
         m_fbo = 0;
+    }
+    if (m_msaaColor) {
+        glDeleteRenderbuffers(1, &m_msaaColor);
+        m_msaaColor = 0;
+    }
+    if (m_msaaDepth) {
+        glDeleteRenderbuffers(1, &m_msaaDepth);
+        m_msaaDepth = 0;
+    }
+    if (m_msaaFbo) {
+        glDeleteFramebuffers(1, &m_msaaFbo);
+        m_msaaFbo = 0;
     }
 }
 

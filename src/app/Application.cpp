@@ -521,6 +521,34 @@ void Application::loadAppSettings() {
     m_autosaveEnabled = s.autosaveEnabled;
     m_autosaveIntervalSec = static_cast<float>(s.autosaveIntervalSec);
     m_invertCubeDrag = s.invertCubeDrag;
+    m_lightAmbient = s.lightAmbient;
+    m_lightHeadlight = s.lightHeadlight;
+    m_lightFill = s.lightFill;
+    m_msaaSamples = s.msaaSamples;
+    m_meshQuality = s.meshQuality;
+    applyRenderingSettings();
+    m_meshesDirty = true; // re-tessellate at the loaded quality
+}
+
+void Application::applyRenderingSettings() {
+    LightingParams lp;
+    lp.ambient = m_lightAmbient;
+    lp.headlight = m_lightHeadlight;
+    lp.fill = m_lightFill;
+    m_shapeRenderer->setLighting(lp);
+    m_viewport->setSamples(m_msaaSamples);
+}
+
+void Application::meshQualityParams(float& deflection, float& angularDeflection) const {
+    // Absolute linear deflection (mm) and angular deflection (radians). Lower
+    // values produce denser, smoother meshes.
+    switch (m_meshQuality) {
+        case 0: deflection = 0.50f; angularDeflection = 0.50f; break; // Low
+        case 2: deflection = 0.03f; angularDeflection = 0.15f; break; // High
+        case 3: deflection = 0.01f; angularDeflection = 0.10f; break; // Ultra
+        case 1:
+        default: deflection = 0.10f; angularDeflection = 0.30f; break; // Medium
+    }
 }
 
 void Application::saveAppSettings() {
@@ -532,6 +560,11 @@ void Application::saveAppSettings() {
     s.autosaveEnabled = m_autosaveEnabled;
     s.autosaveIntervalSec = static_cast<int>(m_autosaveIntervalSec);
     s.invertCubeDrag = m_invertCubeDrag;
+    s.lightAmbient = m_lightAmbient;
+    s.lightHeadlight = m_lightHeadlight;
+    s.lightFill = m_lightFill;
+    s.msaaSamples = m_msaaSamples;
+    s.meshQuality = m_meshQuality;
     SettingsIO::save(SettingsIO::defaultPath(), s);
 }
 
@@ -1010,17 +1043,19 @@ void Application::handleShortcuts() {
 void Application::rebuildMeshes() {
     m_shapeRenderer->clear();
     m_edgeRenderer->clear();
+    float deflection, angularDeflection;
+    meshQualityParams(deflection, angularDeflection);
     auto ids = m_document->getAllBodyIds();
     for (int id : ids) {
         if (!m_document->isBodyVisible(id)) continue;
         const TopoDS_Shape& shape = m_document->getBody(id);
-        int idx = m_shapeRenderer->tessellate(shape, 0.1f);
+        int idx = m_shapeRenderer->tessellate(shape, deflection, angularDeflection);
         if (idx >= 0) {
             // Use the body's own colour (defaults to light grey) instead of an
             // index-based palette, so colours are stable and user-controllable.
             m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
         }
-        m_edgeRenderer->addShape(shape, 0.1f);
+        m_edgeRenderer->addShape(shape, deflection);
     }
 }
 

@@ -10,6 +10,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepTools.hxx>
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
 
@@ -45,26 +46,32 @@ in vec3 v_worldPos;
 in vec3 v_worldNormal;
 
 uniform vec3 u_viewPos;
-uniform vec3 u_lightDir;
+uniform vec3 u_lightDir;       // key light, direction TO the light (normalized)
+uniform vec3 u_fillDir;        // fill light, direction TO the light (normalized)
 uniform vec3 u_objectColor;
 uniform bool u_selected;
+uniform float u_ambient;       // base illumination 0..1 (softens shadows)
+uniform bool u_headlight;      // key light tracks the camera when true
+uniform float u_fillStrength;  // fill light contribution (0 disables it)
 
 out vec4 fragColor;
 
 void main() {
     vec3 normal = normalize(v_worldNormal);
-    vec3 lightDir = normalize(u_lightDir);
     vec3 viewDir = normalize(u_viewPos - v_worldPos);
+    // Headlight: the key light comes from the camera, so the face the user is
+    // looking at is always lit and large cast shadows disappear.
+    vec3 keyDir = u_headlight ? viewDir : normalize(u_lightDir);
 
-    float ambientStrength = 0.3;
-    vec3 ambient = ambientStrength * u_objectColor;
+    vec3 ambient = u_ambient * u_objectColor;
 
-    float diff = max(dot(normal, lightDir), 0.0);
-    vec3 diffuse = diff * u_objectColor;
+    float keyDiff = max(dot(normal, keyDir), 0.0);
+    float fillDiff = max(dot(normal, normalize(u_fillDir)), 0.0) * u_fillStrength;
+    vec3 diffuse = (keyDiff + fillDiff) * u_objectColor;
 
     float specularStrength = 0.5;
     float shininess = 32.0;
-    vec3 halfwayDir = normalize(lightDir + viewDir);
+    vec3 halfwayDir = normalize(keyDir + viewDir);
     float spec = pow(max(dot(normal, halfwayDir), 0.0), shininess);
     vec3 specular = specularStrength * spec * vec3(1.0);
 
@@ -144,8 +151,12 @@ bool ShapeRenderer::initialize()
     m_meshLoc_projection = glGetUniformLocation(m_meshProgram, "u_projection");
     m_meshLoc_viewPos = glGetUniformLocation(m_meshProgram, "u_viewPos");
     m_meshLoc_lightDir = glGetUniformLocation(m_meshProgram, "u_lightDir");
+    m_meshLoc_fillDir = glGetUniformLocation(m_meshProgram, "u_fillDir");
     m_meshLoc_objectColor = glGetUniformLocation(m_meshProgram, "u_objectColor");
     m_meshLoc_selected = glGetUniformLocation(m_meshProgram, "u_selected");
+    m_meshLoc_ambient = glGetUniformLocation(m_meshProgram, "u_ambient");
+    m_meshLoc_headlight = glGetUniformLocation(m_meshProgram, "u_headlight");
+    m_meshLoc_fillStrength = glGetUniformLocation(m_meshProgram, "u_fillStrength");
 
     // Compile outline shader
     unsigned int outlineVert = 0, outlineFrag = 0;
@@ -176,6 +187,12 @@ bool ShapeRenderer::initialize()
 int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
                               float angularDeflection)
 {
+    // Drop any cached triangulation first. BRepMesh_IncrementalMesh only ever
+    // refines an existing mesh, so without this a previously finer tessellation
+    // would be kept when the user *lowers* the quality. Cleaning forces the mesh
+    // to be rebuilt at exactly the requested deflection in either direction.
+    BRepTools::Clean(shape);
+
     // Perform tessellation. The angular deflection subdivides curved surfaces by
     // normal angle, so rounded edges/holes get more facets (smoother) while flat
     // faces stay cheap. Run in parallel to absorb the extra triangles.
@@ -322,6 +339,10 @@ void ShapeRenderer::render(const glm::mat4& view, const glm::mat4& projection,
     glUniformMatrix4fv(m_meshLoc_projection, 1, GL_FALSE, glm::value_ptr(projection));
     glUniform3fv(m_meshLoc_viewPos, 1, glm::value_ptr(viewPos));
     glUniform3fv(m_meshLoc_lightDir, 1, glm::value_ptr(m_lightDir));
+    glUniform3fv(m_meshLoc_fillDir, 1, glm::value_ptr(m_fillDir));
+    glUniform1f(m_meshLoc_ambient, m_lighting.ambient);
+    glUniform1i(m_meshLoc_headlight, m_lighting.headlight ? 1 : 0);
+    glUniform1f(m_meshLoc_fillStrength, m_lighting.fill ? m_lighting.fillStrength : 0.0f);
 
     for (const auto& mesh : m_meshes) {
         glUniformMatrix4fv(m_meshLoc_model, 1, GL_FALSE, glm::value_ptr(mesh.modelMatrix));

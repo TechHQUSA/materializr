@@ -14,6 +14,13 @@ struct AppSettings {
     bool autosaveEnabled    = false;
     int  autosaveIntervalSec = 120;
     bool invertCubeDrag     = false; // ViewCube drag-to-orbit direction
+
+    // --- Rendering ---
+    float lightAmbient   = 0.40f; // 0..1 base illumination; higher = softer shadows
+    bool  lightHeadlight = false; // key light tracks the camera (no large shadows)
+    bool  lightFill      = true;  // soft opposing fill light to lift dark sides
+    int   msaaSamples    = 4;     // viewport anti-aliasing: 0=off, 2, 4, 8
+    int   meshQuality    = 1;     // tessellation density: 0=Low,1=Medium,2=High,3=Ultra
 };
 
 // Reads/writes AppSettings as a simple `key = value` text file. The reader is
