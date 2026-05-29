@@ -51,6 +51,7 @@
 #include "modeling/ChamferOp.h"
 #include "modeling/DeleteOp.h"
 #include "modeling/SketchEditOp.h"
+#include "modeling/ResizeCylindricalOp.h"
 #include "io/StepIO.h"
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
@@ -71,7 +72,12 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepTools.hxx>
 #include <Geom_Plane.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <GeomAbs_CurveType.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Pln.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
@@ -130,6 +136,7 @@ Application::Application() {
 
     // Wire up references
     m_toolbar->setSelectionManager(m_selection.get());
+    m_toolbar->setHistory(m_history.get());
     m_toolbar->setPluginContext(m_pluginContext.get());
     m_historyPanel->setHistory(m_history.get());
     m_historyPanel->setDocument(m_document.get());
@@ -766,6 +773,35 @@ void Application::handleToolAction(int action) {
             break;
         }
 
+        case ToolAction::EditDiameter: {
+            // Detection populates the resize-* fields when it returns true,
+            // so begin() can use them straight away.
+            if (detectCylindricalResizeCandidate()) beginResizeCylindrical();
+            break;
+        }
+
+        case ToolAction::EditFilletChamfer: {
+            // Find the FilletOp / ChamferOp in history that owns the picked face,
+            // then re-open it for editing with the existing radius / distance.
+            TopoDS_Shape pickedFace;
+            for (const auto& e : m_selection->getSelection()) {
+                if (e.type == SelectionType::Face && !e.shape.IsNull()) {
+                    pickedFace = e.shape; break;
+                }
+            }
+            if (pickedFace.IsNull()) break;
+            const auto& ops = m_history->operations();
+            for (int i = 0; i < static_cast<int>(ops.size()); ++i) {
+                const auto& op = ops[i];
+                if (op && op->isEnabled() && op->ownsFace(pickedFace) &&
+                    (op->typeId() == "fillet" || op->typeId() == "chamfer")) {
+                    beginInteractiveEdgeOpEdit(i);
+                    break;
+                }
+            }
+            break;
+        }
+
         default: break;
     }
 }
@@ -895,6 +931,8 @@ void Application::handleShortcuts() {
             m_meshesDirty = true;
         } else if (m_pushPullActive) {
             cancelPushPull();
+        } else if (m_resizeCylActive) {
+            cancelResizeCylindrical();
         } else if (m_edgeOpActive) {
             cancelInteractiveEdgeOp();
         } else if (m_extruding) {
@@ -1606,6 +1644,73 @@ void Application::beginInteractiveEdgeOp(EdgeOpType type) {
         }
     } catch (...) {}
 
+    m_edgeOpEditingIndex = -1; // creating new
+    updateInteractiveEdgeOp();
+}
+
+void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
+    const Operation* opRaw = m_history->getStep(historyIndex);
+    if (!opRaw) return;
+
+    // Pull parameters from the existing op. dynamic_cast picks the right
+    // sub-type; nothing else in history uses ownsFace + this typeId, so the
+    // toolbar's filter is the only thing that should reach here.
+    const FilletOp*  filletOp  = nullptr;
+    const ChamferOp* chamferOp = nullptr;
+    if (opRaw->typeId() == "fillet")
+        filletOp = dynamic_cast<const FilletOp*>(opRaw);
+    else if (opRaw->typeId() == "chamfer")
+        chamferOp = dynamic_cast<const ChamferOp*>(opRaw);
+    if (!filletOp && !chamferOp) return;
+
+    m_edgeOpEdges.clear();
+    if (filletOp) {
+        m_edgeOpType  = EdgeOpType::Fillet;
+        m_edgeOpBodyId = filletOp->getBodyId();
+        for (const auto& e : filletOp->getEdges()) m_edgeOpEdges.push_back(e);
+        m_edgeOpValue = static_cast<float>(filletOp->getRadius());
+        m_edgeOpPreviousShape = filletOp->getPreviousShape();
+    } else {
+        m_edgeOpType  = EdgeOpType::Chamfer;
+        m_edgeOpBodyId = chamferOp->getBodyId();
+        for (const auto& e : chamferOp->getEdges()) m_edgeOpEdges.push_back(e);
+        m_edgeOpValue = static_cast<float>(chamferOp->getDistance());
+        m_edgeOpPreviousShape = chamferOp->getPreviousShape();
+    }
+    if (m_edgeOpBodyId < 0 || m_edgeOpEdges.empty() ||
+        m_edgeOpPreviousShape.IsNull()) return;
+
+    m_edgeOpActive        = true;
+    m_edgeOpEditingIndex  = historyIndex;
+    std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
+    m_edgeOpInputFocus    = true;
+
+    // Same handle-position logic as the create flow — first edge's midpoint
+    // + outward perpendicular for the drag arrow.
+    m_edgeOpHasHandle = false;
+    try {
+        BRepAdaptor_Curve curve(TopoDS::Edge(m_edgeOpEdges.front()));
+        double t = (curve.FirstParameter() + curve.LastParameter()) * 0.5;
+        gp_Pnt p; gp_Vec tan;
+        curve.D1(t, p, tan);
+        m_edgeOpMid = glm::vec3(p.X(), p.Y(), p.Z());
+        if (tan.Magnitude() > 1e-9) {
+            m_edgeOpDir = glm::normalize(glm::vec3(tan.X(), tan.Y(), tan.Z()));
+            Bnd_Box bb; BRepBndLib::Add(m_edgeOpPreviousShape, bb);
+            if (!bb.IsVoid()) {
+                double x1,y1,z1,x2,y2,z2; bb.Get(x1,y1,z1,x2,y2,z2);
+                glm::vec3 c((x1+x2)*0.5f, (y1+y2)*0.5f, (z1+z2)*0.5f);
+                glm::vec3 out = m_edgeOpMid - c;
+                out -= glm::dot(out, m_edgeOpDir) * m_edgeOpDir;
+                if (glm::length(out) > 1e-5f) m_edgeOpOutDir = glm::normalize(out);
+            }
+            m_edgeOpHasHandle = true;
+        }
+    } catch (...) {}
+
+    // Clear the face selection so the gizmo / overlay rendering doesn't fight
+    // a stale "Face Operations" panel while editing.
+    m_selection->clear();
     updateInteractiveEdgeOp();
 }
 
@@ -1653,9 +1758,14 @@ void Application::commitInteractiveEdgeOp() {
     // Restore original, then do it properly through history
     m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);
 
-    // Confirming with no size set is a no-op — just cancel out.
+    // Confirming with no size set is a no-op — just cancel out. In edit mode
+    // a zero value would be a "remove this fillet" — surprising semantics, so
+    // we treat that as cancel too and leave the original op intact.
     if (m_edgeOpValue < 0.01f) {
+        if (m_edgeOpEditingIndex >= 0)
+            m_history->editStep(m_edgeOpEditingIndex, *m_document);
         m_edgeOpActive = false;
+        m_edgeOpEditingIndex = -1;
         m_edgeOpEdges.clear();
         m_edgeOpPreviousShape.Nullify();
         m_edgeOpType = EdgeOpType::None;
@@ -1663,7 +1773,24 @@ void Application::commitInteractiveEdgeOp() {
         return;
     }
 
-    if (m_edgeOpType == EdgeOpType::Fillet) {
+    if (m_edgeOpEditingIndex >= 0) {
+        // Update the existing op's parameter and rerun from that point so any
+        // downstream ops (cuts, fillets stacked on this one, …) recompute too.
+        const Operation* opRaw = m_history->getStep(m_edgeOpEditingIndex);
+        if (m_edgeOpType == EdgeOpType::Fillet) {
+            if (auto* op = const_cast<FilletOp*>(dynamic_cast<const FilletOp*>(opRaw))) {
+                op->setRadius(static_cast<double>(m_edgeOpValue));
+            }
+        } else {
+            if (auto* op = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(opRaw))) {
+                op->setDistance(static_cast<double>(m_edgeOpValue));
+            }
+        }
+        m_history->editStep(m_edgeOpEditingIndex, *m_document);
+        std::fprintf(stdout, "%s edited to %.1f mm\n",
+                     m_edgeOpType == EdgeOpType::Fillet ? "Fillet" : "Chamfer",
+                     m_edgeOpValue);
+    } else if (m_edgeOpType == EdgeOpType::Fillet) {
         auto op = std::make_unique<FilletOp>();
         op->setBody(m_edgeOpBodyId);
         std::vector<TopoDS_Edge> typedEdges;
@@ -1681,13 +1808,18 @@ void Application::commitInteractiveEdgeOp() {
         m_history->pushOperation(std::move(op), *m_document);
     }
 
+    if (m_edgeOpEditingIndex < 0) {
+        std::fprintf(stdout, "%s %.1f mm committed\n",
+                     m_edgeOpType == EdgeOpType::Fillet ? "Fillet" : "Chamfer",
+                     m_edgeOpValue);
+    }
+
     m_edgeOpActive = false;
+    m_edgeOpEditingIndex = -1;
     m_edgeOpEdges.clear();
     m_edgeOpPreviousShape.Nullify();
     m_selection->clear();
     m_meshesDirty = true;
-    std::fprintf(stdout, "%s %.1f mm committed\n",
-                 m_edgeOpType == EdgeOpType::Fillet ? "Fillet" : "Chamfer", m_edgeOpValue);
     m_edgeOpType = EdgeOpType::None;
 }
 
@@ -1695,10 +1827,238 @@ void Application::cancelInteractiveEdgeOp() {
     if (m_edgeOpBodyId >= 0 && !m_edgeOpPreviousShape.IsNull()) {
         m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);
     }
+    // In edit mode, replay the existing op (unchanged) so the body returns to
+    // its committed state including any downstream ops.
+    if (m_edgeOpEditingIndex >= 0) {
+        m_history->editStep(m_edgeOpEditingIndex, *m_document);
+    }
     m_edgeOpActive = false;
+    m_edgeOpEditingIndex = -1;
     m_edgeOpEdges.clear();
     m_edgeOpPreviousShape.Nullify();
     m_edgeOpType = EdgeOpType::None;
+    m_meshesDirty = true;
+}
+
+// ─── Resize cylindrical (edit a tube/cylinder face's diameter) ──────────────
+//
+// Recognises two body shapes by face inventory:
+//   - solid cylinder:  1 cylindrical face + 2 planar caps
+//   - tube:            2 concentric cylindrical faces + 2 planar caps
+// Anything more involved is rejected and the toolbar button doesn't appear.
+// Edits rebuild the body wholesale via BRepPrimAPI_MakeCylinder + (Cut for the
+// tube), under a ResizeCylindricalOp on history.
+
+bool Application::detectCylindricalResizeCandidate() {
+    if (!m_selection || !m_document) return false;
+
+    // Accept either exactly one face (edits both ends → stays cylindrical) or
+    // exactly one edge (edits just that end → makes a cone). Anything else is
+    // unambiguous to interpret, so we bail.
+    TopoDS_Shape pickedFace, pickedEdge;
+    int bodyId = -1;
+    int faceCount = 0, edgeCount = 0;
+    for (const auto& e : m_selection->getSelection()) {
+        if (e.shape.IsNull()) continue;
+        if (e.type == SelectionType::Face) {
+            ++faceCount; pickedFace = e.shape; bodyId = e.bodyId;
+        } else if (e.type == SelectionType::Edge) {
+            ++edgeCount; pickedEdge = e.shape; bodyId = e.bodyId;
+        }
+    }
+    if (bodyId < 0) return false;
+    if (faceCount + edgeCount != 1) return false;
+
+    const TopoDS_Shape& body = m_document->getBody(bodyId);
+
+    // Find the cylindrical face we'll operate on. For a face pick, it's the
+    // pick itself (must be cylindrical). For an edge pick, walk the body's
+    // faces and pick the first cylindrical one that contains the edge.
+    TopoDS_Face cylFace;
+    if (!pickedFace.IsNull()) {
+        TopoDS_Face face = TopoDS::Face(pickedFace);
+        Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+        if (Handle(Geom_CylindricalSurface)::DownCast(surf).IsNull()) return false;
+        cylFace = face;
+    } else {
+        TopoDS_Edge edge = TopoDS::Edge(pickedEdge);
+        // Edge must be a circle for the diameter concept to make sense.
+        try {
+            BRepAdaptor_Curve curve(edge);
+            if (curve.GetType() != GeomAbs_Circle) return false;
+        } catch (...) { return false; }
+
+        TopExp_Explorer fex(body, TopAbs_FACE);
+        for (; fex.More(); fex.Next()) {
+            TopoDS_Face face = TopoDS::Face(fex.Current());
+            Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+            if (Handle(Geom_CylindricalSurface)::DownCast(surf).IsNull()) continue;
+            TopExp_Explorer eex(face, TopAbs_EDGE);
+            for (; eex.More(); eex.Next()) {
+                if (eex.Current().IsSame(edge)) { cylFace = face; break; }
+            }
+            if (!cylFace.IsNull()) break;
+        }
+        if (cylFace.IsNull()) return false;
+    }
+
+    Handle(Geom_Surface) surf = BRep_Tool::Surface(cylFace);
+    Handle(Geom_CylindricalSurface) cylSurf =
+        Handle(Geom_CylindricalSurface)::DownCast(surf);
+    if (cylSurf.IsNull()) return false;
+
+    // Bounded parametric range. U = angular wrap, V = along axis. Must be a
+    // CLOSED cylinder (full 2π) — partial sleeves (fillet faces) don't have
+    // a meaningful single diameter.
+    double u1, u2, v1, v2;
+    BRepTools::UVBounds(cylFace, u1, u2, v1, v2);
+    const double kCircle = 2.0 * M_PI;
+    if (std::abs((u2 - u1) - kCircle) > 1e-3) return false;
+    double height = std::abs(v2 - v1);
+    if (height < 1e-6) return false;
+
+    gp_Cylinder cyl = cylSurf->Cylinder();
+    gp_Pnt shifted = cyl.Position().Location()
+                        .Translated(gp_Vec(cyl.Position().Direction()) * v1);
+    gp_Ax2 axis(shifted, cyl.Position().Direction(), cyl.Position().XDirection());
+    double radius = cyl.Radius();
+
+    // Hole vs solid boundary, from the face's outward normal at its centre.
+    // Normal toward axis → material is OUTSIDE → hole. Away → solid boundary.
+    // BRepGProp_Face::Normal() already applies the face's orientation
+    // internally — don't reverse again (doing so double-negates and makes
+    // every hole look like a solid boundary).
+    BRepGProp_Face prop(cylFace);
+    gp_Pnt centerPt; gp_Vec normVec;
+    prop.Normal(0.5 * (u1 + u2), 0.5 * (v1 + v2), centerPt, normVec);
+    gp_Vec axisVec(axis.Direction());
+    gp_Vec toCenter(shifted, centerPt);
+    toCenter -= axisVec * toCenter.Dot(axisVec);
+    if (toCenter.Magnitude() < 1e-6) return false;
+    bool isHole = (normVec.Dot(toCenter) < 0.0);
+
+    // Which end(s) are we editing? Face pick → both. Edge pick → just the
+    // end whose centroid is closer to that edge's circle centre.
+    bool editBottom = true, editTop = true;
+    if (!pickedEdge.IsNull()) {
+        BRepAdaptor_Curve curve(TopoDS::Edge(pickedEdge));
+        gp_Pnt edgeC = curve.Circle().Location();
+        gp_Pnt botPnt = shifted;
+        gp_Pnt topPnt = shifted.Translated(gp_Vec(axis.Direction()) * height);
+        if (edgeC.Distance(botPnt) < edgeC.Distance(topPnt)) {
+            editBottom = true; editTop = false;
+        } else {
+            editBottom = false; editTop = true;
+        }
+    }
+
+    m_resizeCylBodyId   = bodyId;
+    m_resizeCylIsHole   = isHole;
+    m_resizeCylAxisOX = axis.Location().X();
+    m_resizeCylAxisOY = axis.Location().Y();
+    m_resizeCylAxisOZ = axis.Location().Z();
+    m_resizeCylAxisDX = axis.Direction().X();
+    m_resizeCylAxisDY = axis.Direction().Y();
+    m_resizeCylAxisDZ = axis.Direction().Z();
+    m_resizeCylAxisXX = axis.XDirection().X();
+    m_resizeCylAxisXY = axis.XDirection().Y();
+    m_resizeCylAxisXZ = axis.XDirection().Z();
+    m_resizeCylHeight = height;
+    m_resizeCylOriginalBottomR = radius;
+    m_resizeCylOriginalTopR    = radius;
+    m_resizeCylEditBottom = editBottom;
+    m_resizeCylEditTop    = editTop;
+    return true;
+}
+
+void Application::beginResizeCylindrical() {
+    if (m_resizeCylBodyId < 0) return;
+    try {
+        m_resizeCylPreviousShape = m_document->getBody(m_resizeCylBodyId);
+    } catch (...) { return; }
+
+    m_resizeCylNewBottomDiameter = m_resizeCylOriginalBottomR * 2.0;
+    m_resizeCylNewTopDiameter    = m_resizeCylOriginalTopR    * 2.0;
+    std::snprintf(m_resizeCylBotBuf, sizeof(m_resizeCylBotBuf),
+                  "%.2f", m_resizeCylNewBottomDiameter);
+    std::snprintf(m_resizeCylTopBuf, sizeof(m_resizeCylTopBuf),
+                  "%.2f", m_resizeCylNewTopDiameter);
+    m_resizeCylInputFocus = true;
+    m_resizeCylActive     = true;
+}
+
+void Application::updateResizeCylindrical() {
+    if (!m_resizeCylActive || m_resizeCylBodyId < 0) return;
+    m_document->updateBody(m_resizeCylBodyId, m_resizeCylPreviousShape);
+    m_meshesDirty = true;
+
+    double newBot = m_resizeCylEditBottom ? m_resizeCylNewBottomDiameter * 0.5
+                                          : m_resizeCylOriginalBottomR;
+    double newTop = m_resizeCylEditTop    ? m_resizeCylNewTopDiameter    * 0.5
+                                          : m_resizeCylOriginalTopR;
+    if (newBot < 1e-4 || newTop < 1e-4) return;
+    if (std::abs(newBot - m_resizeCylOriginalBottomR) < 1e-5 &&
+        std::abs(newTop - m_resizeCylOriginalTopR)    < 1e-5) return;
+
+    try {
+        gp_Ax2 axis(gp_Pnt(m_resizeCylAxisOX, m_resizeCylAxisOY, m_resizeCylAxisOZ),
+                    gp_Dir(m_resizeCylAxisDX, m_resizeCylAxisDY, m_resizeCylAxisDZ),
+                    gp_Dir(m_resizeCylAxisXX, m_resizeCylAxisXY, m_resizeCylAxisXZ));
+        auto op = std::make_unique<ResizeCylindricalOp>();
+        op->setBody(m_resizeCylBodyId);
+        op->setAxis(axis);
+        op->setHeight(m_resizeCylHeight);
+        op->setOldRadii(m_resizeCylOriginalBottomR, m_resizeCylOriginalTopR);
+        op->setNewRadii(newBot, newTop);
+        op->setIsHole(m_resizeCylIsHole);
+        if (op->execute(*m_document)) m_meshesDirty = true;
+        else m_document->updateBody(m_resizeCylBodyId, m_resizeCylPreviousShape);
+    } catch (...) {
+        m_document->updateBody(m_resizeCylBodyId, m_resizeCylPreviousShape);
+    }
+}
+
+void Application::commitResizeCylindrical() {
+    if (!m_resizeCylActive) return;
+    m_document->updateBody(m_resizeCylBodyId, m_resizeCylPreviousShape);
+
+    double newBot = m_resizeCylEditBottom ? m_resizeCylNewBottomDiameter * 0.5
+                                          : m_resizeCylOriginalBottomR;
+    double newTop = m_resizeCylEditTop    ? m_resizeCylNewTopDiameter    * 0.5
+                                          : m_resizeCylOriginalTopR;
+    bool unchanged = std::abs(newBot - m_resizeCylOriginalBottomR) < 1e-5 &&
+                     std::abs(newTop - m_resizeCylOriginalTopR)    < 1e-5;
+    if (newBot < 1e-4 || newTop < 1e-4 || unchanged) {
+        cancelResizeCylindrical();
+        return;
+    }
+
+    gp_Ax2 axis(gp_Pnt(m_resizeCylAxisOX, m_resizeCylAxisOY, m_resizeCylAxisOZ),
+                gp_Dir(m_resizeCylAxisDX, m_resizeCylAxisDY, m_resizeCylAxisDZ),
+                gp_Dir(m_resizeCylAxisXX, m_resizeCylAxisXY, m_resizeCylAxisXZ));
+    auto op = std::make_unique<ResizeCylindricalOp>();
+    op->setBody(m_resizeCylBodyId);
+    op->setAxis(axis);
+    op->setHeight(m_resizeCylHeight);
+    op->setOldRadii(m_resizeCylOriginalBottomR, m_resizeCylOriginalTopR);
+    op->setNewRadii(newBot, newTop);
+    op->setIsHole(m_resizeCylIsHole);
+    m_history->pushOperation(std::move(op), *m_document);
+
+    m_resizeCylActive = false;
+    m_resizeCylBodyId = -1;
+    m_resizeCylPreviousShape.Nullify();
+    m_selection->clear();
+    m_meshesDirty = true;
+}
+
+void Application::cancelResizeCylindrical() {
+    if (m_resizeCylBodyId >= 0 && !m_resizeCylPreviousShape.IsNull()) {
+        m_document->updateBody(m_resizeCylBodyId, m_resizeCylPreviousShape);
+    }
+    m_resizeCylActive = false;
+    m_resizeCylBodyId = -1;
+    m_resizeCylPreviousShape.Nullify();
     m_meshesDirty = true;
 }
 
@@ -2034,6 +2394,12 @@ void Application::run() {
             m_toolbar->setGridStep(m_sketchGridStep);
             m_toolbar->setSnapToGrid(m_snapToGrid);
             m_toolbar->setCameraOrtho(m_viewport->getCamera().isOrthographic());
+            // "Edit Diameter" button only appears when the picked face is a
+            // cylinder on a solid-cylinder or tube body. Detection populates
+            // m_resizeCyl* fields as a side effect — we throw the result away
+            // here, those are only used by the actual begin path.
+            m_toolbar->setCanEditDiameter(!m_resizeCylActive &&
+                                          detectCylindricalResizeCandidate());
             ToolAction action = m_toolbar->render();
             m_sketchGridStep = m_toolbar->getGridStep();
             m_snapToGrid = m_toolbar->getSnapToGrid();
@@ -2064,6 +2430,7 @@ void Application::run() {
             m_aboutDialog->render();
             renderUpdatePopup();
             renderMultiTransformPanel();
+            renderResizeCylindricalPanel();
 
             // Keep measurement results in sync with the current selection,
             // then draw the panel. Cheap when inactive.

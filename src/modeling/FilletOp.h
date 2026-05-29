@@ -20,6 +20,10 @@ public:
     int getBodyId() const { return m_bodyId; }
     double getRadius() const { return m_radius; }
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // Body shape from the last execute()'s pre-state — needed by the
+    // interactive edit-by-clicking-face flow so it can preview an updated
+    // radius against the body as it stood BEFORE this fillet was applied.
+    const TopoDS_Shape& getPreviousShape() const { return m_previousShape; }
 
     // Operation interface
     bool execute(Document& doc) override;

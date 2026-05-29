@@ -1,5 +1,7 @@
 #include "Toolbar.h"
 #include "../core/SelectionManager.h"
+#include "../core/History.h"
+#include "../core/Operation.h"
 #include "../plugin/PluginRegistry.h"
 #include "../plugin/PluginContext.h"
 #include "../plugin/Contributions.h"
@@ -216,6 +218,36 @@ ToolAction Toolbar::renderFaceTools() {
         action = ToolAction::SketchOnFace;
     if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
         action = ToolAction::PushPull;
+    if (m_canEditDiameter &&
+        ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
+        action = ToolAction::EditDiameter;
+
+    // "Edit Fillet / Chamfer" appears only when the picked face was actually
+    // produced by a fillet or chamfer op. We ask each Operation via
+    // ownsFace() — the same hook the History panel uses elsewhere.
+    if (m_selection && m_history) {
+        TopoDS_Shape pickedFace;
+        for (const auto& e : m_selection->getSelection()) {
+            if (e.type == SelectionType::Face && !e.shape.IsNull()) {
+                pickedFace = e.shape; break;
+            }
+        }
+        if (!pickedFace.IsNull()) {
+            const auto& ops = m_history->operations();
+            for (const auto& op : ops) {
+                if (op && op->isEnabled() && op->ownsFace(pickedFace)) {
+                    const char* label = (op->typeId() == "fillet")
+                                            ? "Edit Fillet"
+                                            : (op->typeId() == "chamfer")
+                                                  ? "Edit Chamfer"
+                                                  : nullptr;
+                    if (label && ImGui::Button(label, ImVec2(-1, 30)))
+                        action = ToolAction::EditFilletChamfer;
+                    break;
+                }
+            }
+        }
+    }
 
     // Plugin buttons for HasFaces context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasFaces));
@@ -276,6 +308,9 @@ ToolAction Toolbar::renderEdgeTools() {
     ImGui::Separator();
     if (ImGui::Button("Fillet", ImVec2(-1, 30)))  action = ToolAction::Fillet;
     if (ImGui::Button("Chamfer", ImVec2(-1, 30))) action = ToolAction::Chamfer;
+    if (m_canEditDiameter &&
+        ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
+        action = ToolAction::EditDiameter;
 
     // Plugin buttons for HasEdges context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasEdges));

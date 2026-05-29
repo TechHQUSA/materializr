@@ -1161,88 +1161,12 @@ void Application::renderViewport() {
                                 gdl->AddText(lp, IM_COL32(255, 240, 80, 255), angBuf);
                             }
 
-                            if (m_sketchGizmoRotateAdjusting) {
-                                // Fixed size + NoDocking + plain focus semantics — this
-                                // matches the push/pull popup pattern which doesn't
-                                // glitch on hover. AlwaysAutoResize was the culprit:
-                                // tiny content-rect jitter from hover state collided
-                                // with the parent viewport's hit-test.
-                                ImGui::SetNextWindowPos(ImVec2(sc.x + 20.0f, sc.y + 16.0f),
-                                                        ImGuiCond_Appearing);
-                                ImGui::SetNextWindowSize(ImVec2(200.0f, 0.0f), ImGuiCond_Appearing);
-                                ImGui::Begin("##SketchRotateAdjust", nullptr,
-                                             ImGuiWindowFlags_NoTitleBar |
-                                             ImGuiWindowFlags_NoResize |
-                                             ImGuiWindowFlags_NoMove |
-                                             ImGuiWindowFlags_NoSavedSettings |
-                                             ImGuiWindowFlags_NoDocking);
-                                ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f),
-                                                   "Rotation (deg)");
-                                ImGui::SetNextItemWidth(150.0f);
-                                if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-                                bool typedEnter = ImGui::InputText(
-                                    "##sketchRotAng", m_sketchGizmoRotateBuf,
-                                    sizeof(m_sketchGizmoRotateBuf),
-                                    ImGuiInputTextFlags_EnterReturnsTrue |
-                                    ImGuiInputTextFlags_CharsDecimal);
-                                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                                    // Re-apply the typed value live so the user sees
-                                    // the new angle reflected on the sketch.
-                                    float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
-                                    m_sketchGizmoRotateDegrees = deg;
-                                    float rad = deg * static_cast<float>(M_PI) / 180.0f;
-                                    float ca = std::cos(rad), sa = std::sin(rad);
-                                    for (auto& [id, orig] : m_sketchGizmoOriginals) {
-                                        glm::vec2 d = orig - m_sketchGizmoCenter;
-                                        glm::vec2 r(d.x * ca - d.y * sa,
-                                                    d.x * sa + d.y * ca);
-                                        m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
-                                    }
-                                }
-                                ImGui::Separator();
-                                bool apply = ImGui::Button("Apply", ImVec2(70, 0)) ||
-                                             typedEnter;
-                                ImGui::SameLine();
-                                bool cancel = ImGui::Button("Cancel", ImVec2(70, 0));
-                                ImGui::End();
-
-                                if (apply) {
-                                    // Re-apply the final typed value, then commit.
-                                    float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
-                                    float rad = deg * static_cast<float>(M_PI) / 180.0f;
-                                    float ca = std::cos(rad), sa = std::sin(rad);
-                                    for (auto& [id, orig] : m_sketchGizmoOriginals) {
-                                        glm::vec2 d = orig - m_sketchGizmoCenter;
-                                        glm::vec2 r(d.x * ca - d.y * sa,
-                                                    d.x * sa + d.y * ca);
-                                        m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
-                                    }
-                                    bool changed = false;
-                                    for (auto& [id, orig] : m_sketchGizmoOriginals) {
-                                        if (auto* p = m_activeSketch->getPoint(id))
-                                            if (glm::distance(p->pos, orig) > 1e-5f) {
-                                                changed = true; break;
-                                            }
-                                    }
-                                    if (changed) {
-                                        auto after = std::make_shared<Sketch>(*m_activeSketch);
-                                        auto op = std::make_unique<SketchEditOp>(
-                                            m_activeSketch, m_sketchGizmoBefore, after);
-                                        m_history->pushExecuted(std::move(op));
-                                    }
-                                    m_sketchGizmoHandle = SketchGizmoHandle::None;
-                                    m_sketchGizmoBefore.reset();
-                                    m_sketchGizmoOriginals.clear();
-                                    m_sketchGizmoRotateAdjusting = false;
-                                } else if (cancel) {
-                                    for (auto& [id, orig] : m_sketchGizmoOriginals)
-                                        m_activeSketch->movePoint(id, orig);
-                                    m_sketchGizmoHandle = SketchGizmoHandle::None;
-                                    m_sketchGizmoBefore.reset();
-                                    m_sketchGizmoOriginals.clear();
-                                    m_sketchGizmoRotateAdjusting = false;
-                                }
-                            }
+                            // Track the popup's screen-space anchor each frame so
+                            // the camera can pan/orbit and the popup follows the
+                            // centroid. Actual popup rendering happens at top scope
+                            // below — keeping it out of these nested ifs is what
+                            // killed the hover flicker.
+                            m_sketchGizmoAdjustAnchor = glm::vec2(sc.x + 20.0f, sc.y + 16.0f);
 
                             // Start drag: clicking a handle arms the gizmo, snapshots
                             // the involved points, and stops the click from reaching
@@ -1316,11 +1240,14 @@ void Application::renderViewport() {
                         if (m_sketchGizmoHandle == SketchGizmoHandle::Rotate) {
                             // Transition to popup-adjust mode instead of committing
                             // straight away — the user can refine the angle by
-                            // typing, then Apply / Enter commits.
+                            // typing, then Apply / Enter commits. Use a real ImGui
+                            // popup so focus semantics don't fight the viewport
+                            // window (a Begin/End float here flickers on hover).
                             std::snprintf(m_sketchGizmoRotateBuf,
                                           sizeof(m_sketchGizmoRotateBuf),
                                           "%.1f", m_sketchGizmoRotateDegrees);
                             m_sketchGizmoRotateAdjusting = true;
+                            ImGui::OpenPopup("##SketchRotateAdjust");
                         } else {
                             bool changed = false;
                             for (auto& [id, orig] : m_sketchGizmoOriginals) {
@@ -1339,6 +1266,106 @@ void Application::renderViewport() {
                             m_sketchGizmoBefore.reset();
                             m_sketchGizmoOriginals.clear();
                         }
+                    }
+                }
+
+                // === Rotate-angle adjust popup ====================================
+                // Real ImGui popup (OpenPopup/BeginPopup) instead of a Begin/End
+                // floating window: focus, hover hit-test, and z-order all behave
+                // correctly when rendered at top scope. The earlier nested-Begin
+                // approach flickered when the cursor hovered the popup.
+                if (m_sketchGizmoRotateAdjusting) {
+                    ImGui::SetNextWindowPos(ImVec2(m_sketchGizmoAdjustAnchor.x,
+                                                   m_sketchGizmoAdjustAnchor.y),
+                                            ImGuiCond_Appearing);
+                    if (ImGui::BeginPopup("##SketchRotateAdjust",
+                                          ImGuiWindowFlags_AlwaysAutoResize)) {
+                        ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f),
+                                           "Rotation (deg)");
+                        ImGui::SetNextItemWidth(150.0f);
+                        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+                        bool typedEnter = ImGui::InputText(
+                            "##sketchRotAng", m_sketchGizmoRotateBuf,
+                            sizeof(m_sketchGizmoRotateBuf),
+                            ImGuiInputTextFlags_EnterReturnsTrue |
+                            ImGuiInputTextFlags_CharsDecimal);
+                        if (ImGui::IsItemDeactivatedAfterEdit()) {
+                            // Re-apply the typed value live as the user clicks off
+                            // the field, so the sketch reflects what they typed.
+                            float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
+                            m_sketchGizmoRotateDegrees = deg;
+                            float rad = deg * static_cast<float>(M_PI) / 180.0f;
+                            float ca = std::cos(rad), sa = std::sin(rad);
+                            for (auto& [id, orig] : m_sketchGizmoOriginals) {
+                                glm::vec2 d = orig - m_sketchGizmoCenter;
+                                glm::vec2 r(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
+                                m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
+                            }
+                        }
+                        ImGui::Separator();
+                        bool apply  = ImGui::Button("Apply", ImVec2(70, 0)) || typedEnter;
+                        ImGui::SameLine();
+                        bool cancel = ImGui::Button("Cancel", ImVec2(70, 0));
+
+                        if (apply) {
+                            float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
+                            float rad = deg * static_cast<float>(M_PI) / 180.0f;
+                            float ca = std::cos(rad), sa = std::sin(rad);
+                            for (auto& [id, orig] : m_sketchGizmoOriginals) {
+                                glm::vec2 d = orig - m_sketchGizmoCenter;
+                                glm::vec2 r(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
+                                m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
+                            }
+                            bool changed = false;
+                            for (auto& [id, orig] : m_sketchGizmoOriginals) {
+                                if (auto* p = m_activeSketch->getPoint(id))
+                                    if (glm::distance(p->pos, orig) > 1e-5f) {
+                                        changed = true; break;
+                                    }
+                            }
+                            if (changed) {
+                                auto after = std::make_shared<Sketch>(*m_activeSketch);
+                                auto op = std::make_unique<SketchEditOp>(
+                                    m_activeSketch, m_sketchGizmoBefore, after);
+                                m_history->pushExecuted(std::move(op));
+                            }
+                            m_sketchGizmoHandle = SketchGizmoHandle::None;
+                            m_sketchGizmoBefore.reset();
+                            m_sketchGizmoOriginals.clear();
+                            m_sketchGizmoRotateAdjusting = false;
+                            ImGui::CloseCurrentPopup();
+                        } else if (cancel) {
+                            for (auto& [id, orig] : m_sketchGizmoOriginals)
+                                m_activeSketch->movePoint(id, orig);
+                            m_sketchGizmoHandle = SketchGizmoHandle::None;
+                            m_sketchGizmoBefore.reset();
+                            m_sketchGizmoOriginals.clear();
+                            m_sketchGizmoRotateAdjusting = false;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::EndPopup();
+                    } else {
+                        // Click-outside auto-closed the popup → treat as commit
+                        // (whatever angle is currently applied stays). This is the
+                        // friendlier default for a CAD adjust popup; Esc reverts
+                        // via the shortcut handler.
+                        bool changed = false;
+                        for (auto& [id, orig] : m_sketchGizmoOriginals) {
+                            if (auto* p = m_activeSketch->getPoint(id))
+                                if (glm::distance(p->pos, orig) > 1e-5f) {
+                                    changed = true; break;
+                                }
+                        }
+                        if (changed) {
+                            auto after = std::make_shared<Sketch>(*m_activeSketch);
+                            auto op = std::make_unique<SketchEditOp>(
+                                m_activeSketch, m_sketchGizmoBefore, after);
+                            m_history->pushExecuted(std::move(op));
+                        }
+                        m_sketchGizmoHandle = SketchGizmoHandle::None;
+                        m_sketchGizmoBefore.reset();
+                        m_sketchGizmoOriginals.clear();
+                        m_sketchGizmoRotateAdjusting = false;
                     }
                 }
 

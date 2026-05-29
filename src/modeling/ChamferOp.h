@@ -20,6 +20,10 @@ public:
     int getBodyId() const { return m_bodyId; }
     double getDistance() const { return m_distance; }
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // Body shape from the last execute()'s pre-state — used by the interactive
+    // edit-by-clicking-face flow to preview an updated distance against the
+    // body as it stood BEFORE this chamfer was applied.
+    const TopoDS_Shape& getPreviousShape() const { return m_previousShape; }
 
     // Operation interface
     bool execute(Document& doc) override;

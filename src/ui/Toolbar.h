@@ -3,6 +3,7 @@
 #include <string>
 
 class SelectionManager;
+class History;
 
 namespace materializr {
 
@@ -16,7 +17,7 @@ enum class ToolAction {
     FinishSketch, EditSketch, ExtrudeSketch, PushPull, LookAtSketch,
     SketchCopy, SketchMirror,
     // 3D tools that still need the old dispatch path
-    Extrude, Fillet, Chamfer,
+    Extrude, Fillet, Chamfer, EditFilletChamfer, EditDiameter,
     // Gizmo modes + Mirror
     Move, Rotate, Scale, Mirror,
     // General
@@ -28,6 +29,7 @@ public:
     Toolbar();
 
     void setSelectionManager(const SelectionManager* sel);
+    void setHistory(const ::History* h) { m_history = h; }
     void setPluginContext(PluginContext* ctx) { m_pluginCtx = ctx; }
 
     ToolAction render();
@@ -43,13 +45,20 @@ public:
     void setSnapToGrid(bool snap) { m_snapToGrid = snap; }
     bool getSnapToGrid() const { return m_snapToGrid; }
 
+    // Set each frame by Application from a cheap face/body inspection: shows
+    // the "Edit Diameter" button in Face Operations when the picked face is a
+    // cylinder on a recognized cylinder-or-tube body.
+    void setCanEditDiameter(bool b) { m_canEditDiameter = b; }
+
 private:
     const SelectionManager* m_selection = nullptr;
+    const ::History* m_history = nullptr;
     PluginContext* m_pluginCtx = nullptr;
     bool m_sketchMode = false;
     float m_gridStep = 1.0f;
     bool m_cameraOrtho = true;
     bool m_snapToGrid = true;
+    bool m_canEditDiameter = false;
 
     ToolAction renderSketchTools();
     ToolAction renderSketchSelectedTools();

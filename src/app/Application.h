@@ -210,6 +210,9 @@ private:
     bool m_sketchGizmoRotateAdjusting = false;
     float m_sketchGizmoRotateDegrees = 0.0f;
     char m_sketchGizmoRotateBuf[32] = "0.0";
+    // Screen-space anchor for the rotate adjust popup, updated each frame the
+    // gizmo is on screen so the popup tracks the centroid if the camera moves.
+    glm::vec2 m_sketchGizmoAdjustAnchor{0.0f};
 
     // Sketch box-select: when in Select mode and the user clicks on empty space,
     // begin a rectangle drag; on release, sketch elements whose screen-space
@@ -336,11 +339,63 @@ private:
     glm::vec3 m_edgeOpDir{1.0f, 0.0f, 0.0f};   // along the edge
     glm::vec3 m_edgeOpOutDir{0.0f, 0.0f, 1.0f}; // perpendicular, pointing out of the body
     bool m_edgeOpHasHandle = false;
+    // History index of the op being re-edited. -1 means "creating new" — the
+    // commit path then pushes a fresh FilletOp / ChamferOp. >=0 means "editing
+    // existing" — commit updates the op's parameter and calls editStep().
+    int m_edgeOpEditingIndex = -1;
 
     void beginInteractiveEdgeOp(EdgeOpType type);
+    // Re-edit the FilletOp or ChamferOp at the given history index. Pulls the
+    // existing radius/distance + edges + body id from the op, snapshots its
+    // pre-state for live preview, and reuses the same drag handle + popup UI
+    // as creation. Triggered by clicking a face the op produced.
+    void beginInteractiveEdgeOpEdit(int historyIndex);
     void updateInteractiveEdgeOp();
     void commitInteractiveEdgeOp();
     void cancelInteractiveEdgeOp();
+
+    // Resize-cylindrical (edit a closed cylindrical/conical face's diameter,
+    // or a single circular edge of one) ====================================
+    // Triggered by picking a closed cylindrical face (edits BOTH end edges
+    // together → stays a cylinder) or a single circular edge (edits ONE end
+    // → turns cylinder into a cone, makes funnels). Internally the commit
+    // path always builds a CONE primitive at the two end radii — for the
+    // face-edit case they're equal.
+    bool m_resizeCylActive = false;
+    int  m_resizeCylBodyId = -1;
+    bool m_resizeCylIsHole = true; // true: hole (normal toward axis), false: solid boundary
+    // Axis anchored at the V_min end of the affected cylindrical region.
+    // R1 (bottom) = radius at axis location, R2 (top) = radius at +H end.
+    double m_resizeCylAxisOX = 0.0, m_resizeCylAxisOY = 0.0, m_resizeCylAxisOZ = 0.0;
+    double m_resizeCylAxisDX = 0.0, m_resizeCylAxisDY = 0.0, m_resizeCylAxisDZ = 1.0;
+    double m_resizeCylAxisXX = 1.0, m_resizeCylAxisXY = 0.0, m_resizeCylAxisXZ = 0.0;
+    double m_resizeCylHeight       = 0.0;
+    // Original (before this edit) radii at each end of the affected feature.
+    // For an already-cylindrical face these are equal; for an existing cone
+    // they differ.
+    double m_resizeCylOriginalBottomR = 0.0;
+    double m_resizeCylOriginalTopR    = 0.0;
+    // Which ends the user is editing. Face select → both true (and the
+    // single popup field drives both). Edge select on the V_min end →
+    // editBottom true; V_max end → editTop true.
+    bool   m_resizeCylEditBottom = true;
+    bool   m_resizeCylEditTop    = true;
+    double m_resizeCylNewBottomDiameter = 0.0;
+    double m_resizeCylNewTopDiameter    = 0.0;
+    char   m_resizeCylBotBuf[32]  = "0.0";
+    char   m_resizeCylTopBuf[32]  = "0.0";
+    bool   m_resizeCylInputFocus  = true;
+    TopoDS_Shape m_resizeCylPreviousShape;
+
+    // Detect whether the currently-picked face is on a recognised resizable
+    // body (solid cylinder / tube). Populates the relevant m_resizeCyl* fields
+    // and returns true if so. Called per frame to drive the toolbar button.
+    bool detectCylindricalResizeCandidate();
+    void beginResizeCylindrical();
+    void updateResizeCylindrical();
+    void commitResizeCylindrical();
+    void cancelResizeCylindrical();
+    void renderResizeCylindricalPanel();
 
     // Interactive extrude state
     bool m_extruding = false;

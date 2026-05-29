@@ -452,6 +452,84 @@ void Application::applyMultiBodyRotation() {
     m_multiRotate[0] = m_multiRotate[1] = m_multiRotate[2] = 0.0f;
 }
 
+void Application::renderResizeCylindricalPanel() {
+    if (!m_resizeCylActive) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 280,
+                                    ImGui::GetWindowPos().y + 50));
+    ImGui::SetNextWindowSize(ImVec2(260, 0));
+    ImGui::Begin("##ResizeCylindrical", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    bool both = m_resizeCylEditBottom && m_resizeCylEditTop;
+    const char* roleSuffix = m_resizeCylIsHole ? " (hole)" : " (outer)";
+    const char* heading = both
+        ? (m_resizeCylIsHole ? "Edit Diameter (hole)" : "Edit Diameter (outer)")
+        : m_resizeCylEditBottom
+            ? (m_resizeCylIsHole ? "Edit Bottom Diameter (hole)" : "Edit Bottom Diameter (outer)")
+            : (m_resizeCylIsHole ? "Edit Top Diameter (hole)"    : "Edit Top Diameter (outer)");
+    (void)roleSuffix; // kept for grep
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "%s", heading);
+    ImGui::Separator();
+
+    if (both) {
+        ImGui::Text("Original: %.2f mm", m_resizeCylOriginalTopR * 2.0);
+    } else if (m_resizeCylEditBottom) {
+        ImGui::Text("Original: %.2f mm",     m_resizeCylOriginalBottomR * 2.0);
+        ImGui::TextDisabled("Top stays at %.2f mm — drag this end to make a cone.",
+                            m_resizeCylOriginalTopR * 2.0);
+    } else {
+        ImGui::Text("Original: %.2f mm",     m_resizeCylOriginalTopR * 2.0);
+        ImGui::TextDisabled("Bottom stays at %.2f mm — drag this end to make a cone.",
+                            m_resizeCylOriginalBottomR * 2.0);
+    }
+
+    if (m_resizeCylInputFocus) {
+        ImGui::SetKeyboardFocusHere();
+        m_resizeCylInputFocus = false;
+    }
+
+    // Drive one buffer; mirror into the other when face-editing both ends.
+    char*    buf = m_resizeCylEditBottom ? m_resizeCylBotBuf : m_resizeCylTopBuf;
+    double*  val = m_resizeCylEditBottom ? &m_resizeCylNewBottomDiameter
+                                         : &m_resizeCylNewTopDiameter;
+
+    ImGui::SetNextItemWidth(140);
+    bool entered = ImGui::InputText("##rcyldia", buf, 32,
+                                    ImGuiInputTextFlags_EnterReturnsTrue |
+                                    ImGuiInputTextFlags_CharsDecimal);
+
+    double parsed = std::atof(buf);
+    bool changed = std::abs(parsed - *val) > 0.001;
+    if (changed) {
+        *val = parsed;
+        if (both) {
+            m_resizeCylNewBottomDiameter = parsed;
+            m_resizeCylNewTopDiameter    = parsed;
+            std::snprintf(m_resizeCylEditBottom ? m_resizeCylTopBuf : m_resizeCylBotBuf,
+                          32, "%.2f", parsed);
+        }
+        updateResizeCylindrical();
+    }
+
+    if (entered) {
+        commitResizeCylindrical();
+        ImGui::End();
+        return;
+    }
+    ImGui::SameLine();
+    ImGui::Text("mm");
+
+    ImGui::Spacing();
+    if (ImGui::Button("Confirm (Enter)", ImVec2(115, 0))) commitResizeCylindrical();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel (Esc)",    ImVec2(115, 0))) cancelResizeCylindrical();
+
+    ImGui::End();
+}
+
 void Application::renderScalePanel() {
     // Shown only while the Scale gizmo is active with a body selected.
     if (m_inSketchMode || !m_selection->hasSelectedBodies()) return;
