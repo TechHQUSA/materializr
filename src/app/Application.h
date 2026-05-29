@@ -85,7 +85,6 @@ private:
 
     void importStepFile();
     void exportStepFile();
-    void exportStlFile();
     void saveProject();         // Save dialog (Save As behavior)
     void saveProjectQuick();    // Save to current path if known, else falls through to saveProject
     void loadProject();

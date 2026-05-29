@@ -53,7 +53,6 @@
 #include "modeling/SketchEditOp.h"
 #include "modeling/ResizeCylindricalOp.h"
 #include "io/StepIO.h"
-#include "io/StlExport.h"
 #include "io/FileDialogs.h"
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
@@ -781,19 +780,6 @@ void Application::handleToolAction(int action) {
             break;
         }
 
-        case ToolAction::Extrude: {
-            const auto& sel = m_selection->getSelection();
-            if (m_selection->selectedFaceCount() >= 1) {
-                for (const auto& entry : sel) {
-                    if (entry.type == SelectionType::Face && !entry.shape.IsNull()) {
-                        beginInteractiveExtrude(entry.shape);
-                        break;
-                    }
-                }
-            }
-            break;
-        }
-
         case ToolAction::Fillet: {
             if (m_selection->selectedEdgeCount() >= 1)
                 beginInteractiveEdgeOp(EdgeOpType::Fillet);
@@ -1326,17 +1312,6 @@ void Application::exportStepFile() {
             auto result = StepIO::exportFile(path, *m_document);
             if (result.success) std::fprintf(stdout, "Exported to %s\n", path.c_str());
             else std::fprintf(stderr, "Export failed: %s\n", result.errorMessage.c_str());
-        });
-}
-
-void Application::exportStlFile() {
-    FileDialogs::saveFile("Export STL", "export.stl",
-        {{"STL Files", "*.stl"}},
-        [this](const std::string& path) {
-            if (path.empty()) return;
-            auto result = StlExport::exportFile(path, *m_document);
-            if (result.success) std::fprintf(stdout, "Exported %d triangles to %s\n", result.triangleCount, path.c_str());
-            else std::fprintf(stderr, "STL export failed: %s\n", result.errorMessage.c_str());
         });
 }
 
