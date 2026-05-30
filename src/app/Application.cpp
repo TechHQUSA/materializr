@@ -460,8 +460,6 @@ void Application::renderMenuBar() {
                 m_settingsPanButton = m_panButton;
                 m_showSettings = true;
             }
-            if (ImGui::MenuItem("Import Settings...")) importSettings();
-            if (ImGui::MenuItem("Export Settings...")) exportSettings();
             ImGui::Separator();
             if (ImGui::MenuItem("Exit", "Alt+F4")) glfwSetWindowShouldClose(m_window->handle(), true);
             ImGui::EndMenu();
