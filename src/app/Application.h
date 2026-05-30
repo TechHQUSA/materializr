@@ -4,6 +4,7 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <set>
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Face.hxx>
@@ -497,9 +498,27 @@ private:
     char m_sketchPatternAngleBuf[32]    = "360.0";
     char m_sketchPatternOXBuf[32] = "0.0";
     char m_sketchPatternOYBuf[32] = "0.0";
+    // True while the user is clicking in the sketch viewport to set the
+    // radial origin. The next sketch-mode click is captured by the pattern
+    // popup instead of going through SketchTool.
+    bool m_sketchPatternPickingOrigin = false;
+
+    // Snapshot of the sketch at popup-open. Every parameter change replays
+    // from this snapshot so the preview reflects only the current values,
+    // not an accumulation of previous previews. On Apply we diff against
+    // this snapshot to push the SketchEditOp; on Cancel we restore it.
+    std::shared_ptr<materializr::Sketch> m_sketchPatternBefore;
+    // Involved geometry captured at popup-open. We re-use the same IDs each
+    // preview frame since the snapshot is restored each time (new IDs from
+    // earlier preview copies wouldn't survive the restore).
+    std::set<int> m_sketchPatternPts;
+    std::set<int> m_sketchPatternLines;
+    bool          m_sketchPatternSelectAll = false; // include all circles + arcs
 
     void beginSketchPattern(PatternKind kind);
-    void applySketchPattern(); // perform the geometry copy + push SketchEditOp
+    void updateSketchPattern();   // re-apply preview from m_sketchPatternBefore
+    void commitSketchPattern();   // leave preview in place + push SketchEditOp
+    void cancelSketchPattern();   // restore m_sketchPatternBefore + clear state
     void renderSketchPatternPopup();
 
     // User-facing axis convention follows 3D-printer / Z-up: X = side-to-side,

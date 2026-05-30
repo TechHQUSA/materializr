@@ -1140,6 +1140,36 @@ void Application::renderViewport() {
                 float localY = mousePos.y - winPos.y;
                 glm::vec2 sketchCoord = screenToSketch(localX, localY, contentSize.x, contentSize.y);
 
+                // Sketch pattern axis-origin picker. While the radial sketch
+                // pattern popup is asking for an origin, the next click in
+                // the sketch viewport sets it (snapped to the sketch grid)
+                // instead of going through SketchTool's normal input.
+                bool patternPickingNow = m_sketchPatternActive && m_sketchPatternPickingOrigin;
+                if (patternPickingNow) {
+                    float step = std::max(m_sketchGridStep, 0.01f);
+                    glm::vec2 snapped(std::round(sketchCoord.x / step) * step,
+                                      std::round(sketchCoord.y / step) * step);
+                    ImVec2 sp(mousePos.x, mousePos.y);
+                    auto* dl = ImGui::GetForegroundDrawList();
+                    dl->AddCircleFilled(sp, 7.0f, IM_COL32(255, 220, 50, 255));
+                    dl->AddCircle      (sp, 7.0f, IM_COL32(0, 0, 0, 255), 0, 1.5f);
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "(%.2f, %.2f)", snapped.x, snapped.y);
+                    dl->AddText(ImVec2(sp.x + 10.0f, sp.y - 8.0f),
+                                IM_COL32(255, 220, 50, 255), buf);
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        m_sketchPatternOriginX = snapped.x;
+                        m_sketchPatternOriginY = snapped.y;
+                        std::snprintf(m_sketchPatternOXBuf, sizeof(m_sketchPatternOXBuf),
+                                      "%.2f", m_sketchPatternOriginX);
+                        std::snprintf(m_sketchPatternOYBuf, sizeof(m_sketchPatternOYBuf),
+                                      "%.2f", m_sketchPatternOriginY);
+                        m_sketchPatternPickingOrigin = false;
+                        updateSketchPattern();
+                    }
+                }
+
+                if (!patternPickingNow) {
                 // === Sketch Move/Rotate gizmo ====================================
                 // Drawn on the selection centroid in Select mode. Axis arrows for
                 // constrained X/Y move, centre dot for free move, ring for rotate.
@@ -1655,6 +1685,7 @@ void Application::renderViewport() {
                     }
                 }
                 if (!gizmoOwnsInput) m_sketchTool->onMouseMove(sketchCoord);
+                } // if (!patternPickingNow)
             }
         }
     }

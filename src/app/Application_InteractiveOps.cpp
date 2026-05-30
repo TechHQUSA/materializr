@@ -1094,84 +1094,130 @@ void Application::beginSketchPattern(PatternKind kind) {
     std::snprintf(m_sketchPatternOYBuf, sizeof(m_sketchPatternOYBuf), "%.2f", m_sketchPatternOriginY);
     m_sketchPatternFocusInput = true;
     m_sketchPatternActive = true;
-}
 
-void Application::applySketchPattern() {
-    if (!m_inSketchMode || !m_activeSketch || !m_sketchTool) return;
-    if (m_sketchPatternCount < 2) return;
-
-    // Gather involved points / lines — same selection model as SketchCopy.
-    std::set<int> involved;
-    std::set<int> selLines;
-    if (m_sketchTool->hasElementSelection()) {
-        involved.insert(m_sketchTool->getSelectedPoints().begin(),
-                        m_sketchTool->getSelectedPoints().end());
-        selLines = m_sketchTool->getSelectedLines();
-        for (int lid : selLines) {
+    // Capture the selection model NOW (before previewing). On each preview
+    // frame we restore from `before` and re-transform these ids; if we
+    // re-read the selection from SketchTool after restoring, ids would
+    // reference (now-vanished) preview copies.
+    m_sketchPatternPts.clear();
+    m_sketchPatternLines.clear();
+    m_sketchPatternSelectAll = !m_sketchTool->hasElementSelection();
+    if (!m_sketchPatternSelectAll) {
+        m_sketchPatternPts.insert(m_sketchTool->getSelectedPoints().begin(),
+                                  m_sketchTool->getSelectedPoints().end());
+        m_sketchPatternLines = m_sketchTool->getSelectedLines();
+        for (int lid : m_sketchPatternLines) {
             for (const auto& l : m_activeSketch->getLines()) {
                 if (l.id == lid) {
-                    involved.insert(l.startPointId);
-                    involved.insert(l.endPointId);
+                    m_sketchPatternPts.insert(l.startPointId);
+                    m_sketchPatternPts.insert(l.endPointId);
                     break;
                 }
             }
         }
     } else {
-        for (const auto& p : m_activeSketch->getPoints()) involved.insert(p.id);
-        for (const auto& l : m_activeSketch->getLines())  selLines.insert(l.id);
+        for (const auto& p : m_activeSketch->getPoints()) m_sketchPatternPts.insert(p.id);
+        for (const auto& l : m_activeSketch->getLines())  m_sketchPatternLines.insert(l.id);
+        // Circles + arcs only included via the "selectAll" path (they have no
+        // first-class selection state in SketchTool).
+        for (const auto& c : m_activeSketch->getCircles())
+            m_sketchPatternPts.insert(c.centerPointId);
+        for (const auto& a : m_activeSketch->getArcs()) {
+            m_sketchPatternPts.insert(a.centerPointId);
+            m_sketchPatternPts.insert(a.startPointId);
+            m_sketchPatternPts.insert(a.endPointId);
+        }
     }
-    if (involved.empty()) return;
 
-    auto before = std::make_shared<Sketch>(*m_activeSketch);
+    // Snapshot the sketch for preview rollback / commit diff.
+    m_sketchPatternBefore = std::make_shared<materializr::Sketch>(*m_activeSketch);
+    updateSketchPattern();
+}
 
-    // Build one transformed copy per step i in [1..count-1]; collect new ids.
-    std::set<int> allNewPoints, allNewLines;
+void Application::updateSketchPattern() {
+    if (!m_sketchPatternActive || !m_activeSketch || !m_sketchPatternBefore) return;
+    // Restore the pre-preview state, then re-apply the transform from
+    // current parameters. This is how every preview frame stays clean —
+    // no leftover copies from earlier preview iterations.
+    *m_activeSketch = *m_sketchPatternBefore;
+    if (m_sketchPatternCount < 2 || m_sketchPatternPts.empty()) return;
+
     for (int step = 1; step < m_sketchPatternCount; ++step) {
         std::unordered_map<int,int> remap;
-        for (int oldId : involved) {
+        auto xform = [&](glm::vec2 p) -> glm::vec2 {
+            if (m_sketchPatternKind == PatternKind::Linear) {
+                return p + glm::vec2(m_sketchPatternDistance * step, 0.0f);
+            }
+            float stepDeg = m_sketchPatternAngle / m_sketchPatternCount;
+            float angRad = (stepDeg * step) * static_cast<float>(M_PI) / 180.0f;
+            float dx = p.x - m_sketchPatternOriginX;
+            float dy = p.y - m_sketchPatternOriginY;
+            float ca = std::cos(angRad), sa = std::sin(angRad);
+            return glm::vec2(m_sketchPatternOriginX + dx * ca - dy * sa,
+                             m_sketchPatternOriginY + dx * sa + dy * ca);
+        };
+        for (int oldId : m_sketchPatternPts) {
             auto* p = m_activeSketch->getPoint(oldId);
             if (!p) continue;
-            glm::vec2 np;
-            if (m_sketchPatternKind == PatternKind::Linear) {
-                np = p->pos + glm::vec2(m_sketchPatternDistance * step, 0.0f);
-            } else {
-                float stepDeg = m_sketchPatternAngle / m_sketchPatternCount;
-                float angRad = (stepDeg * step) * static_cast<float>(M_PI) / 180.0f;
-                float dx = p->pos.x - m_sketchPatternOriginX;
-                float dy = p->pos.y - m_sketchPatternOriginY;
-                float ca = std::cos(angRad), sa = std::sin(angRad);
-                np = glm::vec2(m_sketchPatternOriginX + dx * ca - dy * sa,
-                               m_sketchPatternOriginY + dx * sa + dy * ca);
-            }
-            int newId = m_activeSketch->addPoint(np);
-            remap[oldId] = newId;
-            allNewPoints.insert(newId);
+            remap[oldId] = m_activeSketch->addPoint(xform(p->pos));
         }
-        for (int lid : selLines) {
+        for (int lid : m_sketchPatternLines) {
             for (const auto& l : m_activeSketch->getLines()) {
                 if (l.id != lid) continue;
                 auto sIt = remap.find(l.startPointId);
                 auto eIt = remap.find(l.endPointId);
-                if (sIt != remap.end() && eIt != remap.end()) {
-                    int newLine = m_activeSketch->addLine(sIt->second, eIt->second);
-                    allNewLines.insert(newLine);
-                }
+                if (sIt != remap.end() && eIt != remap.end())
+                    m_activeSketch->addLine(sIt->second, eIt->second);
                 break;
             }
         }
+        if (m_sketchPatternSelectAll) {
+            auto circles = m_activeSketch->getCircles();
+            for (const auto& c : circles) {
+                auto it = remap.find(c.centerPointId);
+                if (it != remap.end()) m_activeSketch->addCircle(it->second, c.radius);
+            }
+            auto arcs = m_activeSketch->getArcs();
+            for (const auto& a : arcs) {
+                auto ic = remap.find(a.centerPointId);
+                auto is = remap.find(a.startPointId);
+                auto ie = remap.find(a.endPointId);
+                if (ic != remap.end() && is != remap.end() && ie != remap.end())
+                    m_activeSketch->addArc(ic->second, is->second, ie->second, a.radius);
+            }
+        }
     }
-    // Select the new pieces so the user can immediately further-transform them.
-    if (m_sketchTool) {
-        m_sketchTool->setSelection(allNewPoints, allNewLines);
-        m_sketchTool->setMode(SketchToolMode::Select);
-    }
-    auto after = std::make_shared<Sketch>(*m_activeSketch);
-    if (before->getPoints().size() != after->getPoints().size() ||
-        before->getLines().size()  != after->getLines().size()) {
-        auto op = std::make_unique<SketchEditOp>(m_activeSketch, before, after);
+}
+
+void Application::commitSketchPattern() {
+    if (!m_sketchPatternActive) return;
+    updateSketchPattern(); // make sure the in-doc state reflects current params
+    auto after = std::make_shared<materializr::Sketch>(*m_activeSketch);
+    if (m_sketchPatternBefore &&
+        (m_sketchPatternBefore->getPoints().size()  != after->getPoints().size() ||
+         m_sketchPatternBefore->getLines().size()   != after->getLines().size() ||
+         m_sketchPatternBefore->getCircles().size() != after->getCircles().size() ||
+         m_sketchPatternBefore->getArcs().size()    != after->getArcs().size())) {
+        auto op = std::make_unique<SketchEditOp>(m_activeSketch,
+                                                  m_sketchPatternBefore, after);
         m_history->pushExecuted(std::move(op));
     }
     m_sketchPatternActive = false;
+    m_sketchPatternPickingOrigin = false;
+    m_sketchPatternBefore.reset();
+    m_sketchPatternPts.clear();
+    m_sketchPatternLines.clear();
+}
+
+void Application::cancelSketchPattern() {
+    if (m_sketchPatternBefore && m_activeSketch) {
+        *m_activeSketch = *m_sketchPatternBefore;
+    }
+    m_sketchPatternActive = false;
+    m_sketchPatternPickingOrigin = false;
+    m_sketchPatternBefore.reset();
+    m_sketchPatternPts.clear();
+    m_sketchPatternLines.clear();
 }
 
 } // namespace materializr

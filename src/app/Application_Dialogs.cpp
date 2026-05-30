@@ -831,12 +831,14 @@ void Application::renderSketchPatternPopup() {
         ImGui::SetKeyboardFocusHere();
         m_sketchPatternFocusInput = false;
     }
+    bool changed = false;
     ImGui::Text("Copies"); ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputText("##spcount", m_sketchPatternCountBuf,
                      sizeof(m_sketchPatternCountBuf),
                      ImGuiInputTextFlags_CharsDecimal);
-    m_sketchPatternCount = std::max(2, std::atoi(m_sketchPatternCountBuf));
+    int newCount = std::max(2, std::atoi(m_sketchPatternCountBuf));
+    if (newCount != m_sketchPatternCount) { m_sketchPatternCount = newCount; changed = true; }
 
     if (m_sketchPatternKind == PatternKind::Linear) {
         ImGui::Text("Spacing"); ImGui::SameLine();
@@ -845,7 +847,17 @@ void Application::renderSketchPatternPopup() {
                          sizeof(m_sketchPatternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("mm");
-        m_sketchPatternDistance = static_cast<float>(std::atof(m_sketchPatternDistanceBuf));
+        float newDist = static_cast<float>(std::atof(m_sketchPatternDistanceBuf));
+        if (std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
+            m_sketchPatternDistance = newDist; changed = true;
+        }
+        if (ImGui::SliderFloat("##spdistslider", &m_sketchPatternDistance,
+                               0.1f, 100.0f, "%.2f mm")) {
+            std::snprintf(m_sketchPatternDistanceBuf,
+                          sizeof(m_sketchPatternDistanceBuf),
+                          "%.2f", m_sketchPatternDistance);
+            changed = true;
+        }
     } else {
         ImGui::Text("Sweep"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
@@ -853,19 +865,34 @@ void Application::renderSketchPatternPopup() {
                          sizeof(m_sketchPatternAngleBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("°");
-        m_sketchPatternAngle = static_cast<float>(std::atof(m_sketchPatternAngleBuf));
+        float newAng = static_cast<float>(std::atof(m_sketchPatternAngleBuf));
+        if (std::abs(newAng - m_sketchPatternAngle) > 1e-3f) {
+            m_sketchPatternAngle = newAng; changed = true;
+        }
+        if (ImGui::SliderFloat("##spangslider", &m_sketchPatternAngle,
+                               5.0f, 360.0f, "%.1f°")) {
+            std::snprintf(m_sketchPatternAngleBuf,
+                          sizeof(m_sketchPatternAngleBuf),
+                          "%.1f", m_sketchPatternAngle);
+            changed = true;
+        }
 
         ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Origin (sketch X, Y)");
-        ImGui::SetNextItemWidth(110);
-        ImGui::InputText("X##spox", m_sketchPatternOXBuf, sizeof(m_sketchPatternOXBuf),
-                         ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(110);
-        ImGui::InputText("Y##spoy", m_sketchPatternOYBuf, sizeof(m_sketchPatternOYBuf),
-                         ImGuiInputTextFlags_CharsDecimal);
-        m_sketchPatternOriginX = static_cast<float>(std::atof(m_sketchPatternOXBuf));
-        m_sketchPatternOriginY = static_cast<float>(std::atof(m_sketchPatternOYBuf));
+        ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Origin");
+        ImGui::Text("(%.2f, %.2f) sketch coords",
+                    m_sketchPatternOriginX, m_sketchPatternOriginY);
+        if (m_sketchPatternPickingOrigin) {
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
+                               "Click a point in the sketch… (Esc to cancel)");
+            if (ImGui::Button("Cancel picking", ImVec2(-1, 0))) {
+                m_sketchPatternPickingOrigin = false;
+            }
+        } else {
+            if (ImGui::Button("Pick origin in sketch", ImVec2(-1, 0))) {
+                m_sketchPatternPickingOrigin = true;
+            }
+            ImGui::TextDisabled("Click in the sketch — snaps to the grid.");
+        }
     }
 
     ImGui::Separator();
@@ -874,10 +901,11 @@ void Application::renderSketchPatternPopup() {
     bool cancel = ImGui::Button("Cancel", ImVec2(120, 0));
     bool esc    = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
+    if (changed) updateSketchPattern();
     if (apply) {
-        applySketchPattern(); // also sets m_sketchPatternActive = false
+        commitSketchPattern();
     } else if (cancel || esc) {
-        m_sketchPatternActive = false;
+        cancelSketchPattern();
     }
     ImGui::End();
 }

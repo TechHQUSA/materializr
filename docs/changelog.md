@@ -3,6 +3,39 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.3.2] — 2026-05-30
+
+Sketch pattern polish: circles + arcs now actually replicate, the radial
+origin picker drops a yellow snap-to-grid dot inside the sketch, and the
+whole popup previews live the way the body pattern popup does.
+
+### Added
+
+- **Live preview for sketch patterns.** Each parameter change (count,
+  spacing, sweep angle, origin pick) immediately rebuilds the preview
+  on the sketch. Apply commits the current state as a `SketchEditOp`;
+  Cancel / Esc cleanly restores the pre-popup sketch.
+- **In-sketch radial origin picker.** Replaces the coordinate text
+  fields. Click *Pick origin in sketch* in the popup, then click in
+  the viewport — a yellow dot with `(x, y)` follows the cursor on the
+  sketch plane, snapped to the current grid step. Click commits the
+  origin and re-previews; Esc bails out of pick mode.
+
+### Fixed
+
+- **Sketch patterns now replicate circles and arcs**, not just points
+  and lines. A sketch made of (say) just circles previously patterned
+  nothing visible because the apply loop only walked points / lines.
+  The whole-sketch fallback (no element selection) now includes every
+  primitive type.
+
+### Internal
+
+- Sketch pattern state grows a `before` snapshot + captured involved
+  ids; preview frames restore the snapshot then re-apply the
+  transform, so previews never accumulate. Commit diffs against the
+  same snapshot to build the `SketchEditOp`.
+
 ## [0.3.1] — 2026-05-30
 
 Toolbar polish + Linear / Radial Pattern popups + sketch-mode patterns +
