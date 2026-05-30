@@ -173,6 +173,24 @@ void Application::renderSettings() {
         }
 
         ImGui::Spacing();
+        ImGui::SeparatorText("Session");
+        if (ImGui::Checkbox("Open last project on launch", &m_autoOpenLastProject)) {
+            changed = true;
+        }
+        ImGui::TextWrapped("If on, Materializr reopens the project you had open the last "
+                           "time you quit. Using File → Close Project before quitting "
+                           "makes the next launch start empty instead.");
+
+        ImGui::Spacing();
+        if (ImGui::Checkbox("Check for updates on launch", &m_checkForUpdatesOnLaunch)) {
+            changed = true;
+        }
+        ImGui::TextWrapped("If on, Materializr asks GitHub for the latest release at "
+                           "startup and pops a small dialog when a newer build is "
+                           "available. Turn off for offline or portable use; you can "
+                           "still check manually via Help → Check for Updates.");
+
+        ImGui::Spacing();
         ImGui::SeparatorText("Rendering");
 
         // Lighting — tame the harsh single-direction shadows.
@@ -222,6 +240,7 @@ void Application::renderSettings() {
             m_orbitButton = m_settingsOrbitButton;
             m_panButton = m_settingsPanButton;
             changed = true;
+            m_showSettings = false; // Apply commits + dismisses; matches expectation
         }
         ImGui::SameLine();
         if (ImGui::Button("Close", ImVec2(90, 0))) {

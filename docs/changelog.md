@@ -3,6 +3,85 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.2.3] — 2026-05-29
+
+A polish release: clearer tool semantics, a proper close-project flow, an
+auto-update check, a `--safe-mode` recovery flag, and a fix to the Windows
+CI that was rebuilding OpenCASCADE from scratch on every push (~1.6 h per
+build → minutes).
+
+### Added
+
+- **`--safe-mode` CLI flag** (aliases: `--safe-graphics`, `--low-graphics`).
+  Brings the app up with rendering forced to known-safe defaults (MSAA off,
+  mesh quality Low, default lights), autosave off, auto-open-last-project
+  off, and update-check off. The safe values are written to the settings
+  file, so subsequent normal launches stay recovered. Use it if a saved
+  high-quality setting crashes the app at startup or a complex
+  auto-opened project hangs a lower-core machine. `--help` / `-h` prints
+  the available options. Works identically on Linux AppImage and the
+  installed Windows build.
+- **File → Close Project.** Prompts to save if there are unsaved changes
+  (unless autosave is on, in which case it saves quietly first), then
+  clears the document, history, selection, and project path to leave you
+  at an empty viewport.
+- **Settings → Open last project on launch.** When on, Materializr
+  reopens whichever project you had open the last time you quit. Using
+  File → Close Project before quitting clears the stored path, so the
+  next launch starts empty.
+- **Settings → Check for updates on launch.** Default on. Hits the GitHub
+  releases API at startup and pops a small "newer release available"
+  dialog with a one-click link to the release page when applicable.
+  Off in `--safe-mode`; can be turned off in Settings for offline /
+  portable use (the Help → Check for Updates manual path still works).
+- **"Extrude From"** appears in **Face Operations** as well as the
+  sketch-region tools. On a sketch it extrudes the region into a new body
+  (unchanged); on a body face it extrudes that face's silhouette along
+  its normal into a new body. Push/Pull remains the in-place
+  modify-the-body tool; Extrude always creates a separate body.
+- **Troubleshooting docs** in `docs/usage.md` covering rendering-induced
+  crashes, with `--safe-mode` as the easy recovery path and the
+  hand-edit / file-delete fallback for everything else.
+
+### Changed
+
+- **Boolean Ops (Union / Subtract / Intersect)** now only appear in the
+  toolbar when at least two bodies are selected. With a single body
+  picked they can't do anything, so showing them was just noise.
+- **Push / Pull vs. Extrude semantics tightened.** Push/Pull modifies the
+  body that owns the picked face / region. Extrude always creates a
+  separate body. The Extrude plugin's redundant face-extrude button +
+  "Extrude Face" palette command are gone — Push/Pull is the polished
+  in-place tool, and "Extrude From" handles the new-body case.
+- **"Extrude Sketch" button label → "Extrude From"** since the same
+  button now also extrudes from a face.
+- **Settings → Apply also closes the dialog** (previously it just
+  persisted and kept the dialog open).
+
+### Fixed
+
+- **Windows CI was rebuilding OpenCASCADE from scratch on every push**
+  (~1.6 h per build) because the `x-gha` vcpkg binary-cache backend was
+  silently removed upstream and the workflow's `clear;x-gha,readwrite`
+  was a no-op. Switched to a NuGet-on-GitHub-Packages binary cache. The
+  first build after this fix still pays the cold OCCT compile but writes
+  the binaries to the repo's NuGet feed; subsequent builds restore them
+  in a few minutes. Permissions for the workflow now include
+  `packages: write` so the cache writes are allowed.
+
+### Removed
+
+- **Offset Face** is gone. Its implementation was the same OCCT call
+  (`BRepOffsetAPI_MakeThickSolid::MakeThickSolidByJoin`) as Shell, with
+  the picked face in the "face to remove" list — meaning it hollowed the
+  body rather than offsetting a single face. Even if it were
+  reimplemented to do what its name implied (move one face along its
+  normal), that's exactly Push/Pull's job. Op file, plugin file,
+  force-link entry, and CMakeLists entries all removed.
+- **Toolbar `Extrude` button on `HasFaces` context + "Extrude Face"
+  palette command** removed; Push/Pull covers the modify-in-place case
+  and "Extrude From" covers the make-a-new-body case.
+
 ## [0.2.2] — 2026-05-29
 
 Incremental polish on top of 0.2.1 plus the first batch of contributions

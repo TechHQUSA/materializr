@@ -21,6 +21,20 @@ struct AppSettings {
     bool  lightFill      = true;  // soft opposing fill light to lift dark sides
     int   msaaSamples    = 4;     // viewport anti-aliasing: 0=off, 2, 4, 8
     int   meshQuality    = 1;     // tessellation density: 0=Low,1=Medium,2=High,3=Ultra
+
+    // --- Session ---
+    bool  autoOpenLastProject = false;     // re-open the most recent project on launch
+    // Path of the project currently open. Updated on save / load; cleared on
+    // File → Close Project. On launch (with autoOpenLastProject on) this is
+    // read and the file is loaded if it still exists — so "I closed the
+    // project before quitting" produces an empty launch next time, and
+    // "I just quit while working" reopens where you left off.
+    std::string lastProjectPath;
+
+    // Hit the GitHub releases API at startup and pop a "newer release
+    // available" dialog if the running build is older. Off in --safe-mode
+    // (no surprise network calls when the user is recovering from a crash).
+    bool  checkForUpdatesOnLaunch = true;
 };
 
 // Reads/writes AppSettings as a simple `key = value` text file. The reader is

@@ -55,7 +55,12 @@ struct ProjectHistory; // io/ProjectIO.h
 
 class Application {
 public:
-    Application();
+    // `safeMode` is set by `--safe-mode` on the CLI; loadAppSettings honours
+    // it by stomping the persisted "potentially-expensive" fields back to
+    // known-safe defaults (MSAA off, mesh quality Low, default lights,
+    // autosave off, auto-open-last-project off) and writing them out, so the
+    // *next* normal launch is recovered without further action.
+    explicit Application(bool safeMode = false);
     ~Application();
 
     void run();
@@ -89,7 +94,14 @@ private:
     void exportStepFile();
     void saveProject();         // Save dialog (Save As behavior)
     void saveProjectQuick();    // Save to current path if known, else falls through to saveProject
-    void loadProject();
+    void loadProject();         // File dialog → loadProjectAt
+    // Load a project file directly by path. Used by loadProject() and by the
+    // "auto-open last project on launch" path.
+    bool loadProjectAt(const std::string& path);
+    // File → Close Project. Prompts to save if dirty (unless autosave is on),
+    // then clears the document/history/selection and resets the project path.
+    void closeProject();
+    void doCloseProject();      // the actual clear; called from closeProject + save prompt
     // Snapshot the operation history (parameters + per-step body diffs) for the
     // project file, and rebuild a replayable history from a loaded project.
     ProjectHistory captureProjectHistory();
@@ -460,10 +472,27 @@ private:
     int m_savedAtHistoryStep = -1;             // history index when last saved/loaded
     bool m_unsavedNonHistoryChanges = false;   // for mutations outside History (imports, etc.)
 
-    // Close-with-unsaved-changes prompt
+    // Close-with-unsaved-changes prompt. The prompt is shared between two
+    // close intents: exiting the app, or just closing the current project
+    // (File → Close Project). The post-save action picks which happens after
+    // a successful Save.
     bool m_showSavePrompt = false;
     bool m_confirmedClose = false;
     bool m_closeAfterSave = false;             // set when user picked Save in the prompt
+    enum class PostSaveAction { None, CloseProject };
+    PostSaveAction m_postSaveAction = PostSaveAction::None;
+
+    // Settings option: re-open the most recent project on launch (only if it
+    // wasn't explicitly closed before quit). The "last open project path" lives
+    // in AppSettings::lastProjectPath and is mirrored from m_currentProjectPath
+    // on save/load and cleared on closeProject().
+    bool m_autoOpenLastProject = false;
+    bool m_checkForUpdatesOnLaunch = true;
+
+    // Set by the --safe-mode CLI flag. When true, loadAppSettings stomps
+    // rendering, autosave, and auto-open-last-project back to safe defaults
+    // and persists them.
+    bool m_safeMode = false;
 };
 
 } // namespace materializr

@@ -188,9 +188,15 @@ ToolAction Toolbar::renderBodyTools() {
         if (selected) ImGui::PopStyleColor();
     }
 
-    // Plugin buttons: HasBodies + MultipleBodies
-    int mask = (1 << static_cast<int>(SelectionContext::HasBodies))
-             | (1 << static_cast<int>(SelectionContext::MultipleBodies));
+    // Plugin buttons: always include HasBodies (1+ bodies), and only include
+    // MultipleBodies (2+ bodies, e.g. Union / Subtract / Intersect) when at
+    // least two bodies are actually selected. Previously OR-ing them both
+    // unconditionally meant boolean ops appeared with a single body picked,
+    // which can't do anything.
+    int mask = (1 << static_cast<int>(SelectionContext::HasBodies));
+    if (m_selection && m_selection->selectedBodyCount() >= 2) {
+        mask |= (1 << static_cast<int>(SelectionContext::MultipleBodies));
+    }
     renderPluginButtons(mask);
 
     return action;
@@ -206,6 +212,12 @@ ToolAction Toolbar::renderFaceTools() {
         action = ToolAction::SketchOnFace;
     if (ImGui::Button("Push / Pull", ImVec2(-1, 30)))
         action = ToolAction::PushPull;
+    // Extrude From a face → make a new body that's the face's silhouette
+    // swept along its normal. Push/Pull modifies the source body; Extrude
+    // always creates a separate body. Same ToolAction the sketch toolbar
+    // uses; the handler dispatches by selection type.
+    if (ImGui::Button("Extrude From", ImVec2(-1, 30)))
+        action = ToolAction::ExtrudeSketch;
     if (ImGui::Button("Shell", ImVec2(-1, 30)))
         action = ToolAction::Shell;
     if (m_canEditDiameter &&
@@ -255,7 +267,7 @@ ToolAction Toolbar::renderSketchSelectedTools() {
 
     if (ImGui::Button("Edit Sketch", ImVec2(-1, 30)))
         action = ToolAction::EditSketch;
-    if (ImGui::Button("Extrude Sketch", ImVec2(-1, 30)))
+    if (ImGui::Button("Extrude From", ImVec2(-1, 30)))
         action = ToolAction::ExtrudeSketch;
     if (ImGui::Button("Subtract Sketch", ImVec2(-1, 30)))
         action = ToolAction::SubtractSketch;

@@ -98,7 +98,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 
 namespace materializr {
 
-Application::Application() {
+Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_window = std::make_unique<Window>(1600, 900, "Materializr");
     m_viewport = std::make_unique<Viewport>();
     m_grid = std::make_unique<Grid>();
@@ -426,6 +426,7 @@ void Application::renderMenuBar() {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
             if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
             if (ImGui::MenuItem("Save Project As...")) saveProject();
+            if (ImGui::MenuItem("Close Project")) closeProject();
             ImGui::Separator();
 
             // Build Import submenu from IOFormat contributions
@@ -526,8 +527,58 @@ void Application::loadAppSettings() {
     m_lightFill = s.lightFill;
     m_msaaSamples = s.msaaSamples;
     m_meshQuality = s.meshQuality;
+    m_autoOpenLastProject = s.autoOpenLastProject;
+    m_checkForUpdatesOnLaunch = s.checkForUpdatesOnLaunch;
+
+    // CLI --safe-mode: stomp anything that could a) crash a driver on a hot
+    // restart, b) hang the launch by reopening a large project before the
+    // user can intervene, or c) reach for the network during recovery.
+    // Persist the safe values so the next normal launch is also recovered
+    // without further action.
+    if (m_safeMode) {
+        m_lightAmbient            = 0.40f;
+        m_lightHeadlight          = false;
+        m_lightFill               = true;
+        m_msaaSamples             = 0;   // disable multisample buffers entirely
+        m_meshQuality             = 0;   // Low — coarsest tessellation
+        m_autosaveEnabled         = false;
+        m_autoOpenLastProject     = false;
+        m_checkForUpdatesOnLaunch = false;
+        std::fprintf(stdout,
+                     "[safe-mode] Rendering reset to safe defaults "
+                     "(MSAA off, mesh quality Low); autosave, "
+                     "auto-open-last-project, and update-check disabled.\n");
+        saveAppSettings();
+    }
+
     applyRenderingSettings();
     m_meshesDirty = true; // re-tessellate at the loaded quality
+
+    // Auto-open the previously-open project. Suppressed by --safe-mode (the
+    // toggle was forced off above), and only reached otherwise if the project
+    // wasn't closed via File → Close Project before quit (closeProject clears
+    // the path in settings).
+    if (m_autoOpenLastProject && !s.lastProjectPath.empty()) {
+        loadProjectAt(s.lastProjectPath);
+    }
+
+    // Auto check for updates: hit the GitHub releases API and, if a newer
+    // tag is available, pre-populate the update popup so it pops on the
+    // first frame. UpdateChecker has a 5-second connect / 10-second total
+    // timeout, so the worst case here is a few seconds of startup delay on
+    // a broken network. Suppressed by --safe-mode.
+    if (m_checkForUpdatesOnLaunch && !m_safeMode) {
+        auto r = UpdateChecker::check("materializr-cad", "materializr");
+        if (r.ok && r.updateAvailable) {
+            m_updateCurrent    = r.current;
+            m_updateLatest     = r.latest;
+            m_updateAvailable  = true;
+            m_updateReleaseUrl = r.releasePageUrl;
+            m_updateMessage    = "";
+            m_updateChecked    = true; // skip the popup's own network call
+            m_showUpdatePopup  = true;
+        }
+    }
 }
 
 void Application::applyRenderingSettings() {
@@ -565,6 +616,9 @@ void Application::saveAppSettings() {
     s.lightFill = m_lightFill;
     s.msaaSamples = m_msaaSamples;
     s.meshQuality = m_meshQuality;
+    s.autoOpenLastProject = m_autoOpenLastProject;
+    s.lastProjectPath = m_currentProjectPath; // empty after closeProject()
+    s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
     SettingsIO::save(SettingsIO::defaultPath(), s);
 }
 
@@ -615,11 +669,27 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::ExtrudeSketch: {
+            // "Extrude From" — always creates a new body (Push/Pull is the
+            // modify-in-place tool). Picks up either a sketch selection
+            // (extrude the profile) or a face selection (extrude the face's
+            // silhouette). Sketch wins if both kinds are selected.
             const auto& sel = m_selection->getSelection();
+            bool started = false;
             for (const auto& entry : sel) {
                 if (entry.type == SelectionType::Sketch && entry.sketchId >= 0) {
                     extrudeSketchById(entry.sketchId, ExtrudeMode::NewBody);
+                    started = true;
                     break;
+                }
+            }
+            if (!started) {
+                for (const auto& entry : sel) {
+                    if (entry.type == SelectionType::Face && !entry.shape.IsNull()) {
+                        beginInteractiveExtrude(entry.shape,
+                                                ExtrudeMode::NewBody,
+                                                /*targetBody=*/-1);
+                        break;
+                    }
                 }
             }
             break;
@@ -1159,8 +1229,16 @@ void Application::saveProject() {
             if (result.success) {
                 m_currentProjectPath = path;
                 markSaved();
+                saveAppSettings(); // persist lastProjectPath for auto-open
                 std::fprintf(stdout, "Project saved to %s\n", path.c_str());
-                if (m_closeAfterSave) m_confirmedClose = true;
+                if (m_closeAfterSave) {
+                    if (m_postSaveAction == PostSaveAction::CloseProject) {
+                        doCloseProject();
+                        m_postSaveAction = PostSaveAction::None;
+                    } else {
+                        m_confirmedClose = true;
+                    }
+                }
             } else {
                 std::fprintf(stderr, "Save failed: %s\n", result.errorMessage.c_str());
             }
@@ -1177,8 +1255,16 @@ void Application::saveProjectQuick() {
     auto result = ProjectIO::save(m_currentProjectPath, *m_document, &hist);
     if (result.success) {
         markSaved();
+        saveAppSettings(); // persist lastProjectPath for auto-open
         std::fprintf(stdout, "Project saved to %s\n", m_currentProjectPath.c_str());
-        if (m_closeAfterSave) m_confirmedClose = true;
+        if (m_closeAfterSave) {
+            if (m_postSaveAction == PostSaveAction::CloseProject) {
+                doCloseProject();
+                m_postSaveAction = PostSaveAction::None;
+            } else {
+                m_confirmedClose = true;
+            }
+        }
     } else {
         std::fprintf(stderr, "Save failed: %s\n", result.errorMessage.c_str());
     }
@@ -1258,28 +1344,59 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist) {
     }
 }
 
+bool Application::loadProjectAt(const std::string& path) {
+    if (path.empty()) return false;
+    m_document->clear();
+    m_history->clear();
+    m_selection->clear();
+    ProjectHistory hist;
+    auto result = ProjectIO::load(path, *m_document, &hist);
+    if (!result.success) {
+        std::fprintf(stderr, "Load failed: %s\n", result.errorMessage.c_str());
+        return false;
+    }
+    rebuildHistoryFromProject(hist);
+    m_currentProjectPath = path;
+    markSaved();
+    m_meshesDirty = true;
+    std::fprintf(stdout, "Loaded %d bodies, %d history steps from %s\n",
+                 result.bodiesLoaded, static_cast<int>(hist.steps.size()),
+                 path.c_str());
+    // Persist as the last-open project so the next launch can auto-reopen it.
+    saveAppSettings();
+    return true;
+}
+
 void Application::loadProject() {
     FileDialogs::openFile("Open Project",
         {{"Materializr Project", "*.materializr"}},
-        [this](const std::string& path) {
-            if (path.empty()) return;
-            m_document->clear();
-            m_history->clear();
-            m_selection->clear();
-            ProjectHistory hist;
-            auto result = ProjectIO::load(path, *m_document, &hist);
-            if (result.success) {
-                rebuildHistoryFromProject(hist);
-                m_currentProjectPath = path;
-                markSaved();
-                m_meshesDirty = true;
-                std::fprintf(stdout, "Loaded %d bodies, %d history steps from %s\n",
-                             result.bodiesLoaded, static_cast<int>(hist.steps.size()),
-                             path.c_str());
-            } else {
-                std::fprintf(stderr, "Load failed: %s\n", result.errorMessage.c_str());
-            }
-        });
+        [this](const std::string& path) { loadProjectAt(path); });
+}
+
+void Application::closeProject() {
+    // If nothing to lose, close immediately. If autosave is on and the project
+    // already has a path, autosave quietly before closing. Otherwise (dirty +
+    // no autosave) route through the save-prompt with CloseProject intent.
+    if (!isDirty()) { doCloseProject(); return; }
+    if (m_autosaveEnabled && !m_currentProjectPath.empty()) {
+        saveProjectQuick();
+        doCloseProject();
+        return;
+    }
+    m_postSaveAction = PostSaveAction::CloseProject;
+    m_showSavePrompt = true;
+}
+
+void Application::doCloseProject() {
+    m_document->clear();
+    m_history->clear();
+    m_selection->clear();
+    m_currentProjectPath.clear();
+    m_savedAtHistoryStep = -1;
+    m_unsavedNonHistoryChanges = false;
+    m_meshesDirty = true;
+    // Persist: lastProjectPath now empty → no auto-open on next launch.
+    saveAppSettings();
 }
 
 bool Application::isDirty() const {
@@ -1312,7 +1429,10 @@ void Application::renderSavePrompt() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("You have unsaved changes. Save before exiting?");
+        const bool closingProject = (m_postSaveAction == PostSaveAction::CloseProject);
+        ImGui::Text(closingProject
+                    ? "You have unsaved changes. Save before closing the project?"
+                    : "You have unsaved changes. Save before exiting?");
         ImGui::Separator();
         if (ImGui::Button("Save", ImVec2(100, 0))) {
             m_closeAfterSave = true;
@@ -1321,12 +1441,18 @@ void Application::renderSavePrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button("Don't Save", ImVec2(100, 0))) {
-            m_confirmedClose = true;
+            if (closingProject) {
+                doCloseProject();
+                m_postSaveAction = PostSaveAction::None;
+            } else {
+                m_confirmedClose = true;
+            }
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(100, 0))) {
             m_closeAfterSave = false;
+            m_postSaveAction = PostSaveAction::None;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

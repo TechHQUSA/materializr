@@ -16,7 +16,6 @@ void forceLink_Mirror();
 void forceLink_Copy();
 void forceLink_Pattern();
 void forceLink_Shell();
-void forceLink_OffsetFace();
 void forceLink_SplitBody();
 void forceLink_ConstructionPlane();
 
@@ -46,7 +45,6 @@ void linkAll() {
     forceLink_Copy();
     forceLink_Pattern();
     forceLink_Shell();
-    forceLink_OffsetFace();
     forceLink_SplitBody();
     forceLink_ConstructionPlane();
     // Phase 3

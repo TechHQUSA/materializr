@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 0.2.2 LANGUAGES CXX)
+project(Materializr VERSION 0.2.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -141,7 +141,6 @@ add_executable(materializr
     src/plugins/CopyPlugin.cpp
     src/plugins/PatternPlugin.cpp
     src/plugins/ShellPlugin.cpp
-    src/plugins/OffsetFacePlugin.cpp
     src/plugins/SplitBodyPlugin.cpp
     src/plugins/ConstructionPlanePlugin.cpp
     src/plugins/FilletPlugin.cpp
@@ -165,7 +164,6 @@ add_executable(materializr
     src/modeling/BooleanOp.cpp
     src/modeling/TransformOp.cpp
     src/modeling/ShellOp.cpp
-    src/modeling/OffsetFaceOp.cpp
     src/modeling/SplitBodyOp.cpp
     src/modeling/MirrorOp.cpp
     src/modeling/PatternOp.cpp

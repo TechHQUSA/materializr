@@ -33,6 +33,11 @@ void readFloat(const std::map<std::string, std::string>& kv, const char* key, fl
     try { out = std::stof(it->second); } catch (...) { /* keep default */ }
 }
 
+void readString(const std::map<std::string, std::string>& kv, const char* key, std::string& out) {
+    auto it = kv.find(key);
+    if (it != kv.end()) out = it->second;
+}
+
 void readBool(const std::map<std::string, std::string>& kv, const char* key, bool& out) {
     auto it = kv.find(key);
     if (it == kv.end()) return;
@@ -99,6 +104,9 @@ AppSettings SettingsIO::load(const std::string& path) {
     readBool(kv, "lightFill",            s.lightFill);
     readInt (kv, "msaaSamples",          s.msaaSamples);
     readInt (kv, "meshQuality",          s.meshQuality);
+    readBool(kv, "autoOpenLastProject",  s.autoOpenLastProject);
+    readString(kv, "lastProjectPath",    s.lastProjectPath);
+    readBool(kv, "checkForUpdatesOnLaunch", s.checkForUpdatesOnLaunch);
 
     return s;
 }
@@ -129,6 +137,9 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "lightFill = "           << (s.lightFill ? "true" : "false") << "\n";
     ofs << "msaaSamples = "         << s.msaaSamples         << "\n";
     ofs << "meshQuality = "         << s.meshQuality         << "\n";
+    ofs << "autoOpenLastProject = " << (s.autoOpenLastProject ? "true" : "false") << "\n";
+    ofs << "lastProjectPath = "     << s.lastProjectPath     << "\n";
+    ofs << "checkForUpdatesOnLaunch = " << (s.checkForUpdatesOnLaunch ? "true" : "false") << "\n";
 
     return ofs.good();
 }

@@ -137,3 +137,53 @@ tag and tells you whether you're up to date. If a newer release exists, the
 | W | Gizmo: Translate mode |
 | E | Gizmo: Rotate mode |
 | R | Gizmo: Scale mode |
+
+## Troubleshooting
+
+### Recovering from a crash caused by rendering settings
+
+The rendering controls in **File → Settings → Rendering** (ambient, headlight
+/ fill light, MSAA samples, mesh quality) are persisted across launches.
+That's normally what you want, but it means a setting that crashes your GPU
+or driver will keep crashing the app on every launch.
+
+On some hardware setups — particularly older Intel iGPUs, virtualized GPUs
+inside VMs, and some Linux distro + driver combinations — turning **MSAA**
+or **Mesh quality** all the way up triggers a driver crash. The app brings
+those back up on the next launch and crashes again.
+
+#### Easiest: launch with `--safe-mode`
+
+From a terminal (or by editing your launcher / shortcut to append the flag):
+
+```bash
+./Materializr-x86_64.AppImage --safe-mode    # Linux
+materializr.exe --safe-mode                  # Windows
+```
+
+`--safe-mode` (aliases: `--safe-graphics`, `--low-graphics`) loads with a
+known-safe configuration: **MSAA off, mesh quality Low, default lights,
+autosave off, auto-open-last-project off** — and writes those values to the
+settings file so the next normal launch stays recovered. Use it if a
+previously-saved setting crashes the app at startup, or if a complex
+auto-opened project hangs a lower-core machine. From there you can turn
+things back up gradually via Settings and stop wherever your hardware is
+happy.
+
+`--help` (or `-h`) prints the available CLI options.
+
+#### Alternative: reset the settings file by hand
+
+If you'd rather wipe everything and start fresh, delete the settings file:
+
+- **Linux**: `~/.config/materializr/settings.cfg`
+- **Windows**: `%APPDATA%\materializr\settings.cfg`
+
+Materializr writes a fresh file with defaults on the next launch
+(`MSAA = 4`, `Mesh quality = Medium`, ambient `0.40`, headlight off, fill on).
+
+If you only want to reset rendering and keep everything else, open the
+settings file in a text editor and either delete the offending key
+(`msaaSamples`, `meshQuality`, `lightAmbient`, `lightHeadlight`, `lightFill`)
+or set it back to its default. Unknown keys are ignored on read and the
+defaults take over.
