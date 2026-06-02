@@ -197,6 +197,22 @@ void PlaneRenderer::render(const glm::mat4& view, const glm::mat4& projection) {
 
         glLineWidth(borderWidth);
         glDrawArrays(GL_LINE_LOOP, 0, 4);
+
+        // Normal indicator: a short stalk from the plane centre along +normal
+        // so the facing direction is visible (and Flip Normal has a visible
+        // effect). Length scales with the plane half-size.
+        glm::vec3 nrm(static_cast<float>(normal.X()),
+                      static_cast<float>(normal.Y()),
+                      static_cast<float>(normal.Z()));
+        glm::vec3 nTip = o + (s * 0.5f) * nrm;
+        float normalVerts[] = {
+            o.x,    o.y,    o.z,
+            nTip.x, nTip.y, nTip.z,
+        };
+        glBufferData(GL_ARRAY_BUFFER, sizeof(normalVerts), normalVerts, GL_DYNAMIC_DRAW);
+        glUniform4fv(m_locColor, 1, glm::value_ptr(borderColor));
+        glLineWidth(borderWidth);
+        glDrawArrays(GL_LINES, 0, 2);
     }
 
     glBindVertexArray(0);

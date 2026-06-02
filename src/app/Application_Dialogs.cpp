@@ -44,6 +44,7 @@
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/SketchTransformOp.h"
+#include "modeling/PlaneTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/RevolveOp.h"
 #include "modeling/FilletOp.h"
@@ -1859,6 +1860,96 @@ void Application::renderRevolvePopup() {
     } else if (cancelClicked) {
         revolveLiveRestore();
         m_revolveActive = false;
+    }
+
+    ImGui::End();
+}
+
+// ─── Rotate Plane About Axis popup ─────────────────────────────────────────
+// Tilts / hinges an existing construction plane about a chosen line by a
+// typed angle, with live preview. Hinge candidates + the snapshot are seeded
+// by beginRotatePlaneAboutAxis(); this just drives the UI. Writes through
+// Document::setPlane (no history op — matches the plane gizmo). Apply leaves
+// the current pose; Cancel / Escape restores the snapshot.
+void Application::renderRotatePlaneAboutAxisPopup() {
+    if (!m_rotPlaneActive) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 340,
+                                    ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Rotate Plane About Axis", nullptr,
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    if (m_document && m_rotPlaneId >= 0) {
+        ImGui::Text("Plane: %s", m_document->getPlaneName(m_rotPlaneId).c_str());
+    }
+
+    // Hinge picker — the lines computed at open time.
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Hinge");
+    const char* curLabel =
+        (m_rotPlaneHingeIdx >= 0 &&
+         m_rotPlaneHingeIdx < static_cast<int>(m_rotPlaneHingeLabels.size()))
+            ? m_rotPlaneHingeLabels[m_rotPlaneHingeIdx].c_str()
+            : "(none)";
+    if (ImGui::BeginCombo("##rotPlaneHinge", curLabel)) {
+        for (int i = 0; i < static_cast<int>(m_rotPlaneHingeLabels.size()); ++i) {
+            bool sel = (m_rotPlaneHingeIdx == i);
+            if (ImGui::Selectable(m_rotPlaneHingeLabels[i].c_str(), sel)) {
+                m_rotPlaneHingeIdx = i;
+                applyRotatePlanePreview();   // re-preview about the new hinge
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    // Angle — typed entry + slider, both live-preview on change.
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Angle");
+    ImGui::SetNextItemWidth(100);
+    bool angleChanged = false;
+    if (ImGui::InputText("##rotPlaneAng", m_rotPlaneAngleBuf, sizeof(m_rotPlaneAngleBuf),
+                         ImGuiInputTextFlags_CharsDecimal)) {
+        m_rotPlaneAngle = static_cast<float>(std::atof(m_rotPlaneAngleBuf));
+        angleChanged = true;
+    }
+    ImGui::SameLine(); ImGui::Text("°");
+    if (ImGui::SliderFloat("##rotPlaneAngSld", &m_rotPlaneAngle, -180.0f, 180.0f, "%.1f°")) {
+        std::snprintf(m_rotPlaneAngleBuf, sizeof(m_rotPlaneAngleBuf), "%.1f", m_rotPlaneAngle);
+        angleChanged = true;
+    }
+    if (angleChanged) applyRotatePlanePreview();
+
+    ImGui::Separator();
+    bool applyClicked  = ImGui::Button("Apply", ImVec2(150, 0));
+    ImGui::SameLine();
+    bool cancelClicked = ImGui::Button("Cancel", ImVec2(150, 0));
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
+
+    if (applyClicked) {
+        // Make sure the final pose is in the document, then record an
+        // undoable PlaneTransformOp (before = snapshot, after = current) so
+        // Ctrl+Z reverts the rotation. Skip the push for a no-op (angle 0 /
+        // unchanged) so we don't litter history with empty steps.
+        applyRotatePlanePreview();
+        const auto* pe = (m_document && m_rotPlaneId >= 0)
+                             ? m_document->getPlane(m_rotPlaneId) : nullptr;
+        if (m_history && pe && std::abs(m_rotPlaneAngle) > 1e-4f) {
+            std::vector<PlaneTransformOp::Entry> entries{
+                {m_rotPlaneId, m_rotPlaneOriginal, pe->plane}};
+            m_history->pushExecuted(
+                std::make_unique<PlaneTransformOp>("Rotate Plane", std::move(entries)));
+        }
+        markDirty();
+        m_rotPlaneActive = false;
+        m_rotPlaneId = -1;
+        m_rotPlaneHinges.clear();
+        m_rotPlaneHingeLabels.clear();
+    } else if (cancelClicked) {
+        cancelRotatePlaneAboutAxis();
     }
 
     ImGui::End();

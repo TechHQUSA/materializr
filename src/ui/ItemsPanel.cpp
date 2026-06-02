@@ -382,6 +382,13 @@ bool ItemsPanel::render() {
                     if (ImGui::MenuItem("Rename")) {
                         beginRename();
                     }
+                    if (ImGui::MenuItem("Flip Normal")) {
+                        m_document->flipPlaneNormal(id);
+                        if (m_markDirty) m_markDirty();
+                    }
+                    if (ImGui::MenuItem("Rotate About Axis...")) {
+                        if (m_rotatePlane) m_rotatePlane(id);
+                    }
                     if (ImGui::MenuItem("Delete")) {
                         m_document->removePlane(id);
                         if (m_selection) m_selection->clear();

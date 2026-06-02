@@ -29,6 +29,10 @@ public:
     // that sketch — the only way to re-enter a sketch that was created in
     // a previous session.
     void setEditSketchCallback(std::function<void(int)> cb) { m_editSketch = std::move(cb); }
+    // Called when the user picks "Rotate About Axis…" from a construction
+    // plane's right-click menu. Routes to Application, which opens the
+    // rotate-plane-about-axis popup targeting the given plane id.
+    void setRotatePlaneCallback(std::function<void(int)> cb) { m_rotatePlane = std::move(cb); }
 
     // Returns true if a body was deleted (caller must rebuild meshes)
     bool render();
@@ -40,6 +44,7 @@ private:
     std::function<void()> m_markDirty;
     std::function<void(int)> m_exportStl;
     std::function<void(int)> m_editSketch;
+    std::function<void(int)> m_rotatePlane;
     int m_renamingId = -1;
     char m_renameBuffer[128] = {};
     bool m_showBodies = true;

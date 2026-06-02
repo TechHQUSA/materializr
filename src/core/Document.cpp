@@ -2,6 +2,7 @@
 #include "EventBus.h"
 #include "Events.h"
 #include "../modeling/Sketch.h"
+#include <gp_Ax3.hxx>
 #include <algorithm>
 #include <stdexcept>
 
@@ -247,6 +248,21 @@ void Document::setPlane(int id, const gp_Pln& plane) {
     for (auto& p : m_planes) {
         if (p.id == id) {
             p.plane = plane;
+            if (m_eventBus) m_eventBus->publish(materializr::PlaneChangedEvent{id});
+            return;
+        }
+    }
+}
+
+void Document::flipPlaneNormal(int id) {
+    for (auto& p : m_planes) {
+        if (p.id == id) {
+            // ZReverse flips the gp_Ax3's main (Z = normal) direction while
+            // keeping its location and X direction, so the in-plane U axis is
+            // preserved and only the facing (and V) flips.
+            gp_Ax3 pos = p.plane.Position();
+            pos.ZReverse();
+            p.plane = gp_Pln(pos);
             if (m_eventBus) m_eventBus->publish(materializr::PlaneChangedEvent{id});
             return;
         }

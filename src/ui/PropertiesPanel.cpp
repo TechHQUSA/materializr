@@ -17,6 +17,7 @@
 #include <memory>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <gp_Ax3.hxx>
 
 namespace materializr {
 
@@ -244,6 +245,19 @@ bool PropertiesPanel::render() {
 
         if (sketchLike && m_document && m_history && parentSketchId >= 0) {
             renderSketchConstraintsPanel(parentSketchId, modified);
+        } else if (m_selection->primaryType() == SelectionType::Plane && m_document) {
+            int planeId = -1;
+            for (const auto& e : m_selection->getSelection()) {
+                if (e.type == SelectionType::Plane && e.planeId >= 0) {
+                    planeId = e.planeId; break;
+                }
+            }
+            if (planeId >= 0 && m_document->getPlane(planeId)) {
+                renderPlanePanel(planeId, modified);
+            } else {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                                   "Sub-shape properties not yet available.");
+            }
         } else {
             ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
                                "Sub-shape properties not yet available.");
@@ -257,6 +271,43 @@ bool PropertiesPanel::render() {
 
     ImGui::End();
     return modified;
+}
+
+// Orientation readout + actions for a selected construction plane. Values are
+// shown in the app's user Z-up convention (user Y = world Z, user Z = world Y)
+// to match every other coordinate readout. Flip Normal mutates the document
+// directly (marks dirty); Rotate About Axis… routes to Application's hinge
+// popup, which records an undoable PlaneTransformOp on Apply.
+void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
+    const auto* pe = m_document->getPlane(planeId);
+    if (!pe) return;
+
+    const gp_Ax3& ax = pe->plane.Position();
+    gp_Pnt o = ax.Location();
+    gp_Dir n = ax.Direction();
+    gp_Dir u = ax.XDirection();
+
+    // World→user display swap (Y/Z) so "up" reads as the user's Z.
+    ImGui::Text("Origin:  %.2f, %.2f, %.2f mm", o.X(), o.Z(), o.Y());
+    ImGui::Text("Normal:  %.3f, %.3f, %.3f",     n.X(), n.Z(), n.Y());
+    ImGui::Text("In-plane X: %.3f, %.3f, %.3f",  u.X(), u.Z(), u.Y());
+
+    // Tilt of the plane away from horizontal = angle of its normal from the
+    // world up axis (world +Y). 0° = floor-parallel, 90° = vertical wall.
+    double tilt = std::acos(std::min(1.0, std::fabs(n.Y()))) * 180.0 / M_PI;
+    ImGui::Text("Tilt from horizontal: %.1f°", tilt);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::Button("Flip Normal")) {
+        m_document->flipPlaneNormal(planeId);
+        if (m_markDirty) m_markDirty();
+        modified = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Rotate About Axis...")) {
+        if (m_rotatePlane) m_rotatePlane(planeId);
+    }
 }
 
 // Edits the live sketch's constraints in place. Differs from

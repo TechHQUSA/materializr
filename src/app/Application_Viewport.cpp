@@ -46,6 +46,7 @@
 #include "modeling/SketchTransformOp.h"
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
+#include "modeling/PlaneTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
@@ -2266,8 +2267,25 @@ void Application::renderViewport() {
                             if (!anyValid) {
                                 /* below-threshold drag: leave history alone */
                             } else if (planeOnly) {
-                                /* plane gizmo: already written to Document via
-                                   setPlane during the drag; nothing to commit */
+                                // Plane gizmo wrote the new pose to Document via
+                                // setPlane during the drag; record an undoable
+                                // PlaneTransformOp (before = m_planeGizmoDrag's
+                                // stored pose, after = current) so Ctrl+Z works.
+                                // One batched op covers a multi-plane drag.
+                                if (m_history) {
+                                    std::vector<PlaneTransformOp::Entry> entries;
+                                    for (auto& [pid, plnBefore] : m_planeGizmoDrag) {
+                                        const auto* pe = m_document->getPlane(pid);
+                                        if (pe) entries.push_back({pid, plnBefore, pe->plane});
+                                    }
+                                    if (!entries.empty()) {
+                                        const char* lbl = (gm == GizmoMode::Rotate)
+                                                              ? "Rotate Plane" : "Move Plane";
+                                        m_history->pushExecuted(
+                                            std::make_unique<PlaneTransformOp>(
+                                                lbl, std::move(entries)));
+                                    }
+                                }
                             } else if (axisOnly) {
                                 /* axis gizmo: same as plane — direct setAxis
                                    write during the drag covered it. */

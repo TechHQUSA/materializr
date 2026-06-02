@@ -187,12 +187,15 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_itemsPanel->setDirtyCallback([this]() { markDirty(); });
     m_itemsPanel->setExportStlCallback([this](int bodyId) { exportBodyAsStl(bodyId); });
     m_itemsPanel->setEditSketchCallback([this](int sketchId) { editSketch(sketchId); });
+    m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
     m_statusBar->setDocument(m_document.get());
     m_statusBar->setSelectionManager(m_selection.get());
     m_propertiesPanel->setHistory(m_history.get());
     m_propertiesPanel->setDocument(m_document.get());
     m_propertiesPanel->setSelectionManager(m_selection.get());
     m_propertiesPanel->setEventBus(m_eventBus.get());
+    m_propertiesPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
+    m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
 
     initImGui();
     loadAppSettings(); // restore persisted preferences before the theme is applied
@@ -3091,6 +3094,7 @@ void Application::run() {
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
             renderRevolvePopup();
+            renderRotatePlaneAboutAxisPopup();
             renderSketchMovePanel();
             renderSketchPatternPopup();
 

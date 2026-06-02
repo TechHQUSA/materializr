@@ -177,6 +177,7 @@ add_executable(materializr
     src/modeling/SketchTransformOp.cpp
     src/modeling/ConstructionPlaneOp.cpp
     src/modeling/ConstructionAxisOp.cpp
+    src/modeling/PlaneTransformOp.cpp
     src/modeling/AlignOp.cpp
     src/modeling/CopyOp.cpp
     src/modeling/DeleteOp.cpp

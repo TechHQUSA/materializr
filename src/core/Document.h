@@ -139,6 +139,10 @@ public:
     // Update an existing plane's gp_Pln (move + rotate gizmo write-back).
     // Fires PlaneChangedEvent so the renderer / selection-aware UI updates.
     void setPlane(int id, const gp_Pln& plane);
+    // Reverse the plane's normal in place (ZReverse on its gp_Ax3), keeping
+    // location + in-plane X direction. Flips which way new sketches/extrudes
+    // on this plane face. Fires PlaneChangedEvent.
+    void flipPlaneNormal(int id);
     const PlaneEntry* getPlane(int id) const;
     std::string getPlaneName(int id) const;
     void setPlaneName(int id, const std::string& name);

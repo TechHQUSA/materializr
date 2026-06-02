@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 
@@ -23,6 +24,12 @@ public:
     void setDocument(Document* doc);
     void setSelectionManager(const SelectionManager* sel);
     void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
+    // Routes the plane panel's "Rotate About Axis…" button to Application,
+    // which opens the hinge popup for that plane id.
+    void setRotatePlaneCallback(std::function<void(int)> cb) { m_rotatePlane = std::move(cb); }
+    // Called for non-history plane mutations (Flip Normal) so the host marks
+    // the project dirty.
+    void setDirtyCallback(std::function<void()> cb) { m_markDirty = std::move(cb); }
 
     // Set which history step is being edited (-1 for none)
     void setEditingStep(int step);
@@ -39,6 +46,12 @@ private:
     // undoable and survives save/load. `modified` is set true if a value
     // was committed this frame so the host can dirty its mesh + history.
     void renderSketchConstraintsPanel(int sketchId, bool& modified);
+    // Read-only orientation readout + Flip Normal / Rotate-About-Axis actions
+    // for a selected construction plane.
+    void renderPlanePanel(int planeId, bool& modified);
+
+    std::function<void(int)> m_rotatePlane;
+    std::function<void()>    m_markDirty;
 
     History* m_history = nullptr;
     Document* m_document = nullptr;

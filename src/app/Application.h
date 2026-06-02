@@ -11,6 +11,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Ax1.hxx>
 
 #include "modeling/ExtrudeOp.h" // for ExtrudeMode
 #include "modeling/SketchConstraints.h" // for ConstraintType (applySketchConstraint)
@@ -755,6 +756,31 @@ private:
     void revolveLiveBegin();
     void revolveLiveApply(float angle);
     void revolveLiveRestore();
+
+    // Interactive "Rotate Plane About Axis" popup. Triggered from the Items
+    // panel plane context menu (m_itemsPanel->setRotatePlaneCallback). Tilts /
+    // hinges an existing construction plane about a chosen line by a typed
+    // angle. The line can be the plane's own U / V axis (tilt in place), a
+    // construction axis, a selected straight edge, or a selected cylindrical
+    // face's centreline — each resolved to a gp_Ax1 at open time (transient,
+    // nothing persisted). Matches the plane gizmo's model: writes straight
+    // through Document::setPlane with no history op (plane transforms are
+    // intentionally outside undo — see Application_Viewport.cpp's planeOnly
+    // branch). Live preview re-bases from m_rotPlaneOriginal each change;
+    // Apply leaves the current pose, Cancel restores the snapshot.
+    bool   m_rotPlaneActive = false;
+    int    m_rotPlaneId = -1;             // target plane id
+    gp_Pln m_rotPlaneOriginal;            // snapshot for preview re-base + cancel
+    float  m_rotPlaneAngle = 0.0f;        // degrees
+    char   m_rotPlaneAngleBuf[24] = "0.0";
+    int    m_rotPlaneHingeIdx = 0;        // index into the parallel vectors below
+    std::vector<gp_Ax1>      m_rotPlaneHinges;       // resolved hinge per combo entry
+    std::vector<std::string> m_rotPlaneHingeLabels;  // combo display labels
+
+    void beginRotatePlaneAboutAxis(int planeId);
+    void renderRotatePlaneAboutAxisPopup();
+    void applyRotatePlanePreview();       // setPlane(original rotated about hinge by angle)
+    void cancelRotatePlaneAboutAxis();    // restore snapshot + close
 
     // Sketch Move type-in panel: when the Move gizmo is active on a single
     // selected standalone sketch (the sketch-as-construction-plane workflow),

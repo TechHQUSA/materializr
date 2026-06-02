@@ -46,6 +46,10 @@
 #include <gp_Cylinder.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Lin.hxx>
+#include <Geom_Curve.hxx>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1768,6 +1772,99 @@ void Application::cancelSketchPattern() {
     m_sketchPatternBefore.reset();
     m_sketchPatternPts.clear();
     m_sketchPatternLines.clear();
+}
+
+// ── Rotate Plane About Axis ─────────────────────────────────────────────
+// Build the list of candidate hinge lines for the target plane and open the
+// popup. Each entry is a gp_Ax1 resolved up-front (transient — we never touch
+// the document's axis list). Order: the plane's own U / V axes (tilt in
+// place), then every construction axis, then a selected straight edge / a
+// selected cylindrical face's centreline if either is in the selection.
+void Application::beginRotatePlaneAboutAxis(int planeId) {
+    if (!m_document) return;
+    const auto* pe = m_document->getPlane(planeId);
+    if (!pe) return;
+
+    m_rotPlaneId = planeId;
+    m_rotPlaneOriginal = pe->plane;
+    m_rotPlaneAngle = 0.0f;
+    std::snprintf(m_rotPlaneAngleBuf, sizeof(m_rotPlaneAngleBuf), "0.0");
+    m_rotPlaneHinges.clear();
+    m_rotPlaneHingeLabels.clear();
+
+    // Tilt-in-place options: the plane's own X / Y directions through its
+    // centre, so rotation reorients without translating the plane.
+    const gp_Ax3& ax = m_rotPlaneOriginal.Position();
+    gp_Pnt center = ax.Location();
+    m_rotPlaneHinges.emplace_back(center, ax.XDirection());
+    m_rotPlaneHingeLabels.emplace_back("Tilt about plane U (in-plane X)");
+    m_rotPlaneHinges.emplace_back(center, ax.YDirection());
+    m_rotPlaneHingeLabels.emplace_back("Tilt about plane V (in-plane Y)");
+
+    int defaultIdx = 0;
+
+    // Every construction axis in the document.
+    for (int aid : m_document->getAllAxisIds()) {
+        const auto* a = m_document->getAxis(aid);
+        if (!a) continue;
+        m_rotPlaneHinges.emplace_back(a->origin, a->direction);
+        m_rotPlaneHingeLabels.emplace_back("Axis: " + a->name);
+    }
+
+    // Hinge about real geometry: a co-selected straight edge or cylindrical
+    // face. Default to it when present — a co-selected hinge is almost
+    // certainly why the user opened this rather than an in-place tilt.
+    if (m_selection) {
+        for (const auto& e : m_selection->getSelection()) {
+            if (e.shape.IsNull()) continue;
+            if (e.type == SelectionType::Edge) {
+                BRepAdaptor_Curve adaptor(TopoDS::Edge(e.shape));
+                if (adaptor.GetType() == GeomAbs_Line) {
+                    defaultIdx = static_cast<int>(m_rotPlaneHinges.size());
+                    m_rotPlaneHinges.push_back(adaptor.Line().Position());
+                    m_rotPlaneHingeLabels.emplace_back("Selected edge");
+                }
+            } else if (e.type == SelectionType::Face) {
+                Handle(Geom_CylindricalSurface) cyl =
+                    Handle(Geom_CylindricalSurface)::DownCast(
+                        BRep_Tool::Surface(TopoDS::Face(e.shape)));
+                if (!cyl.IsNull()) {
+                    defaultIdx = static_cast<int>(m_rotPlaneHinges.size());
+                    m_rotPlaneHinges.emplace_back(
+                        cyl->Cylinder().Position().Location(),
+                        cyl->Cylinder().Position().Direction());
+                    m_rotPlaneHingeLabels.emplace_back("Selected face centreline");
+                }
+            }
+        }
+    }
+
+    m_rotPlaneHingeIdx = defaultIdx;
+    m_rotPlaneActive = true;
+}
+
+// Live preview / commit core: rotate the snapshot plane about the chosen
+// hinge by the current angle and write it through Document::setPlane. Always
+// re-bases from m_rotPlaneOriginal so dragging the angle doesn't accumulate.
+void Application::applyRotatePlanePreview() {
+    if (!m_document || m_rotPlaneId < 0) return;
+    if (m_rotPlaneHingeIdx < 0 ||
+        m_rotPlaneHingeIdx >= static_cast<int>(m_rotPlaneHinges.size())) return;
+    gp_Trsf t;
+    t.SetRotation(m_rotPlaneHinges[m_rotPlaneHingeIdx],
+                  m_rotPlaneAngle * M_PI / 180.0);
+    gp_Pln rotated = m_rotPlaneOriginal;
+    rotated.Transform(t);
+    m_document->setPlane(m_rotPlaneId, rotated);
+}
+
+void Application::cancelRotatePlaneAboutAxis() {
+    if (m_document && m_rotPlaneId >= 0)
+        m_document->setPlane(m_rotPlaneId, m_rotPlaneOriginal);
+    m_rotPlaneActive = false;
+    m_rotPlaneId = -1;
+    m_rotPlaneHinges.clear();
+    m_rotPlaneHingeLabels.clear();
 }
 
 } // namespace materializr
