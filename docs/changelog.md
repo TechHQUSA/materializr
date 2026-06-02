@@ -3,6 +3,73 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.5.2] — 2026-06-01
+
+### Added
+
+- **Editable body dimensions in the Properties panel.** Selecting a single body
+  shows X / Y / Z extent fields (Z-up convention — X/Y the floor axes, Z the
+  height). Type a new value to scale the body along that axis, anchored at its
+  bbox-min corner so growth is along +axis only.
+- **JetBrains Mono bundled for the UI font.** Slashed zero, distinct 0 / 8 / B
+  glyphs — fixes the "is that a 0 or an 8?" reading problem on the default
+  ProggyClean. ~270 KB in the AppImage; loaded from
+  `share/materializr/fonts/JetBrainsMono-Regular.ttf` at startup.
+- **Cursor-aware mouse-wheel zoom.** Scrolling now dollies toward whatever the
+  cursor is over (ray-pick onto geometry, fallback to a target-plane projection
+  over empty space). Solves the "can't zoom into a small off-origin object
+  without a pan-zoom-tilt dance" problem.
+- **`F` key = frame selection.** Hit `F` to fit the camera to the selected
+  bodies, or to all visible bodies if nothing's selected. Standard CAD shortcut;
+  suppressed in sketch-edit and while typing into a text field.
+- **Arc tool: live sweep angle readout + 15° snap.** While placing the third
+  click, the cursor shows the inferred sweep (e.g. `90.0° (¼)`, `180.0° (½)`),
+  pinned 14 px right of the cursor. Within ±5° of a 15° multiple the cursor
+  jumps to the exact apex via `d = (L/2)·tan(θ/4)` — same side of the chord
+  preserved, no flipping. Snap defers to the global snap toggle.
+- **Angle constraint dimension arc + label.** The Angle constraint between two
+  sketch lines now renders a SolidWorks-style arc at the intersection vertex,
+  with a `°` label hugging the outside of the arc midpoint. Auto-detects the
+  vertex from the closest endpoint pair (handles loose Coincident pairs).
+- **Bold push/pull, extrude, fillet, chamfer arrows.** The dim-arrow style for
+  active body operations is now amber (255, 200, 60) with a black halo, 3 px
+  line, ~2× larger arrowhead, and an amber border on the mm/° label — readable
+  against any body colour. Sketch inferences and the move-gizmo readout keep
+  the lighter style.
+
+### Changed
+
+- **Snap on/off + step are now exclusively the corner widget** next to the
+  ViewCube. Removed the duplicate checkboxes from the Settings dialog and from
+  both Toolbar groups (sketch + body). Threshold slider stays in Settings.
+- **Body dimension bbox + Measure tool bbox use `AddOptimal`.** Analytic bounds
+  rather than tessellation + per-face Tolerance padding: a Ø80 cylinder reads
+  exactly `80.000 / 80.000 / 20.000` instead of `80.007 / 80.005 / 20.010`.
+- **Move-gizmo readout reports the body's bottom along the up axis** rather
+  than its centre. A cylinder sitting on Z=0 now reads `Z 0.00` (drag up 10 mm
+  → `Z 10.00`) — matches what the user sees on the grid.
+
+### Fixed
+
+- **Sketch push/pull no longer accumulates banding on the vertical wall during
+  the slider drag.** `Document::removeBody` now publishes `BodyRemovedEvent`,
+  and `Application` listens to drop the renderer's mesh + edge slots
+  immediately. Previously each preview-undo deleted the body from the document
+  but left its mesh in the ShapeRenderer until the next full rebuild — N
+  overlapping prism previews stacking up during a drag.
+- **Push/Pull on a free-floating sketch no longer marks every invisible body
+  dirty every frame.** The missing-slot loop now restricts itself to visible
+  bodies, so a 100+ body project doesn't burn re-tessellation budget on hidden
+  geometry.
+- **Snap-widget click bleed-through.** The corner widget now uses manual
+  hit-testing (ViewCube pattern) and publishes its hover state to the
+  viewport input gate, so clicking the widget opens the popup instead of
+  starting a sketch line beneath it.
+- **Snap-widget layout-cursor pollution.** Setting changes via the corner
+  widget no longer make subsequent items render directly under the button —
+  `InvisibleButton + SetCursorScreenPos` was tripping ImGui's
+  boundary-extension assert; replaced with `IsMouseHoveringRect`.
+
 ## [0.5.1] — 2026-05-31
 
 ### Added

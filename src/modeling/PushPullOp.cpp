@@ -1,4 +1,5 @@
 #include "PushPullOp.h"
+#include "Sketch.h"
 
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -24,13 +25,68 @@ PushPullOp::PushPullOp() = default;
 
 void PushPullOp::setTargets(std::vector<Target> targets) {
     m_targets = std::move(targets);
+    // Keep the cascade-source arrays sized in lockstep with m_targets. -1
+    // entries mean "no sketch source" — face-driven push/pulls stay opaque
+    // to the cascade walker.
+    m_sketchSourceIds.assign(m_targets.size(), -1);
+    m_sketchSourceRegions.assign(m_targets.size(), -1);
 }
 
 void PushPullOp::setDistance(double d) {
     m_distance = d;
 }
 
+void PushPullOp::setSketchSource(int targetIndex, int sketchId, int regionIndex) {
+    if (targetIndex < 0 ||
+        targetIndex >= static_cast<int>(m_sketchSourceIds.size())) return;
+    m_sketchSourceIds[targetIndex]     = sketchId;
+    m_sketchSourceRegions[targetIndex] = regionIndex;
+}
+
+bool PushPullOp::hasAnySketchSource() const {
+    for (int id : m_sketchSourceIds) if (id >= 0) return true;
+    return false;
+}
+
+int PushPullOp::getSketchIdAt(int targetIndex) const {
+    if (targetIndex < 0 ||
+        targetIndex >= static_cast<int>(m_sketchSourceIds.size())) return -1;
+    return m_sketchSourceIds[targetIndex];
+}
+
+// Rebuild any target.profile that was originally produced by the given
+// sketch. Used by the cascade walker after a constraint commit. Returns
+// true if at least one profile was rebuilt — caller should then re-execute
+// the op so the body shape catches up.
+bool PushPullOp::rebuildProfileFromSketch(Document& doc, int sketchId) {
+    if (sketchId < 0) return false;
+    auto sk = doc.getSketch(sketchId);
+    if (!sk) return false;
+    auto regions = sk->buildRegions();
+    if (regions.empty()) return false;
+    bool any = false;
+    for (size_t i = 0; i < m_targets.size(); ++i) {
+        if (i >= m_sketchSourceIds.size() ||
+            m_sketchSourceIds[i] != sketchId) continue;
+        int idx = (i < m_sketchSourceRegions.size())
+                      ? m_sketchSourceRegions[i] : -1;
+        if (idx < 0 || idx >= static_cast<int>(regions.size())) idx = 0;
+        if (regions[idx].face.IsNull()) continue;
+        m_targets[i].profile = regions[idx].face;
+        any = true;
+    }
+    return any;
+}
+
 bool PushPullOp::execute(Document& doc) {
+    // Direct re-execute support (e.g. cascade after a sketch constraint
+    // edit): fold the previously-created body ids back into the reuse pool
+    // so addOrPutBody re-uses the same ids and updates the existing bodies
+    // in place. Without this each re-execute would allocate fresh body ids
+    // and pile up duplicate bodies at the same coordinates.
+    if (m_reuseBodyIds.empty() && !m_createdBodyIds.empty()) {
+        m_reuseBodyIds = std::move(m_createdBodyIds);
+    }
     m_previousBodies.clear();
     m_createdBodyIds.clear();
     m_reuseIdx = 0; // walks m_reuseBodyIds as each free-floating output is emitted

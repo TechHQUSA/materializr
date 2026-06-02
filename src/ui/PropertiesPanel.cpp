@@ -7,6 +7,9 @@
 #include "../modeling/SketchSolver.h"
 #include "../modeling/SketchEditOp.h"
 #include "../modeling/SketchConstraints.h"
+#include "../modeling/TransformOp.h"
+#include "../core/EventBus.h"
+#include "../core/Events.h"
 #include <imgui.h>
 #include <cmath>
 #include <cstdio>
@@ -137,35 +140,104 @@ bool PropertiesPanel::render() {
         const TopoDS_Shape& shape = m_document->getBody(bodyId);
         if (!shape.IsNull()) {
             Bnd_Box bbox;
-            BRepBndLib::Add(shape, bbox);
+            // AddOptimal w/ useTriangulation=false, useShapeTolerance=false:
+            // evaluates analytic surfaces (so a Ø80 cylinder reads exactly
+            // 80.000, not 80.007 from a tessellation chord) and skips the
+            // per-face Tolerance() safety padding (which would inflate the
+            // 20 mm height to 20.010). User-facing dim readouts only — leave
+            // the conservative BRepBndLib::Add elsewhere alone since hit
+            // boxes / framing want the safety margin.
+            BRepBndLib::AddOptimal(shape, bbox, Standard_False, Standard_False);
 
             if (!bbox.IsVoid()) {
                 Standard_Real xmin, ymin, zmin, xmax, ymax, zmax;
                 bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
 
-                double width  = xmax - xmin;
-                double height = ymax - ymin;
-                double depth  = zmax - zmin;
+                // World axes (Y-up internally) -> user axes (Z-up): user X is
+                // world X, user Y is world Z, user Z is world Y. The display
+                // and edit code below talks user-axis order; m_userToWorld
+                // maps the loop index to the actual world axis the value
+                // describes.
+                const int m_userToWorld[3] = {0, 2, 1};
+                const double worldExtents[3] = {xmax - xmin, ymax - ymin, zmax - zmin};
+                const double worldMins[3] = {xmin, ymin, zmin};
+                const double userExtents[3] = {
+                    worldExtents[m_userToWorld[0]],
+                    worldExtents[m_userToWorld[1]],
+                    worldExtents[m_userToWorld[2]],
+                };
 
                 char dimText[128];
                 std::snprintf(dimText, sizeof(dimText), "%.2f x %.2f x %.2f",
-                              width, height, depth);
+                              userExtents[0], userExtents[1], userExtents[2]);
                 ImGui::Text("Size: %s", dimText);
 
                 ImGui::Spacing();
 
-                // Individual axis values
-                std::snprintf(dimText, sizeof(dimText), "X: %.2f to %.2f (%.2f)",
-                              xmin, xmax, width);
-                ImGui::Text("%s", dimText);
+                // Editable per-axis bbox extents. Typing a new value and
+                // pressing Enter (or clicking out) scales the body so that
+                // axis's extent matches the typed value, anchored at the
+                // body's bbox-min corner — body grows in +axis direction
+                // only so the result is predictable. Non-uniform scale via
+                // TransformOp keeps each axis independent.
+                const char* axisLabels[3] = {"X", "Y", "Z"};
+                const ImVec4 axisColors[3] = {
+                    ImVec4(1.00f, 0.35f, 0.35f, 1.0f),
+                    ImVec4(0.35f, 1.00f, 0.35f, 1.0f),
+                    ImVec4(0.40f, 0.55f, 1.00f, 1.0f),
+                };
 
-                std::snprintf(dimText, sizeof(dimText), "Y: %.2f to %.2f (%.2f)",
-                              ymin, ymax, height);
-                ImGui::Text("%s", dimText);
+                for (int i = 0; i < 3; ++i) {
+                    auto& edit = m_bodyDimEdit[i];
+                    // Refresh the buffer from current bbox whenever the
+                    // user isn't actively editing — covers external updates
+                    // (undo/redo, other panels) AND first-time display.
+                    if (!edit.focused || edit.bodyId != bodyId) {
+                        std::snprintf(edit.buf, sizeof(edit.buf), "%.3f", userExtents[i]);
+                    }
 
-                std::snprintf(dimText, sizeof(dimText), "Z: %.2f to %.2f (%.2f)",
-                              zmin, zmax, depth);
-                ImGui::Text("%s", dimText);
+                    ImGui::PushID(i);
+                    ImGui::TextColored(axisColors[i], "%s", axisLabels[i]);
+                    ImGui::SameLine(40);
+                    ImGui::SetNextItemWidth(110);
+                    ImGui::InputText("##bodydim", edit.buf, sizeof(edit.buf),
+                                     ImGuiInputTextFlags_CharsDecimal |
+                                     ImGuiInputTextFlags_AutoSelectAll);
+                    bool justActivated   = ImGui::IsItemActivated();
+                    bool justDeactivated = ImGui::IsItemDeactivatedAfterEdit();
+                    ImGui::SameLine(); ImGui::Text("mm");
+
+                    if (justActivated) {
+                        edit.focused = true;
+                        edit.bodyId = bodyId;
+                        edit.initialExtent = userExtents[i];
+                    }
+                    if (justDeactivated) {
+                        double newExtent = std::atof(edit.buf);
+                        if (newExtent > 0 &&
+                            edit.initialExtent > 1e-6 &&
+                            std::abs(newExtent - edit.initialExtent) > 1e-4) {
+                            double ratio = newExtent / edit.initialExtent;
+                            // Apply the scale to the WORLD axis that backs
+                            // this user-axis slot.
+                            int worldAxis = m_userToWorld[i];
+                            auto op = std::make_unique<TransformOp>();
+                            op->setBodyId(bodyId);
+                            op->setType(TransformType::Scale);
+                            double sx = 1, sy = 1, sz = 1;
+                            if (worldAxis == 0)      sx = ratio;
+                            else if (worldAxis == 1) sy = ratio;
+                            else                     sz = ratio;
+                            op->setScaleXYZ(sx, sy, sz);
+                            op->setCenter(worldMins[0], worldMins[1], worldMins[2]);
+                            m_history->pushOperation(std::move(op), *m_document);
+                            modified = true;
+                        }
+                        edit.focused = false;
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::TextDisabled("Press Enter or click out to commit.");
             } else {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Empty shape");
             }
@@ -263,6 +335,35 @@ bool PropertiesPanel::render() {
 void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified) {
     auto sk = m_document->getSketch(sketchId);
     if (!sk) return;
+    // One-shot diagnostic: log when the panel first opens on a sketch so we
+    // can confirm the constraint editor is being reached. Suppress repeat
+    // logs for the same sketch on subsequent frames.
+    static int s_lastLoggedSketchId = -1;
+    if (sketchId != s_lastLoggedSketchId) {
+        std::fprintf(stderr, "[Cascade] PropertiesPanel opened on sketchId=%d "
+                             "(constraints=%zu",
+                     sketchId, sk->getConstraints().size());
+        for (const auto& c : sk->getConstraints()) {
+            const char* tn = "?";
+            switch (c.type) {
+                case ConstraintType::Coincident:    tn = "Coincident";    break;
+                case ConstraintType::Horizontal:    tn = "Horizontal";    break;
+                case ConstraintType::Vertical:      tn = "Vertical";      break;
+                case ConstraintType::Distance:      tn = "Distance";      break;
+                case ConstraintType::Radius:        tn = "Radius";        break;
+                case ConstraintType::Parallel:      tn = "Parallel";      break;
+                case ConstraintType::Perpendicular: tn = "Perpendicular"; break;
+                case ConstraintType::Fixed:         tn = "Fixed";         break;
+                case ConstraintType::Tangent:       tn = "Tangent";       break;
+                case ConstraintType::Equal:         tn = "Equal";         break;
+                case ConstraintType::Concentric:    tn = "Concentric";    break;
+                case ConstraintType::Angle:         tn = "Angle";         break;
+            }
+            std::fprintf(stderr, " %s=%.2f", tn, c.value);
+        }
+        std::fprintf(stderr, ")\n");
+        s_lastLoggedSketchId = sketchId;
+    }
 
     // Switching to a different sketch: throw away buffered edits from the
     // previous one so we don't show stale text in the inputs.
@@ -314,6 +415,15 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         edit.beforeSnap.reset();
         edit.focused = false;
         modified = true;
+        // Cascade trigger: Application listens for this and re-executes any
+        // ExtrudeOp downstream of `sketchId` so the body follows the new
+        // constraint value. No-op when nobody's subscribed.
+        if (m_eventBus) {
+            std::fprintf(stderr, "[Cascade] PropertiesPanel publish SketchEdited sketchId=%d\n", sketchId);
+            m_eventBus->publish(SketchEditedEvent{sketchId});
+        } else {
+            std::fprintf(stderr, "[Cascade] PropertiesPanel has no event bus\n");
+        }
     };
 
     int anyDim = 0;

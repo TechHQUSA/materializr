@@ -105,6 +105,71 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
         m_currentPos.x = m_firstClick.x + m_rectDimH;
     }
 
+    // Arc 3rd-click sweep snap to 15° increments. Snap is only meaningful
+    // while the user is sweeping the bulge of the arc (clicks==2: two clicks
+    // for the chord ends already placed, cursor steering which side and how
+    // far the arc bows). Skipped when the global snap toggle is off.
+    //
+    // Geometry: given the chord (A=firstClick, B=secondClick) and a target
+    // sweep θ, the apex of the arc passing through A and B with that sweep
+    // sits on the perpendicular bisector of AB at signed distance
+    //   d = (L/2) * tan(θ/4)
+    // from the chord's midpoint, on whichever side the cursor currently is.
+    // The cursor jumps to that apex when the natural sweep is within ±5° of
+    // a 15° multiple, giving a sticky "click into a quarter / third / etc."
+    // feel without locking out finer adjustments.
+    if (m_mode == SketchToolMode::Arc && m_clickCount == 2 &&
+        m_snapToGridEnabled) {
+        glm::vec2 A = m_firstClick;
+        glm::vec2 B = m_secondClick;
+        glm::vec2 C = m_currentPos;
+        const float ax = A.x, ay = A.y;
+        const float bx = C.x, by = C.y;       // 'b' = third point in circumcircle
+        const float cx = B.x, cy = B.y;       // 'c' = arc end
+        const float D = 2.0f * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+        if (std::abs(D) > 1e-10f) {
+            const float ux = ((ax*ax+ay*ay)*(by-cy) +
+                              (bx*bx+by*by)*(cy-ay) +
+                              (cx*cx+cy*cy)*(ay-by)) / D;
+            const float uy = ((ax*ax+ay*ay)*(cx-bx) +
+                              (bx*bx+by*by)*(ax-cx) +
+                              (cx*cx+cy*cy)*(bx-ax)) / D;
+            glm::vec2 ctr(ux, uy);
+            const float sA = std::atan2(A.y - ctr.y, A.x - ctr.x);
+            const float eA = std::atan2(B.y - ctr.y, B.x - ctr.x);
+            const float mA = std::atan2(C.y - ctr.y, C.x - ctr.x);
+            const float TWO_PI = 2.0f * static_cast<float>(M_PI);
+            auto norm = [TWO_PI](float a){ while (a < 0) a += TWO_PI;
+                                            while (a >= TWO_PI) a -= TWO_PI;
+                                            return a; };
+            const float ds = norm(eA - sA);
+            const float dm = norm(mA - sA);
+            const float sweep = (dm < ds) ? ds : (ds - TWO_PI);
+            const float deg = sweep * 180.0f / static_cast<float>(M_PI); // signed
+            const float step = 15.0f;
+            const float target = std::round(deg / step) * step;
+            if (std::abs(target) >= 0.5f && std::abs(deg - target) <= 5.0f) {
+                glm::vec2 chord = B - A;
+                float L = glm::length(chord);
+                if (L > 1e-4f) {
+                    glm::vec2 chordDir = chord / L;
+                    glm::vec2 perp(-chordDir.y, chordDir.x);
+                    glm::vec2 M = 0.5f * (A + B);
+                    // Side the cursor is on now — preserve it so the snap
+                    // doesn't flip the arc across the chord.
+                    if (glm::dot(C - M, perp) < 0.0f) perp = -perp;
+                    const float thetaAbs =
+                        std::abs(target) * static_cast<float>(M_PI) / 180.0f;
+                    // tan(θ/4) handles 0 < θ < 360 cleanly: 90° → tan(22.5°)
+                    // ≈ 0.414·(L/2); 180° → tan(45°) = L/2; 270° → tan(67.5°)
+                    // ≈ 2.414·(L/2), apex jumps far past the centre.
+                    const float d = (L * 0.5f) * std::tan(thetaAbs * 0.25f);
+                    m_currentPos = M + perp * d;
+                }
+            }
+        }
+    }
+
     if (m_mode == SketchToolMode::Trim) {
         computeTrimHover(pos);
     } else if (!m_trimHoverPoints.empty()) {

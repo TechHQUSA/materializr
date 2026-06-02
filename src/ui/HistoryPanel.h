@@ -5,6 +5,10 @@ class History;
 class Document;
 
 namespace materializr {
+class EventBus;
+}
+
+namespace materializr {
 
 class HistoryPanel {
 public:
@@ -12,6 +16,7 @@ public:
 
     void setHistory(History* history);
     void setDocument(Document* doc);
+    void setEventBus(EventBus* bus) { m_eventBus = bus; }
 
     // Render the panel. Returns true if history was modified (undo/redo/edit).
     bool render();
@@ -24,6 +29,7 @@ public:
 private:
     History* m_history = nullptr;
     Document* m_document = nullptr;
+    materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;
     bool m_showProperties = false;
     bool m_deleteConflict = false; // last delete was blocked by a dependent step

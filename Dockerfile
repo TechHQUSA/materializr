@@ -37,10 +37,19 @@ RUN ARCH=$(uname -m) \
 
 RUN mkdir -p /AppDir/usr/bin /AppDir/usr/lib \
     /AppDir/usr/share/icons/hicolor/256x256/apps \
-    /AppDir/usr/share/icons/hicolor/512x512/apps
+    /AppDir/usr/share/icons/hicolor/512x512/apps \
+    /AppDir/usr/share/materializr/fonts
 
 # Copy binary
 RUN cp /src/build/materializr /AppDir/usr/bin/materializr
+
+# Bundle JetBrains Mono so the ImGui font loader (Application::initImGui)
+# resolves the `<exe>/../share/materializr/fonts/JetBrainsMono-Regular.ttf`
+# candidate when running from the AppImage layout. ~270 KB.
+RUN if [ -f /src/assets/fonts/JetBrainsMono-Regular.ttf ]; then \
+        cp /src/assets/fonts/JetBrainsMono-Regular.ttf \
+           /AppDir/usr/share/materializr/fonts/JetBrainsMono-Regular.ttf ; \
+    fi
 
 # Copy OCCT + TBB + Freetype shared libs (follow symlinks, any arch)
 RUN find /usr/lib -name "libTK*.so*" -o -name "libtbb*.so*" -o -name "libfreetype.so*" \

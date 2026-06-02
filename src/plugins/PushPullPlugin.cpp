@@ -158,6 +158,16 @@ private:
         }
         op->setTargets(std::move(targets));
         op->setDistance(static_cast<double>(m_distance));
+        // Cascade plumbing: stamp each target's sketch+region (when present)
+        // so a later constraint edit can re-derive its profile from the
+        // updated sketch. Face-driven targets keep -1 (no cascade).
+        for (size_t i = 0; i < m_targets.size(); ++i) {
+            if (m_targets[i].sketchId >= 0) {
+                op->setSketchSource(static_cast<int>(i),
+                                    m_targets[i].sketchId,
+                                    m_targets[i].regionIndex);
+            }
+        }
         if (ctx.history().pushOperation(std::move(op), ctx.document())) {
             m_previewPushed = true;
         }

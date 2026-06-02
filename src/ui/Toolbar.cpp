@@ -128,22 +128,9 @@ ToolAction Toolbar::renderSketchTools() {
     }
     ImGui::Separator();
 
-    // Snap toggle sits above the grid step so it's the primary control —
-    // the step buttons below tune the snap when it's on.
-    ImGui::Checkbox("Snap to grid", &m_snapToGrid);
-    ImGui::SetItemTooltip("When on, every placed / dragged point rounds to "
-                          "the selected grid step. Off = sub-grid free-form.");
-    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Grid:");
-    const float steps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
-    const char* labels[] = { "0.1", "0.5", "1", "10" };
-    for (int i = 0; i < 4; ++i) {
-        if (i > 0) ImGui::SameLine();
-        bool selected = std::abs(m_gridStep - steps[i]) < 1e-6f;
-        if (selected) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
-        if (ImGui::Button(labels[i], ImVec2(34, 24))) m_gridStep = steps[i];
-        if (selected) ImGui::PopStyleColor();
-    }
-    ImGui::Separator();
+    // Snap on/off + step both live in the corner widget next to the ViewCube
+    // now — single source of truth. The duplicate grid-step row used to sit
+    // here but was removed once the corner widget proved sufficient.
 
     // Render a sketch-tool button with a thick light-grey border when it's
     // the currently active mode. Caller checks the return value to set
@@ -322,8 +309,8 @@ ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
     if (ImGui::Button("Mirror", ImVec2(-1, 30)))    action = ToolAction::Mirror;
     tip("Mirror the selected bodies across a plane you pick next.");
 
-    ImGui::Checkbox("Snap to grid", &m_snapToGrid);
-    ImGui::SetItemTooltip("When on, gizmo drags round to the selected grid step.");
+    // Snap on/off lives in the corner widget by the ViewCube. Step buttons
+    // remain so you can retune without leaving the body toolbar.
     ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1.0f), "Grid:");
     const float gridSteps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
     const char* gridLabels[] = { "0.1", "0.5", "1", "10" };

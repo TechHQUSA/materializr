@@ -38,7 +38,14 @@ void Document::removeBody(int id) {
         // restore the body's folderId, colour, visibility, and name.
         m_bodyTombstones[id] = m_bodies[idx];
         m_bodies.erase(m_bodies.begin() + idx);
-        if (m_eventBus) m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+        if (m_eventBus) {
+            // BodyRemovedEvent FIRST so the renderer drops the slot before
+            // any DocumentModifiedEvent-triggered logic queries the scene;
+            // banding fix from the push/pull preview-undo loop relies on
+            // this ordering (see Events.h BodyRemovedEvent docs).
+            m_eventBus->publish(materializr::BodyRemovedEvent{id});
+            m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+        }
     }
 }
 

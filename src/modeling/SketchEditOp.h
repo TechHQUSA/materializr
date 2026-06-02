@@ -43,6 +43,7 @@ public:
     // Accessors for the ProjectIO factory.
     std::shared_ptr<Sketch> getBeforeSnapshot() const { return m_before; }
     std::shared_ptr<Sketch> getAfterSnapshot() const  { return m_after;  }
+    std::shared_ptr<Sketch> getTarget() const { return m_target; }
     void setTarget(std::shared_ptr<Sketch> t) { m_target = std::move(t); }
     void setSnapshots(std::shared_ptr<Sketch> before, std::shared_ptr<Sketch> after) {
         m_before = std::move(before); m_after = std::move(after);

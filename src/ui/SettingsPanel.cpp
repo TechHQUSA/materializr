@@ -145,13 +145,13 @@ bool SettingsPanel::render() {
                 if (m_settings.gridSize < 0.01f) m_settings.gridSize = 0.01f;
                 changed = true;
             }
-            if (ImGui::Checkbox("Snap to Grid", &m_settings.snapToGrid)) {
+            // Snap-on/off + step are owned by the corner widget next to the
+            // ViewCube (single source of truth). Threshold stays here as the
+            // one snap parameter that isn't quick-toggled — only meaningful
+            // when snap is on, but always editable so it doesn't disappear.
+            ImGui::TextDisabled("Snap on/off + step: see the widget next to the ViewCube.");
+            if (ImGui::SliderFloat("Snap Threshold", &m_settings.snapThreshold, 0.01f, 2.0f, "%.2f")) {
                 changed = true;
-            }
-            if (m_settings.snapToGrid) {
-                if (ImGui::SliderFloat("Snap Threshold", &m_settings.snapThreshold, 0.01f, 2.0f, "%.2f")) {
-                    changed = true;
-                }
             }
 
             ImGui::EndTabItem();

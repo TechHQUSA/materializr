@@ -76,7 +76,10 @@ void MeasureTool::measureObjects() {
         try {
             const TopoDS_Shape& shape = m_document->getBody(bodyId);
             if (shape.IsNull()) continue;
-            BRepBndLib::Add(shape, bb);
+            // Analytic bounds, no tolerance padding — same reasoning as the
+            // Properties panel dim readout (avoids ~5–10 µm of slop on
+            // cylinders/cones and STEP-imported faces).
+            BRepBndLib::AddOptimal(shape, bb, Standard_False, Standard_False);
             ++count;
         } catch (...) {}
     }

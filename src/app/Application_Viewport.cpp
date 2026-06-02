@@ -383,7 +383,14 @@ void Application::renderViewport() {
                              imgMin.y + (1.0f - (c.y / c.w * 0.5f + 0.5f)) * imgSize.y);
                 return true;
             };
-            auto drawDim = [&](glm::vec3 aW, glm::vec3 bW, const char* label) {
+            // Style enum lets callers pick between the subtle sketch / move
+            // gizmo readout (Normal) and the bolder fluorescent-yellow arrow
+            // used during active body operations (Bold) — push/pull, fillet,
+            // chamfer. Sketch inferences keep Normal because 4-5 of them can
+            // run at once and the heavier visuals would clutter the canvas.
+            enum class DimStyle { Normal, Bold };
+            auto drawDim = [&](glm::vec3 aW, glm::vec3 bW, const char* label,
+                               DimStyle style = DimStyle::Normal) {
                 ImVec2 sa, sb;
                 if (!toImg(aW, sa) || !toImg(bW, sb)) return;
                 ImVec2 dir(sb.x - sa.x, sb.y - sa.y);
@@ -391,19 +398,41 @@ void Application::renderViewport() {
                 if (len < 2.0f) return;
                 dir.x /= len; dir.y /= len;
                 ImVec2 perp(-dir.y, dir.x);
-                const float off = 26.0f, ah = 7.0f;
+                const bool bold = (style == DimStyle::Bold);
+                const float off    = bold ? 30.0f : 26.0f;
+                const float ah     = bold ? 13.0f : 7.0f;     // arrowhead size
+                const float thick  = bold ? 3.0f  : 1.5f;     // dim line thickness
+                const float extThk = bold ? 1.5f  : 1.0f;     // extension thickness
                 ImVec2 da(sa.x + perp.x * off, sa.y + perp.y * off);
                 ImVec2 db(sb.x + perp.x * off, sb.y + perp.y * off);
-                ImU32 col = IM_COL32(235, 235, 240, 255);
-                ImU32 ext = IM_COL32(170, 170, 180, 150);
-                dl->AddLine(sa, da, ext, 1.0f);                 // extension lines
-                dl->AddLine(sb, db, ext, 1.0f);
-                dl->AddLine(da, db, col, 1.5f);                 // dimension line
+                // Bold uses a saturated amber/yellow that pops against both the
+                // steel-blue body palette and the dark gray viewport. A black
+                // outline (drawn one thickness wider underneath) keeps it
+                // readable against any surface colour.
+                ImU32 col       = bold ? IM_COL32(255, 200,  60, 255)
+                                       : IM_COL32(235, 235, 240, 255);
+                ImU32 outline   = IM_COL32( 20,  20,  28, 230);
+                ImU32 ext       = bold ? IM_COL32(255, 200,  60, 200)
+                                       : IM_COL32(170, 170, 180, 150);
+                dl->AddLine(sa, da, ext, extThk);                 // extension lines
+                dl->AddLine(sb, db, ext, extThk);
+                if (bold) dl->AddLine(da, db, outline, thick + 2.0f); // halo
+                dl->AddLine(da, db, col, thick);                  // dimension line
                 auto arrow = [&](ImVec2 tip, ImVec2 along) {
                     ImVec2 base(tip.x - along.x * ah, tip.y - along.y * ah);
-                    dl->AddTriangleFilled(tip,
-                        ImVec2(base.x + perp.x * ah * 0.5f, base.y + perp.y * ah * 0.5f),
-                        ImVec2(base.x - perp.x * ah * 0.5f, base.y - perp.y * ah * 0.5f), col);
+                    ImVec2 wing1(base.x + perp.x * ah * 0.5f, base.y + perp.y * ah * 0.5f);
+                    ImVec2 wing2(base.x - perp.x * ah * 0.5f, base.y - perp.y * ah * 0.5f);
+                    if (bold) {
+                        // Black halo around the arrowhead so it doesn't melt
+                        // into the body silhouette when the camera is edge-on.
+                        ImVec2 g1(base.x + perp.x * (ah * 0.5f + 1.6f),
+                                  base.y + perp.y * (ah * 0.5f + 1.6f));
+                        ImVec2 g2(base.x - perp.x * (ah * 0.5f + 1.6f),
+                                  base.y - perp.y * (ah * 0.5f + 1.6f));
+                        ImVec2 gt(tip.x + along.x * 1.6f, tip.y + along.y * 1.6f);
+                        dl->AddTriangleFilled(gt, g1, g2, outline);
+                    }
+                    dl->AddTriangleFilled(tip, wing1, wing2, col);
                 };
                 arrow(da, ImVec2(-dir.x, -dir.y));
                 arrow(db, dir);
@@ -411,8 +440,11 @@ void Application::renderViewport() {
                 ImVec2 mid((da.x + db.x) * 0.5f + perp.x * 12.0f,
                            (da.y + db.y) * 0.5f + perp.y * 12.0f);
                 ImVec2 tp(mid.x - ts.x * 0.5f, mid.y - ts.y * 0.5f);
-                dl->AddRectFilled(ImVec2(tp.x - 3, tp.y - 2), ImVec2(tp.x + ts.x + 3, tp.y + ts.y + 2),
-                                  IM_COL32(20, 20, 28, 205), 3.0f);
+                dl->AddRectFilled(ImVec2(tp.x - 4, tp.y - 3), ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 3),
+                                  IM_COL32(20, 20, 28, bold ? 235 : 205), 3.0f);
+                if (bold) dl->AddRect(ImVec2(tp.x - 4, tp.y - 3),
+                                      ImVec2(tp.x + ts.x + 4, tp.y + ts.y + 3),
+                                      col, 3.0f, 0, 1.5f);
                 dl->AddText(tp, col, label);
             };
 
@@ -420,16 +452,19 @@ void Application::renderViewport() {
             if (m_extruding) {
                 std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", std::abs(m_extrudeDistance));
                 drawDim(m_extrudeOrigin,
-                        m_extrudeOrigin + m_extrudeNormal * m_extrudeDistance, dbuf);
+                        m_extrudeOrigin + m_extrudeNormal * m_extrudeDistance, dbuf,
+                        DimStyle::Bold);
             } else if (m_pushPullActive && m_pushPullHasArrow) {
                 // Arrow out of the face + signed-distance measurement.
                 std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_pushPullDistance);
                 drawDim(m_pushPullOrigin,
-                        m_pushPullOrigin + m_pushPullNormal * m_pushPullDistance, dbuf);
+                        m_pushPullOrigin + m_pushPullNormal * m_pushPullDistance, dbuf,
+                        DimStyle::Bold);
             } else if (m_edgeOpActive && m_edgeOpHasHandle) {
                 // Arrow straight out of the edge (outward, perpendicular) + measurement.
                 std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_edgeOpValue);
-                drawDim(m_edgeOpMid, m_edgeOpMid + m_edgeOpOutDir * m_edgeOpValue, dbuf);
+                drawDim(m_edgeOpMid, m_edgeOpMid + m_edgeOpOutDir * m_edgeOpValue, dbuf,
+                        DimStyle::Bold);
             } else if (m_gizmoDragging && glm::length(m_gizmoTotalDelta) > 1e-3f) {
                 // Translate drag: dimension line from the WORLD ORIGIN to the
                 // current pivot. Snap matches the rule used by the actual
@@ -437,10 +472,19 @@ void Application::renderViewport() {
                 // so the readout shows whole-mm (or whole-grid-step) coords
                 // and the label tracks what the body/sketch is doing.
                 glm::vec3 cc = m_gizmoSharedPivot + m_gizmoTotalDelta;
+                // For the user-Z (world-Y) component of the displayed tuple
+                // we want the BOTTOM of the body, not the centre. Translate
+                // moves the whole body rigidly, so bottom-Y after drag =
+                // bottom-Y at start + delta.y. The pivot stays the centre
+                // (gizmo placement is unchanged) but `bottomCC.y` flows into
+                // the readout below.
+                glm::vec3 bottomCC = cc;
+                bottomCC.y = m_gizmoSharedBottomY + m_gizmoTotalDelta.y;
                 if (m_snapToGrid && m_sketchGridStep > 0.0f) {
                     float step = m_sketchGridStep;
                     auto s = [&](float v){ return std::round(v/step)*step; };
-                    cc = glm::vec3(s(cc.x), s(cc.y), s(cc.z));
+                    cc       = glm::vec3(s(cc.x),       s(cc.y),       s(cc.z));
+                    bottomCC = glm::vec3(s(bottomCC.x), s(bottomCC.y), s(bottomCC.z));
                 }
                 // Label leads with the dragged axis name. We map from the
                 // Y-up world internals to the user's Z-up convention so the
@@ -454,18 +498,21 @@ void Application::renderViewport() {
                 float ax = std::abs(m_gizmoTotalDelta.x);
                 float ay = std::abs(m_gizmoTotalDelta.y);
                 float az = std::abs(m_gizmoTotalDelta.z);
+                // Lead label: which axis dominates the drag delta. axV uses
+                // bottomCC for the Z (world-Y) leg, cc for X/Y — so the
+                // single-axis readout matches the tuple's user-Z column.
                 char axL = '?'; float axV = 0.0f;
                 if (ax >= ay && ax >= az && ax > 1e-3f) { axL = 'X'; axV = cc.x; }
-                else if (ay >= az && ay > 1e-3f)         { axL = 'Z'; axV = cc.y; }
+                else if (ay >= az && ay > 1e-3f)         { axL = 'Z'; axV = bottomCC.y; }
                 else if (az > 1e-3f)                      { axL = 'Y'; axV = cc.z; }
                 if (axL == '?') {
                     std::snprintf(dbuf, sizeof(dbuf),
                                   "%.2f mm  (%.2f, %.2f, %.2f)",
-                                  glm::length(cc), cc.x, cc.z, cc.y);
+                                  glm::length(cc), cc.x, cc.z, bottomCC.y);
                 } else {
                     std::snprintf(dbuf, sizeof(dbuf),
                                   "%c %.2f mm   (%.2f, %.2f, %.2f)",
-                                  axL, axV, cc.x, cc.z, cc.y);
+                                  axL, axV, cc.x, cc.z, bottomCC.y);
                 }
                 glm::vec3 origin(0.0f);
                 drawDim(origin, cc, dbuf);
@@ -560,6 +607,89 @@ void Application::renderViewport() {
                     if (h > 1e-3f) {
                         std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", h);
                         drawDim(sketch2world(br), sketch2world(tr), dbuf);
+                    }
+                } else if (pm == SketchToolMode::Arc) {
+                    // Arc is a 3-click tool. While placing the second click
+                    // (clicks==1) we just have a chord — show its length.
+                    // Once the second click lands (clicks==2) we have three
+                    // points on a circle, so we can compute the sweep and
+                    // show the user "this is a 90° quarter, this is a 180°
+                    // semicircle, this is 270°…" while they're aiming the
+                    // third click. Same circumcircle math the renderer uses.
+                    int clicks = m_sketchTool->getClickCount();
+                    if (clicks == 1) {
+                        float length = glm::length(pe - ps);
+                        if (length > 1e-3f) {
+                            std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", length);
+                            drawDim(sketch2world(ps), sketch2world(pe), dbuf);
+                        }
+                    } else if (clicks == 2) {
+                        glm::vec2 second = m_sketchTool->getSecondClick();
+                        float ax = ps.x, ay = ps.y;
+                        float bx = pe.x, by = pe.y;
+                        float cx = second.x, cy = second.y;
+                        float D = 2.0f * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by));
+                        if (std::abs(D) > 1e-10f) {
+                            float ux = ((ax*ax+ay*ay)*(by-cy) +
+                                        (bx*bx+by*by)*(cy-ay) +
+                                        (cx*cx+cy*cy)*(ay-by)) / D;
+                            float uy = ((ax*ax+ay*ay)*(cx-bx) +
+                                        (bx*bx+by*by)*(ax-cx) +
+                                        (cx*cx+cy*cy)*(bx-ax)) / D;
+                            glm::vec2 ctr(ux, uy);
+                            float r = glm::length(ps - ctr);
+                            if (r > 1e-3f) {
+                                // Arc semantics (matches SketchRenderer):
+                                //   ps     = first click  = arc START
+                                //   second = second click = arc END
+                                //   pe     = cursor       = the through-point
+                                //                           that picks which
+                                //                           side of the chord
+                                //                           the arc bows.
+                                // Sweep is start → end; the through-point
+                                // only decides direction. (Previously I'd
+                                // labelled mA/eA inverted, which flipped the
+                                // (dm<ds) branch and reported the long-way
+                                // arc — e.g. a 25° sliver as 335°.)
+                                float sA = std::atan2(ps.y - ctr.y, ps.x - ctr.x);
+                                float eA = std::atan2(second.y - ctr.y,
+                                                       second.x - ctr.x);
+                                float mA = std::atan2(pe.y - ctr.y, pe.x - ctr.x);
+                                auto norm = [](float a){
+                                    const float TWO_PI = 2.0f * (float)M_PI;
+                                    while (a < 0) a += TWO_PI;
+                                    while (a >= TWO_PI) a -= TWO_PI;
+                                    return a;
+                                };
+                                float ds = norm(eA - sA);
+                                float dm = norm(mA - sA);
+                                float sweep = (dm < ds) ? ds : (ds - 2.0f * (float)M_PI);
+                                float deg = std::abs(sweep * 180.0f / (float)M_PI);
+                                // Pin label 14 px to the right of the cursor —
+                                // a consistent place to look that doesn't
+                                // dance around when the inferred circle's
+                                // centre/radius shift mid-drag. Tags common
+                                // sweeps (¼ / ½ / ¾ / full) so the user can
+                                // lock onto canonical values by eye.
+                                ImVec2 mp = ImGui::GetMousePos();
+                                const char* tag =
+                                    (std::abs(deg -  90.0f) < 1.5f) ? "  (¼)"
+                                  : (std::abs(deg - 180.0f) < 1.5f) ? "  (½)"
+                                  : (std::abs(deg - 270.0f) < 1.5f) ? "  (¾)"
+                                  : (std::abs(deg - 360.0f) < 1.5f) ? "  (full)"
+                                  : "";
+                                std::snprintf(dbuf, sizeof(dbuf),
+                                              "%.1f\xC2\xB0%s", deg, tag);
+                                ImVec2 ts = ImGui::CalcTextSize(dbuf);
+                                ImVec2 tp(mp.x + 14.0f, mp.y - ts.y * 0.5f);
+                                dl->AddRectFilled(
+                                    ImVec2(tp.x - 5, tp.y - 3),
+                                    ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3),
+                                    IM_COL32(20, 20, 28, 225), 3.0f);
+                                dl->AddText(tp,
+                                            IM_COL32(255, 235, 120, 255), dbuf);
+                            }
+                        }
                     }
                 }
             }
@@ -815,20 +945,89 @@ void Application::renderViewport() {
                                       c.value * 2.0);
                         drawLabel(labelPos, lbl, c);
                     } else if (c.type == ConstraintType::Angle) {
-                        // Label at the midpoint of line A (the reference) so
-                        // it's near both lines without overlapping geometry.
+                        // SolidWorks-style angle dim: find the vertex where the
+                        // two constrained lines meet, draw a small arc spanning
+                        // the angle, and place the °-label hugging the outside
+                        // of the arc. Falls back to the old line-A midpoint
+                        // label only if the geometry doesn't admit a sensible
+                        // vertex.
                         const SketchLine* lA = nullptr;
+                        const SketchLine* lB = nullptr;
                         for (const auto& l : m_activeSketch->getLines()) {
-                            if (l.id == c.entityA) { lA = &l; break; }
+                            if (l.id == c.entityA) lA = &l;
+                            else if (l.id == c.entityB) lB = &l;
                         }
-                        if (!lA) continue;
-                        const SketchPoint* sp = m_activeSketch->getPoint(lA->startPointId);
-                        const SketchPoint* ep = m_activeSketch->getPoint(lA->endPointId);
-                        if (!sp || !ep) continue;
-                        glm::vec2 mid = 0.5f * (sp->pos + ep->pos);
-                        float deg = static_cast<float>(c.value * 180.0 / M_PI);
+                        if (!lA || !lB) continue;
+                        const SketchPoint* aS = m_activeSketch->getPoint(lA->startPointId);
+                        const SketchPoint* aE = m_activeSketch->getPoint(lA->endPointId);
+                        const SketchPoint* bS = m_activeSketch->getPoint(lB->startPointId);
+                        const SketchPoint* bE = m_activeSketch->getPoint(lB->endPointId);
+                        if (!aS || !aE || !bS || !bE) continue;
+
+                        // Vertex = the closest pair of endpoints between the two
+                        // lines. Average them so the arc is anchored even when
+                        // the lines don't quite touch (Coincident-loose).
+                        glm::vec2 aEnds[2] = { aS->pos, aE->pos };
+                        glm::vec2 bEnds[2] = { bS->pos, bE->pos };
+                        int ai = 0, bi = 0; float minD = FLT_MAX;
+                        for (int i = 0; i < 2; ++i)
+                            for (int j = 0; j < 2; ++j) {
+                                float d = glm::length(aEnds[i] - bEnds[j]);
+                                if (d < minD) { minD = d; ai = i; bi = j; }
+                            }
+                        glm::vec2 vertex = 0.5f * (aEnds[ai] + bEnds[bi]);
+                        glm::vec2 dirA = aEnds[1 - ai] - vertex;
+                        glm::vec2 dirB = bEnds[1 - bi] - vertex;
+                        float lenA = glm::length(dirA), lenB = glm::length(dirB);
+                        if (lenA < 1e-4f || lenB < 1e-4f) continue;
+                        dirA /= lenA; dirB /= lenB;
+
+                        // Arc radius scales with the shorter line so the arc
+                        // stays inside the visible angle. Clamped so it never
+                        // shrinks below 2mm (illegible) or balloons past 20mm
+                        // (covers neighbouring geometry).
+                        float arcR = std::min(lenA, lenB) * 0.25f;
+                        arcR = std::clamp(arcR, 2.0f, 20.0f);
+
+                        // Pick the SHORTER arc between dirA and dirB so the
+                        // label sits in the same wedge the user sees as "the
+                        // angle". atan2 + signed delta wrapped to (-π, π].
+                        float angA = std::atan2(dirA.y, dirA.x);
+                        float angB = std::atan2(dirB.y, dirB.x);
+                        float diff = angB - angA;
+                        while (diff >  M_PI) diff -= 2.0f * M_PI;
+                        while (diff < -M_PI) diff += 2.0f * M_PI;
+
+                        // Sample the arc and AddPolyline through screen-space —
+                        // sketches can sit on arbitrarily-oriented planes, so
+                        // we can't draw a flat 2D arc; each sample goes through
+                        // dim2world → toImg like the rest of the sketch overlay.
+                        constexpr int N = 28;
+                        ImVec2 pts[N + 1];
+                        int nPts = 0;
+                        for (int i = 0; i <= N; ++i) {
+                            float t = float(i) / float(N);
+                            float a = angA + diff * t;
+                            glm::vec2 p2 = vertex + glm::vec2(std::cos(a), std::sin(a)) * arcR;
+                            ImVec2 ip;
+                            if (toImg(dim2world(p2), ip)) pts[nPts++] = ip;
+                        }
+                        if (nPts > 1) {
+                            // Light halo so the arc reads against the sketch
+                            // grid lines, then the dim-yellow stroke on top.
+                            dl->AddPolyline(pts, nPts, IM_COL32(20, 20, 28, 200),
+                                            0, 3.0f);
+                            dl->AddPolyline(pts, nPts, IM_COL32(255, 235, 120, 230),
+                                            0, 1.5f);
+                        }
+
+                        // Label hugs the outside of the arc midpoint.
+                        float midA = angA + diff * 0.5f;
+                        glm::vec2 labelPos = vertex +
+                            glm::vec2(std::cos(midA), std::sin(midA)) * (arcR + 2.5f);
+                        float deg = std::abs(static_cast<float>(diff * 180.0 / M_PI));
                         std::snprintf(lbl, sizeof(lbl), "%.1f\xC2\xB0", deg);
-                        drawLabel(mid, lbl, c);
+                        drawLabel(labelPos, lbl, c);
                     }
                 }
 
@@ -927,7 +1126,53 @@ void Application::renderViewport() {
 
         if (ImGui::IsItemHovered()) {
             ImGuiIO& io = ImGui::GetIO();
-            if (io.MouseWheel != 0.0f) cam.zoom(io.MouseWheel);
+            if (io.MouseWheel != 0.0f) {
+                // Zoom toward whatever the cursor is over (Blender/Fusion-360
+                // feel). Ray-cast against the document for a real hit point;
+                // fall back to the ray's intersection with the plane through
+                // the current target perpendicular to the view direction —
+                // that gives a sensible focus even over empty space and means
+                // empty-space scrolling matches the legacy dolly-to-target
+                // behaviour.
+                ImVec2 mp = ImGui::GetMousePos();
+                ImVec2 wpz = ImGui::GetItemRectMin();
+                float lx = mp.x - wpz.x;
+                float ly = mp.y - wpz.y;
+                glm::vec3 focus = cam.getTarget();
+                bool gotHit = false;
+                try {
+                    auto hit = m_picker->pick(lx, ly, contentSize.x, contentSize.y,
+                                              cam, *m_document);
+                    if (hit.hit) {
+                        focus = hit.hitPoint;
+                        gotHit = true;
+                    }
+                } catch (...) {}
+                if (!gotHit) {
+                    // Unproject the cursor into the world (NDC → ray) and
+                    // intersect with the plane through the camera target
+                    // perpendicular to the view direction. That gives us a
+                    // focus point at the same depth as the current target,
+                    // so empty-space scrolling matches the legacy
+                    // dolly-to-target behaviour and full-space scrolling
+                    // zooms toward whatever's under the cursor.
+                    float ndcX = (2.0f * lx) / contentSize.x - 1.0f;
+                    float ndcY = 1.0f - (2.0f * ly) / contentSize.y;
+                    glm::mat4 invVP = glm::inverse(
+                        cam.getProjectionMatrix() * cam.getViewMatrix());
+                    glm::vec4 nearH = invVP * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+                    glm::vec4 farH  = invVP * glm::vec4(ndcX, ndcY,  1.0f, 1.0f);
+                    glm::vec3 rayO  = glm::vec3(nearH) / nearH.w;
+                    glm::vec3 rayD  = glm::normalize(glm::vec3(farH) / farH.w - rayO);
+                    glm::vec3 viewDir = glm::normalize(cam.getPosition() - cam.getTarget());
+                    float denom = glm::dot(rayD, -viewDir);
+                    if (std::abs(denom) > 1e-4f) {
+                        float t = glm::dot(cam.getTarget() - rayO, -viewDir) / denom;
+                        if (t > 0.0f) focus = rayO + rayD * t;
+                    }
+                }
+                cam.zoomToward(focus, io.MouseWheel);
+            }
             // Camera drag uses the configurable bindings (File > Settings). The
             // orbit button pans instead when Shift is held; a distinct pan button
             // always pans.
@@ -1203,6 +1448,12 @@ void Application::renderViewport() {
                             // Rotate spin the sketch in place instead of
                             // around a remote plane-anchor point.
                             m_gizmoSharedPivot = glm::vec3(0.0f);
+                            // Track lowest world-Y across the drag set so the
+                            // translate readout can report bottom-Z (user
+                            // convention) instead of centre-Z. Seeded with
+                            // FLT_MAX; falls back to pivot.y at the bottom
+                            // of this block if nothing valid contributed.
+                            float bottomY = FLT_MAX;
                             int np = 0;
                             for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
                                 auto sk = m_document->getSketch(sid);
@@ -1231,10 +1482,13 @@ void Application::renderViewport() {
                                     if (bb.IsVoid()) continue;
                                     double x0,y0,z0,x1,y1,z1; bb.Get(x0,y0,z0,x1,y1,z1);
                                     m_gizmoSharedPivot += glm::vec3((x0+x1)*0.5f, (y0+y1)*0.5f, (z0+z1)*0.5f);
+                                    if (static_cast<float>(y0) < bottomY) bottomY = static_cast<float>(y0);
                                     ++np;
                                 } catch (...) {}
                             }
                             if (np > 0) m_gizmoSharedPivot /= static_cast<float>(np);
+                            m_gizmoSharedBottomY = (bottomY < FLT_MAX) ? bottomY
+                                                                       : m_gizmoSharedPivot.y;
                         }
                     }
 
@@ -1538,7 +1792,8 @@ void Application::renderViewport() {
                     }
                 }
 
-                if (!gizmoConsumedInput && !m_viewCube->wasHovered()) {
+                if (!gizmoConsumedInput && !m_viewCube->wasHovered() &&
+                    !m_snapWidgetHovered) {
                     auto result = m_picker->pick(localX, localY,
                         contentSize.x, contentSize.y, cam, *m_document);
 
@@ -1904,7 +2159,7 @@ void Application::renderViewport() {
             // Suppress while the ViewCube widget is being hovered/dragged so its
             // click doesn't pass through and start a line draw underneath.
             if (m_inSketchMode && m_activeSketch && !camDragging &&
-                !m_viewCube->wasHovered()) {
+                !m_viewCube->wasHovered() && !m_snapWidgetHovered) {
                 ImVec2 mousePos = ImGui::GetMousePos();
                 ImVec2 winPos = ImGui::GetItemRectMin();
                 float localX = mousePos.x - winPos.x;

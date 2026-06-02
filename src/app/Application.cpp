@@ -58,6 +58,7 @@
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
 #include "core/EventBus.h"
+#include "core/Events.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
 
@@ -99,6 +100,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <TopoDS.hxx>
 #include <stdexcept>
 #include <cstdio>
+#include <unistd.h>  // readlink for resolving /proc/self/exe → exe dir (font path lookup)
 
 namespace materializr {
 
@@ -115,6 +117,36 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_history = std::make_unique<History>();
     m_selection = std::make_unique<SelectionManager>();
     m_eventBus = std::make_unique<EventBus>();
+
+    // Cascade: when a SketchEditOp commits via a user-driven path that
+    // identifies the sketch (Properties → Constraints panel today), re-run
+    // every enabled ExtrudeOp downstream of that sketch so its body follows.
+    m_eventBus->subscribe<SketchEditedEvent>(
+        [this](const SketchEditedEvent& e) { cascadeFromSketchEdit(e.sketchId); });
+
+    // Document body lifecycle → renderer slot lifecycle. Without this, a
+    // PushPullOp::undo (firing on every preview frame during a drag) deletes
+    // the body from Document but the renderer keeps drawing its stale mesh
+    // — the "banding" effect of N overlapping preview prisms accumulating
+    // during a drag. We drop the slot immediately rather than waiting for
+    // someone to put the id in m_dirtyBodyIds (nothing does, today).
+    m_eventBus->subscribe<materializr::BodyRemovedEvent>(
+        [this](const materializr::BodyRemovedEvent& e) {
+            if (e.bodyId < 0) return;
+            if (m_shapeRenderer) m_shapeRenderer->removeBody(e.bodyId);
+            if (m_edgeRenderer)  m_edgeRenderer->removeBody(e.bodyId);
+            // Also clear any pending dirty entry — the body is gone, no
+            // point asking the partial rebuild to revisit it.
+            m_dirtyBodyIds.erase(e.bodyId);
+        });
+
+    // NOTE: we explicitly do NOT cascade off generic HistoryStepEvents. That
+    // event also fires for in-flight push/pull preview undos (every drag
+    // frame), and those undo-landings on a SketchEditOp would otherwise
+    // re-cascade every frame — piling up duplicate bodies. The cascade is
+    // driven solely by the explicit SketchEditedEvent above, published by
+    // PropertiesPanel (live constraint editor) and HistoryPanel's Apply
+    // Changes button. Other history mutators stay out of it.
     m_pluginContext = std::make_unique<PluginContext>();
 
     m_toolbar = std::make_unique<Toolbar>();
@@ -143,6 +175,7 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_toolbar->setPluginContext(m_pluginContext.get());
     m_historyPanel->setHistory(m_history.get());
     m_historyPanel->setDocument(m_document.get());
+    m_historyPanel->setEventBus(m_eventBus.get());
     m_itemsPanel->setDocument(m_document.get());
     m_itemsPanel->setSelectionManager(m_selection.get());
     m_itemsPanel->setHistory(m_history.get());
@@ -154,6 +187,7 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_propertiesPanel->setHistory(m_history.get());
     m_propertiesPanel->setDocument(m_document.get());
     m_propertiesPanel->setSelectionManager(m_selection.get());
+    m_propertiesPanel->setEventBus(m_eventBus.get());
 
     initImGui();
     loadAppSettings(); // restore persisted preferences before the theme is applied
@@ -313,6 +347,42 @@ void Application::initImGui() {
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
     style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.10f, 1.0f);
     style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.14f, 0.14f, 0.18f, 1.0f);
+
+    // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,
+    // distinct 0/8/B/6, designed for engineering UIs. Resolved from a small
+    // list of candidate paths so both AppImage and dev builds find it:
+    //   1. <exe>/../share/materializr/fonts/    (AppImage layout)
+    //   2. <exe>/../assets/fonts/               (dev: binary in build/)
+    //   3. <cwd>/assets/fonts/                  (dev: launched from repo root)
+    // Falls through to the bundled default if the TTF isn't present, so
+    // a font miss never bricks the UI.
+    {
+        char exePath[4096];
+        ssize_t n = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+        std::string exeDir;
+        if (n > 0) {
+            exePath[n] = '\0';
+            std::string p(exePath);
+            auto slash = p.find_last_of('/');
+            if (slash != std::string::npos) exeDir = p.substr(0, slash);
+        }
+        const std::string candidates[] = {
+            exeDir + "/../share/materializr/fonts/JetBrainsMono-Regular.ttf",
+            exeDir + "/../assets/fonts/JetBrainsMono-Regular.ttf",
+            std::string("assets/fonts/JetBrainsMono-Regular.ttf"),
+        };
+        for (const auto& path : candidates) {
+            if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+                std::fclose(f);
+                ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f);
+                if (fnt) {
+                    std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
+                    break;
+                }
+            }
+        }
+        // If nothing loaded, ImGui will lazily fall back to its baked-in default.
+    }
 
     ImGui_ImplGlfw_InitForOpenGL(m_window->handle(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -1277,6 +1347,45 @@ void Application::handleShortcuts() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
         m_viewport->getCamera().reset();
+    }
+    // F = Frame: zoom-fit to the current selection, or to visible bodies if
+    // nothing's selected. The whole point is the user can hide everything
+    // they don't care about, hit F, and have the camera snap onto the
+    // remaining part — no more pan-zoom-tilt dance to reach a small off-
+    // origin object. Suppressed in sketch mode + while a text field has
+    // focus so it doesn't fire while typing constraint values.
+    if (!m_inSketchMode && !ImGui::IsAnyItemActive() &&
+        ImGui::IsKeyPressed(ImGuiKey_F)) {
+        Bnd_Box bb;
+        // Selection first.
+        if (m_selection) {
+            for (const auto& e : m_selection->getSelection()) {
+                if (e.bodyId < 0) continue;
+                try {
+                    const TopoDS_Shape& s = m_document->getBody(e.bodyId);
+                    if (!s.IsNull()) BRepBndLib::AddOptimal(s, bb,
+                                                            Standard_False, Standard_False);
+                } catch (...) {}
+            }
+        }
+        // Fall back to all visible bodies.
+        if (bb.IsVoid()) {
+            for (int id : m_document->getAllBodyIds()) {
+                if (!m_document->isBodyVisible(id)) continue;
+                try {
+                    const TopoDS_Shape& s = m_document->getBody(id);
+                    if (!s.IsNull()) BRepBndLib::AddOptimal(s, bb,
+                                                            Standard_False, Standard_False);
+                } catch (...) {}
+            }
+        }
+        if (!bb.IsVoid()) {
+            Standard_Real x0,y0,z0,x1,y1,z1;
+            bb.Get(x0,y0,z0,x1,y1,z1);
+            m_viewport->getCamera().zoomToFit(
+                glm::vec3((float)x0,(float)y0,(float)z0),
+                glm::vec3((float)x1,(float)y1,(float)z1));
+        }
     }
     // Delete: while in sketch mode, restrict to sketch-element deletion so the
     // host body (which stays selected to keep its face highlighted, per the
@@ -2405,7 +2514,7 @@ void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
             return;
         }
     }
-    beginInteractiveExtrude(profile, mode, targetBody);
+    beginInteractiveExtrude(profile, mode, targetBody, sketchId);
 }
 
 void Application::subtractSketchRegion(int sketchId, int regionIndex) {
@@ -2426,7 +2535,7 @@ void Application::subtractSketchRegion(int sketchId, int regionIndex) {
         std::fprintf(stderr, "Sketch region has no profile face to subtract\n");
         return;
     }
-    beginInteractiveExtrude(profile, ExtrudeMode::Subtract, targetBody);
+    beginInteractiveExtrude(profile, ExtrudeMode::Subtract, targetBody, sketchId);
 }
 
 void Application::alignCameraToActiveSketch() {

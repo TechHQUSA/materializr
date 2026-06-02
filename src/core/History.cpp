@@ -121,6 +121,11 @@ bool History::editStep(int index, Document& doc) {
         }
     }
 
+    // Note: we deliberately don't publish HistoryStepEvent here. editStep
+    // is initiated from explicit user UI (HistoryPanel's Apply Changes),
+    // which publishes its own SketchEditedEvent when appropriate — better
+    // signal-to-noise than a generic step event that also fires for
+    // unrelated history shuffles (push/pull preview undos, etc).
     return true;
 }
 

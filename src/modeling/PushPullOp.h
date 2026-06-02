@@ -21,6 +21,19 @@ public:
 
     double getDistance() const { return m_distance; }
 
+    // Cascade plumbing: remember which sketch + region(s) each target came
+    // from when Push/Pull was triggered from sketch regions. The two arrays
+    // are zip-aligned with m_targets: m_sketchSourceIds[i] is the sketch
+    // that produced m_targets[i].profile, m_sketchSourceRegions[i] the
+    // specific region index in that sketch (or -1 = "use first region").
+    // -1 sketch id means a face-driven Push/Pull (no source sketch; that
+    // target stays as-is during cascade).
+    void setSketchSource(int targetIndex, int sketchId, int regionIndex = -1);
+    bool hasAnySketchSource() const;
+    int getSketchIdAt(int targetIndex) const;
+    int targetCount() const { return static_cast<int>(m_targets.size()); }
+    bool rebuildProfileFromSketch(Document& doc, int sketchId);
+
     bool execute(Document& doc) override;
     bool undo(Document& doc) override;
     std::string name() const override { return "Push/Pull"; }
@@ -42,4 +55,8 @@ private:
     // bring folder / colour / visibility / name back.
     std::vector<int> m_reuseBodyIds;
     size_t m_reuseIdx = 0;
+
+    // Cascade plumbing — see setSketchSource() in the public section.
+    std::vector<int> m_sketchSourceIds;     // sketch id per target (-1 = none)
+    std::vector<int> m_sketchSourceRegions; // region index per target (-1 = first)
 };

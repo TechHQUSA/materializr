@@ -1248,17 +1248,23 @@ void Application::renderSnapWidget() {
                      wp.y + pad + widgetR * 2.0f + 96.0f);
     ImVec2 widgetEnd(widgetPos.x + size, widgetPos.y + size);
 
+    // Manual hit-test — same pattern the ViewCube uses to anchor in a corner
+    // without polluting the parent window's layout cursor (which is what
+    // ImGui's boundary-extension assert was complaining about when we used
+    // SetCursorScreenPos + InvisibleButton).
     ImGui::PushID("snap-corner-widget");
-    ImGui::SetCursorScreenPos(widgetPos);
-    ImGui::InvisibleButton("##snap", ImVec2(size, size));
-    bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
-    bool rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
-    bool hovered = ImGui::IsItemHovered();
+    bool hovered = ImGui::IsMouseHoveringRect(widgetPos, widgetEnd) &&
+                   ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup |
+                                          ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    bool clicked      = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    bool rightClicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
     if (hovered) {
-        ImGui::SetTooltip("Snap step: %.3g mm   |   %s\nClick: open snap settings"
-                          "\nRight-click: toggle snap",
-                          m_sketchGridStep,
-                          m_snapToGrid ? "Snap ON" : "Snap off");
+        ImGui::BeginTooltip();
+        ImGui::Text("Snap step: %.3g mm   |   %s", m_sketchGridStep,
+                    m_snapToGrid ? "Snap ON" : "Snap off");
+        ImGui::TextDisabled("Click: open snap settings");
+        ImGui::TextDisabled("Right-click: toggle snap");
+        ImGui::EndTooltip();
     }
     if (clicked) ImGui::OpenPopup("SnapSettings");
     if (rightClicked) {
@@ -1266,6 +1272,11 @@ void Application::renderSnapWidget() {
         if (m_toolbar) m_toolbar->setSnapToGrid(m_snapToGrid);
         saveAppSettings();
     }
+    // Latch this frame's hover state so the next frame's viewport input
+    // handlers know to skip picker / sketch-tool clicks over the widget.
+    // OR with the popup-open check so dragging through the popup also stays
+    // out of the picker.
+    m_snapWidgetHovered = hovered || ImGui::IsPopupOpen("SnapSettings");
 
     // Draw the square + step label + blue border when snap is on.
     ImDrawList* dl = ImGui::GetWindowDrawList();

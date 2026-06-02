@@ -1,4 +1,5 @@
 #include "ExtrudeOp.h"
+#include "Sketch.h"
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -7,6 +8,8 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopExp_Explorer.hxx>
 #include <gp_Vec.hxx>
@@ -24,6 +27,46 @@ ExtrudeOp::ExtrudeOp() = default;
 
 void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
     m_profile = wire;
+}
+
+// Rebuild m_profile from the currently-live source sketch. Mirrors the
+// Application::buildSketchProfileFace algorithm so the cascade produces the
+// same shape the original extrude got (largest-bbox wire as outer, the rest
+// reversed as holes). Returns false if there's nothing to rebuild from.
+bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
+    if (m_sketchId < 0) return false;
+    auto sk = doc.getSketch(m_sketchId);
+    if (!sk) return false;
+
+    auto wires = sk->buildWires();
+    if (wires.empty()) return false;
+
+    int outerIdx = 0;
+    double bestExtent = -1.0;
+    std::vector<double> extents(wires.size(), 0.0);
+    for (size_t i = 0; i < wires.size(); ++i) {
+        Bnd_Box bb;
+        BRepBndLib::Add(wires[i], bb);
+        if (bb.IsVoid()) continue;
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        bb.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        double dx = xmax - xmin, dy = ymax - ymin, dz = zmax - zmin;
+        double diag = dx*dx + dy*dy + dz*dz;
+        extents[i] = diag;
+        if (diag > bestExtent) {
+            bestExtent = diag;
+            outerIdx = static_cast<int>(i);
+        }
+    }
+
+    BRepBuilderAPI_MakeFace faceMaker(sk->getPlane(), wires[outerIdx]);
+    for (size_t i = 0; i < wires.size(); ++i) {
+        if (static_cast<int>(i) == outerIdx) continue;
+        faceMaker.Add(TopoDS::Wire(wires[i].Reversed()));
+    }
+    if (!faceMaker.IsDone()) return false;
+    m_profile = faceMaker.Face();
+    return true;
 }
 
 void ExtrudeOp::setDistance(double distance) {

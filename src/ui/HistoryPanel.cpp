@@ -2,6 +2,9 @@
 #include "../core/History.h"
 #include "../core/Document.h"
 #include "../core/Operation.h"
+#include "../core/EventBus.h"
+#include "../core/Events.h"
+#include "../modeling/SketchEditOp.h"
 #include <imgui.h>
 #include <chrono>
 #include <ctime>
@@ -259,6 +262,24 @@ bool HistoryPanel::render() {
             if (ImGui::Button("Apply Changes", ImVec2(-1, 0))) {
                 m_history->editStep(m_editingStep, *m_document);
                 modified = true;
+                // If the edited step is a SketchEditOp, publish a cascade
+                // event so any downstream Extrude / Push-Pull that consumed
+                // this sketch re-runs with the new constraint values. We
+                // publish from here (not from inside editStep) so generic
+                // history shuffles — undo/redo, push/pull drag previews —
+                // don't trigger spurious cascades.
+                if (m_eventBus) {
+                    auto* sketchOp = dynamic_cast<const materializr::SketchEditOp*>(op);
+                    if (sketchOp) {
+                        auto target = sketchOp->getTarget();
+                        if (target && m_document) {
+                            int sid = m_document->findSketchId(target.get());
+                            if (sid >= 0) {
+                                m_eventBus->publish(SketchEditedEvent{sid});
+                            }
+                        }
+                    }
+                }
             }
         }
     }

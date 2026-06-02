@@ -150,6 +150,34 @@ void Camera::zoom(float delta)
     m_position = m_target + glm::normalize(direction) * newDistance;
 }
 
+void Camera::zoomToward(const glm::vec3& focus, float delta)
+{
+    // Scale-around-focus formulation: a single uniform factor scales both the
+    // camera→focus and target→focus vectors. The focus point stays put on
+    // screen, position and target both slide toward (or away from) it, and
+    // subsequent orbits pivot around the new target — which is now near the
+    // thing the user was zooming on. This eliminates the "I have to pan to
+    // re-aim before zoom feels right" dance for off-origin parts.
+    float factor = 1.0f - delta * m_zoomSpeed;
+    factor = glm::clamp(factor, 0.1f, 10.0f);
+    if (m_orthographic) {
+        // In ortho, both the camera/target slide AND the view extent scale —
+        // otherwise the focus would shift on screen as we narrow the frustum.
+        m_orthoSize = std::max(0.01f, m_orthoSize * factor);
+        m_position  = focus + (m_position - focus) * factor;
+        m_target    = focus + (m_target   - focus) * factor;
+        return;
+    }
+    glm::vec3 newPos    = focus + (m_position - focus) * factor;
+    glm::vec3 newTarget = focus + (m_target   - focus) * factor;
+    // Don't let the camera pass through (or onto) the focus point — keep at
+    // least 0.1 mm of standoff so the view doesn't degenerate.
+    if (glm::length(newPos - newTarget) < 0.1f) return;
+    if (glm::length(newPos - focus)     < 0.1f) return;
+    m_position = newPos;
+    m_target   = newTarget;
+}
+
 glm::mat4 Camera::getViewMatrix() const
 {
     return glm::lookAt(m_position, m_target, m_up);

@@ -9,6 +9,7 @@ class SelectionManager;
 
 namespace materializr {
 class Sketch;
+class EventBus;
 }
 
 namespace materializr {
@@ -20,6 +21,7 @@ public:
     void setHistory(History* history);
     void setDocument(Document* doc);
     void setSelectionManager(const SelectionManager* sel);
+    void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
 
     // Set which history step is being edited (-1 for none)
     void setEditingStep(int step);
@@ -40,6 +42,7 @@ private:
     History* m_history = nullptr;
     Document* m_document = nullptr;
     const SelectionManager* m_selection = nullptr;
+    materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;
 
     // Buffered text for each editable constraint value in the panel above.
@@ -54,6 +57,18 @@ private:
         std::shared_ptr<materializr::Sketch> beforeSnap;
     };
     std::map<int, ConstraintEdit> m_constraintEdits;
+
+    // Per-axis edit state for the body Dimensions section. Refilled from the
+    // body's current bbox each frame the field isn't focused; commit on
+    // Enter/focus-out pushes a TransformOp::Scale that anchors at the body's
+    // bbox-min corner so growth is along +axis only (predictable).
+    struct DimensionEdit {
+        char buf[24] = "0";
+        bool focused = false;
+        int bodyId = -1;
+        double initialExtent = 0;
+    };
+    DimensionEdit m_bodyDimEdit[3]; // X, Y, Z
 };
 
 } // namespace materializr

@@ -181,7 +181,18 @@ private:
     void cancelPushPull();
     void beginInteractiveExtrude(const TopoDS_Shape& profile,
                                  ExtrudeMode mode = ExtrudeMode::NewBody,
-                                 int targetBody = -1);
+                                 int targetBody = -1,
+                                 int sourceSketchId = -1);
+
+    // Re-execute every enabled ExtrudeOp in history that was originally built
+    // from this sketch — called when the user edits a constraint value via
+    // the Properties → Constraints panel or the History → Apply Changes
+    // path. Downstream ops (Fillet, Pattern, Push/Pull face-references) are
+    // intentionally NOT re-run; that's a separate toponaming-heavy future
+    // release. Result: simple "sketch -> extrude -> done" chains follow the
+    // sketch immediately; chained workflows leave downstream ops on their
+    // old body shape (user re-does manually).
+    void cascadeFromSketchEdit(int sketchId);
     void updateInteractiveExtrude();
     // Signed distance to pass to ExtrudeOp: Subtract cuts into the body (the
     // profile normal points outward), so it uses the negated distance.
@@ -322,6 +333,13 @@ private:
 
     // Snap-to-grid for gizmo translate (shares the grid step with the sketch grid).
     bool m_snapToGrid = true;
+    // Previous-frame hover state for the corner snap widget. The widget is
+    // hit-tested with raw IsMouseHoveringRect (no ImGui item) so it can't
+    // claim input via the usual IsItemActive path; instead the viewport
+    // input handlers check this flag to skip picker/sketch-tool clicks when
+    // the mouse is over the widget. Same pattern m_viewCube uses with
+    // wasHovered().
+    bool m_snapWidgetHovered = false;
 
     // Configurable camera mouse bindings (ImGuiMouseButton values: 0=Left,1=Right,
     // 2=Middle). Zoom is always the scroll wheel. Edited in File > Settings.
@@ -388,6 +406,12 @@ private:
     // a single rotation around the selection centroid.
     std::vector<std::pair<int, TopoDS_Shape>> m_gizmoDragOriginals;
     glm::vec3 m_gizmoSharedPivot{0.0f};
+    // World-Y of the lowest face of the drag selection at drag start. The
+    // translate readout reports the body's BOTTOM (= what the user sees
+    // sitting on the grid) on the user-Z axis rather than the bbox centre,
+    // so a cylinder resting on Z=0 reads `Z 0.00` instead of `Z 10.00`.
+    // Sketch-only drags get the pivot's Y here (no bbox → no offset).
+    float m_gizmoSharedBottomY{0.0f};
 
     // Standalone-sketch gizmo drag — set when the gizmo is shown on a Sketch
     // selection (no body in the selection, not in sketch-edit, perspective
@@ -669,6 +693,11 @@ private:
     // Interactive extrude state
     bool m_extruding = false;
     TopoDS_Shape m_extrudeProfile;
+    // Source sketch for the in-flight extrude. Stamped onto every ExtrudeOp
+    // we push (preview + final) so the cascade-on-sketch-edit walker can find
+    // them later. -1 means face-driven extrude (no source sketch; never
+    // cascades).
+    int m_extrudeSketchId = -1;
     glm::vec3 m_extrudeNormal{0, 0, 1};
     glm::vec3 m_extrudeOrigin{0};
     float m_extrudeDistance = 5.0f;

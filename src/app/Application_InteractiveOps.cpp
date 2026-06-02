@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cmath>
 #include <limits>
+#include <set>
 
 #include "app/Application.h"
 #include "viewport/Viewport.h"
@@ -607,11 +608,13 @@ double Application::extrudeOpDistance() const {
 }
 
 void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
-                                          ExtrudeMode mode, int targetBody) {
+                                          ExtrudeMode mode, int targetBody,
+                                          int sourceSketchId) {
     m_extrudeProfile = profile;
     m_extruding = true;
     m_extrudeMode = mode;
     m_extrudeTargetBody = targetBody;
+    m_extrudeSketchId = sourceSketchId;
     m_extrudeDistance = 5.0f;
     std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf), "%.1f", m_extrudeDistance);
     m_extrudeInputFocus = true;
@@ -641,6 +644,7 @@ void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
     op->setProfile(profile);
     op->setDistance(extrudeOpDistance());
     op->setMode(ExtrudeMode::NewBody);
+    op->setSketchSource(m_extrudeSketchId);
     if (m_history->pushOperation(std::move(op), *m_document)) {
         auto ids = m_document->getAllBodyIds();
         m_extrudePreviewBodyId = ids.back();
@@ -660,6 +664,7 @@ void Application::updateInteractiveExtrude() {
     op->setProfile(m_extrudeProfile);
     op->setDistance(extrudeOpDistance());
     op->setMode(ExtrudeMode::NewBody);
+    op->setSketchSource(m_extrudeSketchId);
     if (m_history->pushOperation(std::move(op), *m_document)) {
         auto ids = m_document->getAllBodyIds();
         m_extrudePreviewBodyId = ids.back();
@@ -680,6 +685,7 @@ void Application::commitInteractiveExtrude() {
         op->setDistance(extrudeOpDistance());
         op->setMode(ExtrudeMode::Subtract);
         op->setTargetBody(m_extrudeTargetBody);
+        op->setSketchSource(m_extrudeSketchId);
         if (m_history->pushOperation(std::move(op), *m_document)) {
             markDirty();
             std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",
@@ -1054,6 +1060,16 @@ void Application::updatePushPull() {
     }
     op->setTargets(std::move(targets));
     op->setDistance(static_cast<double>(m_pushPullDistance));
+    // Cascade plumbing: stamp the originating sketch+region on every target.
+    // setTargets() above pre-sizes the source arrays to all -1, so this
+    // upgrades them where we actually have a sketch source. Free-face
+    // pushpulls (sourceBodyId-driven, no sketch) keep -1.
+    for (size_t i = 0; i < m_pushPullTargets.size(); ++i) {
+        const auto& t = m_pushPullTargets[i];
+        if (t.sketchId >= 0) {
+            op->setSketchSource(static_cast<int>(i), t.sketchId, t.regionIndex);
+        }
+    }
     if (m_history->pushOperation(std::move(op), *m_document)) {
         m_pushPullPreviewPushed = true;
     }
@@ -1065,12 +1081,11 @@ void Application::updatePushPull() {
         if (t.sourceBodyId >= 0) markBodyDirty(t.sourceBodyId);
     }
     // Free-floating push/pull creates new bodies — mark them too so they
-    // appear / refresh.
+    // appear / refresh. Restrict to VISIBLE bodies: invisible ones never get
+    // a renderer slot (full-rebuild skips them), so without the visibility
+    // check they'd be marked dirty every preview frame forever — pure waste.
     for (int id : m_document->getAllBodyIds()) {
-        // Cheap heuristic: any body the document has but the renderer
-        // doesn't is new, and any body whose ID is in m_pushPullPreviewBodyIds
-        // is changing every frame. We don't track preview ids here, so just
-        // mark any body whose mesh slot is missing.
+        if (!m_document->isBodyVisible(id)) continue;
         if (m_shapeRenderer->findSlotByBody(id) < 0) markBodyDirty(id);
     }
 }
@@ -1315,6 +1330,82 @@ void Application::commitLoft() {
     m_loftWireA = TopoDS_Wire();
     m_loftWireB = TopoDS_Wire();
     m_meshesDirty = true;
+}
+
+// ─── Cascade: re-execute Extrudes that consumed a just-edited sketch ───────
+//
+// Triggered by SketchEditedEvent. Walks the live history forward and, for
+// every enabled ExtrudeOp whose source sketch matches, rebuilds the profile
+// from the current sketch state and re-runs execute() — which uses
+// addOrPutBody under the hood, so the resulting body keeps the same id and
+// the user sees its shape morph in place.
+//
+// We deliberately stop at Extrude. Downstream ops (Fillet, Chamfer, Pattern,
+// Mirror, Push/Pull) reference faces / edges of the extruded body — when
+// the body's topology shifts, those references go stale (the toponaming
+// problem). Re-running them blindly would produce wrong-edge fillets or
+// outright crashes. For the user's "edit a dimension and watch the prism
+// follow" workflow this trade-off is fine: simple chains just work; chained
+// workflows leave the downstream ops on the stale body and the user
+// manually re-runs them.
+void Application::cascadeFromSketchEdit(int sketchId) {
+    if (sketchId < 0 || !m_history || !m_document) return;
+    int n = m_history->stepCount();
+    int matched = 0, rebuilt = 0, executed = 0, anyOps = 0, reloadedNoCast = 0;
+    bool anyChanged = false;
+
+    // Diagnostic: snapshot body ids before cascade so we can see exactly
+    // which bodies got added / replaced. If the count grows, we know a
+    // duplicate body was created instead of the existing one being updated.
+    auto bodyIdsBefore = m_document->getAllBodyIds();
+
+    for (int i = 0; i < n; ++i) {
+        Operation* op = const_cast<Operation*>(m_history->getStep(i));
+        if (!op || !op->isEnabled()) continue;
+        ++anyOps;
+        // Diagnostic: a reloaded Extrude/PushPull shows up as ReplayOp, not
+        // a real instance — that's the "post-load loses sketch link"
+        // limitation we'll fix later via op-specific serialization.
+        const std::string tid = op->typeId();
+        if ((tid == "extrude" || tid == "pushpull") &&
+            !dynamic_cast<ExtrudeOp*>(op) &&
+            !dynamic_cast<PushPullOp*>(op)) ++reloadedNoCast;
+
+        if (auto* ext = dynamic_cast<ExtrudeOp*>(op)) {
+            if (ext->getSketchId() != sketchId) continue;
+            ++matched;
+            if (!ext->rebuildProfileFromSketch(*m_document)) continue;
+            ++rebuilt;
+            if (ext->execute(*m_document)) { ++executed; anyChanged = true; }
+        } else if (auto* pp = dynamic_cast<PushPullOp*>(op)) {
+            // PushPullOp can hold multiple targets, each with its own
+            // sketch source — only re-execute if at least one references
+            // the edited sketch.
+            bool refs = false;
+            int tc = pp->targetCount();
+            for (int t = 0; t < tc; ++t) {
+                if (pp->getSketchIdAt(t) == sketchId) { refs = true; break; }
+            }
+            if (!refs) continue;
+            ++matched;
+            if (!pp->rebuildProfileFromSketch(*m_document, sketchId)) continue;
+            ++rebuilt;
+            if (pp->execute(*m_document)) { ++executed; anyChanged = true; }
+        }
+    }
+    auto bodyIdsAfter = m_document->getAllBodyIds();
+    int added = 0;
+    for (int id : bodyIdsAfter) {
+        bool wasThere = false;
+        for (int b : bodyIdsBefore) if (b == id) { wasThere = true; break; }
+        if (!wasThere) ++added;
+    }
+    std::fprintf(stderr,
+        "[Cascade] sketchId=%d  steps=%d enabled=%d  reloadedNoCast=%d  "
+        "matched=%d  rebuilt=%d  executed=%d  bodies_before=%zu bodies_after=%zu added=%d\n",
+        sketchId, n, anyOps, reloadedNoCast, matched, rebuilt, executed,
+        bodyIdsBefore.size(), bodyIdsAfter.size(), added);
+    if (anyChanged) m_meshesDirty = true;
 }
 
 void Application::cancelLoft() {

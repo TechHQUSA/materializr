@@ -23,6 +23,14 @@ public:
     /// Dolly: move closer/further from target.
     void zoom(float delta);
 
+    /// Dolly toward (or away from) a specific world-space focus point — both
+    /// camera and target move so the focus stays put on screen. Used by the
+    /// mouse-wheel handler with `focus` set to the world point under the
+    /// cursor (ray-pick onto geometry, fallback to the target-plane). Solves
+    /// the "can't zoom into a small object far from origin" problem because
+    /// the zoom centre is wherever you're already looking.
+    void zoomToward(const glm::vec3& focus, float delta);
+
     /// Compute the view matrix from current camera state.
     glm::mat4 getViewMatrix() const;
 
