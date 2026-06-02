@@ -130,6 +130,11 @@ private:
     ToolAction renderEdgeTools();
 
     void renderPluginButtons(int contextMask);
+    // Single "Add Plane…" button + dropdown listing the construction-plane
+    // creation modes the current selection supports. Shared across the face /
+    // plane / edge / axis context renderers; renders nothing when no mode
+    // applies.
+    void renderAddPlaneMenu();
 
     void tip(const char* text) const;
 };

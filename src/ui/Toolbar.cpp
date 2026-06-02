@@ -7,6 +7,13 @@
 #include "../plugin/Contributions.h"
 #include <imgui.h>
 #include <cmath>
+#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <Geom_Surface.hxx>
+#include <Geom_Plane.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <GeomAbs_CurveType.hxx>
+#include <TopoDS.hxx>
 
 namespace materializr {
 
@@ -102,6 +109,56 @@ void Toolbar::renderPluginButtons(int contextMask) {
         }
         if (!c.tooltip.empty()) tip(c.tooltip.c_str());
         ImGui::PopID();
+    }
+}
+
+void Toolbar::renderAddPlaneMenu() {
+    if (!m_selection || !m_pluginCtx) return;
+
+    // Detect which construction-plane modes the current selection supports.
+    int  planarFaces = 0, planeCount = 0;
+    bool haveCyl = false, straightEdge = false, haveAxis = false;
+    for (const auto& e : m_selection->getSelection()) {
+        if (e.type == SelectionType::Plane) { ++planeCount; continue; }
+        if (e.type == SelectionType::Axis)  { haveAxis = true; continue; }
+        if (e.shape.IsNull()) continue;
+        try {
+            if (e.type == SelectionType::Face) {
+                Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(e.shape));
+                if (!s.IsNull()) {
+                    if (s->IsKind(STANDARD_TYPE(Geom_Plane))) ++planarFaces;
+                    else if (!Handle(Geom_CylindricalSurface)::DownCast(s).IsNull())
+                        haveCyl = true;
+                }
+            } else if (e.type == SelectionType::Edge) {
+                BRepAdaptor_Curve ad(TopoDS::Edge(e.shape));
+                if (ad.GetType() == GeomAbs_Line) straightEdge = true;
+            }
+        } catch (...) {}
+    }
+
+    const bool midplane = (planarFaces >= 2) || (planeCount >= 2);
+    if (!(midplane || haveCyl || haveAxis || straightEdge)) return;
+
+    ImGui::Separator();
+    if (ImGui::Button("Add Plane...", ImVec2(-1, 30)))
+        ImGui::OpenPopup("AddPlaneMenu");
+    tip("Create a construction plane derived from the current selection.");
+    if (ImGui::BeginPopup("AddPlaneMenu")) {
+        if (midplane && ImGui::MenuItem("Midplane (between the 2 selected)"))
+            m_pluginCtx->requestInteractiveOp("Midplane");
+        if (haveCyl) {
+            if (ImGui::MenuItem("Tangent to cylinder"))
+                m_pluginCtx->requestInteractiveOp("TangentPlane");
+            if (ImGui::MenuItem("Perpendicular to cylinder axis"))
+                m_pluginCtx->requestInteractiveOp("PlaneNormalToAxis");
+            if (ImGui::MenuItem("Through cylinder axis (longitudinal)"))
+                m_pluginCtx->requestInteractiveOp("PlaneThroughAxis");
+        } else if (haveAxis || straightEdge) {
+            if (ImGui::MenuItem(straightEdge ? "Normal to edge" : "Normal to axis"))
+                m_pluginCtx->requestInteractiveOp("PlaneNormalToAxis");
+        }
+        ImGui::EndPopup();
     }
 }
 
@@ -394,6 +451,9 @@ ToolAction Toolbar::renderFaceTools() {
         }
     }
 
+    // Construction-plane creation from the selected face(s) — Add Plane menu.
+    renderAddPlaneMenu();
+
     // Plugin buttons for HasFaces context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasFaces));
 
@@ -464,6 +524,9 @@ ToolAction Toolbar::renderPlaneSelectedTools() {
     if (ImGui::Button("Rotate", ImVec2(-1, 30))) action = ToolAction::Rotate;
     tip("Show the Rotate gizmo. Drag a ring to spin the plane around its "
         "origin; snap is 5° increments when snap-to-grid is on.");
+
+    // Midplane between two selected construction planes (Add Plane menu).
+    renderAddPlaneMenu();
     return action;
 }
 
@@ -481,6 +544,8 @@ ToolAction Toolbar::renderAxisSelectedTools() {
     if (ImGui::Button("Move", ImVec2(-1, 30))) action = ToolAction::Move;
     tip("Show the Move gizmo on this axis. Drag an arrow to translate "
         "the axis origin; the direction is preserved.");
+
+    renderAddPlaneMenu();
     return action;
 }
 
@@ -549,6 +614,9 @@ ToolAction Toolbar::renderEdgeTools() {
         ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
         action = ToolAction::EditDiameter;
     tip("Resize the cylindrical face this edge belongs to.");
+
+    // Construction plane from this edge (Add Plane menu).
+    renderAddPlaneMenu();
 
     // Plugin buttons for HasEdges context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasEdges));

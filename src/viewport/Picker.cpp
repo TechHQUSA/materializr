@@ -381,7 +381,16 @@ PickResult Picker::pick(float screenX, float screenY,
             float denom = glm::dot(N, rayDir);
             if (std::abs(denom) < 1e-6f) continue;          // ~parallel
             float t = glm::dot(O - rayOrigin, N) / denom;
-            if (t <= 0.0f || t >= nearestDist) continue;    // behind / farther
+            // Coplanar tie-break: a construction plane sitting ON a body face
+            // (sketch-on-face plane, a part's base on the XY plane, etc.) has
+            // t ≈ the face's t, but the analytic plane math and the mesh
+            // ray-triangle math differ by float noise, so the plane would
+            // randomly steal the click. Require the plane to be closer than
+            // the nearest face by a small relative margin; on a tie the FACE
+            // wins. With no face hit (nearestDist == FLT_MAX) the margin is
+            // irrelevant and an open-space plane is still freely pickable.
+            const float coplanarBias = nearestDist * 1e-3f;
+            if (t <= 0.0f || t >= nearestDist - coplanarBias) continue; // behind / farther / coplanar
             glm::vec3 hit = rayOrigin + rayDir * t;
             glm::vec3 d = hit - O;
             float u = glm::dot(d, X);

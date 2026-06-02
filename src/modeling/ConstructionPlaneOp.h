@@ -9,7 +9,15 @@ enum class PlaneCreationType {
     XY, XZ, YZ,           // standard planes
     OffsetFromPlane,       // parallel at distance
     ThroughThreePoints,    // defined by 3 points
-    ParallelToFace         // parallel to a face, through a point
+    ParallelToFace,        // parallel to a face, through a point
+    // The three below are all "plane with normal N through point P" — the
+    // host computes (N, P) from the selection and feeds them via
+    // setBasePlane (carries N) + setPoints (P), exactly like ParallelToFace.
+    // They exist as distinct types only so the history label reads correctly.
+    Midplane,              // centred between two parallel planes/faces
+    NormalToAxis,          // perpendicular to an axis/edge, through a point
+    TangentToCylinder,     // tangent to a cylindrical face, on a chosen side
+    ThroughAxis            // contains an axis (longitudinal), oriented by a ref
 };
 
 class ConstructionPlaneOp : public Operation {

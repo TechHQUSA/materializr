@@ -49,6 +49,7 @@
 #include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Lin.hxx>
+#include <gp_Vec.hxx>
 #include <Geom_Curve.hxx>
 
 #ifndef M_PI
@@ -1467,15 +1468,116 @@ void Application::beginConstructionPlane() {
         }
     }
 
-    // Default to Parallel-to-Face when a face is selected (typical user flow:
-    // pick a face, click the button, drag the offset). Otherwise XY.
-    m_planeOpKindIdx = m_planeOpHaveFace ? 3 : 0;
+    // Gather inputs for the derived modes (Midplane / Normal-to-Axis /
+    // Tangent-to-Cylinder) from the selection in one pass.
+    m_planeOpHaveTwoPlanes = false;
+    m_planeOpHaveAxis = false;
+    m_planeOpHaveCylinder = false;
+    {
+        std::vector<gp_Pln> planarPlanes;        // planar faces + construction planes
+        std::vector<gp_Ax1> axes;                // construction axes + straight edges
+        struct CylInfo { gp_Ax1 axis; double radius; };
+        std::vector<CylInfo> cylinders;
+        std::vector<gp_Pnt> vertices;
+        if (m_selection) {
+            for (const auto& e : m_selection->getSelection()) {
+                if (e.type == SelectionType::Plane && e.planeId >= 0) {
+                    if (const auto* pe = m_document->getPlane(e.planeId))
+                        planarPlanes.push_back(pe->plane);
+                    continue;
+                }
+                if (e.type == SelectionType::Axis && e.axisId >= 0) {
+                    if (const auto* a = m_document->getAxis(e.axisId))
+                        axes.emplace_back(a->origin, a->direction);
+                    continue;
+                }
+                if (e.shape.IsNull()) continue;
+                try {
+                    if (e.type == SelectionType::Face && e.shape.ShapeType() == TopAbs_FACE) {
+                        Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(e.shape));
+                        if (!s.IsNull() && s->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                            planarPlanes.push_back(Handle(Geom_Plane)::DownCast(s)->Pln());
+                        } else {
+                            Handle(Geom_CylindricalSurface) cyl =
+                                Handle(Geom_CylindricalSurface)::DownCast(s);
+                            if (!cyl.IsNull())
+                                cylinders.push_back({gp_Ax1(cyl->Cylinder().Position().Location(),
+                                                            cyl->Cylinder().Position().Direction()),
+                                                     cyl->Cylinder().Radius()});
+                        }
+                    } else if (e.type == SelectionType::Edge) {
+                        BRepAdaptor_Curve adaptor(TopoDS::Edge(e.shape));
+                        if (adaptor.GetType() == GeomAbs_Line)
+                            axes.push_back(adaptor.Line().Position());
+                    } else if (e.type == SelectionType::Vertex) {
+                        vertices.push_back(BRep_Tool::Pnt(TopoDS::Vertex(e.shape)));
+                    }
+                } catch (...) {}
+            }
+        }
+
+        if (planarPlanes.size() >= 2) {
+            m_planeOpHaveTwoPlanes = true;
+            m_planeOpPlaneA = planarPlanes[0];
+            m_planeOpPlaneB = planarPlanes[1];
+        }
+        if (!axes.empty()) {
+            m_planeOpHaveAxis = true;
+            m_planeOpAxis = axes[0];
+            m_planeOpAxisPoint = vertices.empty() ? axes[0].Location() : vertices[0];
+        }
+        if (!cylinders.empty()) {
+            m_planeOpHaveCylinder = true;
+            m_planeOpCylAxis = cylinders[0].axis;
+            m_planeOpCylRadius = cylinders[0].radius;
+            // Side reference for the tangent: radial toward a selected vertex,
+            // else a second plane's normal, else world +X.
+            if (!vertices.empty()) {
+                gp_Vec v(m_planeOpCylAxis.Location(), vertices[0]);
+                m_planeOpCylRefDir = (v.Magnitude() > 1e-9) ? gp_Dir(v) : gp_Dir(1, 0, 0);
+            } else if (!planarPlanes.empty()) {
+                m_planeOpCylRefDir = planarPlanes[0].Axis().Direction();
+            } else {
+                m_planeOpCylRefDir = gp_Dir(1, 0, 0);
+            }
+        }
+    }
+
+    // A cylindrical face also yields an axis (its centreline), so the
+    // Normal-to-Axis mode can build a cross-section plane perpendicular to
+    // the cylinder without a separate construction axis. Only fill it in when
+    // no explicit axis/edge was selected.
+    if (!m_planeOpHaveAxis && m_planeOpHaveCylinder) {
+        m_planeOpHaveAxis = true;
+        m_planeOpAxis = m_planeOpCylAxis;
+        m_planeOpAxisPoint = m_planeOpCylAxis.Location();
+    }
+
+    // Pick the most likely mode from what's selected so the common "select
+    // geometry, click the button" flow lands ready-to-go: two planes →
+    // Midplane; a planar face → Parallel-to-face; a cylinder → Tangent;
+    // an axis/edge → Normal-to-axis; nothing relevant → XY.
+    if      (m_planeOpHaveTwoPlanes) m_planeOpKindIdx = 4;  // 2 faces → midplane intent
+    else if (m_planeOpHaveFace)      m_planeOpKindIdx = 3;
+    else if (m_planeOpHaveCylinder)  m_planeOpKindIdx = 6;  // cylinder → tangent default
+    else if (m_planeOpHaveAxis)      m_planeOpKindIdx = 5;
+    else                             m_planeOpKindIdx = 0;
     m_planeOpOffset = 0.0;
     std::snprintf(m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf), "%.2f",
                   m_planeOpOffset);
     m_planeOpPreviewPushed = false;
     m_planeOpActive = true;
 
+    updateConstructionPlane();
+}
+
+void Application::beginConstructionPlaneMode(int kindIdx) {
+    // Open the plane popup (captures selection, pushes a default preview) then
+    // force the explicitly-requested mode. The sidebar only offers a mode when
+    // its inputs are present, so the override is always valid.
+    beginConstructionPlane();
+    if (!m_planeOpActive) return;
+    m_planeOpKindIdx = kindIdx;
     updateConstructionPlane();
 }
 
@@ -1517,6 +1619,35 @@ void Application::updateConstructionPlane() {
                 op->setName("XY Plane");
             }
             break;
+        case 4:   // Midplane
+        case 5:   // Normal to axis / edge
+        case 6:   // Tangent to cylinder
+        case 7: { // Through (containing) the cylinder axis
+            gp_Dir N; gp_Pnt P0;
+            if (computeDerivedPlaneNP(m_planeOpKindIdx, N, P0)) {
+                // Push the through-point along N by the offset so the slider
+                // shifts the result off the derived position, reusing the
+                // ParallelToFace (normal + point) form.
+                gp_Pnt p(P0.X() + N.X() * m_planeOpOffset,
+                         P0.Y() + N.Y() * m_planeOpOffset,
+                         P0.Z() + N.Z() * m_planeOpOffset);
+                op->setBasePlane(gp_Pln(P0, N));
+                op->setPoints(p, gp_Pnt(0, 0, 0), gp_Pnt(0, 0, 0));
+                if (m_planeOpKindIdx == 4) {
+                    op->setType(PlaneCreationType::Midplane);     op->setName("Midplane");
+                } else if (m_planeOpKindIdx == 5) {
+                    op->setType(PlaneCreationType::NormalToAxis); op->setName("Normal-to-Axis Plane");
+                } else if (m_planeOpKindIdx == 6) {
+                    op->setType(PlaneCreationType::TangentToCylinder); op->setName("Tangent Plane");
+                } else {
+                    op->setType(PlaneCreationType::ThroughAxis);  op->setName("Through-Axis Plane");
+                }
+            } else {
+                op->setType(PlaneCreationType::XY);
+                op->setName("XY Plane");
+            }
+            break;
+        }
     }
     if (m_history->pushOperation(std::move(op), *m_document)) {
         m_planeOpPreviewPushed = true;
@@ -1547,6 +1678,72 @@ void Application::cancelConstructionPlane() {
     }
     m_planeOpActive = false;
     m_meshesDirty = true;
+}
+
+bool Application::computeDerivedPlaneNP(int kindIdx, gp_Dir& outNormal,
+                                        gp_Pnt& outPoint) const {
+    if (kindIdx == 4) { // Midplane — centred between the two captured planes
+        if (!m_planeOpHaveTwoPlanes) return false;
+        gp_Dir nA = m_planeOpPlaneA.Axis().Direction();
+        gp_Dir nB = m_planeOpPlaneB.Axis().Direction();
+        // Align B's normal with A before averaging so two faces pointing at
+        // each other (antiparallel) don't cancel to a zero vector.
+        gp_Vec sum(nA);
+        if (nA.Dot(nB) < 0.0) sum -= gp_Vec(nB); else sum += gp_Vec(nB);
+        if (sum.Magnitude() < 1e-9) return false;
+        outNormal = gp_Dir(sum);
+        gp_Pnt a = m_planeOpPlaneA.Axis().Location();
+        gp_Pnt b = m_planeOpPlaneB.Axis().Location();
+        // Midpoint of the two plane origins sits exactly on the perpendicular
+        // midplane (its component along N is the average of the two offsets);
+        // the in-plane component is irrelevant to the resulting plane.
+        outPoint = gp_Pnt((a.X() + b.X()) * 0.5,
+                          (a.Y() + b.Y()) * 0.5,
+                          (a.Z() + b.Z()) * 0.5);
+        return true;
+    }
+    if (kindIdx == 5) { // Normal to axis/edge through the captured point
+        if (!m_planeOpHaveAxis) return false;
+        outNormal = m_planeOpAxis.Direction();
+        outPoint  = m_planeOpAxisPoint;
+        return true;
+    }
+    if (kindIdx == 6) { // Tangent to cylinder, on the reference-direction side
+        if (!m_planeOpHaveCylinder) return false;
+        gp_Vec axv(m_planeOpCylAxis.Direction());
+        gp_Vec ref(m_planeOpCylRefDir);
+        gp_Vec radial = ref - axv * ref.Dot(axv);   // perp-to-axis component
+        if (radial.Magnitude() < 1e-9) {
+            // Reference is parallel to the axis — fall back to any perpendicular.
+            gp_Ax2 tmp(m_planeOpCylAxis.Location(), m_planeOpCylAxis.Direction());
+            radial = gp_Vec(tmp.XDirection());
+        }
+        outNormal = gp_Dir(radial);
+        gp_Pnt c = m_planeOpCylAxis.Location();
+        outPoint = gp_Pnt(c.X() + outNormal.X() * m_planeOpCylRadius,
+                          c.Y() + outNormal.Y() * m_planeOpCylRadius,
+                          c.Z() + outNormal.Z() * m_planeOpCylRadius);
+        return true;
+    }
+    if (kindIdx == 7) { // Plane CONTAINING the cylinder axis (longitudinal)
+        if (!m_planeOpHaveCylinder) return false;
+        gp_Vec axv(m_planeOpCylAxis.Direction());
+        gp_Vec ref(m_planeOpCylRefDir);
+        gp_Vec radial = ref - axv * ref.Dot(axv);     // perp-to-axis component
+        if (radial.Magnitude() < 1e-9) {
+            gp_Ax2 tmp(m_planeOpCylAxis.Location(), m_planeOpCylAxis.Direction());
+            radial = gp_Vec(tmp.XDirection());
+        }
+        // The plane contains both the axis and the radial reference, so its
+        // normal is perpendicular to both. Offset (applied by the caller along
+        // this normal) slides it to a parallel chord cut.
+        gp_Vec nrm = axv.Crossed(radial);
+        if (nrm.Magnitude() < 1e-9) return false;
+        outNormal = gp_Dir(nrm);
+        outPoint  = m_planeOpCylAxis.Location();
+        return true;
+    }
+    return false;
 }
 
 // ─── Construction Axis interactive popup ───────────────────────────────────

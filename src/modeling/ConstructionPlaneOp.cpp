@@ -81,8 +81,13 @@ gp_Pln ConstructionPlaneOp::computePlane() const {
             return gp_Pln(m_p1, dir);
         }
 
-        case PlaneCreationType::ParallelToFace: {
-            // Use the base plane's normal but place it at point p1
+        case PlaneCreationType::ParallelToFace:
+        case PlaneCreationType::Midplane:
+        case PlaneCreationType::NormalToAxis:
+        case PlaneCreationType::TangentToCylinder:
+        case PlaneCreationType::ThroughAxis: {
+            // All four share the same form: the host pre-computed the normal
+            // (stored as m_basePlane's axis) and the through point (m_p1).
             gp_Dir normal = m_basePlane.Axis().Direction();
             return gp_Pln(m_p1, normal);
         }
@@ -123,6 +128,10 @@ std::string ConstructionPlaneOp::description() const {
         case PlaneCreationType::OffsetFromPlane:   typeStr = "Offset (" + std::to_string(m_offset) + " mm)"; break;
         case PlaneCreationType::ThroughThreePoints: typeStr = "3 Points"; break;
         case PlaneCreationType::ParallelToFace:    typeStr = "Parallel to Face"; break;
+        case PlaneCreationType::Midplane:           typeStr = "Midplane"; break;
+        case PlaneCreationType::NormalToAxis:       typeStr = "Normal to Axis"; break;
+        case PlaneCreationType::TangentToCylinder:  typeStr = "Tangent to Cylinder"; break;
+        case PlaneCreationType::ThroughAxis:        typeStr = "Through Axis"; break;
     }
     return "Construction Plane: " + m_planeName + " (" + typeStr + ")";
 }
@@ -143,10 +152,14 @@ void ConstructionPlaneOp::renderProperties() {
         "XY", "XZ", "YZ",
         "Offset from Plane",
         "Through 3 Points",
-        "Parallel to Face"
+        "Parallel to Face",
+        "Midplane",
+        "Normal to Axis",
+        "Tangent to Cylinder",
+        "Through Axis"
     };
     int typeIndex = static_cast<int>(m_type);
-    if (ImGui::Combo("Type", &typeIndex, typeItems, 6)) {
+    if (ImGui::Combo("Type", &typeIndex, typeItems, 10)) {
         m_type = static_cast<PlaneCreationType>(typeIndex);
     }
 

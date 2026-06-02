@@ -12,6 +12,8 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Ax1.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Dir.hxx>
 
 #include "modeling/ExtrudeOp.h" // for ExtrudeMode
 #include "modeling/SketchConstraints.h" // for ConstraintType (applySketchConstraint)
@@ -673,7 +675,32 @@ private:
     char  m_planeOpRotBuf[32] = "0.0";
     int   m_planeOpRotAxisIdx = 0; // 0=X, 1=Z (user up), 2=Y
 
+    // Selection-derived inputs for the kind-index 4/5/6 creation modes,
+    // captured once at beginConstructionPlane. Each reduces to a plane with
+    // normal N through point P (computed by computeDerivedPlaneNP), fed to
+    // the op as ParallelToFace-style basePlane + point.
+    //   4 = Midplane           — needs two planar planes/faces
+    //   5 = Normal to axis/edge — needs an axis or straight edge (+ point)
+    //   6 = Tangent to cylinder — needs a cylindrical face (+ a side ref)
+    bool   m_planeOpHaveTwoPlanes = false;
+    gp_Pln m_planeOpPlaneA, m_planeOpPlaneB;
+    bool   m_planeOpHaveAxis = false;
+    gp_Ax1 m_planeOpAxis;
+    gp_Pnt m_planeOpAxisPoint;
+    bool   m_planeOpHaveCylinder = false;
+    gp_Ax1 m_planeOpCylAxis;
+    double m_planeOpCylRadius = 0.0;
+    gp_Dir m_planeOpCylRefDir{1.0, 0.0, 0.0};
+    // Resolve the captured inputs for a derived kind index into a base
+    // (normal, through-point) pair, pre-offset. Returns false if the needed
+    // selection isn't present.
+    bool computeDerivedPlaneNP(int kindIdx, gp_Dir& outNormal, gp_Pnt& outPoint) const;
+
     void beginConstructionPlane();
+    // Open the plane popup forced to a specific kind index (4=Midplane,
+    // 5=Normal-to-Axis, 6=Tangent), used by the Properties-panel contextual
+    // "Create …" buttons.
+    void beginConstructionPlaneMode(int kindIdx);
     void updateConstructionPlane();
     void commitConstructionPlane();
     void cancelConstructionPlane();

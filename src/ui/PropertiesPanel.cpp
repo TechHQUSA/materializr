@@ -18,6 +18,14 @@
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <gp_Ax3.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <Geom_Surface.hxx>
+#include <Geom_Plane.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <GeomAbs_CurveType.hxx>
+#include <TopoDS.hxx>
+#include <TopAbs_ShapeEnum.hxx>
 
 namespace materializr {
 
@@ -245,16 +253,21 @@ bool PropertiesPanel::render() {
 
         if (sketchLike && m_document && m_history && parentSketchId >= 0) {
             renderSketchConstraintsPanel(parentSketchId, modified);
-        } else if (m_selection->primaryType() == SelectionType::Plane && m_document) {
-            int planeId = -1;
+        } else if (m_document) {
+            // A single selected construction plane gets its orientation panel.
+            int planeCount = 0, firstPlaneId = -1;
             for (const auto& e : m_selection->getSelection()) {
                 if (e.type == SelectionType::Plane && e.planeId >= 0) {
-                    planeId = e.planeId; break;
+                    ++planeCount;
+                    if (firstPlaneId < 0) firstPlaneId = e.planeId;
                 }
             }
-            if (planeId >= 0 && m_document->getPlane(planeId)) {
-                renderPlanePanel(planeId, modified);
+            if (planeCount == 1 && m_document->getPlane(firstPlaneId)) {
+                renderPlanePanel(firstPlaneId, modified);
             } else {
+                // Construction-plane CREATION actions (Midplane / Tangent /
+                // Normal-to-axis) live in the Tools panel, alongside the other
+                // create operations — see Toolbar's context renderers.
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
                                    "Sub-shape properties not yet available.");
             }

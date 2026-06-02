@@ -1515,6 +1515,30 @@ void Application::renderConstructionPlanePanel() {
         ImGui::TextDisabled("(Select a planar face to enable Parallel-to-face.)");
     }
 
+    // Derived modes — each enabled only when its required selection exists.
+    if (m_planeOpHaveTwoPlanes) {
+        if (ImGui::RadioButton("Midplane (between 2 planes/faces)", m_planeOpKindIdx == 4)) {
+            m_planeOpKindIdx = 4; kindChanged = true;
+        }
+    }
+    if (m_planeOpHaveAxis) {
+        if (ImGui::RadioButton("Normal to selected axis/edge", m_planeOpKindIdx == 5)) {
+            m_planeOpKindIdx = 5; kindChanged = true;
+        }
+    }
+    if (m_planeOpHaveCylinder) {
+        if (ImGui::RadioButton("Tangent to selected cylinder", m_planeOpKindIdx == 6)) {
+            m_planeOpKindIdx = 6; kindChanged = true;
+        }
+        if (ImGui::RadioButton("Through cylinder axis (longitudinal)", m_planeOpKindIdx == 7)) {
+            m_planeOpKindIdx = 7; kindChanged = true;
+        }
+    }
+    if (!m_planeOpHaveTwoPlanes && !m_planeOpHaveAxis && !m_planeOpHaveCylinder) {
+        ImGui::TextDisabled("(Select 2 planes/faces, an axis/edge, or a cylinder\n"
+                            " for Midplane / Normal-to-axis / Tangent.)");
+    }
+
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Offset");
     // Sync the slider/field with the live preview plane's distance from
@@ -1522,7 +1546,10 @@ void Application::renderConstructionPlanePanel() {
     // drags and rotations rather than only the popup-input history. Skip
     // when the user is actively typing the field (else editing would jump
     // mid-keystroke).
-    {
+    // Only sync for the standard / parallel modes: the derived modes (4/5/6)
+    // measure their offset relative to a computed base position, so reading
+    // back the plane's absolute distance-from-origin would fight them.
+    if (m_planeOpKindIdx <= 3) {
         auto ids = m_document->getAllPlaneIds();
         if (!ids.empty()) {
             const auto* p = m_document->getPlane(ids.back());
