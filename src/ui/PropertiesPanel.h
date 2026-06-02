@@ -49,6 +49,8 @@ private:
     // Read-only orientation readout + Flip Normal / Rotate-About-Axis actions
     // for a selected construction plane.
     void renderPlanePanel(int planeId, bool& modified);
+    // Origin / direction / length readout + Flip Direction for a selected axis.
+    void renderAxisPanel(int axisId, bool& modified);
 
     std::function<void(int)> m_rotatePlane;
     std::function<void()>    m_markDirty;

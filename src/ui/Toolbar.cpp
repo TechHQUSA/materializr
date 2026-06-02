@@ -162,6 +162,54 @@ void Toolbar::renderAddPlaneMenu() {
     }
 }
 
+void Toolbar::renderAddAxisMenu() {
+    if (!m_selection || !m_pluginCtx) return;
+
+    int  planarFaces = 0, planeCount = 0, vertexCount = 0;
+    bool haveCyl = false, straightEdge = false;
+    for (const auto& e : m_selection->getSelection()) {
+        if (e.type == SelectionType::Plane)  { ++planeCount;  continue; }
+        if (e.type == SelectionType::Vertex) { ++vertexCount; continue; }
+        if (e.shape.IsNull()) continue;
+        try {
+            if (e.type == SelectionType::Face) {
+                Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(e.shape));
+                if (!s.IsNull()) {
+                    if (s->IsKind(STANDARD_TYPE(Geom_Plane))) ++planarFaces;
+                    else if (!Handle(Geom_CylindricalSurface)::DownCast(s).IsNull())
+                        haveCyl = true;
+                }
+            } else if (e.type == SelectionType::Edge) {
+                BRepAdaptor_Curve ad(TopoDS::Edge(e.shape));
+                if (ad.GetType() == GeomAbs_Line) straightEdge = true;
+            }
+        } catch (...) {}
+    }
+
+    const bool twoPlanes  = (planeCount >= 2) || (planarFaces >= 2);
+    const bool twoVerts   = (vertexCount >= 2);
+    const bool faceNormal = (planarFaces >= 1);
+    if (!(haveCyl || straightEdge || twoVerts || faceNormal || twoPlanes)) return;
+
+    ImGui::Separator();
+    if (ImGui::Button("Add Axis...", ImVec2(-1, 30)))
+        ImGui::OpenPopup("AddAxisMenu");
+    tip("Create a construction axis derived from the current selection.");
+    if (ImGui::BeginPopup("AddAxisMenu")) {
+        if (haveCyl && ImGui::MenuItem("From cylinder axis"))
+            m_pluginCtx->requestInteractiveOp("AxisFromCylinder");
+        if (straightEdge && ImGui::MenuItem("Along edge"))
+            m_pluginCtx->requestInteractiveOp("AxisAlongEdge");
+        if (twoVerts && ImGui::MenuItem("Through two vertices"))
+            m_pluginCtx->requestInteractiveOp("AxisTwoPoints");
+        if (faceNormal && ImGui::MenuItem("Normal to face"))
+            m_pluginCtx->requestInteractiveOp("AxisNormalToFace");
+        if (twoPlanes && ImGui::MenuItem("Intersection of two planes"))
+            m_pluginCtx->requestInteractiveOp("AxisTwoPlanes");
+        ImGui::EndPopup();
+    }
+}
+
 ToolAction Toolbar::renderSketchTools() {
     ToolAction action = ToolAction::None;
 
@@ -337,6 +385,10 @@ ToolAction Toolbar::renderNoSelectionTools() {
     if (ImGui::Button("Sketch on YZ", ImVec2(-1, 30))) action = ToolAction::StartSketchYZ;
     tip("Start a new sketch on the world YZ (side) plane.");
 
+    // Axis from a vertex selection (two vertices → through-points axis). This
+    // is the fallback context vertices land in; renders nothing otherwise.
+    renderAddAxisMenu();
+
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Inspect");
     ImGui::Separator();
@@ -451,8 +503,9 @@ ToolAction Toolbar::renderFaceTools() {
         }
     }
 
-    // Construction-plane creation from the selected face(s) — Add Plane menu.
+    // Construction-plane / -axis creation from the selected face(s).
     renderAddPlaneMenu();
+    renderAddAxisMenu();
 
     // Plugin buttons for HasFaces context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasFaces));
@@ -525,8 +578,10 @@ ToolAction Toolbar::renderPlaneSelectedTools() {
     tip("Show the Rotate gizmo. Drag a ring to spin the plane around its "
         "origin; snap is 5° increments when snap-to-grid is on.");
 
-    // Midplane between two selected construction planes (Add Plane menu).
+    // Midplane between two selected construction planes; axis from their
+    // intersection.
     renderAddPlaneMenu();
+    renderAddAxisMenu();
     return action;
 }
 
@@ -615,8 +670,9 @@ ToolAction Toolbar::renderEdgeTools() {
         action = ToolAction::EditDiameter;
     tip("Resize the cylindrical face this edge belongs to.");
 
-    // Construction plane from this edge (Add Plane menu).
+    // Construction plane / axis from this edge.
     renderAddPlaneMenu();
+    renderAddAxisMenu();
 
     // Plugin buttons for HasEdges context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasEdges));

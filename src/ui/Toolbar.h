@@ -135,6 +135,10 @@ private:
     // plane / edge / axis context renderers; renders nothing when no mode
     // applies.
     void renderAddPlaneMenu();
+    // Single "Add Axis…" button + dropdown listing the construction-axis
+    // creation modes the current selection supports (cylinder centreline,
+    // straight edge, two vertices, face normal, two-plane intersection).
+    void renderAddAxisMenu();
 
     void tip(const char* text) const;
 };

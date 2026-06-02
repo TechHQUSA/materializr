@@ -40,8 +40,10 @@ void ConstructionAxisOp::computeAxis(gp_Pnt& outOrigin, gp_Dir& outDir) const {
             return;
         }
         case AxisCreationType::ThroughFaceNormal:
-            // Caller fills m_origin (a point on the face) and m_direction
-            // (the face's normal). Just pass through.
+        case AxisCreationType::FromCylinderAxis:
+        case AxisCreationType::AlongEdge:
+        case AxisCreationType::TwoPlanesIntersection:
+            // Caller fills m_origin + m_direction (resolved geometry). Pass through.
             outOrigin = m_origin;
             outDir = m_direction;
             return;
@@ -77,6 +79,9 @@ std::string ConstructionAxisOp::description() const {
         case AxisCreationType::WorldZ:            typeStr = "World Z"; break;
         case AxisCreationType::TwoPoints:         typeStr = "Two points"; break;
         case AxisCreationType::ThroughFaceNormal: typeStr = "Face normal"; break;
+        case AxisCreationType::FromCylinderAxis:  typeStr = "Cylinder axis"; break;
+        case AxisCreationType::AlongEdge:         typeStr = "Along edge"; break;
+        case AxisCreationType::TwoPlanesIntersection: typeStr = "Plane intersection"; break;
     }
     return std::string("Construction Axis (") + typeStr + ")";
 }

@@ -714,12 +714,26 @@ private:
     // for the v0.6.x line.) Live preview via ConstructionAxisOp on
     // history, same Apply / Cancel idiom as the plane popup.
     bool m_axisOpActive = false;
-    int  m_axisOpKindIdx = 0;     // 0=WorldX, 1=WorldY, 2=WorldZ
+    int  m_axisOpKindIdx = 0;     // 0=WorldX,1=userY,2=userZ,3=Cyl,4=Edge,5=2Pts,6=FaceNormal,7=2Planes
     double m_axisOpOrigin[3] = {0.0, 0.0, 0.0}; // world coords
     char m_axisOpOriginBuf[3][24] = {"0.0", "0.0", "0.0"};
     bool m_axisOpPreviewPushed = false;
 
+    // Selection-derived inputs for kind indices 3–7, captured at
+    // beginConstructionAxis. Each reduces to an (origin, direction) the host
+    // computes (computeDerivedAxisOD) and feeds via setOrigin/setDirection.
+    bool   m_axisOpHaveCylinder = false;  gp_Ax1 m_axisOpCylAxis;
+    bool   m_axisOpHaveEdge = false;      gp_Ax1 m_axisOpEdgeAxis;
+    bool   m_axisOpHaveTwoVerts = false;  gp_Pnt m_axisOpV1, m_axisOpV2;
+    bool   m_axisOpHaveFaceNormal = false; gp_Pnt m_axisOpFacePt; gp_Dir m_axisOpFaceNormal;
+    bool   m_axisOpHaveTwoPlanes = false; gp_Pln m_axisOpPlaneA, m_axisOpPlaneB;
+    bool computeDerivedAxisOD(int kindIdx, gp_Pnt& outOrigin, gp_Dir& outDir) const;
+
     void beginConstructionAxis();
+    // Open the axis popup forced to a kind index (used by the Tools-panel
+    // "Add Axis…" buttons): 3=Cylinder, 4=Edge, 5=Two points, 6=Face normal,
+    // 7=Two-plane intersection.
+    void beginConstructionAxisMode(int kindIdx);
     void updateConstructionAxis();
     void commitConstructionAxis();
     void cancelConstructionAxis();

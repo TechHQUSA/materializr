@@ -242,6 +242,9 @@ bool PropertiesPanel::render() {
             case SelectionType::Plane:
                 typeName = "Plane";
                 break;
+            case SelectionType::Axis:
+                typeName = "Axis";
+                break;
             default:
                 break;
         }
@@ -255,15 +258,20 @@ bool PropertiesPanel::render() {
             renderSketchConstraintsPanel(parentSketchId, modified);
         } else if (m_document) {
             // A single selected construction plane gets its orientation panel.
-            int planeCount = 0, firstPlaneId = -1;
+            int planeCount = 0, firstPlaneId = -1, axisCount = 0, firstAxisId = -1;
             for (const auto& e : m_selection->getSelection()) {
                 if (e.type == SelectionType::Plane && e.planeId >= 0) {
                     ++planeCount;
                     if (firstPlaneId < 0) firstPlaneId = e.planeId;
+                } else if (e.type == SelectionType::Axis && e.axisId >= 0) {
+                    ++axisCount;
+                    if (firstAxisId < 0) firstAxisId = e.axisId;
                 }
             }
             if (planeCount == 1 && m_document->getPlane(firstPlaneId)) {
                 renderPlanePanel(firstPlaneId, modified);
+            } else if (axisCount == 1 && m_document->getAxis(firstAxisId)) {
+                renderAxisPanel(firstAxisId, modified);
             } else {
                 // Construction-plane CREATION actions (Midplane / Tangent /
                 // Normal-to-axis) live in the Tools panel, alongside the other
@@ -320,6 +328,27 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     ImGui::SameLine();
     if (ImGui::Button("Rotate About Axis...")) {
         if (m_rotatePlane) m_rotatePlane(planeId);
+    }
+}
+
+// Orientation readout + Flip Direction for a selected construction axis.
+// Values shown in user Z-up convention (user Y = world Z, user Z = world Y).
+void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
+    const auto* ae = m_document->getAxis(axisId);
+    if (!ae) return;
+
+    const gp_Pnt& o = ae->origin;
+    const gp_Dir& d = ae->direction;
+    ImGui::Text("Origin:    %.2f, %.2f, %.2f mm", o.X(), o.Z(), o.Y());
+    ImGui::Text("Direction: %.3f, %.3f, %.3f",     d.X(), d.Z(), d.Y());
+    ImGui::Text("Length:    %.1f mm", ae->halfLength * 2.0);
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    if (ImGui::Button("Flip Direction")) {
+        m_document->flipAxisDirection(axisId);
+        if (m_markDirty) m_markDirty();
+        modified = true;
     }
 }
 

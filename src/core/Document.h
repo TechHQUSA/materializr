@@ -158,6 +158,9 @@ public:
                 const std::string& name = "");
     void removeAxis(int id);
     void setAxis(int id, const gp_Pnt& origin, const gp_Dir& direction);
+    // Reverse an axis's direction in place (keeps origin). Flips which way
+    // Revolve spins around it. Fires AxisChangedEvent.
+    void flipAxisDirection(int id);
     const AxisEntry* getAxis(int id) const;
     std::string getAxisName(int id) const;
     void setAxisName(int id, const std::string& name);

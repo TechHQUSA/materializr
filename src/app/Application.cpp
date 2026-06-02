@@ -3007,6 +3007,11 @@ void Application::run() {
                     else if (pending == "PlaneNormalToAxis") beginConstructionPlaneMode(5);
                     else if (pending == "TangentPlane")      beginConstructionPlaneMode(6);
                     else if (pending == "PlaneThroughAxis")  beginConstructionPlaneMode(7);
+                    else if (pending == "AxisFromCylinder")  beginConstructionAxisMode(3);
+                    else if (pending == "AxisAlongEdge")     beginConstructionAxisMode(4);
+                    else if (pending == "AxisTwoPoints")     beginConstructionAxisMode(5);
+                    else if (pending == "AxisNormalToFace")  beginConstructionAxisMode(6);
+                    else if (pending == "AxisTwoPlanes")     beginConstructionAxisMode(7);
                     // Unknown ids are silently ignored — future plugins can
                     // ship their own without modifying Application by routing
                     // through whatever new dispatcher is added here.

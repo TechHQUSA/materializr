@@ -375,6 +375,16 @@ void Document::setAxis(int id, const gp_Pnt& origin, const gp_Dir& direction) {
     }
 }
 
+void Document::flipAxisDirection(int id) {
+    for (auto& a : m_axes) {
+        if (a.id == id) {
+            a.direction.Reverse();
+            if (m_eventBus) m_eventBus->publish(materializr::AxisChangedEvent{id});
+            return;
+        }
+    }
+}
+
 const AxisEntry* Document::getAxis(int id) const {
     for (const auto& a : m_axes) if (a.id == id) return &a;
     return nullptr;

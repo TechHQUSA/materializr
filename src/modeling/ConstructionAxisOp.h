@@ -12,7 +12,13 @@
 enum class AxisCreationType {
     WorldX, WorldY, WorldZ,
     TwoPoints,
-    ThroughFaceNormal
+    ThroughFaceNormal,
+    // Derived-from-selection modes. Like ThroughFaceNormal, the host computes
+    // (origin, direction) and feeds them via setOrigin/setDirection; these
+    // exist as distinct types only so the history label reads correctly.
+    FromCylinderAxis,        // a cylindrical/conical face's centreline
+    AlongEdge,               // a straight edge
+    TwoPlanesIntersection    // the line where two planes meet
 };
 
 class ConstructionAxisOp : public Operation {

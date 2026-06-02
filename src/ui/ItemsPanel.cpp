@@ -473,6 +473,10 @@ bool ItemsPanel::render() {
                     if (ImGui::MenuItem("Rename")) {
                         beginRename();
                     }
+                    if (ImGui::MenuItem("Flip Direction")) {
+                        m_document->flipAxisDirection(id);
+                        if (m_markDirty) m_markDirty();
+                    }
                     if (ImGui::MenuItem("Delete")) {
                         m_document->removeAxis(id);
                         if (m_selection) m_selection->clear();

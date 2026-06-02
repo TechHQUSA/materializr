@@ -51,6 +51,8 @@
 #include <gp_Lin.hxx>
 #include <gp_Vec.hxx>
 #include <Geom_Curve.hxx>
+#include <IntAna_QuadQuadGeo.hxx>
+#include <Precision.hxx>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1757,14 +1759,127 @@ bool Application::computeDerivedPlaneNP(int kindIdx, gp_Dir& outNormal,
 void Application::beginConstructionAxis() {
     if (m_axisOpActive) return; // already open
     m_axisOpActive = true;
-    m_axisOpKindIdx = 2;        // user Z (= world Y up) — sensible default
     m_axisOpOrigin[0] = m_axisOpOrigin[1] = m_axisOpOrigin[2] = 0.0;
     for (int i = 0; i < 3; ++i) {
         std::snprintf(m_axisOpOriginBuf[i], sizeof(m_axisOpOriginBuf[i]),
                       "%.2f", m_axisOpOrigin[i]);
     }
+
+    // Gather selection-derived inputs (cylinder centreline, straight edge,
+    // two vertices, a planar face's normal, two planes' intersection).
+    m_axisOpHaveCylinder = m_axisOpHaveEdge = m_axisOpHaveTwoVerts = false;
+    m_axisOpHaveFaceNormal = m_axisOpHaveTwoPlanes = false;
+    {
+        std::vector<gp_Pln> planarPlanes;
+        std::vector<gp_Pnt> vertices;
+        if (m_selection) {
+            for (const auto& e : m_selection->getSelection()) {
+                if (e.type == SelectionType::Plane && e.planeId >= 0) {
+                    if (const auto* pe = m_document->getPlane(e.planeId))
+                        planarPlanes.push_back(pe->plane);
+                    continue;
+                }
+                if (e.shape.IsNull()) continue;
+                try {
+                    if (e.type == SelectionType::Face && e.shape.ShapeType() == TopAbs_FACE) {
+                        Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(e.shape));
+                        if (s.IsNull()) continue;
+                        Handle(Geom_CylindricalSurface) cyl =
+                            Handle(Geom_CylindricalSurface)::DownCast(s);
+                        if (!cyl.IsNull()) {
+                            if (!m_axisOpHaveCylinder) {
+                                m_axisOpCylAxis = gp_Ax1(cyl->Cylinder().Position().Location(),
+                                                         cyl->Cylinder().Position().Direction());
+                                m_axisOpHaveCylinder = true;
+                            }
+                        } else if (s->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                            gp_Pln pln = Handle(Geom_Plane)::DownCast(s)->Pln();
+                            planarPlanes.push_back(pln);
+                            if (!m_axisOpHaveFaceNormal) {
+                                m_axisOpFacePt = pln.Axis().Location();
+                                m_axisOpFaceNormal = pln.Axis().Direction();
+                                m_axisOpHaveFaceNormal = true;
+                            }
+                        }
+                    } else if (e.type == SelectionType::Edge) {
+                        BRepAdaptor_Curve ad(TopoDS::Edge(e.shape));
+                        if (ad.GetType() == GeomAbs_Line && !m_axisOpHaveEdge) {
+                            m_axisOpEdgeAxis = ad.Line().Position();
+                            m_axisOpHaveEdge = true;
+                        }
+                    } else if (e.type == SelectionType::Vertex) {
+                        vertices.push_back(BRep_Tool::Pnt(TopoDS::Vertex(e.shape)));
+                    }
+                } catch (...) {}
+            }
+        }
+        if (vertices.size() >= 2) {
+            m_axisOpHaveTwoVerts = true;
+            m_axisOpV1 = vertices[0]; m_axisOpV2 = vertices[1];
+        }
+        if (planarPlanes.size() >= 2) {
+            m_axisOpHaveTwoPlanes = true;
+            m_axisOpPlaneA = planarPlanes[0]; m_axisOpPlaneB = planarPlanes[1];
+        }
+    }
+
+    // Default to the most likely mode for the selection; else user-Z (up).
+    if      (m_axisOpHaveCylinder)   m_axisOpKindIdx = 3;
+    else if (m_axisOpHaveEdge)       m_axisOpKindIdx = 4;
+    else if (m_axisOpHaveTwoVerts)   m_axisOpKindIdx = 5;
+    else if (m_axisOpHaveTwoPlanes)  m_axisOpKindIdx = 7;
+    else if (m_axisOpHaveFaceNormal) m_axisOpKindIdx = 6;
+    else                             m_axisOpKindIdx = 2;
+
     m_axisOpPreviewPushed = false;
     updateConstructionAxis();
+}
+
+void Application::beginConstructionAxisMode(int kindIdx) {
+    beginConstructionAxis();
+    if (!m_axisOpActive) return;
+    m_axisOpKindIdx = kindIdx;   // override the auto-default
+    updateConstructionAxis();
+}
+
+bool Application::computeDerivedAxisOD(int kindIdx, gp_Pnt& outOrigin,
+                                       gp_Dir& outDir) const {
+    switch (kindIdx) {
+        case 3: // cylinder centreline
+            if (!m_axisOpHaveCylinder) return false;
+            outOrigin = m_axisOpCylAxis.Location();
+            outDir    = m_axisOpCylAxis.Direction();
+            return true;
+        case 4: // along straight edge
+            if (!m_axisOpHaveEdge) return false;
+            outOrigin = m_axisOpEdgeAxis.Location();
+            outDir    = m_axisOpEdgeAxis.Direction();
+            return true;
+        case 5: { // through two vertices
+            if (!m_axisOpHaveTwoVerts) return false;
+            gp_Vec v(m_axisOpV1, m_axisOpV2);
+            if (v.Magnitude() < 1e-9) return false;
+            outOrigin = m_axisOpV1;
+            outDir    = gp_Dir(v);
+            return true;
+        }
+        case 6: // normal to a planar face, through its point
+            if (!m_axisOpHaveFaceNormal) return false;
+            outOrigin = m_axisOpFacePt;
+            outDir    = m_axisOpFaceNormal;
+            return true;
+        case 7: { // intersection line of two planes
+            if (!m_axisOpHaveTwoPlanes) return false;
+            IntAna_QuadQuadGeo inter(m_axisOpPlaneA, m_axisOpPlaneB,
+                                     Precision::Angular(), Precision::Confusion());
+            if (!inter.IsDone() || inter.NbSolutions() < 1) return false;
+            gp_Lin line = inter.Line(1);
+            outOrigin = line.Location();
+            outDir    = line.Direction();
+            return true;
+        }
+        default: return false;
+    }
 }
 
 void Application::updateConstructionAxis() {
@@ -1778,21 +1893,50 @@ void Application::updateConstructionAxis() {
     }
 
     auto op = std::make_unique<ConstructionAxisOp>();
-    // User-Z-up remap (same as the plane popup): the popup's X / Y / Z
-    // labels are in the user's Z-up convention, so user-Y → world-Z
-    // (depth) and user-Z → world-Y (up). Without this, picking "Z"
-    // gives a horizontal axis instead of the floor-up axis the user expects.
-    AxisCreationType kind = AxisCreationType::WorldZ;
-    const char* nm = "Axis";
-    switch (m_axisOpKindIdx) {
-        case 0: kind = AxisCreationType::WorldX; nm = "X Axis"; break;
-        case 1: kind = AxisCreationType::WorldZ; nm = "Y Axis"; break;
-        case 2: kind = AxisCreationType::WorldY; nm = "Z Axis"; break;
-        default: break;
+    if (m_axisOpKindIdx <= 2) {
+        // World axes through a typed origin. User-Z-up remap (same as the
+        // plane popup): the popup's X / Y / Z labels are in the user's Z-up
+        // convention, so user-Y → world-Z (depth) and user-Z → world-Y (up).
+        AxisCreationType kind = AxisCreationType::WorldY;
+        const char* nm = "Axis";
+        switch (m_axisOpKindIdx) {
+            case 0: kind = AxisCreationType::WorldX; nm = "X Axis"; break;
+            case 1: kind = AxisCreationType::WorldZ; nm = "Y Axis"; break;
+            case 2: kind = AxisCreationType::WorldY; nm = "Z Axis"; break;
+        }
+        op->setType(kind);
+        op->setOrigin(gp_Pnt(m_axisOpOrigin[0], m_axisOpOrigin[1], m_axisOpOrigin[2]));
+        op->setName(nm);
+    } else if (m_axisOpKindIdx == 5) {
+        // Two points → TwoPoints (its computeAxis derives direction from p1→p2).
+        if (m_axisOpHaveTwoVerts) {
+            op->setPoints(m_axisOpV1, m_axisOpV2);
+            op->setType(AxisCreationType::TwoPoints);
+            op->setName("Axis (2 points)");
+        } else {
+            op->setType(AxisCreationType::WorldY); op->setName("Z Axis");
+        }
+    } else {
+        // Derived (cylinder / edge / face-normal / plane-intersection): the
+        // host resolves (origin, direction); the op passes them through.
+        gp_Pnt o; gp_Dir d;
+        if (computeDerivedAxisOD(m_axisOpKindIdx, o, d)) {
+            op->setOrigin(o);
+            op->setDirection(d);
+            switch (m_axisOpKindIdx) {
+                case 3: op->setType(AxisCreationType::FromCylinderAxis);
+                        op->setName("Cylinder Axis"); break;
+                case 4: op->setType(AxisCreationType::AlongEdge);
+                        op->setName("Edge Axis"); break;
+                case 6: op->setType(AxisCreationType::ThroughFaceNormal);
+                        op->setName("Face-Normal Axis"); break;
+                case 7: op->setType(AxisCreationType::TwoPlanesIntersection);
+                        op->setName("Plane-Intersection Axis"); break;
+            }
+        } else {
+            op->setType(AxisCreationType::WorldY); op->setName("Z Axis");
+        }
     }
-    op->setType(kind);
-    op->setOrigin(gp_Pnt(m_axisOpOrigin[0], m_axisOpOrigin[1], m_axisOpOrigin[2]));
-    op->setName(nm);
 
     if (m_history->pushOperation(std::move(op), *m_document)) {
         m_axisOpPreviewPushed = true;

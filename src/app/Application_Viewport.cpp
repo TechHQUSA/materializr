@@ -47,6 +47,7 @@
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/PlaneTransformOp.h"
+#include "modeling/AxisTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
@@ -2287,8 +2288,26 @@ void Application::renderViewport() {
                                     }
                                 }
                             } else if (axisOnly) {
-                                /* axis gizmo: same as plane — direct setAxis
-                                   write during the drag covered it. */
+                                // Axis gizmo wrote the new pose via setAxis during
+                                // the drag; record an undoable AxisTransformOp
+                                // (before = m_axisGizmoDrag's stored pose, after =
+                                // current) so Ctrl+Z works. One batched op covers
+                                // a multi-axis drag.
+                                if (m_history) {
+                                    std::vector<AxisTransformOp::Entry> entries;
+                                    for (auto& a : m_axisGizmoDrag) {
+                                        const auto* ae = m_document->getAxis(a.id);
+                                        if (ae) entries.push_back({a.id, a.origin, a.direction,
+                                                                   ae->origin, ae->direction});
+                                    }
+                                    if (!entries.empty()) {
+                                        const char* lbl = (gm == GizmoMode::Rotate)
+                                                              ? "Rotate Axis" : "Move Axis";
+                                        m_history->pushExecuted(
+                                            std::make_unique<AxisTransformOp>(
+                                                lbl, std::move(entries)));
+                                    }
+                                }
                             } else if (isMulti) {
                                 // Batched commit: one ReplayOp covering all bodies.
                                 ReplayOp::BodyState beforeState;
