@@ -43,6 +43,7 @@
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
 #include "modeling/ReplayOp.h"
+#include "modeling/OperationFactory.h"
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/MirrorOp.h"
@@ -1909,6 +1910,20 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist) {
 
     for (const auto& st : hist.steps) {
         ReplayOp::BodyState before = toVec(running);
+
+        // While `running` still holds the pre-step state, derive what this
+        // step did to the body set so a rehydrated real op can restore its
+        // post-execution bookkeeping (Operation::rehydrateFromReload).
+        Operation::ReloadState reload;
+        for (const auto& [id, shape] : st.changed) {
+            if (running.find(id) == running.end()) reload.created.push_back(id);
+            else reload.modifiedBefore.push_back({id, running[id]});
+        }
+        for (int id : st.deleted) {
+            auto it = running.find(id);
+            if (it != running.end()) reload.deletedBefore.push_back({id, it->second});
+        }
+
         for (const auto& [id, shape] : st.changed) running[id] = shape;
         for (int id : st.deleted) running.erase(id);
         ReplayOp::BodyState after = toVec(running);
@@ -1921,6 +1936,17 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist) {
         std::unique_ptr<Operation> op;
         if (st.typeId == "sketchedit" && !st.params.empty()) {
             op = ProjectIO::rehydrateSketchEditOp(st.params, *m_document);
+        }
+        // Generic factory path: build the real op from typeId, restore its
+        // parameters, then its post-execution state. Only ops that opt into
+        // rehydrateFromReload() (returning true) come back editable; everyone
+        // else falls through to the baked ReplayOp below, unchanged.
+        if (!op && !st.params.empty()) {
+            auto candidate = OperationFactory::create(st.typeId);
+            if (candidate && candidate->deserializeParams(st.params) &&
+                candidate->rehydrateFromReload(reload)) {
+                op = std::move(candidate);
+            }
         }
         if (!op) {
             op = std::make_unique<ReplayOp>(

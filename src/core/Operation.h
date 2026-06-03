@@ -55,6 +55,30 @@ public:
     virtual std::string serializeParams() const { return ""; }
     virtual bool deserializeParams(const std::string& /*blob*/) { return true; }
 
+    // The body changes a step made, reconstructed from the saved project on
+    // load. Handed to rehydrateFromReload() so a freshly-deserialized op can
+    // restore the bookkeeping it would normally have built during execute()
+    // (which ids it created / modified / deleted), without re-running the
+    // geometry. `created` ids are exactly the bodies this step introduced;
+    // `modifiedBefore` / `deletedBefore` carry the prior shape so undo() can
+    // restore them.
+    struct ReloadState {
+        std::vector<int> created;
+        std::vector<std::pair<int, TopoDS_Shape>> modifiedBefore;
+        std::vector<std::pair<int, TopoDS_Shape>> deletedBefore;
+    };
+
+    // Restore an op (already populated via deserializeParams) to its
+    // post-execution state from a saved project, so undo()/redo() and
+    // parameter re-editing work across sessions. Return true if this op is now
+    // a fully editable reloaded op; the default returns false, which tells the
+    // loader to fall back to a baked ReplayOp (preserving prior behaviour for
+    // every op that hasn't opted in). Ops that reference whole bodies by id
+    // (patterns, shells, transforms) can implement this cheaply; ops that
+    // reference specific sub-shapes (fillet edges, push/pull faces) need
+    // persistent topological naming first and should leave it unimplemented.
+    virtual bool rehydrateFromReload(const ReloadState& /*state*/) { return false; }
+
     bool isEnabled() const { return m_enabled; }
     void setEnabled(bool enabled) { m_enabled = enabled; }
 

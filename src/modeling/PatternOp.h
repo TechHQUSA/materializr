@@ -39,6 +39,7 @@ public:
     std::string typeId() const override { return "pattern"; }
     std::string serializeParams() const override;
     bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state) override;
 
 private:
     int m_bodyId = -1;

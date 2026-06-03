@@ -140,9 +140,9 @@ std::string PatternOp::description() const {
 std::string PatternOp::serializeParams() const {
     char buf[256];
     std::snprintf(buf, sizeof(buf),
-        "type=%d;count=%d;sx=%.6f;sy=%.6f;sz=%.6f;ax=%.6f;ay=%.6f;az=%.6f;"
+        "body=%d;type=%d;count=%d;sx=%.6f;sy=%.6f;sz=%.6f;ax=%.6f;ay=%.6f;az=%.6f;"
         "ox=%.6f;oy=%.6f;oz=%.6f;angle=%.6f",
-        static_cast<int>(m_type), m_count,
+        m_bodyId, static_cast<int>(m_type), m_count,
         m_spacingX, m_spacingY, m_spacingZ,
         m_axisX, m_axisY, m_axisZ,
         m_originX, m_originY, m_originZ, m_totalAngle);
@@ -161,7 +161,8 @@ bool PatternOp::deserializeParams(const std::string& blob) {
         std::string val = blob.substr(eq + 1, end - eq - 1);
         double d = std::atof(val.c_str());
         int    i = std::atoi(val.c_str());
-        if      (key == "type")  { m_type = (i == 1) ? PatternType::Radial : PatternType::Linear; any = true; }
+        if      (key == "body")  { m_bodyId = i; any = true; }
+        else if (key == "type")  { m_type = (i == 1) ? PatternType::Radial : PatternType::Linear; any = true; }
         else if (key == "count") { m_count = i; any = true; }
         else if (key == "sx")    { m_spacingX = d; any = true; }
         else if (key == "sy")    { m_spacingY = d; any = true; }
@@ -176,6 +177,23 @@ bool PatternOp::deserializeParams(const std::string& blob) {
         pos = end + 1;
     }
     return any;
+}
+
+bool PatternOp::rehydrateFromReload(const ReloadState& state) {
+    // deserializeParams has already restored m_bodyId + the pattern params.
+    // Without a valid source body the op can't re-execute, so keep it as a
+    // baked ReplayOp instead.
+    if (m_bodyId < 0) return false;
+
+    // The bodies this step created ARE the pattern copies (copies 1..count-1;
+    // copy 0 is the original source, which the op never creates). Adopt them
+    // as our post-execution state so undo() removes exactly these and a redo
+    // / parameter-edit reuses their ids. Order matches execution order
+    // (preserved through save/load), so m_reuseBodyIds lines up on redo.
+    m_createdBodyIds = state.created;
+    m_reuseBodyIds.clear();
+    m_reuseIdx = 0;
+    return true;
 }
 
 void PatternOp::renderProperties() {
