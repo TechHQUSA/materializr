@@ -3,6 +3,61 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.6.3] — 2026-06-02
+
+### Added
+
+- **Construction axes brought to parity with construction planes.** A new
+  contextual **"Add Axis…"** dropdown in the Tools panel creates axes from the
+  current selection, each resolving to an (origin, direction) the host computes:
+  - **From cylinder axis** — a cylindrical face's centreline
+  - **Along edge** — a straight edge
+  - **Through two vertices**
+  - **Normal to face** — a planar face's normal
+  - **Intersection of two planes** — computed via `IntAna_QuadQuadGeo`
+
+  The plain Construction Axis button also auto-defaults to the right mode for
+  whatever is selected.
+- **Flip Direction for axes** — `Document::flipAxisDirection`, available from
+  the Items-panel axis context menu and the Properties panel.
+- **Axis Properties readout** — a selected axis shows origin / direction /
+  length, plus a Flip button.
+
+### Fixed
+
+- **Axis transforms are now undoable across the board.** A new
+  `AxisTransformOp` (before/after origin + direction) is wired into the axis
+  gizmo's move branch, so `Ctrl+Z` reverts axis drags — the same fix
+  `PlaneTransformOp` brought to planes.
+
+## [0.6.2] — 2026-06-02
+
+### Added
+
+- **Construction planes completed into a full datum-creation system.** New
+  creation modes surfaced contextually behind a single **"Add Plane…"**
+  dropdown that only lists what the current selection supports: Midplane
+  (centred between two parallel planes/faces), Normal to axis/edge, Tangent to
+  cylinder, Perpendicular to cylinder axis, and Through cylinder axis
+  (longitudinal). All reduce to "plane with normal N through point P"; the host
+  computes (N, P) from the selection.
+- **Flip Normal** for planes (`Document::flipPlaneNormal`) with a visible
+  normal stalk drawn by `PlaneRenderer`, plus a **Rotate/hinge about axis**
+  popup (hinge = plane U/V, a construction axis, an edge, or a cylinder
+  centreline).
+- **Undoable plane transforms** via `PlaneTransformOp`, wired into the plane
+  gizmo and the rotate-about-axis Apply.
+- **Plane Properties readout** — origin / normal / in-plane-X / tilt (user
+  Z-up), with Flip and Rotate buttons.
+- **Construction Axes** (new datum type) and **Revolve** (profile around an
+  axis, 0–360°) folded in under this release.
+
+### Fixed
+
+- **Coplanar pick tie-break** — a construction plane sitting on a body face no
+  longer steals the click; the face wins ties so coplanar faces stay
+  selectable (`Picker.cpp`). The sketch path is untouched.
+
 ## [0.6.0] — 2026-06-02
 
 ### Added
