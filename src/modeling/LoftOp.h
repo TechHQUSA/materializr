@@ -12,6 +12,11 @@ public:
 
     // Parameters
     void addProfile(const TopoDS_Wire& wire);
+    // Profile with holes: `outer` is the outer boundary, `holes` the inner
+    // boundary wires (e.g. the inner circle of a concentric pair). The holes
+    // are lofted into their own inner solids and cut from the outer loft, so a
+    // ring-section profile produces a tube instead of a solid cylinder.
+    void addProfile(const TopoDS_Wire& outer, const std::vector<TopoDS_Wire>& holes);
     void clearProfiles();
     void setSolid(bool solid);   // true = solid, false = shell
     void setRuled(bool ruled);   // true = ruled surface, false = smooth
@@ -31,6 +36,9 @@ public:
 
 private:
     std::vector<TopoDS_Wire> m_profiles;
+    // Parallel to m_profiles: the hole wires for each profile (empty if none).
+    // m_holeProfiles[i] are the holes of m_profiles[i].
+    std::vector<std::vector<TopoDS_Wire>> m_holeProfiles;
     bool m_solid = true;
     bool m_ruled = false;
 

@@ -644,6 +644,9 @@ private:
     bool m_loftActive = false;
     TopoDS_Wire m_loftWireA;
     TopoDS_Wire m_loftWireB;
+    // Inner (hole) wires of each profile, so a ring section lofts into a tube.
+    std::vector<TopoDS_Wire> m_loftHolesA;
+    std::vector<TopoDS_Wire> m_loftHolesB;
     bool m_loftSolid = true;
     bool m_loftRuled = false;
     bool m_loftReverseB = false;

@@ -1311,18 +1311,22 @@ void Application::beginLoft() {
     }
     if (sketchIds.size() < 2) return;
 
-    auto wireFromSketch = [&](int id) -> TopoDS_Wire {
+    auto wireFromSketch = [&](int id, std::vector<TopoDS_Wire>& holesOut) -> TopoDS_Wire {
+        holesOut.clear();
         auto sk = m_document->getSketch(id);
         if (!sk) return {};
         auto regions = sk->buildRegions();
-        if (!regions.empty()) return regions[0].outerWire;
+        if (!regions.empty()) {
+            holesOut = regions[0].holeWires; // inner boundaries → tube channels
+            return regions[0].outerWire;
+        }
         auto wires = sk->buildWires();
         if (!wires.empty()) return wires[0];
         return {};
     };
 
-    m_loftWireA = wireFromSketch(sketchIds[0]);
-    m_loftWireB = wireFromSketch(sketchIds[1]);
+    m_loftWireA = wireFromSketch(sketchIds[0], m_loftHolesA);
+    m_loftWireB = wireFromSketch(sketchIds[1], m_loftHolesB);
     if (m_loftWireA.IsNull() || m_loftWireB.IsNull()) {
         std::fprintf(stderr,
             "[Loft] could not derive a closed wire from one of the "
@@ -1350,12 +1354,19 @@ void Application::updateLoft() {
     }
 
     auto op = std::make_unique<LoftOp>();
-    op->addProfile(m_loftWireA);
+    op->addProfile(m_loftWireA, m_loftHolesA);
     // Reverse profile B's wire when requested: this re-orders B's vertices so
     // they pair differently against A's, which is the standard remedy for
     // the "apex pinch / pyramid" output when start vertices are misaligned.
-    if (m_loftReverseB) op->addProfile(TopoDS::Wire(m_loftWireB.Reversed()));
-    else                op->addProfile(m_loftWireB);
+    // Reverse B's hole wires to match, so inner channels pair consistently.
+    if (m_loftReverseB) {
+        std::vector<TopoDS_Wire> holesB;
+        holesB.reserve(m_loftHolesB.size());
+        for (const auto& h : m_loftHolesB) holesB.push_back(TopoDS::Wire(h.Reversed()));
+        op->addProfile(TopoDS::Wire(m_loftWireB.Reversed()), holesB);
+    } else {
+        op->addProfile(m_loftWireB, m_loftHolesB);
+    }
     op->setSolid(m_loftSolid);
     op->setRuled(m_loftRuled);
     if (m_history->pushOperation(std::move(op), *m_document)) {

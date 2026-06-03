@@ -1,5 +1,6 @@
 #include "LoftOp.h"
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
 #include <TopoDS.hxx>
 #include <imgui.h>
 
@@ -7,10 +8,17 @@ LoftOp::LoftOp() = default;
 
 void LoftOp::addProfile(const TopoDS_Wire& wire) {
     m_profiles.push_back(wire);
+    m_holeProfiles.emplace_back(); // no holes for this profile
+}
+
+void LoftOp::addProfile(const TopoDS_Wire& outer, const std::vector<TopoDS_Wire>& holes) {
+    m_profiles.push_back(outer);
+    m_holeProfiles.push_back(holes);
 }
 
 void LoftOp::clearProfiles() {
     m_profiles.clear();
+    m_holeProfiles.clear();
 }
 
 void LoftOp::setSolid(bool solid) {
@@ -40,6 +48,32 @@ bool LoftOp::execute(Document& doc) {
         }
 
         TopoDS_Shape loftedShape = thruSections.Shape();
+
+        // Tube support: if the profiles carry holes (e.g. concentric circles),
+        // loft each hole-channel into its own inner solid and cut it from the
+        // outer loft. Only meaningful for a solid loft. Hole k is matched by
+        // index across the profiles, and we require every profile to expose the
+        // same number of holes so the channels pair up unambiguously.
+        if (m_solid && !m_holeProfiles.empty()) {
+            size_t nHoles = m_holeProfiles[0].size();
+            bool uniform = nHoles > 0;
+            for (const auto& hp : m_holeProfiles) {
+                if (hp.size() != nHoles) { uniform = false; break; }
+            }
+            for (size_t k = 0; uniform && k < nHoles; ++k) {
+                BRepOffsetAPI_ThruSections inner(Standard_True, // solid
+                                                 m_ruled ? Standard_True : Standard_False);
+                for (const auto& hp : m_holeProfiles) {
+                    inner.AddWire(hp[k]);
+                }
+                inner.Build();
+                if (!inner.IsDone()) continue; // skip a hole that won't loft
+                BRepAlgoAPI_Cut cut(loftedShape, inner.Shape());
+                cut.Build();
+                if (cut.IsDone()) loftedShape = cut.Shape();
+            }
+        }
+
         doc.addOrPutBody(m_createdBodyId, loftedShape, "Loft");
 
         return true;
