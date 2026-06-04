@@ -1317,8 +1317,25 @@ void Application::beginLoft() {
         if (!sk) return {};
         auto regions = sk->buildRegions();
         if (!regions.empty()) {
-            holesOut = regions[0].holeWires; // inner boundaries → tube channels
-            return regions[0].outerWire;
+            // Concentric profiles decompose into MULTIPLE regions (the ring
+            // AND the inner disk). Loft the outermost one — largest outer
+            // bbox — so its holes become the tube channel; blindly taking
+            // regions[0] could grab the inner disk and loft a solid cone.
+            size_t best = 0;
+            double bestDiag = -1.0;
+            for (size_t i = 0; i < regions.size(); ++i) {
+                if (regions[i].outerWire.IsNull()) continue;
+                Bnd_Box bb;
+                BRepBndLib::Add(regions[i].outerWire, bb);
+                if (bb.IsVoid()) continue;
+                double x0, y0, z0, x1, y1, z1;
+                bb.Get(x0, y0, z0, x1, y1, z1);
+                double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+                double diag = dx * dx + dy * dy + dz * dz;
+                if (diag > bestDiag) { bestDiag = diag; best = i; }
+            }
+            holesOut = regions[best].holeWires; // inner boundaries → tube channels
+            return regions[best].outerWire;
         }
         auto wires = sk->buildWires();
         if (!wires.empty()) return wires[0];

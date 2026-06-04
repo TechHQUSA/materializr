@@ -1,5 +1,7 @@
 #include "RevolveOp.h"
 #include "Sketch.h"
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <cstdio>
 #include <cstdlib>
 #include <BRepPrimAPI_MakeRevol.hxx>
@@ -164,8 +166,24 @@ bool RevolveOp::rebuildProfileFromSketch(Document& doc) {
     auto sk = doc.getSketch(m_sketchId);
     if (!sk) return false;
     auto regions = sk->buildRegions();
-    if (regions.empty() || regions[0].face.IsNull()) return false;
-    m_profile = regions[0].face; // mirrors the Revolve popup's creation path
+    // Outermost region (largest outer bbox) — mirrors the Revolve popup's
+    // creation pick, so a reload re-derives the same profile (its face
+    // carries any inner boundaries as holes).
+    int bestIdx = -1;
+    double bestDiag = -1.0;
+    for (size_t i = 0; i < regions.size(); ++i) {
+        if (regions[i].face.IsNull() || regions[i].outerWire.IsNull()) continue;
+        Bnd_Box bb;
+        BRepBndLib::Add(regions[i].outerWire, bb);
+        if (bb.IsVoid()) continue;
+        double x0, y0, z0, x1, y1, z1;
+        bb.Get(x0, y0, z0, x1, y1, z1);
+        double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+        double diag = dx * dx + dy * dy + dz * dz;
+        if (diag > bestDiag) { bestDiag = diag; bestIdx = static_cast<int>(i); }
+    }
+    if (bestIdx < 0) return false;
+    m_profile = regions[bestIdx].face;
     return true;
 }
 

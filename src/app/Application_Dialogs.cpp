@@ -1744,6 +1744,12 @@ void Application::beginRevolve() {
             if (!dup) m_revolveBodyIds.push_back(e.bodyId);
         }
     }
+    // Default the What mode from the selection: a captured sketch profile
+    // means the user wants to revolve it (Sweep); bodies-only means rotate
+    // in place. Previously this kept its last value (default Rotate Body),
+    // so revolving a selected profile silently committed a rotate-snapshot
+    // step ("Batched transform") instead of a real, re-editable RevolveOp.
+    m_revolveWhatIdx = (m_revolveSketchId >= 0) ? 1 : 0;
     // Reset to a neutral start angle every time the popup opens so the
     // user isn't surprised by the last session's value sticking around
     // (and so live preview begins at "no rotation" and tracks the slider
@@ -2231,13 +2237,29 @@ void Application::applyRevolve() {
     auto sk = m_document->getSketch(m_revolveSketchId);
     if (!sk) return;
     auto regions = sk->buildRegions();
-    if (regions.empty() || regions[0].face.IsNull()) {
+    // Pick the outermost region (largest outer bbox) — its face carries any
+    // inner boundaries as holes. Matches RevolveOp::rebuildProfileFromSketch
+    // so reloads re-derive the same profile.
+    int bestIdx = -1;
+    double bestDiag = -1.0;
+    for (size_t i = 0; i < regions.size(); ++i) {
+        if (regions[i].face.IsNull() || regions[i].outerWire.IsNull()) continue;
+        Bnd_Box bb;
+        BRepBndLib::Add(regions[i].outerWire, bb);
+        if (bb.IsVoid()) continue;
+        double x0, y0, z0, x1, y1, z1;
+        bb.Get(x0, y0, z0, x1, y1, z1);
+        double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+        double diag = dx * dx + dy * dy + dz * dz;
+        if (diag > bestDiag) { bestDiag = diag; bestIdx = static_cast<int>(i); }
+    }
+    if (bestIdx < 0) {
         std::fprintf(stderr, "[Revolve] sketch has no closed region to revolve\n");
         return;
     }
 
     auto op = std::make_unique<RevolveOp>();
-    op->setProfile(regions[0].face);
+    op->setProfile(regions[bestIdx].face);
     op->setSketchSource(m_revolveSketchId); // for reload profile re-derivation
     op->setAxis(gp_Ax1(axisOrigin, axisDir));
     op->setAngle(static_cast<double>(m_revolveAngle));
