@@ -11,6 +11,7 @@
 #include "ChamferOp.h"
 #include "ShellOp.h"
 #include "ResizeCylindricalOp.h"
+#include "ThreadOp.h"
 
 namespace OperationFactory {
 
@@ -38,6 +39,7 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     if (typeId == "chamfer") return std::make_unique<ChamferOp>();
     if (typeId == "shell")   return std::make_unique<ShellOp>();
     if (typeId == "resize_cylindrical") return std::make_unique<ResizeCylindricalOp>();
+    if (typeId == "thread")  return std::make_unique<ThreadOp>(); // pure derived geometry
 
     return nullptr;
 }

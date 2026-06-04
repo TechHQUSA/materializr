@@ -585,6 +585,28 @@ private:
     bool   m_resizeCylInputFocus  = true;
     TopoDS_Shape m_resizeCylPreviousShape;
 
+    // ─── Thread (helical screw thread on a cylindrical face) ───────────────
+    // beginThread copies the geometry the cylindrical-face detector left in
+    // the m_resizeCyl* fields; the popup collects pitch/depth/handedness and
+    // Apply pushes a ThreadOp (no live preview — the helical sweep + boolean
+    // is too heavy to run per-frame).
+    bool   m_threadActive = false;
+    int    m_threadBodyId = -1;
+    bool   m_threadIsHole = false;
+    double m_threadAxis[9] = {0, 0, 0, 0, 0, 1, 1, 0, 0}; // loc, dir, xdir
+    double m_threadRadius = 5.0;
+    double m_threadLength = 10.0;
+    float  m_threadPitch  = 1.0f;
+    float  m_threadDepth  = 0.6f;
+    bool   m_threadRightHanded = true;
+    char   m_threadPitchBuf[32] = "1.0";
+    char   m_threadDepthBuf[32] = "0.6";
+
+    void beginThread();        // copies detector output, opens the popup
+    void commitThread();       // pushes the ThreadOp
+    void cancelThread();
+    void renderThreadPanel();  // ImGui popup contents
+
     // Detect whether the currently-picked face is on a recognised resizable
     // body (solid cylinder / tube). Populates the relevant m_resizeCyl* fields
     // and returns true if so. Called per frame to drive the toolbar button.

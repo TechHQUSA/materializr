@@ -22,6 +22,7 @@
 #include "modeling/ChamferOp.h"
 #include "modeling/ShellOp.h"
 #include "modeling/ResizeCylindricalOp.h"
+#include "modeling/ThreadOp.h"
 #include "modeling/PatternOp.h"
 #include "modeling/LoftOp.h"
 #include "modeling/ConstructionPlaneOp.h"
@@ -477,6 +478,70 @@ bool Application::detectCylindricalResizeCandidate() {
     m_resizeCylEditBottom = editBottom;
     m_resizeCylEditTop    = editTop;
     return true;
+}
+
+
+// ─── Thread (helical screw thread) ──────────────────────────────────────────
+//
+// The Toolbar's Thread button dispatches through the same cylindrical-face
+// detector as Edit Diameter; beginThread copies its m_resizeCyl* output and
+// opens the popup. No live preview: a helical sweep + boolean per frame is a
+// multi-second operation, so the thread computes once on Apply.
+
+void Application::beginThread() {
+    // Threads need a true cylinder — a cone's helix would leave the surface.
+    if (std::abs(m_resizeCylOriginalBottomR - m_resizeCylOriginalTopR) > 1e-5) {
+        std::fprintf(stderr, "[Thread] picked face is conical — thread needs "
+                             "a cylinder\n");
+        return;
+    }
+    m_threadBodyId  = m_resizeCylBodyId;
+    m_threadIsHole  = m_resizeCylIsHole;
+    m_threadRadius  = m_resizeCylOriginalBottomR;
+    m_threadLength  = m_resizeCylHeight;
+    m_threadAxis[0] = m_resizeCylAxisOX; m_threadAxis[1] = m_resizeCylAxisOY;
+    m_threadAxis[2] = m_resizeCylAxisOZ; m_threadAxis[3] = m_resizeCylAxisDX;
+    m_threadAxis[4] = m_resizeCylAxisDY; m_threadAxis[5] = m_resizeCylAxisDZ;
+    m_threadAxis[6] = m_resizeCylAxisXX; m_threadAxis[7] = m_resizeCylAxisXY;
+    m_threadAxis[8] = m_resizeCylAxisXZ;
+
+    // Metric-coarse-ish defaults from the diameter, clamped to sane bounds;
+    // depth defaults to ~0.6·pitch (close to the ISO thread depth ratio).
+    double dia = m_threadRadius * 2.0;
+    m_threadPitch = static_cast<float>(std::min(3.0, std::max(0.5, 0.125 * dia)));
+    m_threadDepth = static_cast<float>(0.6 * m_threadPitch);
+    m_threadRightHanded = true;
+    std::snprintf(m_threadPitchBuf, sizeof(m_threadPitchBuf), "%.2f", m_threadPitch);
+    std::snprintf(m_threadDepthBuf, sizeof(m_threadDepthBuf), "%.2f", m_threadDepth);
+    m_threadActive = true;
+}
+
+void Application::commitThread() {
+    if (m_threadBodyId < 0) { cancelThread(); return; }
+    auto op = std::make_unique<ThreadOp>();
+    op->setBody(m_threadBodyId);
+    op->setAxis(gp_Ax2(gp_Pnt(m_threadAxis[0], m_threadAxis[1], m_threadAxis[2]),
+                       gp_Dir(m_threadAxis[3], m_threadAxis[4], m_threadAxis[5]),
+                       gp_Dir(m_threadAxis[6], m_threadAxis[7], m_threadAxis[8])));
+    op->setRadius(m_threadRadius);
+    op->setLength(m_threadLength);
+    op->setPitch(static_cast<double>(m_threadPitch));
+    op->setDepth(static_cast<double>(m_threadDepth));
+    op->setIsHole(m_threadIsHole);
+    op->setRightHanded(m_threadRightHanded);
+    if (!m_history->pushOperation(std::move(op), *m_document)) {
+        std::fprintf(stderr, "[Thread] failed — pitch/depth may be too large "
+                             "for the face (or > 300 turns)\n");
+    }
+    m_threadActive = false;
+    m_threadBodyId = -1;
+    m_selection->clear();
+    m_meshesDirty = true;
+}
+
+void Application::cancelThread() {
+    m_threadActive = false;
+    m_threadBodyId = -1;
 }
 
 void Application::beginResizeCylindrical() {

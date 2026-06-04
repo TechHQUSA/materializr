@@ -1249,6 +1249,68 @@ void Application::renderPatternPanel() {
     ImGui::End();
 }
 
+
+void Application::renderThreadPanel() {
+    if (!m_threadActive) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 280,
+                                    ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Thread", nullptr,
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "%s thread",
+                       m_threadIsHole ? "Internal" : "External");
+    ImGui::Text("Diameter %.2f mm, length %.2f mm",
+                m_threadRadius * 2.0, m_threadLength);
+    ImGui::Separator();
+
+    ImGui::Text("Pitch"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(90);
+    if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
+                         ImGuiInputTextFlags_CharsDecimal)) {
+        float v = static_cast<float>(std::atof(m_threadPitchBuf));
+        if (v >= 0.1f) m_threadPitch = v;
+    }
+    ImGui::SameLine(); ImGui::Text("mm");
+
+    ImGui::Text("Depth"); ImGui::SameLine();
+    ImGui::SetNextItemWidth(90);
+    if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
+                         ImGuiInputTextFlags_CharsDecimal)) {
+        float v = static_cast<float>(std::atof(m_threadDepthBuf));
+        if (v >= 0.05f) m_threadDepth = v;
+    }
+    ImGui::SameLine(); ImGui::Text("mm");
+
+    ImGui::Checkbox("Right-handed", &m_threadRightHanded);
+
+    double turns = m_threadLength / std::max(0.1f, m_threadPitch);
+    ImGui::TextDisabled("%.0f turns over the face", turns);
+    if (turns > 300.0) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                           "Too many turns (max 300) — raise the pitch.");
+    }
+    ImGui::TextDisabled("Computed on Apply — may take a few seconds.");
+
+    ImGui::Separator();
+    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    ImGui::SameLine();
+    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+
+    if (applyClicked && turns <= 300.0) {
+        commitThread();
+    } else if (cancelClicked || escPressed) {
+        cancelThread();
+    }
+
+    ImGui::End();
+}
+
 void Application::renderLoftPanel() {
     if (!m_loftActive) return;
 

@@ -472,6 +472,12 @@ ToolAction Toolbar::renderFaceTools() {
         ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
         action = ToolAction::EditDiameter;
     tip("Resize a cylindrical hole / pin to an exact diameter.");
+    if (m_canEditDiameter &&
+        ImGui::Button("Thread", ImVec2(-1, 30)))
+        action = ToolAction::Thread;
+    tip("Cut a helical screw thread into the picked cylindrical face — "
+        "external on a boss, internal in a hole. Pitch / depth / handedness "
+        "in the popup.");
 
     // "Edit Fillet / Chamfer" appears only when the picked face was actually
     // produced by a fillet or chamfer op. We ask each Operation via

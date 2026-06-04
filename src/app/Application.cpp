@@ -1203,6 +1203,13 @@ void Application::handleToolAction(int action) {
             if (detectCylindricalResizeCandidate()) beginResizeCylindrical();
             break;
         }
+        case ToolAction::Thread: {
+            // Same detector as Edit Diameter — it fills the m_resizeCyl*
+            // fields (axis, radius, extent, hole-vs-boss) that the thread
+            // popup copies from.
+            if (detectCylindricalResizeCandidate()) beginThread();
+            break;
+        }
 
         case ToolAction::Shell: {
             // Pick the first selected face and shell its owning body. The
@@ -3162,6 +3169,7 @@ void Application::run() {
             renderResizeCylindricalPanel();
             renderShellPanel();
             renderPatternPanel();
+            renderThreadPanel();
             renderLoftPanel();
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
