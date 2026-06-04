@@ -65,6 +65,10 @@ bool History::undo(Document& doc) {
     }
 
     m_currentIndex--;
+    // Manual undo means the user is steering the applied range themselves —
+    // drop any pending auto-recovery so a later edit doesn't surprise-redo
+    // steps they deliberately walked back past.
+    m_failedReplayAt = -1;
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
     return true;
 }
@@ -77,10 +81,14 @@ bool History::redo(Document& doc) {
     m_currentIndex++;
     Operation* op = m_operations[m_currentIndex].get();
     if (!op->execute(doc)) {
+        m_failedReplayAt = m_currentIndex;
         m_currentIndex--;
         return false;
     }
 
+    if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
+        m_failedReplayAt = -1; // the previously-failed step recomputed fine
+    }
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
     return true;
 }
@@ -109,7 +117,25 @@ bool History::editStep(int index, Document& doc) {
     if (m_breakpoint >= 0 && m_breakpoint < limit) {
         limit = m_breakpoint;
     }
-    if (index > limit) return false; // step isn't part of the current state
+
+    if (index > limit) {
+        // The step isn't currently applied — e.g. it was suspended by an
+        // earlier failed recompute (fillet grew, chamfer edge vanished) and
+        // the user is editing ITS parameters to fix it. Roll FORWARD to it,
+        // executing the intervening steps, instead of refusing.
+        for (int i = limit + 1; i <= index; ++i) {
+            Operation* op = m_operations[i].get();
+            if (op->isEnabled() && !op->execute(doc)) {
+                m_failedReplayAt = i;
+                return false;
+            }
+            m_currentIndex = i;
+        }
+        if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
+            m_failedReplayAt = -1;
+        }
+        return true;
+    }
 
     // Rebuild IN PLACE rather than clearing the document: clearing would also
     // wipe bodies that aren't operations (the base/imported bodies) and reset
@@ -125,9 +151,31 @@ bool History::editStep(int index, Document& doc) {
         if (op->isEnabled()) {
             if (!op->execute(doc)) {
                 m_currentIndex = i - 1;
+                m_failedReplayAt = i;
                 return false;
             }
         }
+    }
+
+    // If a PREVIOUS edit knocked steps out (failed recompute left a suspended
+    // tail), retry them now that the upstream geometry changed again — this is
+    // what makes "grow the fillet too far, chamfer dies, shrink the fillet
+    // back" bring the chamfer back automatically. Stops at the first step
+    // that still fails (keeping the flag) without failing THIS edit.
+    if (m_failedReplayAt >= 0) {
+        int cap = static_cast<int>(m_operations.size()) - 1;
+        if (m_breakpoint >= 0 && m_breakpoint < cap) cap = m_breakpoint;
+        bool cleared = true;
+        for (int i = limit + 1; i <= cap; ++i) {
+            Operation* op = m_operations[i].get();
+            if (op->isEnabled() && !op->execute(doc)) {
+                m_failedReplayAt = i;
+                cleared = false;
+                break;
+            }
+            m_currentIndex = i;
+        }
+        if (cleared) m_failedReplayAt = -1;
     }
 
     // Note: we deliberately don't publish HistoryStepEvent here. editStep
@@ -229,6 +277,7 @@ void History::clear() {
     m_operations.clear();
     m_currentIndex = -1;
     m_breakpoint = -1;
+    m_failedReplayAt = -1;
 }
 
 const std::vector<std::unique_ptr<Operation>>& History::operations() const {

@@ -33,8 +33,17 @@ public:
     int currentStep() const; // index of last executed step
     const Operation* getStep(int index) const;
 
-    // Edit a historical step's parameters and replay
+    // Edit a historical step's parameters and replay. Editing a step ABOVE
+    // the current index (e.g. one suspended by a failed recompute) rolls
+    // forward to it instead of refusing; a successful edit also auto-retries
+    // a failure-suspended tail.
     bool editStep(int index, Document& doc);
+
+    // Index of the step that most recently failed to recompute during an
+    // editStep replay / redo (its result vanished from the viewport and it
+    // sits above the current index). -1 = none. The UI uses this to explain
+    // what happened instead of leaving steps silently missing.
+    int lastReplayFailure() const { return m_failedReplayAt; }
 
     // Remove a step entirely (delete that operation), rebuilding the model in
     // place. Returns false and leaves the model unchanged if removing the step
@@ -58,5 +67,8 @@ private:
     std::vector<std::unique_ptr<Operation>> m_operations;
     int m_currentIndex = -1;
     int m_breakpoint = -1;
+    // Step that failed to recompute during the last editStep/redo replay;
+    // cleared by manual undo, by a successful retry, or by clear().
+    int m_failedReplayAt = -1;
     materializr::EventBus* m_eventBus = nullptr;
 };

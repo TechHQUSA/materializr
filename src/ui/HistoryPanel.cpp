@@ -58,6 +58,23 @@ bool HistoryPanel::render() {
         ImGui::Separator();
     }
 
+    // A step that failed to recompute after an upstream edit sits above the
+    // current index with its geometry missing from the viewport — say so,
+    // and say how to get it back, instead of leaving it silently absent.
+    int failedAt = m_history->lastReplayFailure();
+    if (failedAt >= 0) {
+        const Operation* fop = m_history->getStep(failedAt);
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
+            "Step %d (%s) couldn't recompute — the geometry it referenced no "
+            "longer exists after the upstream edit. Edit an upstream step "
+            "(it retries automatically), edit this step's parameters, or "
+            "delete it.",
+            failedAt + 1, fop ? fop->name().c_str() : "?");
+        ImGui::PopTextWrapPos();
+        ImGui::Separator();
+    }
+
     // Step list. When a step's properties editor is open below, shrink the
     // list so the editor + its pinned Apply button stay on-screen instead of
     // overflowing past the panel bottom (previously: type, scroll, THEN
