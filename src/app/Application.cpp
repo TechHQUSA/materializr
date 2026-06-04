@@ -1946,9 +1946,17 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist) {
             if (candidate && candidate->deserializeParams(st.params) &&
                 candidate->rehydrateFromReload(reload, *m_document)) {
                 op = std::move(candidate);
+                std::fprintf(stderr, "[Reload] step '%s' (%s): rehydrated as "
+                                     "real op (created=%zu modified=%zu)\n",
+                             st.name.c_str(), st.typeId.c_str(),
+                             reload.created.size(), reload.modifiedBefore.size());
             }
         }
         if (!op) {
+            std::fprintf(stderr, "[Reload] step '%s' (%s): baked ReplayOp "
+                                 "(params=%s)\n",
+                         st.name.c_str(), st.typeId.c_str(),
+                         st.params.empty() ? "none" : "present");
             op = std::make_unique<ReplayOp>(
                 st.typeId, st.name, st.description,
                 std::move(before), std::move(after));
@@ -2075,7 +2083,12 @@ void Application::closeProject() {
     // already has a path, autosave quietly before closing. Otherwise (dirty +
     // no autosave) route through the save-prompt with CloseProject intent.
     if (!isDirty()) { doCloseProject(); return; }
-    if (m_autosaveEnabled && !m_currentProjectPath.empty()) {
+    // The quiet-autosave shortcut only applies at the history tip — saving in
+    // an undone state would silently drop the redo tail from the file (only
+    // applied steps persist). Below the tip, fall through to the explicit
+    // prompt so losing those steps is the user's call, not autosave's.
+    if (m_autosaveEnabled && !m_currentProjectPath.empty() &&
+        !(m_history && m_history->canRedo())) {
         saveProjectQuick();
         doCloseProject();
         return;
@@ -3166,7 +3179,14 @@ void Application::run() {
             double now = ImGui::GetTime();
             if (m_autosaveEnabled && !m_currentProjectPath.empty()) {
                 if (isDirty()) {
-                    if (now - m_lastAutosaveTime >= m_autosaveIntervalSec) {
+                    // Never autosave while the user is below the history tip
+                    // (mid undo-exploration): the file only persists APPLIED
+                    // steps, so saving now would silently truncate the redo
+                    // tail from the project. Resume once they redo back to the
+                    // tip or push a new op (which discards the tail anyway).
+                    if (m_history && m_history->canRedo()) {
+                        // hold off — keep checking each interval
+                    } else if (now - m_lastAutosaveTime >= m_autosaveIntervalSec) {
                         saveProjectQuick();
                         m_lastAutosaveTime = now;
                     }

@@ -1,6 +1,7 @@
 #include "History.h"
 #include "EventBus.h"
 #include "Events.h"
+#include <cstdio>
 
 History::History() = default;
 
@@ -47,11 +48,19 @@ bool History::canRedo() const {
 
 bool History::undo(Document& doc) {
     if (!canUndo()) {
+        std::fprintf(stderr, "[History] undo: nothing to undo (currentIndex=%d)\n",
+                     m_currentIndex);
         return false;
     }
 
     Operation* op = m_operations[m_currentIndex].get();
+    std::fprintf(stderr, "[History] undo step %d '%s' (type=%s reloaded=%d enabled=%d)\n",
+                 m_currentIndex, op->name().c_str(), op->typeId().c_str(),
+                 op->isReloaded() ? 1 : 0, op->isEnabled() ? 1 : 0);
     if (!op->undo(doc)) {
+        std::fprintf(stderr, "[History] undo FAILED at step %d '%s' — op->undo() "
+                             "returned false; staying at this step\n",
+                     m_currentIndex, op->name().c_str());
         return false;
     }
 

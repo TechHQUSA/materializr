@@ -1,5 +1,7 @@
 #include "PushPullOp.h"
 #include "Sketch.h"
+#include <cstdio>
+#include <cstdlib>
 
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -279,4 +281,96 @@ OperationDiff PushPullOp::captureDiff() const {
     for (int id : m_createdBodyIds)
         if (id >= 0) d.created.push_back(id);
     return d;
+}
+
+std::string PushPullOp::serializeParams() const {
+    // Profiles are NOT stored — each sketch-sourced target re-derives its face
+    // from (sketch id, region index) on reload. Targets without a sketch
+    // source (a push/pull on a bare body face) still serialise their scalars,
+    // but rehydrateFromReload declines them — the face reference needs
+    // persistent topological naming to survive a reload.
+    std::string blob;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "dist=%.6f;count=%d",
+                  m_distance, static_cast<int>(m_targets.size()));
+    blob += buf;
+    for (size_t i = 0; i < m_targets.size(); ++i) {
+        int sk = (i < m_sketchSourceIds.size())     ? m_sketchSourceIds[i]     : -1;
+        int rg = (i < m_sketchSourceRegions.size()) ? m_sketchSourceRegions[i] : -1;
+        std::snprintf(buf, sizeof(buf), ";s%zu=%d;r%zu=%d;b%zu=%d",
+                      i, sk, i, rg, i, m_targets[i].sourceBodyId);
+        blob += buf;
+    }
+    return blob;
+}
+
+bool PushPullOp::deserializeParams(const std::string& blob) {
+    bool any = false;
+    int count = 0;
+    // First pass: scalars + target count, so the vectors can be sized before
+    // the per-target keys land.
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string key = blob.substr(pos, eq - pos);
+        std::string val = blob.substr(eq + 1, end - eq - 1);
+        if      (key == "dist")  { m_distance = std::atof(val.c_str()); any = true; }
+        else if (key == "count") { count = std::atoi(val.c_str()); any = true; }
+        pos = end + 1;
+    }
+    if (count <= 0) return any;
+    m_targets.assign(count, Target{});          // profiles rebuilt on rehydrate
+    m_sketchSourceIds.assign(count, -1);
+    m_sketchSourceRegions.assign(count, -1);
+    pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string key = blob.substr(pos, eq - pos);
+        std::string val = blob.substr(eq + 1, end - eq - 1);
+        if (key.size() >= 2 && (key[0] == 's' || key[0] == 'r' || key[0] == 'b')) {
+            int idx = std::atoi(key.c_str() + 1);
+            int v   = std::atoi(val.c_str());
+            if (idx >= 0 && idx < count) {
+                if      (key[0] == 's') m_sketchSourceIds[idx]      = v;
+                else if (key[0] == 'r') m_sketchSourceRegions[idx]  = v;
+                else                    m_targets[idx].sourceBodyId = v;
+                any = true;
+            }
+        }
+        pos = end + 1;
+    }
+    return any;
+}
+
+bool PushPullOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
+    if (m_targets.empty()) return false;
+    // Every target must be sketch-sourced to re-derive its profile; a single
+    // face-driven target poisons the whole op (its face can't be rebuilt), so
+    // decline and let the loader fall back to a baked ReplayOp.
+    for (size_t i = 0; i < m_targets.size(); ++i) {
+        if (i >= m_sketchSourceIds.size() || m_sketchSourceIds[i] < 0) return false;
+    }
+    // Rebuild each distinct source sketch's targets (the helper fills every
+    // target bound to that sketch in one call).
+    for (size_t i = 0; i < m_targets.size(); ++i) {
+        if (!m_targets[i].profile.IsNull()) continue; // already rebuilt
+        if (!rebuildProfileFromSketch(doc, m_sketchSourceIds[i])) return false;
+    }
+    for (const auto& t : m_targets) {
+        if (t.profile.IsNull()) return false;
+    }
+    // Post-execution bookkeeping from the saved step's body delta, so undo()
+    // removes/restores exactly the right bodies and a distance edit re-executes
+    // under the same ids (tombstone metadata included).
+    m_createdBodyIds = state.created;
+    m_previousBodies = state.modifiedBefore;
+    m_reuseBodyIds.clear();
+    m_reuseIdx = 0;
+    return true;
 }
