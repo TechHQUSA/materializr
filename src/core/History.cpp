@@ -137,6 +137,14 @@ bool History::editStep(int index, Document& doc) {
         return true;
     }
 
+    // Snapshot the edited op's parameters: if the new values are geometrically
+    // impossible (a fillet radius larger than its host face, say), we restore
+    // these and reapply so a REJECTED edit leaves the model exactly as it was
+    // — instead of stranding the step and everything above it, where the
+    // user's next Ctrl+Z would unexpectedly hit the step below (Steve: "undo
+    // deleted the whole body").
+    std::string paramSnapshot = m_operations[index]->serializeParams();
+
     // Rebuild IN PLACE rather than clearing the document: clearing would also
     // wipe bodies that aren't operations (the base/imported bodies) and reset
     // body ids, so dependent ops (which reference body ids) would fail. Instead
@@ -146,16 +154,27 @@ bool History::editStep(int index, Document& doc) {
         Operation* op = m_operations[i].get();
         if (op->isEnabled()) op->undo(doc);
     }
+    bool editRejected = false;
     for (int i = index; i <= limit; ++i) {
         Operation* op = m_operations[i].get();
         if (op->isEnabled()) {
             if (!op->execute(doc)) {
+                if (i == index && !paramSnapshot.empty() &&
+                    op->deserializeParams(paramSnapshot) && op->execute(doc)) {
+                    // The edited step rejected its NEW parameters but reapplies
+                    // cleanly with the previous ones — keep replaying the rest;
+                    // the props editor re-reads the op, so the value visibly
+                    // snaps back.
+                    editRejected = true;
+                    continue;
+                }
                 m_currentIndex = i - 1;
                 m_failedReplayAt = i;
                 return false;
             }
         }
     }
+    if (editRejected) return false; // model intact, but the edit didn't apply
 
     // If a PREVIOUS edit knocked steps out (failed recompute left a suspended
     // tail), retry them now that the upstream geometry changed again — this is
