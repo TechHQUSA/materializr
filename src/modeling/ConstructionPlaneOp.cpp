@@ -1,4 +1,6 @@
 #include "ConstructionPlaneOp.h"
+#include <cstdio>
+#include <cstdlib>
 #include <gp_Ax3.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Vec.hxx>
@@ -99,8 +101,11 @@ gp_Pln ConstructionPlaneOp::computePlane() const {
 
 bool ConstructionPlaneOp::execute(Document& doc) {
     try {
-        gp_Pln plane = computePlane();
-        m_createdPlaneId = doc.addPlane(plane, m_planeName);
+        gp_Pln plane = m_hasLiteralPlane ? m_literalPlane : computePlane();
+        // Pass the prior id (kept across undo) as reuseId so a redo — in
+        // session or of a reloaded step — restores the plane under the same
+        // id, keeping sketches / transform steps that reference it valid.
+        m_createdPlaneId = doc.addPlane(plane, m_planeName, m_createdPlaneId);
         return m_createdPlaneId >= 0;
     } catch (...) {
         return false;
@@ -112,11 +117,84 @@ bool ConstructionPlaneOp::undo(Document& doc) {
     // this every preview cycle (radio-click XY/XZ/YZ, drag the offset
     // slider) would stack a fresh plane on top of the previous one — the
     // visible "every selection shows" + "offset has no effect" symptoms.
+    // The id itself is KEPT so the next execute() re-adds under it.
     if (m_createdPlaneId >= 0) {
         doc.removePlane(m_createdPlaneId);
-        m_createdPlaneId = -1;
     }
     return true;
+}
+
+std::string ConstructionPlaneOp::serializeParams() const {
+    // Persist the COMPUTED plane (location + normal + in-plane X) plus the
+    // created id; the picked-geometry creation inputs can't be rebuilt across
+    // sessions, but the resulting plane fully describes the op. The name goes
+    // LAST and runs to end-of-blob so user names may contain ';' or '='.
+    gp_Pln pln = m_hasLiteralPlane ? m_literalPlane : computePlane();
+    const gp_Ax3& ax = pln.Position();
+    char buf[420];
+    std::snprintf(buf, sizeof(buf),
+        "id=%d;type=%d;px=%.9g;py=%.9g;pz=%.9g;"
+        "nx=%.9g;ny=%.9g;nz=%.9g;xx=%.9g;xy=%.9g;xz=%.9g;name=%s",
+        m_createdPlaneId, static_cast<int>(m_type),
+        ax.Location().X(), ax.Location().Y(), ax.Location().Z(),
+        ax.Direction().X(), ax.Direction().Y(), ax.Direction().Z(),
+        ax.XDirection().X(), ax.XDirection().Y(), ax.XDirection().Z(),
+        m_planeName.c_str());
+    return buf;
+}
+
+bool ConstructionPlaneOp::deserializeParams(const std::string& blob) {
+    bool any = false;
+    double px = 0, py = 0, pz = 0, nx = 0, ny = 0, nz = 1, xx = 1, xy = 0, xz = 0;
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        std::string key = blob.substr(pos, eq - pos);
+        if (key == "name") {
+            // Name runs to end-of-blob (may contain ';' / '=').
+            m_planeName = blob.substr(eq + 1);
+            any = true;
+            break;
+        }
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string val = blob.substr(eq + 1, end - eq - 1);
+        double d = std::atof(val.c_str());
+        int    i = std::atoi(val.c_str());
+        if      (key == "id")   { m_createdPlaneId = i; any = true; }
+        else if (key == "type") { m_type = static_cast<PlaneCreationType>(i); any = true; }
+        else if (key == "px") { px = d; any = true; }
+        else if (key == "py") { py = d; any = true; }
+        else if (key == "pz") { pz = d; any = true; }
+        else if (key == "nx") { nx = d; any = true; }
+        else if (key == "ny") { ny = d; any = true; }
+        else if (key == "nz") { nz = d; any = true; }
+        else if (key == "xx") { xx = d; any = true; }
+        else if (key == "xy") { xy = d; any = true; }
+        else if (key == "xz") { xz = d; any = true; }
+        pos = end + 1;
+    }
+    if (any) {
+        try {
+            m_literalPlane = gp_Pln(gp_Ax3(gp_Pnt(px, py, pz),
+                                           gp_Dir(nx, ny, nz),
+                                           gp_Dir(xx, xy, xz)));
+            m_hasLiteralPlane = true;
+        } catch (...) {
+            m_hasLiteralPlane = false; // degenerate dirs → decline rehydration
+        }
+    }
+    return any;
+}
+
+bool ConstructionPlaneOp::rehydrateFromReload(const ReloadState& /*state*/,
+                                              Document& doc) {
+    // The plane itself was persisted as a document entity and is already
+    // loaded — verify our recorded id points at it, so undo() removes the
+    // right plane and a redo re-adds under the same id.
+    if (!m_hasLiteralPlane || m_createdPlaneId < 0) return false;
+    return doc.getPlane(m_createdPlaneId) != nullptr;
 }
 
 std::string ConstructionPlaneOp::description() const {

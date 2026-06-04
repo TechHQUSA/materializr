@@ -37,6 +37,9 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "construction_plane"; }
+    std::string serializeParams() const override;
+    bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
 private:
     gp_Pln computePlane() const;
@@ -47,4 +50,11 @@ private:
     gp_Pnt m_p1, m_p2, m_p3;
     std::string m_planeName = "Plane";
     int m_createdPlaneId = -1;
+
+    // Reload support: the params blob stores the COMPUTED plane (the creation
+    // inputs — picked faces/points — aren't reconstructable across sessions),
+    // so a rehydrated op re-executes from this literal instead of
+    // computePlane(). m_type is still restored for the history label.
+    gp_Pln m_literalPlane;
+    bool m_hasLiteralPlane = false;
 };

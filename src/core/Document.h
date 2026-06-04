@@ -134,7 +134,11 @@ public:
     // Construction planes — first-class document objects parallel to sketches.
     // PlaneAddedEvent / PlaneRemovedEvent let the renderer + Items panel
     // react without polling each frame.
-    int addPlane(const gp_Pln& plane, const std::string& name = "");
+    // `reuseId` >= 0 re-adds the plane under that id (redo of a plane-creation
+    // step, including reloaded ones) so downstream references stay valid;
+    // -1 allocates a fresh id as usual.
+    int addPlane(const gp_Pln& plane, const std::string& name = "",
+                 int reuseId = -1);
     void removePlane(int id);
     // Update an existing plane's gp_Pln (move + rotate gizmo write-back).
     // Fires PlaneChangedEvent so the renderer / selection-aware UI updates.
@@ -154,8 +158,9 @@ public:
     // Construction axes — same shape as construction planes. Used by
     // Revolve and any other op that needs to rotate around a line.
     // Axis* events let the renderer + Items panel react without polling.
+    // `reuseId` semantics match addPlane.
     int addAxis(const gp_Pnt& origin, const gp_Dir& direction,
-                const std::string& name = "");
+                const std::string& name = "", int reuseId = -1);
     void removeAxis(int id);
     void setAxis(int id, const gp_Pnt& origin, const gp_Dir& direction);
     // Reverse an axis's direction in place (keeps origin). Flips which way

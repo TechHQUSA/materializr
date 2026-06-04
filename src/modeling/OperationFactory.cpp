@@ -5,6 +5,8 @@
 #include "ExtrudeOp.h"
 #include "PushPullOp.h"
 #include "RevolveOp.h"
+#include "ConstructionPlaneOp.h"
+#include "ConstructionAxisOp.h"
 
 namespace OperationFactory {
 
@@ -18,10 +20,14 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     //                 declines when any target is a bare body face.
     //   - "revolve":  profile re-derived from its sketch; axis is geometric
     //                 (origin+direction) and serialises directly.
+    //   - datum creation ops: self-contained — params carry the computed
+    //     plane/axis + its document id, so reloaded steps undo/redo cleanly.
     if (typeId == "pattern")  return std::make_unique<PatternOp>();
     if (typeId == "extrude")  return std::make_unique<ExtrudeOp>();
     if (typeId == "pushpull") return std::make_unique<PushPullOp>();
     if (typeId == "revolve")  return std::make_unique<RevolveOp>();
+    if (typeId == "construction_plane") return std::make_unique<ConstructionPlaneOp>();
+    if (typeId == "construction_axis")  return std::make_unique<ConstructionAxisOp>();
 
     return nullptr;
 }

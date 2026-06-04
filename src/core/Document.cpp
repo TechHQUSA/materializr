@@ -230,9 +230,15 @@ int Document::findSketchIndex(int id) const {
     return -1;
 }
 
-int Document::addPlane(const gp_Pln& plane, const std::string& name) {
+int Document::addPlane(const gp_Pln& plane, const std::string& name,
+                       int reuseId) {
     PlaneEntry entry;
-    entry.id = m_nextPlaneId++;
+    if (reuseId >= 0 && !getPlane(reuseId)) {
+        entry.id = reuseId;
+        if (reuseId >= m_nextPlaneId) m_nextPlaneId = reuseId + 1;
+    } else {
+        entry.id = m_nextPlaneId++;
+    }
     entry.name = name.empty() ? ("Plane " + std::to_string(entry.id)) : name;
     entry.plane = plane;
     m_planes.push_back(std::move(entry));
@@ -336,9 +342,14 @@ int Document::planeCount() const {
 // set* fire Changed. The render pass + Items panel listen and resync.
 
 int Document::addAxis(const gp_Pnt& origin, const gp_Dir& direction,
-                      const std::string& name) {
+                      const std::string& name, int reuseId) {
     AxisEntry entry;
-    entry.id = m_nextAxisId++;
+    if (reuseId >= 0 && !getAxis(reuseId)) {
+        entry.id = reuseId;
+        if (reuseId >= m_nextAxisId) m_nextAxisId = reuseId + 1;
+    } else {
+        entry.id = m_nextAxisId++;
+    }
     entry.name = name.empty() ? ("Axis " + std::to_string(entry.id)) : name;
     entry.origin = origin;
     entry.direction = direction;

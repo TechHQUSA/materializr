@@ -2943,6 +2943,12 @@ void Application::exitSketchMode() {
         }
     } else if (m_activeSketchId < 0) {
         std::fprintf(stdout, "Sketch discarded (empty)\n");
+    } else if (m_activeSketch) {
+        // An EXISTING sketch the user emptied during this edit: drop it from
+        // the document rather than leaving a blank entry in the Items panel.
+        m_document->removeSketch(m_activeSketchId);
+        markDirty();
+        std::fprintf(stdout, "Sketch %d removed (emptied)\n", m_activeSketchId);
     }
 
     m_activeSketch.reset();

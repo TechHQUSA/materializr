@@ -38,6 +38,9 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "construction_axis"; }
+    std::string serializeParams() const override;
+    bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
     int getCreatedAxisId() const { return m_createdAxisId; }
 
@@ -52,4 +55,11 @@ private:
     gp_Pnt m_p1, m_p2;
     std::string m_axisName = "Axis";
     int m_createdAxisId = -1;
+
+    // Reload support: params persist the COMPUTED (origin, direction) — the
+    // picked-geometry inputs aren't reconstructable — so a rehydrated op
+    // re-executes from this literal. m_type is kept for the history label.
+    gp_Pnt m_literalOrigin{0, 0, 0};
+    gp_Dir m_literalDir{0, 0, 1};
+    bool m_hasLiteralAxis = false;
 };

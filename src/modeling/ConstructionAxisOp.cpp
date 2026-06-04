@@ -1,4 +1,6 @@
 #include "ConstructionAxisOp.h"
+#include <cstdio>
+#include <cstdlib>
 
 #include <imgui.h>
 #include <cmath>
@@ -55,8 +57,12 @@ void ConstructionAxisOp::computeAxis(gp_Pnt& outOrigin, gp_Dir& outDir) const {
 bool ConstructionAxisOp::execute(Document& doc) {
     try {
         gp_Pnt o; gp_Dir d;
-        computeAxis(o, d);
-        m_createdAxisId = doc.addAxis(o, d, m_axisName);
+        if (m_hasLiteralAxis) { o = m_literalOrigin; d = m_literalDir; }
+        else computeAxis(o, d);
+        // Prior id (kept across undo) is passed as reuseId so a redo — in
+        // session or of a reloaded step — restores the axis under the same id,
+        // keeping Revolve / pattern steps that reference it valid.
+        m_createdAxisId = doc.addAxis(o, d, m_axisName, m_createdAxisId);
         return m_createdAxisId >= 0;
     } catch (...) {
         return false;
@@ -64,11 +70,73 @@ bool ConstructionAxisOp::execute(Document& doc) {
 }
 
 bool ConstructionAxisOp::undo(Document& doc) {
+    // The id is KEPT so the next execute() re-adds under it.
     if (m_createdAxisId >= 0) {
         doc.removeAxis(m_createdAxisId);
-        m_createdAxisId = -1;
     }
     return true;
+}
+
+std::string ConstructionAxisOp::serializeParams() const {
+    // Persist the COMPUTED axis + created id (picked-geometry inputs aren't
+    // reconstructable across sessions). Name LAST, runs to end-of-blob.
+    gp_Pnt o; gp_Dir d;
+    if (m_hasLiteralAxis) { o = m_literalOrigin; d = m_literalDir; }
+    else computeAxis(o, d);
+    char buf[300];
+    std::snprintf(buf, sizeof(buf),
+        "id=%d;type=%d;ox=%.9g;oy=%.9g;oz=%.9g;dx=%.9g;dy=%.9g;dz=%.9g;name=%s",
+        m_createdAxisId, static_cast<int>(m_type),
+        o.X(), o.Y(), o.Z(), d.X(), d.Y(), d.Z(), m_axisName.c_str());
+    return buf;
+}
+
+bool ConstructionAxisOp::deserializeParams(const std::string& blob) {
+    bool any = false;
+    double ox = 0, oy = 0, oz = 0, dx = 0, dy = 0, dz = 1;
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        std::string key = blob.substr(pos, eq - pos);
+        if (key == "name") {
+            m_axisName = blob.substr(eq + 1); // to end-of-blob
+            any = true;
+            break;
+        }
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string val = blob.substr(eq + 1, end - eq - 1);
+        double d = std::atof(val.c_str());
+        int    i = std::atoi(val.c_str());
+        if      (key == "id")   { m_createdAxisId = i; any = true; }
+        else if (key == "type") { m_type = static_cast<AxisCreationType>(i); any = true; }
+        else if (key == "ox") { ox = d; any = true; }
+        else if (key == "oy") { oy = d; any = true; }
+        else if (key == "oz") { oz = d; any = true; }
+        else if (key == "dx") { dx = d; any = true; }
+        else if (key == "dy") { dy = d; any = true; }
+        else if (key == "dz") { dz = d; any = true; }
+        pos = end + 1;
+    }
+    if (any) {
+        try {
+            m_literalOrigin = gp_Pnt(ox, oy, oz);
+            m_literalDir = gp_Dir(dx, dy, dz);
+            m_hasLiteralAxis = true;
+        } catch (...) {
+            m_hasLiteralAxis = false; // zero-length dir → decline rehydration
+        }
+    }
+    return any;
+}
+
+bool ConstructionAxisOp::rehydrateFromReload(const ReloadState& /*state*/,
+                                             Document& doc) {
+    // The axis is persisted as a document entity and already loaded — verify
+    // the recorded id resolves so undo() removes the right one.
+    if (!m_hasLiteralAxis || m_createdAxisId < 0) return false;
+    return doc.getAxis(m_createdAxisId) != nullptr;
 }
 
 std::string ConstructionAxisOp::description() const {
