@@ -51,6 +51,14 @@ bool ChamferOp::execute(Document& doc) {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
 
+        // Re-bind stored edges to the (possibly regenerated) body before
+        // chamfering — see FilletOp::execute. Without this, editing an
+        // upstream fillet's radius left every chamfer edge stale: the
+        // edge-face map silently skipped them all and the chamfer vanished.
+        if (!SubShapeIndex::rebindEdges(m_previousShape, m_edges)) {
+            return false;
+        }
+
         // Build an edge-face map so we can find a face adjacent to each edge
         TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
         TopExp::MapShapesAndAncestors(m_previousShape, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);

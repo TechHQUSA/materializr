@@ -1810,6 +1810,11 @@ void Application::renderViewport() {
                     // edge returns to 0 (no change).
                     float proj = glm::dot(hit - m_edgeOpMid, m_edgeOpOutDir);
                     m_edgeOpValue = (proj <= 0.0f) ? 0.0f : std::max(0.1f, proj);
+                    // Quantise the drag to the displayed precision (0.1 mm):
+                    // every readout shows %.1f, so committing the raw float
+                    // stored "1.9948" behind an on-screen "2.0" — visible
+                    // later in the Properties editor after a reload.
+                    m_edgeOpValue = std::round(m_edgeOpValue * 10.0f) / 10.0f;
                     std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
                     updateInteractiveEdgeOp();
                 }

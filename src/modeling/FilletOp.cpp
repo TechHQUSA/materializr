@@ -49,6 +49,15 @@ bool FilletOp::execute(Document& doc) {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
 
+        // If an upstream edit regenerated the body, our stored edges have
+        // stale TShapes — re-bind them to their successors by carrier
+        // geometry so editing (say) a neighbouring fillet's radius doesn't
+        // kill this op. Fails (loudly, via editStep) only when an edge was
+        // genuinely consumed by the upstream change.
+        if (!SubShapeIndex::rebindEdges(m_previousShape, m_edges)) {
+            return false;
+        }
+
         // Create fillet on the body shape
         BRepFilletAPI_MakeFillet fillet(m_previousShape);
 
