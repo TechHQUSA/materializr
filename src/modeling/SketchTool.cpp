@@ -1150,12 +1150,36 @@ void SketchTool::handleSplineTool(glm::vec2 pos) {
     // Each click adds a control point
     int ptId = -1;
 
-    // Check if snapping to an existing point
+    // Check if snapping to an existing point (snap() has already pulled the
+    // click exactly onto any nearby point, so an exact compare suffices)
     const auto& points = m_sketch->getPoints();
     for (const auto& pt : points) {
         if (glm::length(pos - pt.pos) < 1e-4f) {
             ptId = pt.id;
             break;
+        }
+    }
+
+    // Finishing flow (this used to not exist — the spline just "kept
+    // going" no matter what you clicked):
+    // - clicking the FIRST control point closes the loop and commits
+    // - clicking the LAST placed point again commits the open spline
+    if (!m_splinePoints.empty() && ptId >= 0) {
+        if (ptId == m_splinePoints.front() && m_splinePoints.size() >= 3) {
+            m_splinePoints.push_back(ptId); // front==back marks it closed
+            m_sketch->addSpline(m_splinePoints);
+            m_splinePoints.clear();
+            m_isPlacing = false;
+            m_clickCount = 0;
+            return;
+        }
+        if (ptId == m_splinePoints.back()) {
+            if (m_splinePoints.size() >= 2)
+                m_sketch->addSpline(m_splinePoints);
+            m_splinePoints.clear();
+            m_isPlacing = false;
+            m_clickCount = 0;
+            return;
         }
     }
 
@@ -1171,7 +1195,7 @@ void SketchTool::handleSplineTool(glm::vec2 pos) {
     }
 
     m_clickCount = static_cast<int>(m_splinePoints.size());
-    // The spline is finalized via onConfirm() (Enter key)
+    // Also finalized via onConfirm() (Enter key)
 }
 
 // ─── Trim tool ──────────────────────────────────────────────────────────────

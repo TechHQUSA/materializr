@@ -3216,8 +3216,8 @@ void Application::run() {
                 m_statusBar->setMessage(
                     nPts == 0
                         ? "Spline: click to place control points"
-                        : "Spline: click to add points - ENTER to finish, "
-                          "click the first point again to close the loop");
+                        : "Spline: click FIRST point to close the loop, "
+                          "LAST point (or ENTER) to finish open");
             } else {
                 m_statusBar->setMessage("");
             }
