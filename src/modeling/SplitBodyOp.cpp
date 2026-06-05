@@ -54,6 +54,10 @@ bool SplitBodyOp::execute(Document& doc) {
         BRepAlgoAPI_Splitter splitter;
         splitter.SetArguments(arguments);
         splitter.SetTools(tools);
+        // Thread-cut bodies carry healed spline faces whose tolerances the
+        // splitter rejects without slack ("produced 1 solid" on a plane
+        // straight through the body). Same remedy as the thread cut itself.
+        splitter.SetFuzzyValue(1.0e-3);
         splitter.Build();
         if (!splitter.IsDone()) {
             std::fprintf(stderr, "[Split] splitter FAILED\n");
