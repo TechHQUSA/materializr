@@ -3207,6 +3207,20 @@ void Application::run() {
                 m_meshesDirty = true;
             }
             m_statusBar->setSketchMode(m_inSketchMode);
+            // Spline placement is the one tool that needs a keyboard step
+            // to finish — without this hint it reads as "adds dots and
+            // then nothing" (Steve, verbatim).
+            if (m_inSketchMode && m_sketchTool &&
+                m_sketchTool->getMode() == SketchToolMode::Spline) {
+                size_t nPts = m_sketchTool->splinePointsInProgress().size();
+                m_statusBar->setMessage(
+                    nPts == 0
+                        ? "Spline: click to place control points"
+                        : "Spline: click to add points - ENTER to finish, "
+                          "click the first point again to close the loop");
+            } else {
+                m_statusBar->setMessage("");
+            }
             m_statusBar->render();
             FileDialogs::render();
             renderSavePrompt();

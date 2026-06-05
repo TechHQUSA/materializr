@@ -16,6 +16,9 @@
 #include <Geom_Curve.hxx>
 #include <GC_MakeCircle.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <ElCLib.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Ax2.hxx>
@@ -223,6 +226,75 @@ const std::vector<SketchSpline>& Sketch::getSplines() const {
     return m_splines;
 }
 
+std::vector<glm::vec2> Sketch::interpolate2D(const std::vector<glm::vec2>& ctrl,
+                                             int segsPerSpan, bool closed) {
+    int n = static_cast<int>(ctrl.size());
+    if (n < 2) return ctrl;
+    try {
+        Handle(TColgp_HArray1OfPnt) pts = new TColgp_HArray1OfPnt(1, n);
+        for (int k = 0; k < n; ++k)
+            pts->SetValue(k + 1, gp_Pnt(ctrl[k].x, ctrl[k].y, 0.0));
+        GeomAPI_Interpolate interp(pts, closed ? Standard_True
+                                               : Standard_False, 1e-6);
+        interp.Perform();
+        if (!interp.IsDone()) return ctrl;
+        Handle(Geom_BSplineCurve) c = interp.Curve();
+        int total = segsPerSpan * std::max(1, n - (closed ? 0 : 1));
+        double f = c->FirstParameter(), l = c->LastParameter();
+        std::vector<glm::vec2> out;
+        out.reserve(total + 1);
+        for (int i = 0; i <= total; ++i) {
+            gp_Pnt p;
+            c->D0(f + (l - f) * i / total, p);
+            out.push_back(glm::vec2(static_cast<float>(p.X()),
+                                    static_cast<float>(p.Y())));
+        }
+        return out;
+    } catch (...) { return ctrl; }
+}
+
+std::vector<glm::vec2> Sketch::sampleSpline2D(const SketchSpline& sp,
+                                              int segsPerSpan) const {
+    std::vector<glm::vec2> out;
+    const auto& ids = sp.controlPointIds;
+    auto fallback = [&]() {
+        out.clear();
+        for (int id : ids)
+            if (const SketchPoint* p = getPoint(id)) out.push_back(p->pos);
+    };
+    bool closedSp = ids.size() > 2 && ids.front() == ids.back();
+    int n = static_cast<int>(ids.size()) - (closedSp ? 1 : 0);
+    if (n < 2) { fallback(); return out; }
+    try {
+        Handle(TColgp_HArray1OfPnt) pts = new TColgp_HArray1OfPnt(1, n);
+        for (int k = 0; k < n; ++k) {
+            const SketchPoint* p = getPoint(ids[k]);
+            if (!p) { fallback(); return out; }
+            pts->SetValue(k + 1, sketchToWorld(p->pos));
+        }
+        GeomAPI_Interpolate interp(pts,
+                                   closedSp ? Standard_True : Standard_False,
+                                   1e-6);
+        interp.Perform();
+        if (!interp.IsDone()) { fallback(); return out; }
+        Handle(Geom_BSplineCurve) c = interp.Curve();
+        gp_Ax3 ax = m_plane.Position();
+        gp_Pnt o = ax.Location();
+        gp_Dir xd = ax.XDirection(), yd = ax.YDirection();
+        int total = segsPerSpan * std::max(1, static_cast<int>(ids.size()) - 1);
+        double f = c->FirstParameter(), l = c->LastParameter();
+        out.reserve(total + 1);
+        for (int i = 0; i <= total; ++i) {
+            gp_Pnt p;
+            c->D0(f + (l - f) * i / total, p);
+            gp_Vec v(o, p);
+            out.push_back(glm::vec2(static_cast<float>(v.Dot(gp_Vec(xd))),
+                                    static_cast<float>(v.Dot(gp_Vec(yd)))));
+        }
+    } catch (...) { fallback(); }
+    return out;
+}
+
 const std::vector<SketchPolygon>& Sketch::getPolygons() const {
     return m_polygons;
 }
@@ -306,6 +378,11 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         int circleId = -1;           // index into m_circles
         float startAngle = 0.0f;     // radians, around circle center
         float endAngle = 0.0f;       // radians, CCW from startAngle (may exceed 2pi)
+        // Spline-only: index into m_splines. A spline participates in
+        // adjacency as a single edge between its first and last control
+        // points; emitOcctEdge interpolates a smooth B-spline through ALL
+        // its control points.
+        int splineIdx = -1;
     };
     std::vector<EdgeSpec> edges;
 
@@ -487,6 +564,21 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         }
     }
 
+    // Splines: one adjacency edge from first to last control point. A
+    // CLOSED spline (first == last point, e.g. the user finished by
+    // clicking the start point) forms a loop on its own and the walker
+    // closes it immediately.
+    for (size_t si = 0; si < m_splines.size(); ++si) {
+        const auto& sp = m_splines[si];
+        if (sp.isConstruction) continue;
+        if (sp.controlPointIds.size() < 2) continue;
+        EdgeSpec es;
+        es.splineIdx = static_cast<int>(si);
+        es.startPtId = sp.controlPointIds.front();
+        es.endPtId = sp.controlPointIds.back();
+        edges.push_back(es);
+    }
+
     if (edges.empty()) return wires;
 
     // Prune dangling edges. An edge hanging off a free end — a vertex touched by
@@ -539,7 +631,37 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         if (sc == coord.end() || ec == coord.end()) return false;
         gp_Pnt p1 = sketchToWorld(sc->second);
         gp_Pnt p2 = sketchToWorld(ec->second);
-        if (p1.Distance(p2) < 1e-10 && !es.isArc) return false;
+        if (p1.Distance(p2) < 1e-10 && !es.isArc && es.splineIdx < 0)
+            return false; // (a CLOSED spline legitimately starts where it ends)
+
+        if (es.splineIdx >= 0) {
+            // Smooth B-spline interpolated through ALL control points,
+            // walked in the chain's direction.
+            const SketchSpline& sp = m_splines[es.splineIdx];
+            std::vector<int> ids = sp.controlPointIds;
+            bool closedSp = ids.size() > 2 && ids.front() == ids.back();
+            if (fromPt == es.endPtId && !closedSp)
+                std::reverse(ids.begin(), ids.end());
+            int n = static_cast<int>(ids.size()) - (closedSp ? 1 : 0);
+            if (n < 2 && !closedSp) return false;
+            try {
+                Handle(TColgp_HArray1OfPnt) pts =
+                    new TColgp_HArray1OfPnt(1, n);
+                for (int k = 0; k < n; ++k) {
+                    const SketchPoint* p = getPoint(ids[k]);
+                    if (!p) return false;
+                    pts->SetValue(k + 1, sketchToWorld(p->pos));
+                }
+                GeomAPI_Interpolate interp(
+                    pts, closedSp ? Standard_True : Standard_False, 1e-6);
+                interp.Perform();
+                if (!interp.IsDone()) return false;
+                BRepBuilderAPI_MakeEdge mk(interp.Curve());
+                if (!mk.IsDone()) return false;
+                wm.Add(mk.Edge());
+                return true;
+            } catch (...) { return false; }
+        }
 
         if (!es.isArc) {
             BRepBuilderAPI_MakeEdge mk(p1, p2);

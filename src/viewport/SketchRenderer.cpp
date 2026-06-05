@@ -265,12 +265,13 @@ void SketchRenderer::drawSplines(const Sketch* sketch, const glm::mat4& vp) {
     std::vector<float> verts;
 
     for (const auto& spline : sketch->getSplines()) {
-        for (size_t i = 0; i + 1 < spline.controlPointIds.size(); ++i) {
-            const SketchPoint* p1 = sketch->getPoint(spline.controlPointIds[i]);
-            const SketchPoint* p2 = sketch->getPoint(spline.controlPointIds[i + 1]);
-            if (!p1 || !p2) continue;
-            glm::vec3 w1 = toWorld(sketch, p1->pos);
-            glm::vec3 w2 = toWorld(sketch, p2->pos);
+        // Draw the SAME smooth interpolated curve the profile builder
+        // emits — what you see is what extrudes. (This used to draw the
+        // raw control polyline, back when splines were display-only.)
+        std::vector<glm::vec2> pts = sketch->sampleSpline2D(spline, 12);
+        for (size_t i = 0; i + 1 < pts.size(); ++i) {
+            glm::vec3 w1 = toWorld(sketch, pts[i]);
+            glm::vec3 w2 = toWorld(sketch, pts[i + 1]);
             verts.push_back(w1.x); verts.push_back(w1.y); verts.push_back(w1.z);
             verts.push_back(w2.x); verts.push_back(w2.y); verts.push_back(w2.z);
         }
@@ -399,7 +400,22 @@ void SketchRenderer::drawPreview(const Sketch* sketch, const SketchTool* tool,
     // active / being placed" convention used elsewhere (point markers).
     glm::vec3 color(1.0f, 0.85f, 0.2f);
 
-    if (mode == SketchToolMode::Line || mode == SketchToolMode::Spline) {
+    if (mode == SketchToolMode::Spline) {
+        // Live smooth preview: the curve through every placed control
+        // point plus the cursor, interpolated the same way the committed
+        // spline (and its extrudable geometry) will be.
+        std::vector<glm::vec2> ctrl;
+        for (int id : tool->splinePointsInProgress())
+            if (const SketchPoint* p = sketch->getPoint(id))
+                ctrl.push_back(p->pos);
+        ctrl.push_back(end);
+        std::vector<glm::vec2> pts = Sketch::interpolate2D(ctrl, 12);
+        for (size_t i = 0; i + 1 < pts.size(); ++i) {
+            pushPt(verts, pw(pts[i]));
+            pushPt(verts, pw(pts[i + 1]));
+        }
+        uploadAndDraw(verts, GL_LINES, color, vp, 1.5f);
+    } else if (mode == SketchToolMode::Line) {
         pushPt(verts, pw(start));
         pushPt(verts, pw(end));
         uploadAndDraw(verts, GL_LINES, color, vp, 1.5f);

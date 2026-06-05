@@ -179,6 +179,14 @@ private:
     std::set<int> m_selectedArcs;
 
     std::vector<int> m_splinePoints; // temp storage during spline creation
+
+public:
+    // Control points of the spline currently being placed (live preview).
+    const std::vector<int>& splinePointsInProgress() const {
+        return m_splinePoints;
+    }
+
+private:
     int m_polygonSides = 6; // default hexagon
 
     // Rectangle's typed-value placement is two-stage: first Enter sets the

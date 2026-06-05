@@ -89,6 +89,19 @@ public:
     const std::vector<SketchSpline>& getSplines() const;
     const std::vector<SketchPolygon>& getPolygons() const;
 
+    // Sample the smooth interpolated curve of a spline as sketch-2D points
+    // (the same B-spline buildWires() emits, so what you see is what
+    // extrudes). Falls back to the raw control polyline if interpolation
+    // fails. `segsPerSpan` segments between consecutive control points.
+    std::vector<glm::vec2> sampleSpline2D(const SketchSpline& sp,
+                                          int segsPerSpan = 12) const;
+    // Interpolate a smooth curve through raw 2D positions (no sketch points
+    // needed) — used for the live in-progress spline preview. Falls back to
+    // the input polyline on failure.
+    static std::vector<glm::vec2> interpolate2D(
+        const std::vector<glm::vec2>& ctrl, int segsPerSpan = 12,
+        bool closed = false);
+
     // Element removal
     void removeElement(int id);
     void clear();
