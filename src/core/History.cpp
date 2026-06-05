@@ -21,7 +21,10 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
             std::fprintf(stderr, "[History] reflow: inserting '%s' before "
                                  "thread step %d\n",
                          op->name().c_str(), at);
-            return insertStepAndReplay(at, std::move(op), doc);
+            if (insertStepAndReplay(at, std::move(op), doc)) return true;
+            // Reflow declined or the op failed against clean geometry — the
+            // op was consumed either way.
+            return false;
         }
     }
 
@@ -369,43 +372,69 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
     if (m_breakpoint >= 0 && m_breakpoint < limit) limit = m_breakpoint;
     if (index < 0 || index > limit) return false;
 
-    // Roll back to just before the threads.
-    for (int i = limit; i >= index; --i) {
+    // Only steps that TOUCH the op's bodies are rolled back and replayed.
+    // Unrelated steps stay applied — critically, a reloaded project's baked
+    // full-document snapshot steps must NOT re-execute, or their snapshots
+    // resurrect the pre-op world and silently erase the inserted op's result
+    // (Steve: "it didn't work, but it didn't crash").
+    std::vector<int> planned = op->plannedBodyIds();
+    auto touches = [&](const Operation* s) {
+        OperationDiff d = s->captureDiff();
+        for (const auto& [id, shp] : d.modifiedBefore)
+            for (int p : planned) if (p == id) return true;
+        for (int id : d.created)
+            for (int p : planned) if (p == id) return true;
+        for (const auto& [id, shp] : d.deletedBefore)
+            for (int p : planned) if (p == id) return true;
+        return false;
+    };
+    std::vector<int> touched; // indices in [index..limit], ascending
+    for (int i = index; i <= limit; ++i) {
         Operation* s = m_operations[i].get();
-        if (s->isEnabled()) s->undo(doc);
+        if (!s->isEnabled() || !touches(s)) continue;
+        if (s->isReloaded()) {
+            // A baked reload snapshot on this body can't recompute — replaying
+            // it would clobber the op's result. Decline the whole reflow; the
+            // caller falls back to the direct path (fast failure, no hang).
+            std::fprintf(stderr, "[History] reflow declined: step %d '%s' is "
+                                 "a baked reload snapshot on the same body\n",
+                         i, s->name().c_str());
+            return false;
+        }
+        touched.push_back(i);
+    }
+
+    // Roll back the touched steps (deepest last).
+    for (int k = static_cast<int>(touched.size()) - 1; k >= 0; --k) {
+        m_operations[touched[k]]->undo(doc);
     }
 
     // The new op runs against clean geometry.
     if (!op->execute(doc)) {
-        // Failed — put the displaced steps back and report failure.
-        for (int i = index; i <= limit; ++i) {
+        for (int i : touched) {
             Operation* s = m_operations[i].get();
-            if (s->isEnabled() && s->execute(doc)) s->rememberGoodParams();
+            if (s->execute(doc)) s->rememberGoodParams();
         }
         return false;
     }
     op->rememberGoodParams();
 
-    // Splice it in and replay the displaced threads on the new geometry.
+    // Splice it in and replay the touched steps on the new geometry.
     m_operations.insert(m_operations.begin() + index, std::move(op));
     if (m_breakpoint >= index) m_breakpoint++;
     m_currentIndex = limit + 1;
-    for (int i = index + 1; i <= limit + 1; ++i) {
-        Operation* s = m_operations[i].get();
-        if (s->isEnabled()) {
-            if (!s->execute(doc)) {
-                // The thread couldn't re-cut the new geometry (e.g. its
-                // cylindrical span was consumed). The op the user asked for
-                // DID apply; the thread suspends with the explainer banner.
-                std::fprintf(stderr, "[History] reflow: step %d '%s' could "
-                                     "not re-execute\n",
-                             i, s->name().c_str());
-                m_currentIndex = i - 1;
-                m_failedReplayAt = i;
-                break;
-            }
-            s->rememberGoodParams();
+    for (int i : touched) {
+        Operation* s = m_operations[i + 1].get(); // shifted by the insert
+        if (!s->execute(doc)) {
+            // E.g. the thread's cylindrical span was consumed. The user's op
+            // DID apply; the step suspends with the explainer banner.
+            std::fprintf(stderr, "[History] reflow: step %d '%s' could not "
+                                 "re-execute\n",
+                         i + 1, s->name().c_str());
+            m_failedReplayAt = i + 1;
+            break;
         }
+        s->rememberGoodParams();
     }
     if (m_eventBus)
         m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
