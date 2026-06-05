@@ -9,9 +9,12 @@
 #include <Geom2d_Line.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
-#include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepLib.hxx>
-#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
+#include <Geom2d_Ellipse.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <gp_Ax2d.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -92,63 +95,79 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                 return cls.State() == TopAbs_OUT;
             } catch (...) { return false; }
         };
-        double vLo = endIsFree(-0.6 * m_pitch) ? -m_pitch : 0.0;
+        double vLo = endIsFree(-0.6 * m_pitch) ? -0.5 * m_pitch : 0.0;
         double vHi = m_length +
-                     (endIsFree(m_length + 0.6 * m_pitch) ? m_pitch : 0.0);
+                     (endIsFree(m_length + 0.6 * m_pitch) ? 0.5 * m_pitch : 0.0);
         turns = (vHi - vLo) / m_pitch;
         std::fprintf(stderr, "[Thread] runout: vLo=%.3f vHi=%.3f turns=%.1f\n",
                      vLo, vHi, turns);
 
-        // Build the groove cutter for a given helix span [lo, hi] along the
-        // axis: helix as a straight 2D line on the cylindrical surface
-        // (U angular, V axial — slope pitch/2π IS the helix, sign = hand),
-        // swept with a 60° V profile in binormal mode so the triangle stays
-        // axis-aligned the whole way round (Frenet would corkscrew it).
+        // Build the groove cutter for a helix span [lo, hi] along the axis
+        // using the canonical OCCT threading construction (the "bottle
+        // tutorial"): ThruSections between two half-ellipse wires drawn in
+        // UV space on coaxial cylindrical surfaces. Unlike a MakePipeShell
+        // sweep (whose helical solids the boolean classified erratically —
+        // four variants, four different wrong answers), these tools cut
+        // consistently, and the ellipse tips taper to nothing, giving
+        // natural thread runout at both ends.
         auto buildCutter = [&](double lo, double hi) -> TopoDS_Shape {
             try {
+                // Outer surface sits a hair on the material-free side of the
+                // face so the groove detaches cleanly; the inner surface is
+                // the groove apex. (For a hole, "outer" is inside the void.)
+                double rOut = m_isHole ? (m_radius - 0.02) : (m_radius + 0.02);
+                double rIn  = m_isHole ? (m_radius + depth) : (m_radius - depth);
+                Handle(Geom_CylindricalSurface) sOut =
+                    new Geom_CylindricalSurface(ax3, rOut);
+                Handle(Geom_CylindricalSurface) sIn =
+                    new Geom_CylindricalSurface(ax3, rIn);
+
+                // The thread is one long, thin ellipse in (U, V) parameter
+                // space — U angular, V axial — whose major axis runs along
+                // the helix direction. Handedness flips the U component.
                 double t = (hi - lo) / m_pitch;
-                Handle(Geom_CylindricalSurface) cylSurf =
-                    new Geom_CylindricalSurface(ax3, m_radius);
-                gp_Dir2d slope(m_rightHanded ? 2.0 * M_PI : -2.0 * M_PI, m_pitch);
-                Handle(Geom2d_Line) line2d =
-                    new Geom2d_Line(gp_Pnt2d(0.0, lo), slope);
-                double uLen =
-                    std::sqrt(4.0 * M_PI * M_PI + m_pitch * m_pitch) * t;
-                TopoDS_Edge helixEdge =
-                    BRepBuilderAPI_MakeEdge(line2d, cylSurf, 0.0, uLen).Edge();
-                BRepLib::BuildCurves3d(helixEdge); // pipe needs the 3D curve
-                TopoDS_Wire spine = BRepBuilderAPI_MakeWire(helixEdge).Wire();
+                double uMax = 2.0 * M_PI * t;
+                double uSign = m_rightHanded ? 1.0 : -1.0;
+                gp_Pnt2d centre(uSign * uMax * 0.5, (lo + hi) * 0.5);
+                gp_Dir2d along(uSign * 2.0 * M_PI, m_pitch);
+                gp_Ax2d ax2d(centre, along);
+                double major = 0.5 * std::hypot(uMax, hi - lo);
+                double minor = std::min(0.57735 * depth, 0.45 * m_pitch);
+                Handle(Geom2d_Ellipse) eOut =
+                    new Geom2d_Ellipse(ax2d, major, minor);
+                Handle(Geom2d_Ellipse) eIn =
+                    new Geom2d_Ellipse(ax2d, major, minor * 0.25);
+                Handle(Geom2d_TrimmedCurve) arcOut =
+                    new Geom2d_TrimmedCurve(eOut, 0, M_PI);
+                Handle(Geom2d_TrimmedCurve) arcIn =
+                    new Geom2d_TrimmedCurve(eIn, 0, M_PI);
+                gp_Pnt2d tip1 = eOut->Value(0);
+                gp_Pnt2d tip2 = eOut->Value(M_PI);
+                Handle(Geom2d_TrimmedCurve) seam =
+                    GCE2d_MakeSegment(tip1, tip2).Value();
 
-                // V profile at the helix start: base slightly on the
-                // material-free side so the cut detaches cleanly, apex
-                // `depth` into the material; 60° ISO flanks capped so
-                // adjacent grooves can't merge.
-                double pad   = 0.05 * m_pitch + 1e-3;
-                double baseR = m_isHole ? (m_radius - pad) : (m_radius + pad);
-                double apexR = m_isHole ? (m_radius + depth) : (m_radius - depth);
-                double halfW = std::min(0.57735 * depth, 0.45 * m_pitch);
-                BRepBuilderAPI_MakePolygon tri;
-                tri.Add(pt(baseR, lo - halfW));
-                tri.Add(pt(baseR, lo + halfW));
-                tri.Add(pt(apexR, lo));
-                tri.Close();
+                TopoDS_Edge e1 = BRepBuilderAPI_MakeEdge(arcOut, sOut).Edge();
+                TopoDS_Edge e2 = BRepBuilderAPI_MakeEdge(seam,   sOut).Edge();
+                TopoDS_Edge e3 = BRepBuilderAPI_MakeEdge(arcIn,  sIn).Edge();
+                TopoDS_Edge e4 = BRepBuilderAPI_MakeEdge(seam,   sIn).Edge();
+                BRepLib::BuildCurves3d(e1);
+                BRepLib::BuildCurves3d(e2);
+                BRepLib::BuildCurves3d(e3);
+                BRepLib::BuildCurves3d(e4);
+                TopoDS_Wire w1 = BRepBuilderAPI_MakeWire(e1, e2).Wire();
+                TopoDS_Wire w2 = BRepBuilderAPI_MakeWire(e3, e4).Wire();
 
-                BRepOffsetAPI_MakePipeShell pipe(spine);
-                pipe.SetMode(zd);
-                pipe.Add(tri.Wire(), Standard_False, Standard_False);
-                pipe.Build();
-                if (!pipe.IsDone()) return {};
-                if (!pipe.MakeSolid()) return {};
-                TopoDS_Shape cutter = pipe.Shape();
-                // Helical sweeps regularly come out marginally invalid, and
-                // the boolean then rejects them outright — heal first.
-                if (!BRepCheck_Analyzer(cutter).IsValid()) {
-                    std::fprintf(stderr, "[Thread] healing swept cutter\n");
-                    ShapeFix_Shape fixer(cutter);
-                    fixer.Perform();
-                    cutter = fixer.Shape();
-                }
-                return cutter;
+                BRepOffsetAPI_ThruSections tool(Standard_True);
+                tool.AddWire(w1);
+                tool.AddWire(w2);
+                tool.CheckCompatibility(Standard_False);
+                tool.Build();
+                if (!tool.IsDone()) return {};
+                // NOTE: do NOT "fix" the orientation even if GProp reports a
+                // negative volume — the integrator mis-reads the helical
+                // seam, but the boolean classifies this solid correctly;
+                // reversing it makes the cut remove the complement.
+                return tool.Shape();
             } catch (...) { return {}; }
         };
 
@@ -161,23 +180,27 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                 tools.Append(tool);
                 cut.SetArguments(args);
                 cut.SetTools(tools);
-                // Fuzzy tolerance is the standard remedy for helical contact
-                // zones — without it the cut fails on near-coincident strips.
                 cut.SetFuzzyValue(1.0e-3);
                 cut.Build();
                 if (!cut.IsDone()) return {};
-                return cut.Shape();
+                TopoDS_Shape res = cut.Shape();
+                // The cut result regularly carries tolerance nits — heal it
+                // so downstream ops (fillets, further booleans, save) get a
+                // clean solid.
+                if (!BRepCheck_Analyzer(res).IsValid()) {
+                    ShapeFix_Shape fixer(res);
+                    fixer.Perform();
+                    res = fixer.Shape();
+                }
+                return res;
             } catch (...) { return {}; }
         };
 
-        std::fprintf(stderr, "[Thread] sweeping (span %.2f..%.2f)...\n", vLo, vHi);
+        std::fprintf(stderr, "[Thread] cutting (span %.2f..%.2f)...\n", vLo, vHi);
         TopoDS_Shape result = tryCut(buildCutter(vLo, vHi));
         if (result.IsNull() && (vLo < 0.0 || vHi > m_length)) {
-            // The runout-extended cutter crosses the end caps, which the
-            // boolean occasionally rejects outright. Retry on the exact face
-            // span — a blunt thread end beats no thread at all.
             std::fprintf(stderr,
-                         "[Thread] runout cut failed — retrying exact span\n");
+                         "[Thread] extended cut failed — retrying exact span\n");
             result = tryCut(buildCutter(0.0, m_length));
         }
         if (result.IsNull()) {
