@@ -333,17 +333,32 @@ int History::reflowInsertionIndex(const Operation& op) const {
     int limit = m_currentIndex;
     if (m_breakpoint >= 0 && m_breakpoint < limit) limit = m_breakpoint;
 
+    auto touchesPlanned = [&](const Operation* s) {
+        OperationDiff d = s->captureDiff();
+        for (const auto& [id, shp] : d.modifiedBefore)
+            for (int p : planned) if (p == id) return true;
+        for (int id : d.created)
+            for (int p : planned) if (p == id) return true;
+        for (const auto& [id, shp] : d.deletedBefore)
+            for (int p : planned) if (p == id) return true;
+        return false;
+    };
+
+    // Walk down from the top, SKIPPING steps unrelated to the op's bodies
+    // (real histories always have sketches / other-body work above the
+    // thread). Reorder beneath the deepest thread that touched a planned
+    // body; stop cold at any NON-thread step touching a planned body — the
+    // op may depend on its result, so we can't jump past it.
     int insertAt = -1;
     for (int i = limit; i >= 0; --i) {
         const Operation* s = m_operations[i].get();
-        if (s->typeId() != "thread") break; // only a TRAILING thread run
         if (!s->isEnabled()) continue;
-        OperationDiff d = s->captureDiff();
-        for (const auto& [id, shp] : d.modifiedBefore) {
-            for (int p : planned) {
-                if (p == id) { insertAt = i; break; }
-            }
+        bool touches = touchesPlanned(s);
+        if (s->typeId() == "thread") {
+            if (touches) insertAt = i;
+            continue;
         }
+        if (touches) break;
     }
     return insertAt;
 }
