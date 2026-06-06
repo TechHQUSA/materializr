@@ -37,6 +37,8 @@
 #include <BRepBndLib.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <Bnd_Box.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_ConicalSurface.hxx>
@@ -2060,7 +2062,19 @@ void Application::beginConstructionAxis() {
                             gp_Pln pln = Handle(Geom_Plane)::DownCast(s)->Pln();
                             planarPlanes.push_back(pln);
                             if (!m_axisOpHaveFaceNormal) {
-                                m_axisOpFacePt = pln.Axis().Location();
+                                // Anchor at the FACE CENTROID — the plane's
+                                // parametric origin is wherever the surface
+                                // happens to start, often a corner ("axis on
+                                // lower corner instead of straight out of
+                                // the face").
+                                gp_Pnt anchor = pln.Axis().Location();
+                                try {
+                                    GProp_GProps pr;
+                                    BRepGProp::SurfaceProperties(
+                                        TopoDS::Face(e.shape), pr);
+                                    anchor = pr.CentreOfMass();
+                                } catch (...) {}
+                                m_axisOpFacePt = anchor;
                                 m_axisOpFaceNormal = pln.Axis().Direction();
                                 m_axisOpHaveFaceNormal = true;
                             }

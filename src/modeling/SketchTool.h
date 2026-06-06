@@ -186,6 +186,11 @@ public:
         return m_splinePoints;
     }
 
+    // Backspace during spline placement: drop the last control point
+    // (removing it from the sketch too unless something else references
+    // it — e.g. the user snapped onto an existing vertex).
+    void removeLastSplinePoint();
+
 private:
     int m_polygonSides = 6; // default hexagon
 

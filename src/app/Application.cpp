@@ -1492,6 +1492,15 @@ void Application::handleShortcuts() {
             // face / edge has no clean standalone interpretation.
         }
     }
+    // Backspace during spline placement removes the last control point —
+    // the natural "oops, one back" while clicking out a curve.
+    if (m_inSketchMode && m_sketchTool &&
+        m_sketchTool->getMode() == SketchToolMode::Spline &&
+        !m_sketchTool->splinePointsInProgress().empty() &&
+        !ImGui::GetIO().WantTextInput &&
+        ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+        recordSketchMutation([&] { m_sketchTool->removeLastSplinePoint(); });
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         if (m_sketchGizmoHandle != SketchGizmoHandle::None) {
             // Revert each involved point to its drag-start position and exit
@@ -2898,8 +2907,31 @@ void Application::alignCameraToActiveSketch() {
         chosenUp = (dX >= 0.0f) ? faceX : -faceX;
     }
 
+    // Stand off on the face's OUTWARD side. The sketch plane's normal is
+    // the underlying surface's — a REVERSED face stores it pointing INTO
+    // the body, which used to fling the camera to the far side of the part
+    // ("still flat with it, but opposite side" — Steve, on a narrow side
+    // face). BRepGProp_Face::Normal applies the orientation flag.
+    glm::vec3 standDir = normal;
+    if (!m_activeSketch->getSourceFace().IsNull()) {
+        try {
+            BRepGProp_Face gpFace(TopoDS::Face(m_activeSketch->getSourceFace()));
+            double u1, u2, v1, v2;
+            gpFace.Bounds(u1, u2, v1, v2);
+            gp_Pnt p;
+            gp_Vec nv;
+            gpFace.Normal(0.5 * (u1 + u2), 0.5 * (v1 + v2), p, nv);
+            if (nv.Magnitude() > 1e-9) {
+                glm::vec3 outward(static_cast<float>(nv.X()),
+                                  static_cast<float>(nv.Y()),
+                                  static_cast<float>(nv.Z()));
+                if (glm::dot(outward, normal) < 0.0f) standDir = -normal;
+            }
+        } catch (...) {}
+    }
+
     cam.setTarget(lookAt);
-    cam.setPosition(lookAt + normal * standoff);
+    cam.setPosition(lookAt + standDir * standoff);
     cam.setUp(chosenUp);
     cam.setOrthoSize(orthoSize);
     cam.setOrthographic(true);

@@ -270,12 +270,15 @@ void SketchTool::onCancel() {
         m_chainStartPointId >= 0) {
         m_sketch->removeElement(m_chainStartPointId);
     }
+    // Spline-in-progress: drop every placed control point properly (each
+    // freshly-created one is removed from the sketch) instead of clearing
+    // the list and stranding orphan dots.
+    while (!m_splinePoints.empty()) removeLastSplinePoint();
     m_isPlacing = false;
     m_clickCount = 0;
     m_lastPointId = -1;
     m_chainStartPointId = -1;
     m_chainStartPointCreated = false;
-    m_splinePoints.clear();
     m_hasPrevLineDir = false;
     m_activeInferences.clear();
     m_rectDimStage = 0;
@@ -1136,6 +1139,25 @@ void SketchTool::handleArcTool(glm::vec2 pos) {
             int startId  = reuseOrAdd(start);
             int endId    = reuseOrAdd(end);
 
+            // Store the endpoints in the order whose CCW sweep passes
+            // through the user's MID click. addArc keeps only (center,
+            // start, end) and everything downstream sweeps CCW start→end —
+            // committing the wrong order flips the arc to the complementary
+            // side ("comes out weird on first try, inverts after third
+            // click... randomly" — random because it depended on which side
+            // of the chord the bulge was clicked).
+            auto ang = [&](glm::vec2 p) {
+                float a = std::atan2(p.y - center.y, p.x - center.x);
+                if (a < 0.0f) a += 2.0f * static_cast<float>(M_PI);
+                return a;
+            };
+            float sA = ang(start), eA = ang(end), mA = ang(mid);
+            float sweep = eA - sA;
+            if (sweep <= 0.0f) sweep += 2.0f * static_cast<float>(M_PI);
+            float rel = mA - sA;
+            if (rel < 0.0f) rel += 2.0f * static_cast<float>(M_PI);
+            if (rel > sweep) std::swap(startId, endId);
+
             m_sketch->addArc(centerId, startId, endId, static_cast<double>(radius));
         }
 
@@ -1196,6 +1218,45 @@ void SketchTool::handleSplineTool(glm::vec2 pos) {
 
     m_clickCount = static_cast<int>(m_splinePoints.size());
     // Also finalized via onConfirm() (Enter key)
+}
+
+void SketchTool::removeLastSplinePoint() {
+    if (!m_sketch || m_splinePoints.empty()) return;
+    int id = m_splinePoints.back();
+    m_splinePoints.pop_back();
+
+    // Only delete the sketch point if nothing references it: not this
+    // spline-in-progress (duplicate snaps), not any committed element.
+    bool referenced =
+        std::count(m_splinePoints.begin(), m_splinePoints.end(), id) > 0;
+    if (!referenced) {
+        for (const auto& l : m_sketch->getLines())
+            if (l.startPointId == id || l.endPointId == id) {
+                referenced = true; break;
+            }
+        if (!referenced)
+            for (const auto& c : m_sketch->getCircles())
+                if (c.centerPointId == id) { referenced = true; break; }
+        if (!referenced)
+            for (const auto& a : m_sketch->getArcs())
+                if (a.centerPointId == id || a.startPointId == id ||
+                    a.endPointId == id) { referenced = true; break; }
+        if (!referenced)
+            for (const auto& sp : m_sketch->getSplines())
+                for (int cid : sp.controlPointIds)
+                    if (cid == id) { referenced = true; break; }
+        if (!referenced)
+            for (const auto& pg : m_sketch->getPolygons()) {
+                if (pg.centerPointId == id) { referenced = true; break; }
+                for (int vid : pg.vertexPointIds)
+                    if (vid == id) { referenced = true; break; }
+                if (referenced) break;
+            }
+    }
+    if (!referenced) m_sketch->removeElement(id);
+
+    m_clickCount = static_cast<int>(m_splinePoints.size());
+    if (m_splinePoints.empty()) m_isPlacing = false;
 }
 
 // ─── Trim tool ──────────────────────────────────────────────────────────────

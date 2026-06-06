@@ -1317,7 +1317,11 @@ void Application::renderViewport() {
                     }
                     if (!label.empty()) {
                         ImVec2 mp = ImGui::GetMousePos();
-                        ImVec2 tp(mp.x + 16.0f, mp.y + 16.0f);
+                        // One row LOWER than the dimension readout (which
+                        // pins ~14 px right of the cursor) — on short lines
+                        // the two used to stack on the same spot and the
+                        // guide name sat right on top of the measurement.
+                        ImVec2 tp(mp.x + 16.0f, mp.y + 36.0f);
                         ImVec2 ts = ImGui::CalcTextSize(label.c_str());
                         // Dark background pill so the text stays legible no
                         // matter what's underneath in the viewport.
@@ -3807,7 +3811,13 @@ void Application::renderViewport() {
 
             ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "%s", dimLabel);
             ImGui::Separator();
-            ImGui::TextWrapped("%s", dimHint);
+            // Explicit wrap width — TextWrapped inside an AlwaysAutoResize
+            // window is a feedback loop (wrap wants the window width, the
+            // window wants the content width): the polygon hint rendered
+            // half cut-off until typing nudged a re-measure.
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 200.0f);
+            ImGui::TextUnformatted(dimHint);
+            ImGui::PopTextWrapPos();
 
             // Grab keyboard focus the first frame placement begins
             if (!m_sketchDimWasShown) {
