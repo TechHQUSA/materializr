@@ -1,6 +1,7 @@
 #pragma once
 #include "SketchConstraints.h"
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <vector>
 #include <string>
 #include <memory>
@@ -16,6 +17,11 @@ struct SketchPoint {
     int id;
     glm::vec2 pos;
     bool isConstruction = false;
+    // Glyph-outline geometry from the Text tool. Still forms regions and is
+    // still selectable, but hidden from vertex markers and snap/inference —
+    // a five-letter word carries hundreds of vertices, and drawing anywhere
+    // near it became impossible when every one was a snap target.
+    bool fromText = false;
 };
 
 struct SketchLine {
@@ -23,6 +29,7 @@ struct SketchLine {
     int startPointId;
     int endPointId;
     bool isConstruction = false;
+    bool fromText = false; // see SketchPoint::fromText
 };
 
 struct SketchCircle {
@@ -67,13 +74,13 @@ public:
     const gp_Pln& getPlane() const;
 
     // Point management
-    int addPoint(glm::vec2 pos);
+    int addPoint(glm::vec2 pos, bool fromText = false);
     void movePoint(int id, glm::vec2 pos);
     const SketchPoint* getPoint(int id) const;
     const std::vector<SketchPoint>& getPoints() const;
 
     // Element creation
-    int addLine(int startPtId, int endPtId);
+    int addLine(int startPtId, int endPtId, bool fromText = false);
     int addCircle(int centerPtId, double radius);
     int addArc(int centerPtId, int startPtId, int endPtId, double radius);
     int addRectangle(glm::vec2 corner1, glm::vec2 corner2); // returns first line id
@@ -117,6 +124,11 @@ public:
         TopoDS_Face face;                   // planar face on the sketch plane
         glm::vec2 representativePoint;      // a point guaranteed inside the region (2D sketch space)
     };
+    // Cached: region construction runs an OCCT general fuse + splitter,
+    // far too heavy for the per-frame hover pick that calls it (a text
+    // sketch carries hundreds of glyph edges). The cache revalidates via a
+    // cheap geometry hash, so the dozens of mutators don't each need to
+    // remember an invalidate call.
     std::vector<Region> buildRegions() const;
 
     // 2D point-in-region test (sketch-space coordinates)
@@ -207,6 +219,13 @@ private:
 
     mutable bool m_centroidValid = false;
     mutable glm::vec2 m_centroid{0};
+
+    // buildRegions cache (see the public declaration for rationale).
+    mutable std::vector<Region> m_regionCache;
+    mutable uint64_t m_regionHash = 0;
+    mutable bool m_regionCacheValid = false;
+    uint64_t geometryHash() const;
+    std::vector<Region> buildRegionsUncached() const;
 
     int nextId() { return m_nextId++; }
     SketchPoint* findPoint(int id);

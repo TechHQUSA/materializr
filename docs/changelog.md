@@ -3,6 +3,60 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.8.5] — 2026-06-06
+
+### Added
+
+- **Project Sketch onto Face** — pick a body face → **Project Sketch** →
+  the chosen sketch's regions project onto the face along the sketch's
+  normal and **engrave** (cut in) or **emboss** (raise out) to a depth.
+  The projected outline is rebuilt on the target face's own surface, so
+  the result follows the curvature exactly — wrap a logo or label onto a
+  cylinder. Scope it live: with the panel open, click sketch regions in
+  the viewport to project only those (Ctrl+click adds; click empty space
+  for all); clicking a region also picks its sketch. Depth is measured
+  along the projection direction, like a stamp pressed straight in.
+  Sketches that hang off the face are refused cleanly. Parametric and
+  reload-editable.
+- **Text in sketches** — a **Text** tool in the sketch toolbar inserts
+  real TrueType outlines (three bundled fonts: JetBrains Mono, DejaVu
+  Sans, DejaVu Serif) as ordinary sketch geometry: letters form closed
+  regions with proper holes, so they extrude, push/pull, and project like
+  anything drawn by hand. Letter height is the measured capital height in
+  mm. A dashed preview box with a baseline follows the cursor before
+  placing; rotate in 90° steps from the popup — the default orientation
+  reads upright in the current view. Glyph outlines stay out of the way:
+  no vertex markers, no snap/inference grabbing, no welding new lines
+  onto letter points.
+- **Per-region extrude** — click one closed region of a sketch (a single
+  letter, the circle inside a rectangle) → **Extrude From** extrudes just
+  that region; Ctrl+click several regions to extrude them together. A
+  whole-sketch selection still extrudes the full profile.
+
+### Fixed
+
+- **Region picking respects nesting** — clicking anywhere inside a closed
+  region now selects exactly that region; previously only a click near
+  the region's centre worked, and clicks near edges selected the
+  surrounding sketch. Strict containment beats boundary proximity, and
+  the smallest containing region wins.
+- **Concurrent tool previews no longer corrupt each other** — starting
+  any interactive operation now cancels whichever other preview is live
+  (and vice versa). Previously, cancelling a tool while another preview
+  ran on the same body could leave phantom geometry on the body with no
+  history step to undo it.
+- Region detection is cached — hovering sketches with many curves (text,
+  dense profiles) no longer recomputes the region layout every frame.
+- **Windows packages now include the bundled fonts** — the UI font
+  rendered as a fallback on Windows because the assets folder was never
+  staged into the zip/installer.
+
+### Internal
+
+- The Linux AppImage now bundles the executable's full shared-library
+  closure (minus the system GL/X11 layer) instead of a hand-maintained
+  list — new library dependencies can no longer ship missing.
+
 ## [0.8.4] — 2026-06-06
 
 ### Added

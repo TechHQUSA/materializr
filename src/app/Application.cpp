@@ -100,6 +100,8 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #define M_PI 3.14159265358979323846
 #endif
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+#include <BRep_Builder.hxx>
 #include <stdexcept>
 #include <cstdio>
 #ifdef _WIN32
@@ -323,6 +325,47 @@ static const char* computeImguiIniPath() {
     return s_imguiIniPath.c_str();
 }
 
+// Resolve a TTF shipped in assets/fonts against the layouts we run from:
+//   1. <exe>/../share/materializr/fonts/  (AppImage)
+//   2. <exe>/../assets/fonts/             (dev: binary in build/)
+//   3. <exe>/assets/fonts/                (Windows portable zip: assets next to exe)
+//   4. <cwd>/assets/fonts/                (dev: launched from repo root)
+// Returns "" when the font isn't found anywhere — callers degrade gracefully.
+std::string Application::resolveBundledFont(const std::string& fname) const {
+    char exePath[4096];
+    std::string exeDir;
+#ifdef _WIN32
+    DWORD n = GetModuleFileNameA(nullptr, exePath, sizeof(exePath) - 1);
+    if (n > 0) {
+        exePath[n] = '\0';
+        std::string p(exePath);
+        auto slash = p.find_last_of("\\/");
+        if (slash != std::string::npos) exeDir = p.substr(0, slash);
+    }
+#else
+    ssize_t n = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+    if (n > 0) {
+        exePath[n] = '\0';
+        std::string p(exePath);
+        auto slash = p.find_last_of('/');
+        if (slash != std::string::npos) exeDir = p.substr(0, slash);
+    }
+#endif
+    const std::string candidates[] = {
+        exeDir + "/../share/materializr/fonts/" + fname,
+        exeDir + "/../assets/fonts/" + fname,
+        exeDir + "/assets/fonts/" + fname,
+        "assets/fonts/" + fname,
+    };
+    for (const auto& path : candidates) {
+        if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+            std::fclose(f);
+            return path;
+        }
+    }
+    return std::string();
+}
+
 void Application::initImGui() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -376,39 +419,10 @@ void Application::initImGui() {
     // Falls through to the bundled default if the TTF isn't present, so
     // a font miss never bricks the UI.
     {
-        char exePath[4096];
-        std::string exeDir;
-#ifdef _WIN32
-        DWORD n = GetModuleFileNameA(nullptr, exePath, sizeof(exePath) - 1);
-        if (n > 0) {
-            exePath[n] = '\0';
-            std::string p(exePath);
-            auto slash = p.find_last_of("\\/");
-            if (slash != std::string::npos) exeDir = p.substr(0, slash);
-        }
-#else
-        ssize_t n = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
-        if (n > 0) {
-            exePath[n] = '\0';
-            std::string p(exePath);
-            auto slash = p.find_last_of('/');
-            if (slash != std::string::npos) exeDir = p.substr(0, slash);
-        }
-#endif
-        const std::string candidates[] = {
-            exeDir + "/../share/materializr/fonts/JetBrainsMono-Regular.ttf",
-            exeDir + "/../assets/fonts/JetBrainsMono-Regular.ttf",
-            std::string("assets/fonts/JetBrainsMono-Regular.ttf"),
-        };
-        for (const auto& path : candidates) {
-            if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
-                std::fclose(f);
-                ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f);
-                if (fnt) {
-                    std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
-                    break;
-                }
-            }
+        std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
+        if (!path.empty()) {
+            ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f);
+            if (fnt) std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
         }
         // If nothing loaded, ImGui will lazily fall back to its baked-in default.
     }
@@ -504,6 +518,24 @@ materializr::IopContext Application::iopContext() {
     return materializr::IopContext{
         *m_document, *m_history, *m_selection,
         [this] { m_meshesDirty = true; }};
+}
+
+void Application::cancelActiveIops() {
+    auto ctx = iopContext();
+    for (auto* c : m_iops)
+        if (c->active()) c->cancel(ctx);
+}
+
+void Application::beginIop(materializr::InteractiveOpController& ctl) {
+    cancelActiveIops();
+    // Legacy history-replay previews write the document every frame; a
+    // controller preview running beside one corrupts both restore paths.
+    if (m_extruding) cancelInteractiveExtrude();
+    if (m_pushPullActive) cancelPushPull();
+    if (m_patternActive) cancelPattern();
+    if (m_resizeCylActive) cancelResizeCylindrical();
+    if (m_threadActive) cancelThread();
+    ctl.begin(iopContext());
 }
 
 void Application::beginFrame() {
@@ -980,16 +1012,67 @@ void Application::handleToolAction(int action) {
         }
         case ToolAction::ExtrudeSketch: {
             // "Extrude From" — always creates a new body (Push/Pull is the
-            // modify-in-place tool). Picks up either a sketch selection
-            // (extrude the profile) or a face selection (extrude the face's
-            // silhouette). Sketch wins if both kinds are selected.
+            // modify-in-place tool). Priority: selected region(s) > whole
+            // sketch > face silhouette. The region branch is what makes a
+            // single letter of a text sketch (or the circle inside a
+            // rectangle) extrudable on its own — clicking a region selects
+            // it, so the explicit pick must win over the whole profile.
             const auto& sel = m_selection->getSelection();
             bool started = false;
-            for (const auto& entry : sel) {
-                if (entry.type == SelectionType::Sketch && entry.sketchId >= 0) {
-                    extrudeSketchById(entry.sketchId, ExtrudeMode::NewBody);
-                    started = true;
-                    break;
+            {
+                // Collect every selected region of ONE sketch (Ctrl+click
+                // several letters → one combined extrude).
+                int regionSketch = -1;
+                std::vector<int> regionIdxs;
+                for (const auto& entry : sel) {
+                    if (entry.type != SelectionType::SketchRegion ||
+                        entry.sketchId < 0)
+                        continue;
+                    if (regionSketch < 0) regionSketch = entry.sketchId;
+                    if (entry.sketchId == regionSketch)
+                        regionIdxs.push_back(entry.subShapeIndex);
+                }
+                if (regionSketch >= 0 && !regionIdxs.empty()) {
+                    auto sketch = m_document->getSketch(regionSketch);
+                    if (sketch) {
+                        auto regions = sketch->buildRegions();
+                        std::vector<TopoDS_Face> profileFaces;
+                        for (int idx : regionIdxs) {
+                            if (idx < 0 ||
+                                idx >= static_cast<int>(regions.size()))
+                                continue;
+                            if (!regions[idx].face.IsNull())
+                                profileFaces.push_back(regions[idx].face);
+                        }
+                        if (profileFaces.size() == 1) {
+                            beginInteractiveExtrude(profileFaces.front(),
+                                                    ExtrudeMode::NewBody,
+                                                    /*targetBody=*/-1,
+                                                    regionSketch);
+                            started = true;
+                        } else if (profileFaces.size() > 1) {
+                            TopoDS_Compound comp;
+                            BRep_Builder bb;
+                            bb.MakeCompound(comp);
+                            for (const auto& f : profileFaces)
+                                bb.Add(comp, f);
+                            beginInteractiveExtrude(comp,
+                                                    ExtrudeMode::NewBody,
+                                                    /*targetBody=*/-1,
+                                                    regionSketch);
+                            started = true;
+                        }
+                    }
+                }
+            }
+            if (!started) {
+                for (const auto& entry : sel) {
+                    if (entry.type == SelectionType::Sketch &&
+                        entry.sketchId >= 0) {
+                        extrudeSketchById(entry.sketchId, ExtrudeMode::NewBody);
+                        started = true;
+                        break;
+                    }
                 }
             }
             if (!started) {
@@ -1058,6 +1141,41 @@ void Application::handleToolAction(int action) {
             break;
         case ToolAction::Trim:
             if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Trim);
+            break;
+        case ToolAction::SketchText:
+            if (m_inSketchMode) {
+                // First activation: default to the UI font (always bundled).
+                if (m_sketchTool->getTextFontPath().empty()) {
+                    m_sketchTool->setTextFontPath(
+                        resolveBundledFont("JetBrainsMono-Regular.ttf"));
+                }
+                // Seed the rotation so text reads upright in the CURRENT
+                // view — some sketch planes have their 2D axes pointing
+                // away from the camera's right/up, and unrotated text came
+                // out sideways or upside-down. Project the camera's right
+                // vector into sketch space and snap to the nearest 90°.
+                if (m_activeSketch && m_viewport) {
+                    const gp_Ax3& ax =
+                        m_activeSketch->getPlane().Position();
+                    glm::vec3 xd(ax.XDirection().X(), ax.XDirection().Y(),
+                                 ax.XDirection().Z());
+                    glm::vec3 yd(ax.YDirection().X(), ax.YDirection().Y(),
+                                 ax.YDirection().Z());
+                    const Camera& cam = m_viewport->getCamera();
+                    glm::vec3 fwd = glm::normalize(cam.getTarget() -
+                                                   cam.getPosition());
+                    glm::vec3 right =
+                        glm::normalize(glm::cross(fwd, cam.getUp()));
+                    glm::vec2 d(glm::dot(right, xd), glm::dot(right, yd));
+                    if (glm::length(d) > 1e-4f) {
+                        float aDeg =
+                            glm::degrees(std::atan2(d.y, d.x));
+                        m_sketchTool->setTextAngle(
+                            static_cast<int>(std::round(aDeg / 90.0f)) * 90);
+                    }
+                }
+                m_sketchTool->setMode(SketchToolMode::Text);
+            }
             break;
 
         // --- Sketch constraints (opt-in only; nothing autoConstrains) ---
@@ -1306,17 +1424,22 @@ void Application::handleToolAction(int action) {
         }
 
         case ToolAction::Shell: {
-            m_shellCtl.begin(iopContext());
+            beginIop(m_shellCtl);
             break;
         }
 
         case ToolAction::Taper: {
-            m_taperCtl.begin(iopContext());
+            beginIop(m_taperCtl);
             break;
         }
 
         case ToolAction::ScaleFace: {
-            m_scaleFaceCtl.begin(iopContext());
+            beginIop(m_scaleFaceCtl);
+            break;
+        }
+
+        case ToolAction::ProjectSketch: {
+            beginIop(m_projectSketchCtl);
             break;
         }
 
@@ -3319,6 +3442,7 @@ void Application::run() {
             renderPatternPanel();
             renderThreadPanel();
             renderSectionPanel();
+            renderTextToolPanel();
             renderLoftPanel();
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();

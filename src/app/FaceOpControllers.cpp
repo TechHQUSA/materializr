@@ -5,6 +5,7 @@
 #include "../modeling/ShellOp.h"
 #include "../modeling/TaperOp.h"
 #include "../modeling/ScaleFaceOp.h"
+#include "../modeling/ProjectSketchOp.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -238,6 +239,150 @@ void TaperController::panelBody(const IopContext&, bool& changed) {
 }
 
 void TaperController::onCleanup() { m_faces.clear(); }
+
+// ─── Project Sketch ──────────────────────────────────────────────────────────
+
+int ProjectSketchController::onBegin(const IopContext& ctx) {
+    m_face.Nullify();
+    m_sketchIds.clear();
+    m_regionFilter.clear();
+    m_depth = 1.0f;
+    m_mode = 0;
+
+    int body = -1;
+    int pickedSketch = -1;
+    for (const auto& e : ctx.selection.getSelection()) {
+        if (e.type == SelectionType::Face && e.bodyId >= 0 &&
+            !e.shape.IsNull() && body < 0) {
+            m_face = TopoDS::Face(e.shape);
+            body = e.bodyId;
+        }
+        // Regions Ctrl+clicked beforehand narrow the projection to just
+        // those; all of them must come from one sketch.
+        if (e.type == SelectionType::SketchRegion && e.sketchId >= 0) {
+            if (pickedSketch < 0) pickedSketch = e.sketchId;
+            if (e.sketchId == pickedSketch)
+                m_regionFilter.push_back(e.subShapeIndex);
+        }
+    }
+    if (body < 0) return -1;
+
+    m_sketchIds = ctx.doc.getAllSketchIds();
+    if (m_sketchIds.empty()) {
+        std::fprintf(stderr, "[ProjectSketch] no sketches in document\n");
+        return -1;
+    }
+    // Default to the selection's sketch, else the newest one.
+    m_sketchPick = static_cast<int>(m_sketchIds.size()) - 1;
+    if (pickedSketch >= 0) {
+        for (size_t i = 0; i < m_sketchIds.size(); ++i)
+            if (m_sketchIds[i] == pickedSketch)
+                m_sketchPick = static_cast<int>(i);
+    }
+    return body;
+}
+
+std::unique_ptr<Operation> ProjectSketchController::buildOp(
+    const IopContext&) {
+    if (m_face.IsNull() || m_sketchIds.empty() || m_depth < 0.01f)
+        return nullptr;
+    auto op = std::make_unique<ProjectSketchOp>();
+    op->setBody(bodyId());
+    op->setTargetFace(m_face);
+    op->setSketchId(m_sketchIds[m_sketchPick]);
+    op->setRegionFilter(m_regionFilter);
+    op->setDepth(static_cast<double>(m_depth));
+    op->setMode(m_mode == 1 ? ProjectSketchOp::Mode::Emboss
+                            : ProjectSketchOp::Mode::Engrave);
+    return op;
+}
+
+void ProjectSketchController::panelBody(const IopContext& ctx,
+                                        bool& changed) {
+    ImGui::TextDisabled("Projects the sketch onto this face along the\n"
+                        "sketch's normal, then cuts in or raises out.");
+
+    // Live region scoping: clicking sketch regions in the viewport while
+    // this panel is open narrows the projection to just those (Ctrl+click
+    // adds more); clicking empty space goes back to the whole sketch. A
+    // clicked region also drives the sketch choice, so picking "the
+    // relevant sketch" is literally clicking it.
+    {
+        int selSketch = -1;
+        std::vector<int> live;
+        for (const auto& e : ctx.selection.getSelection()) {
+            if (e.type != SelectionType::SketchRegion || e.sketchId < 0)
+                continue;
+            if (selSketch < 0) selSketch = e.sketchId;
+            if (e.sketchId == selSketch)
+                live.push_back(e.subShapeIndex);
+        }
+        if (selSketch >= 0 &&
+            selSketch != m_sketchIds[m_sketchPick]) {
+            for (size_t i = 0; i < m_sketchIds.size(); ++i) {
+                if (m_sketchIds[i] == selSketch) {
+                    m_sketchPick = static_cast<int>(i);
+                    changed = true;
+                }
+            }
+        }
+        std::sort(live.begin(), live.end());
+        std::vector<int> cur = m_regionFilter;
+        std::sort(cur.begin(), cur.end());
+        if (live != cur) {
+            m_regionFilter = live;
+            changed = true;
+        }
+    }
+
+    std::string current =
+        ctx.doc.getSketchName(m_sketchIds[m_sketchPick]);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##projSketch", current.c_str())) {
+        for (size_t i = 0; i < m_sketchIds.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i)); // names may repeat
+            bool sel = static_cast<int>(i) == m_sketchPick;
+            std::string label = ctx.doc.getSketchName(m_sketchIds[i]);
+            if (ImGui::Selectable(label.c_str(), sel)) {
+                if (static_cast<int>(i) != m_sketchPick) {
+                    m_sketchPick = static_cast<int>(i);
+                    m_regionFilter.clear(); // filter was for the old sketch
+                    changed = true;
+                }
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    if (!m_regionFilter.empty()) {
+        ImGui::TextDisabled("%d region(s) - click empty space for all.",
+                            static_cast<int>(m_regionFilter.size()));
+    } else {
+        ImGui::TextDisabled("All regions. Click regions in the viewport\n"
+                            "to project only those (Ctrl+click adds).");
+    }
+
+    if (ImGui::RadioButton("Engrave", &m_mode, 0)) changed = true;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Emboss", &m_mode, 1)) changed = true;
+
+    if (ImGui::SliderFloat("##projDepth", &m_depth, 0.1f, 10.0f,
+                           "%.2f mm")) {
+        changed = true;
+    }
+
+    if (!previewOk()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
+                           "Projection failed - the sketch must land\n"
+                           "fully inside this face.");
+    }
+}
+
+void ProjectSketchController::onCleanup() {
+    m_face.Nullify();
+    m_sketchIds.clear();
+    m_regionFilter.clear();
+}
 
 // ─── Scale Face ──────────────────────────────────────────────────────────────
 

@@ -498,6 +498,7 @@ bool Application::detectCylindricalResizeCandidate() {
 // multi-second operation, so the thread computes once on Apply.
 
 void Application::beginThread() {
+    cancelActiveIops();
     // Threads need a true cylinder — a cone's helix would leave the surface.
     if (std::abs(m_resizeCylOriginalBottomR - m_resizeCylOriginalTopR) > 1e-5) {
         std::fprintf(stderr, "[Thread] picked face is conical — thread needs "
@@ -591,6 +592,7 @@ void Application::cancelThread() {
 }
 
 void Application::beginResizeCylindrical() {
+    cancelActiveIops();
     if (m_resizeCylBodyId < 0) return;
     try {
         m_resizeCylPreviousShape = m_document->getBody(m_resizeCylBodyId);
@@ -700,6 +702,7 @@ double Application::extrudeOpDistance() const {
 void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
                                           ExtrudeMode mode, int targetBody,
                                           int sourceSketchId) {
+    cancelActiveIops();
     m_extrudeProfile = profile;
     m_extruding = true;
     m_extrudeMode = mode;
@@ -709,9 +712,16 @@ void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
     std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf), "%.1f", m_extrudeDistance);
     m_extrudeInputFocus = true;
 
-    // Compute face normal and center
-    if (profile.ShapeType() == TopAbs_FACE) {
-        BRepGProp_Face prop(TopoDS::Face(profile));
+    // Compute face normal and center. A compound profile (multi-region
+    // extrude — several letters at once) uses its first face: all regions
+    // of one sketch are coplanar, so any face gives the right normal.
+    TopoDS_Shape normShape = profile;
+    if (profile.ShapeType() != TopAbs_FACE) {
+        TopExp_Explorer fx(profile, TopAbs_FACE);
+        if (fx.More()) normShape = fx.Current();
+    }
+    if (normShape.ShapeType() == TopAbs_FACE) {
+        BRepGProp_Face prop(TopoDS::Face(normShape));
         gp_Pnt center;
         gp_Vec norm;
         double u1, u2, v1, v2;
@@ -873,18 +883,46 @@ Application::SketchRegionHit Application::pickSketchRegion(float screenX, float 
         if (projectToPlane(o2, d2, t2, p2d2)) tol = glm::length(p2d2 - p2d);
 
         auto regions = sketch.buildRegions();
-        bool matched = false;
+        // Resolve overlapping candidates by two ranked rules instead of
+        // first-match (BOP region order is arbitrary):
+        //   1. STRICT containment beats near-boundary proximity. A click
+        //      inside a letter is also within `tol` of the surrounding
+        //      region's hole edge; first-match let the big region steal
+        //      every click that wasn't dead-centre in the stroke.
+        //   2. Among matches of equal rank, the SMALLEST region wins —
+        //      clicking inside a nested shape picks the shape, not the
+        //      sea it sits in.
+        int bestIdx = -1;
+        bool bestInside = false;
+        double bestArea = 0.0;
         for (size_t i = 0; i < regions.size(); ++i) {
-            if (sketch.isPointInOrNearRegion(regions[i], p2d, tol)) {
-                bestT = t;
-                hit.sketchId = sketchId;
-                hit.regionIndex = static_cast<int>(i);
-                hit.worldPoint = rayOrigin + rayDir * t;
-                matched = true;
-                break; // first match per sketch is fine; nesting handled by the test
+            bool inside = sketch.isPointInRegion(regions[i], p2d);
+            if (!inside &&
+                !sketch.isPointInOrNearRegion(regions[i], p2d, tol))
+                continue;
+            double area = 0.0;
+            try {
+                GProp_GProps props;
+                BRepGProp::SurfaceProperties(regions[i].face, props);
+                area = std::abs(props.Mass());
+            } catch (...) {}
+            bool better =
+                bestIdx < 0 ||
+                (inside && !bestInside) ||
+                (inside == bestInside && area < bestArea);
+            if (better) {
+                bestIdx = static_cast<int>(i);
+                bestInside = inside;
+                bestArea = area;
             }
         }
-        if (matched) return;
+        if (bestIdx >= 0) {
+            bestT = t;
+            hit.sketchId = sketchId;
+            hit.regionIndex = bestIdx;
+            hit.worldPoint = rayOrigin + rayDir * t;
+            return;
+        }
 
         // Fallback: edge picking. Open profiles (an arc, an unclosed polyline,
         // a spline used as a loft rib, …) have no closed region, so the loop
@@ -995,6 +1033,7 @@ Application::SketchRegionHit Application::pickSketchRegion(float screenX, float 
 }
 
 void Application::beginPushPull() {
+    cancelActiveIops();
     m_pushPullTargets.clear();
     m_pushPullPreviewBodyIds.clear();
     m_pushPullPreviousBodies.clear();
@@ -1318,6 +1357,7 @@ int Application::userAxisToWorldIdx(int userIdx) {
 // history via updatePattern; commit leaves the op there, cancel undoes it.
 
 void Application::beginPattern(PatternKind kind) {
+    cancelActiveIops();
     // Find the first selected body. PatternOp clones one source body.
     int bodyId = -1;
     if (m_selection) {

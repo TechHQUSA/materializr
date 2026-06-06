@@ -43,16 +43,22 @@ RUN mkdir -p /AppDir/usr/bin /AppDir/usr/lib \
 # Copy binary
 RUN cp /src/build/materializr /AppDir/usr/bin/materializr
 
-# Bundle JetBrains Mono so the ImGui font loader (Application::initImGui)
-# resolves the `<exe>/../share/materializr/fonts/JetBrainsMono-Regular.ttf`
-# candidate when running from the AppImage layout. ~270 KB.
-RUN if [ -f /src/assets/fonts/JetBrainsMono-Regular.ttf ]; then \
-        cp /src/assets/fonts/JetBrainsMono-Regular.ttf \
-           /AppDir/usr/share/materializr/fonts/JetBrainsMono-Regular.ttf ; \
-    fi
+# Bundle every TTF from assets/fonts: JetBrains Mono for the ImGui UI font,
+# plus DejaVu Sans/Serif for the sketch Text tool's font picker. Resolved at
+# runtime via the `<exe>/../share/materializr/fonts/` candidate. ~1.4 MB.
+RUN cp /src/assets/fonts/*.ttf /AppDir/usr/share/materializr/fonts/ 2>/dev/null || true
 
 # Copy OCCT + TBB + Freetype shared libs (follow symlinks, any arch)
 RUN find /usr/lib -name "libTK*.so*" -o -name "libtbb*.so*" -o -name "libfreetype.so*" \
+    | while read lib; do cp -L "$lib" /AppDir/usr/lib/ 2>/dev/null || true; done
+
+# Bundle the binary's FULL shared-lib closure, minus the system layer that
+# must come from the host (glibc, GL stack, X11/xcb, fontconfig, wayland).
+# The hand-list above stopped sufficing when TKService arrived (Text tool's
+# Font_BRepFont): it drags in FreeImage and its whole codec tree — jpeg,
+# png, tiff, webp, OpenEXR, raw — which no hand-list should chase.
+RUN ldd /AppDir/usr/bin/materializr | awk '/=> \//{print $3}' | sort -u \
+    | grep -vE '/(libc|libm|libdl|libpthread|librt|libresolv|libgcc_s|libstdc\+\+|ld-linux|libGL|libGLX|libGLdispatch|libOpenGL|libEGL|libX11|libxcb|libXau|libXdmcp|libXext|libXrender|libXi|libXfixes|libXcursor|libXrandr|libXinerama|libXxf86vm|libfontconfig|libexpat|libdbus|libdrm|libwayland)[.-]' \
     | while read lib; do cp -L "$lib" /AppDir/usr/lib/ 2>/dev/null || true; done
 
 # Set RPATH

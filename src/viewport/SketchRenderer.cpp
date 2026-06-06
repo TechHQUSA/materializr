@@ -308,6 +308,8 @@ void SketchRenderer::drawPolygons(const Sketch* sketch, const glm::mat4& vp) {
 void SketchRenderer::drawPoints(const Sketch* sketch, const glm::mat4& vp) {
     std::vector<float> verts;
     for (const auto& pt : sketch->getPoints()) {
+        // Glyph vertices stay invisible — hundreds per word, pure noise.
+        if (pt.fromText) continue;
         glm::vec3 w = toWorld(sketch, pt.pos);
         verts.push_back(w.x);
         verts.push_back(w.y);
@@ -345,8 +347,9 @@ void SketchRenderer::drawMidpointDots(const Sketch* sketch, const glm::mat4& vp)
         verts.push_back(w.x); verts.push_back(w.y); verts.push_back(w.z);
     };
 
-    // Midpoint of each line.
+    // Midpoint of each line. Glyph edges excluded — no dot confetti on text.
     for (const auto& line : sketch->getLines()) {
+        if (line.fromText) continue;
         const SketchPoint* p1 = sketch->getPoint(line.startPointId);
         const SketchPoint* p2 = sketch->getPoint(line.endPointId);
         if (!p1 || !p2) continue;

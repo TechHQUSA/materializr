@@ -44,6 +44,27 @@ private:
     bool  m_flipBase = false;
 };
 
+// ─── Project Sketch ──────────────────────────────────────────────────────────
+// Project a sketch onto the picked face along the sketch normal, then
+// engrave or emboss the projected regions — text wrapped onto a cylinder.
+class ProjectSketchController : public InteractiveOpController {
+protected:
+    const char* title() const override { return "Project Sketch"; }
+    int onBegin(const IopContext& ctx) override;
+    std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
+    void panelBody(const IopContext& ctx, bool& changed) override;
+    void onCleanup() override;
+    float panelWidth() const override { return 300.0f; }
+
+private:
+    TopoDS_Face m_face;
+    std::vector<int> m_sketchIds;   // combo choices, built at begin
+    int  m_sketchPick = 0;          // index into m_sketchIds
+    std::vector<int> m_regionFilter; // region subset from selection; empty = all
+    float m_depth = 1.0f;
+    int   m_mode = 0;               // 0=Engrave, 1=Emboss
+};
+
 // ─── Scale Face ──────────────────────────────────────────────────────────────
 // Pinch/flare the body toward a scaled copy of a planar END face. Carries
 // the 2D gizmo frame the viewport draws and drags (red U / blue V arrows).

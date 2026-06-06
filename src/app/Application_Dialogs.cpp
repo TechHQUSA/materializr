@@ -39,6 +39,7 @@
 #include "modeling/Sketch.h"
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
+#include "modeling/TextSketchOp.h"
 #include "modeling/ExtrudeOp.h"
 #include "modeling/ReplayOp.h"
 #include "modeling/ThreadOp.h"
@@ -2517,6 +2518,99 @@ void Application::renderSectionPanel() {
     }
     ImGui::End();
     if (!open) m_sectionEnabled = false;
+}
+
+void Application::renderTextToolPanel() {
+    if (!m_inSketchMode || !m_sketchTool ||
+        m_sketchTool->getMode() != SketchToolMode::Text)
+        return;
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 60.0f),
+        ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    bool open = true;
+    if (ImGui::Begin("Text", &open,
+                     ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings)) {
+        // The string buffer lives here; the tool consumes the committed
+        // std::string. Re-seeded each time the window (re)appears.
+        static char buf[128];
+        if (ImGui::IsWindowAppearing()) {
+            std::snprintf(buf, sizeof(buf), "%s",
+                          m_sketchTool->getTextString().c_str());
+        }
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::InputText("##textString", buf, sizeof(buf)))
+            m_sketchTool->setTextString(buf);
+
+        // Bundled fonts only — deterministic across machines, unlike a
+        // system-font scan.
+        static const char* kFontNames[] = {"Mono (JetBrains)",
+                                           "Sans (DejaVu)",
+                                           "Serif (DejaVu)"};
+        static const char* kFontFiles[] = {"JetBrainsMono-Regular.ttf",
+                                           "DejaVuSans.ttf",
+                                           "DejaVuSerif.ttf"};
+        static int fontIdx = 0;
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::Combo("Font", &fontIdx, kFontNames, 3)) {
+            std::string p = resolveBundledFont(kFontFiles[fontIdx]);
+            if (p.empty()) {
+                std::fprintf(stderr, "[Text] bundled font missing: %s\n",
+                             kFontFiles[fontIdx]);
+            }
+            m_sketchTool->setTextFontPath(p);
+        }
+
+        float h = m_sketchTool->getTextHeight();
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderFloat("Height (mm)", &h, 1.0f, 50.0f, "%.1f",
+                               ImGuiSliderFlags_Logarithmic))
+            m_sketchTool->setTextHeight(h);
+
+        // 90° steps about the click anchor. The default is seeded from the
+        // camera so text usually starts upright; these fix the rest.
+        int ang = m_sketchTool->getTextAngle();
+        if (ImGui::Button("Rotate left"))
+            m_sketchTool->setTextAngle(ang + 90);
+        ImGui::SameLine();
+        if (ImGui::Button("Rotate right"))
+            m_sketchTool->setTextAngle(ang - 90);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d deg", m_sketchTool->getTextAngle());
+
+        // Keep the placement-preview extents current. Re-measured only when
+        // string / font / height actually change (font load isn't free).
+        {
+            static std::string lastKey;
+            std::string key = m_sketchTool->getTextString() + "|" +
+                              m_sketchTool->getTextFontPath() + "|" +
+                              std::to_string(m_sketchTool->getTextHeight());
+            if (key != lastKey) {
+                glm::vec2 mn, mx;
+                if (TextSketch::measure(m_sketchTool->getTextString(),
+                                        m_sketchTool->getTextFontPath(),
+                                        m_sketchTool->getTextHeight(),
+                                        mn, mx)) {
+                    m_sketchTool->setTextPreviewBox(mn, mx);
+                } else {
+                    m_sketchTool->clearTextPreviewBox();
+                }
+                lastKey = key;
+            }
+        }
+
+        ImGui::TextDisabled("Click in the sketch to place.");
+        if (m_sketchTool->getTextFontPath().empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
+                               "Font file not found - cannot place text.");
+        }
+
+    }
+    ImGui::End();
+    if (!open) m_sketchTool->setMode(SketchToolMode::Select);
 }
 
 } // namespace materializr

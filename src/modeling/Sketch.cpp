@@ -63,11 +63,12 @@ gp_Pnt Sketch::sketchToWorld(glm::vec2 pt2d) const {
 
 // Point management
 
-int Sketch::addPoint(glm::vec2 pos) {
+int Sketch::addPoint(glm::vec2 pos, bool fromText) {
     SketchPoint pt;
     pt.id = nextId();
     pt.pos = pos;
     pt.isConstruction = false;
+    pt.fromText = fromText;
     m_points.push_back(pt);
     return pt.id;
 }
@@ -99,12 +100,13 @@ SketchPoint* Sketch::findPoint(int id) {
 
 // Element creation
 
-int Sketch::addLine(int startPtId, int endPtId) {
+int Sketch::addLine(int startPtId, int endPtId, bool fromText) {
     SketchLine line;
     line.id = nextId();
     line.startPointId = startPtId;
     line.endPointId = endPtId;
     line.isConstruction = false;
+    line.fromText = fromText;
     m_lines.push_back(line);
     return line.id;
 }
@@ -838,6 +840,67 @@ bool pointInPolygon2D(const std::vector<glm::vec2>& poly, glm::vec2 p) {
 } // anonymous
 
 std::vector<Sketch::Region> Sketch::buildRegions() const {
+    const uint64_t h = geometryHash();
+    if (m_regionCacheValid && h == m_regionHash) return m_regionCache;
+    m_regionCache = buildRegionsUncached();
+    m_regionHash = h;
+    m_regionCacheValid = true;
+    return m_regionCache;
+}
+
+// FNV-1a over everything region construction depends on. ~10 µs on a text
+// sketch — noise next to the general fuse this guards (tens of ms).
+uint64_t Sketch::geometryHash() const {
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](const void* data, size_t n) {
+        const unsigned char* b = static_cast<const unsigned char*>(data);
+        for (size_t i = 0; i < n; ++i) {
+            h ^= b[i];
+            h *= 1099511628211ull;
+        }
+    };
+    auto mixI = [&](int v) { mix(&v, sizeof v); };
+    auto mixF = [&](float v) { mix(&v, sizeof v); };
+    auto mixD = [&](double v) { mix(&v, sizeof v); };
+
+    const gp_Ax3& ax = m_plane.Position();
+    mixD(ax.Location().X()); mixD(ax.Location().Y()); mixD(ax.Location().Z());
+    mixD(ax.Direction().X()); mixD(ax.Direction().Y()); mixD(ax.Direction().Z());
+    mixD(ax.XDirection().X()); mixD(ax.XDirection().Y()); mixD(ax.XDirection().Z());
+
+    for (const auto& p : m_points) {
+        mixI(p.id); mixF(p.pos.x); mixF(p.pos.y);
+        mixI(p.isConstruction ? 1 : 0);
+    }
+    for (const auto& l : m_lines) {
+        mixI(l.id); mixI(l.startPointId); mixI(l.endPointId);
+        mixI(l.isConstruction ? 1 : 0);
+    }
+    for (const auto& c : m_circles) {
+        mixI(c.id); mixI(c.centerPointId); mixD(c.radius);
+        mixI(c.isConstruction ? 1 : 0);
+    }
+    for (const auto& a : m_arcs) {
+        mixI(a.id); mixI(a.centerPointId); mixI(a.startPointId);
+        mixI(a.endPointId); mixD(a.radius);
+    }
+    for (const auto& s : m_splines) {
+        mixI(s.id);
+        for (int id : s.controlPointIds) mixI(id);
+    }
+    for (const auto& g : m_polygons) {
+        mixI(g.id); mixI(g.centerPointId); mixD(g.radius); mixI(g.sides);
+    }
+    mixI(m_sourceBodyId);
+    // Source face identity: the TShape pointer changes whenever the host
+    // body is regenerated, which is exactly when grafted holes can change.
+    const void* tsh =
+        m_sourceFace.IsNull() ? nullptr : m_sourceFace.TShape().get();
+    mix(&tsh, sizeof tsh);
+    return h;
+}
+
+std::vector<Sketch::Region> Sketch::buildRegionsUncached() const {
     std::vector<Region> regions;
 
     // Build a planar face from every closed wire the sketch forms. Each

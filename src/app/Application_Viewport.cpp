@@ -1338,6 +1338,57 @@ void Application::renderViewport() {
                     }
                 }
 
+                // Text tool: dashed placement rectangle following the
+                // cursor — the measured (rotated) extents of the string, so
+                // the user sees exactly where the letters will land before
+                // clicking. Baseline drawn solid for orientation.
+                if (m_sketchTool->getMode() == SketchToolMode::Text &&
+                    m_sketchTool->hasTextPreviewBox()) {
+                    const glm::vec2 anchor = m_sketchTool->getCurrentPos();
+                    const glm::vec2 mn = m_sketchTool->getTextPreviewMin();
+                    const glm::vec2 mx = m_sketchTool->getTextPreviewMax();
+                    const float a = glm::radians(
+                        static_cast<float>(m_sketchTool->getTextAngle()));
+                    const float ca = std::cos(a), sa2 = std::sin(a);
+                    auto rot = [&](glm::vec2 p) {
+                        return anchor + glm::vec2(p.x * ca - p.y * sa2,
+                                                  p.x * sa2 + p.y * ca);
+                    };
+                    const glm::vec2 corners[4] = {
+                        rot({mn.x, mn.y}), rot({mx.x, mn.y}),
+                        rot({mx.x, mx.y}), rot({mn.x, mx.y})};
+                    ImVec2 sc[4];
+                    bool vis = true;
+                    for (int i = 0; i < 4 && vis; ++i)
+                        vis = toImg(sk2w(corners[i]), sc[i]);
+                    if (vis) {
+                        const ImU32 boxCol = IM_COL32(140, 220, 255, 200);
+                        auto dashSeg = [&](ImVec2 p0, ImVec2 p1) {
+                            ImVec2 d(p1.x - p0.x, p1.y - p0.y);
+                            float len = std::sqrt(d.x * d.x + d.y * d.y);
+                            if (len < 1.0f) return;
+                            d.x /= len; d.y /= len;
+                            const float on = 8.0f, off = 6.0f;
+                            for (float t = 0.0f; t < len; t += on + off) {
+                                float t1 = std::min(t + on, len);
+                                dl->AddLine(
+                                    ImVec2(p0.x + d.x * t, p0.y + d.y * t),
+                                    ImVec2(p0.x + d.x * t1,
+                                           p0.y + d.y * t1),
+                                    boxCol, 1.5f);
+                            }
+                        };
+                        for (int i = 0; i < 4; ++i)
+                            dashSeg(sc[i], sc[(i + 1) % 4]);
+                        // Solid baseline (y=0 of the glyphs) — shows which
+                        // way is "up" for the letters at a glance.
+                        ImVec2 b0, b1;
+                        if (toImg(sk2w(rot({mn.x, 0.0f})), b0) &&
+                            toImg(sk2w(rot({mx.x, 0.0f})), b1))
+                            dl->AddLine(b0, b1, boxCol, 2.0f);
+                    }
+                }
+
                 // Inference label near the cursor — names which snap(s) are
                 // active so the user understands WHY the cursor jumped. The
                 // killer SketchUp feature ("Endpoint" / "On midpoint" /

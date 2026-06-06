@@ -272,6 +272,10 @@ ToolAction Toolbar::renderSketchTools() {
     tip("Multi-point spline. Click control points, Enter to finish.");
     if (skBtn("Polygon",   7))     action = ToolAction::Polygon;
     tip("Regular polygon: click centre, drag to size. Side count in properties.");
+    if (skBtn("Text",      9))     action = ToolAction::SketchText;
+    tip("Insert text as real outline geometry: set string, font and letter "
+        "height in the popup, then click to place. Letters become closed "
+        "regions - extrude them or engrave them onto a face.");
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip("Trim a sketch segment at the nearest intersections.");
 
@@ -478,6 +482,11 @@ ToolAction Toolbar::renderFaceTools() {
     tip("Pinch or flare the body toward a scaled copy of this END face - "
         "shrink a wing tip profile into a winglet taper. Scale, blend "
         "length and extend/pinch mode in the popup.");
+    if (ImGui::Button("Project Sketch", ImVec2(-1, 30)))
+        action = ToolAction::ProjectSketch;
+    tip("Project a sketch onto this face along the sketch's normal, then "
+        "engrave (cut in) or emboss (raise out) to a depth - wrap a logo "
+        "or text onto a cylinder. Sketch, mode and depth in the popup.");
     if (m_canEditDiameter &&
         ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
         action = ToolAction::EditDiameter;

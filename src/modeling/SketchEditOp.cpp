@@ -148,7 +148,8 @@ static void writeSketchBody(std::ostream& os, const Sketch& sk, int sketchId,
     os << "POINT_COUNT " << pts.size() << "\n";
     for (const auto& p : pts) {
         os << "POINT " << p.id << " " << p.pos.x << " " << p.pos.y
-           << " " << (p.isConstruction ? 1 : 0) << "\n";
+           << " " << (p.isConstruction ? 1 : 0)
+           << " " << (p.fromText ? 1 : 0) << "\n";
     }
 
     // Lines.
@@ -156,7 +157,8 @@ static void writeSketchBody(std::ostream& os, const Sketch& sk, int sketchId,
     os << "LINE_COUNT " << lines.size() << "\n";
     for (const auto& l : lines) {
         os << "LINE " << l.id << " " << l.startPointId << " " << l.endPointId
-           << " " << (l.isConstruction ? 1 : 0) << "\n";
+           << " " << (l.isConstruction ? 1 : 0)
+           << " " << (l.fromText ? 1 : 0) << "\n";
     }
 
     // Circles.

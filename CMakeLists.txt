@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 0.8.4 LANGUAGES CXX)
+project(Materializr VERSION 0.8.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -176,6 +176,7 @@ add_executable(materializr
     src/modeling/ShellOp.cpp
     src/modeling/TaperOp.cpp
     src/modeling/ScaleFaceOp.cpp
+    src/modeling/ProjectSketchOp.cpp
     src/modeling/SplitBodyOp.cpp
     src/modeling/MirrorOp.cpp
     src/modeling/PatternOp.cpp
@@ -284,6 +285,10 @@ else()
         # TKBin: BinTools::Write / Read (binary BREP, used by the v3
         # .materializr format — smaller + faster than BRepTools' ASCII).
         TKBin
+        # TKService + TKV3d: Font_BRepFont / Font_BRepTextBuilder (the
+        # sketch Text tool renders TrueType glyphs into outline wires).
+        TKService
+        TKV3d
     )
 endif()
 

@@ -4,10 +4,11 @@
 #include <glm/glm.hpp>
 #include <functional>
 #include <set>
+#include <string>
 
 namespace materializr {
 
-enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim };
+enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text };
 
 // One drawing-time alignment hint. Inferences are transient — they describe
 // what the cursor IS aligned to right now, get drawn as coloured ghost lines /
@@ -91,6 +92,28 @@ public:
     // count before clicking.
     int getPolygonSides() const { return m_polygonSides; }
     void setPolygonSides(int n) { m_polygonSides = (n < 3) ? 3 : n; }
+    // Text tool settings — the popup edits these; the click consumes them.
+    const std::string& getTextString() const { return m_textString; }
+    void setTextString(const std::string& s) { m_textString = s; }
+    const std::string& getTextFontPath() const { return m_textFontPath; }
+    void setTextFontPath(const std::string& p) { m_textFontPath = p; }
+    float getTextHeight() const { return m_textHeight; }
+    void setTextHeight(float h) { m_textHeight = (h < 0.5f) ? 0.5f : h; }
+    // CCW rotation about the click anchor, 90° steps. The app seeds this
+    // from the camera when the tool activates so text reads upright in the
+    // current view; the popup's rotate buttons adjust from there.
+    int getTextAngle() const { return m_textAngle; }
+    void setTextAngle(int deg) { m_textAngle = ((deg % 360) + 360) % 360; }
+    // Unrotated text extents relative to the anchor (mm), pushed by the app
+    // whenever string/font/height change; the viewport draws the placement
+    // rectangle from these. Invalid until setTextPreviewBox is called.
+    bool hasTextPreviewBox() const { return m_textPrevValid; }
+    glm::vec2 getTextPreviewMin() const { return m_textPrevMin; }
+    glm::vec2 getTextPreviewMax() const { return m_textPrevMax; }
+    void setTextPreviewBox(glm::vec2 mn, glm::vec2 mx) {
+        m_textPrevMin = mn; m_textPrevMax = mx; m_textPrevValid = true;
+    }
+    void clearTextPreviewBox() { m_textPrevValid = false; }
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter the vertical (and commits). Stage 0 =
     // expecting H, 1 = expecting V. Read by the UI to swap the popup label.
@@ -166,6 +189,7 @@ private:
     void handleSelectTool(glm::vec2 pos);
     void handleSplineTool(glm::vec2 pos);
     void handlePolygonTool(glm::vec2 pos);
+    void handleTextTool(glm::vec2 pos);
     void handleTrimTool(glm::vec2 pos);
     void computeTrimHover(glm::vec2 pos); // updates m_trimHoverPoints (no mutation)
 
@@ -193,6 +217,15 @@ public:
 
 private:
     int m_polygonSides = 6; // default hexagon
+
+    // Text tool settings (see TextSketchOp.h for the generator)
+    std::string m_textString = "TEXT";
+    std::string m_textFontPath; // resolved by the app at tool activation
+    float m_textHeight = 8.0f;  // capital height, mm
+    int   m_textAngle = 0;      // CCW degrees, 90° steps
+    bool  m_textPrevValid = false;
+    glm::vec2 m_textPrevMin{0.0f};
+    glm::vec2 m_textPrevMax{0.0f};
 
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter sets the vertical side and commits.

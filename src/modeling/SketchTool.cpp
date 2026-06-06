@@ -1,5 +1,6 @@
 #include "SketchTool.h"
 #include "SketchConstraints.h"
+#include "TextSketchOp.h"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -84,6 +85,9 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
             break;
         case SketchToolMode::Trim:
             handleTrimTool(snapped);
+            break;
+        case SketchToolMode::Text:
+            handleTextTool(snapped);
             break;
         default:
             break;
@@ -421,6 +425,9 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             // During a drag, skip the points being moved — they'd snap to
             // their own starting position and lock the drag in place.
             if (m_snapExcludePoints.count(pt.id)) continue;
+            // Glyph vertices are never snap targets — a word is hundreds of
+            // points and drawing near text was impossible.
+            if (pt.fromText) continue;
             if (glm::length(pos - pt.pos) < pointSnapThreshold) {
                 m_activeInferences.push_back({InferenceGuide::Endpoint, pt.pos, pt.pos, pt.id});
                 return pt.pos;
@@ -471,6 +478,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // Snap to line midpoints (matches the green dots drawn by the renderer).
         const auto& lines = m_sketch->getLines();
         for (const auto& ln : lines) {
+            if (ln.fromText) continue; // glyph edges aren't snap targets
             // Skip lines being dragged — their midpoint is moving with them.
             if (m_snapExcludePoints.count(ln.startPointId) ||
                 m_snapExcludePoints.count(ln.endPointId)) continue;
@@ -525,6 +533,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             glm::vec2 bestProj{0.0f};
             float bestD = onLineThresh;
             for (const auto& ln : lines) {
+                if (ln.fromText) continue;
                 // Skip dragged lines.
                 if (m_snapExcludePoints.count(ln.startPointId) ||
                     m_snapExcludePoints.count(ln.endPointId)) continue;
@@ -583,6 +592,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             glm::vec2 bestProj{0.0f};
             float bestD = extThresh;
             for (const auto& ln : lines) {
+                if (ln.fromText) continue;
                 if (m_snapExcludePoints.count(ln.startPointId) ||
                     m_snapExcludePoints.count(ln.endPointId)) continue;
                 const SketchPoint* p1 = m_sketch->getPoint(ln.startPointId);
@@ -637,6 +647,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // skipped (drawing a guide from a point to itself is meaningless).
         for (const auto& pt : m_sketch->getPoints()) {
             if (m_snapExcludePoints.count(pt.id)) continue;
+            if (pt.fromText) continue;
             float dX = std::abs(pos.x - pt.pos.x);
             float dY = std::abs(pos.y - pt.pos.y);
             if (dX < bestVDist) {
@@ -870,6 +881,7 @@ int SketchTool::findCoincidentPoint(glm::vec2 pos, int excludeId) const {
     const auto& points = m_sketch->getPoints();
     for (const auto& pt : points) {
         if (pt.id == excludeId) continue;
+        if (pt.fromText) continue; // never weld user geometry onto glyphs
         if (glm::length(pos - pt.pos) < threshold) {
             return pt.id;
         }
@@ -1929,6 +1941,19 @@ void SketchTool::handlePolygonTool(glm::vec2 pos) {
 
         m_isPlacing = false;
         m_clickCount = 0;
+    }
+}
+
+void SketchTool::handleTextTool(glm::vec2 pos) {
+    // Single click places the text with the popup's current settings; the
+    // click point is the baseline-left anchor. The tool stays active, so
+    // several labels can be stamped in a row.
+    int loops = TextSketch::generate(m_sketch, m_textString, m_textFontPath,
+                                     pos, m_textHeight,
+                                     static_cast<float>(m_textAngle));
+    if (loops <= 0) {
+        std::fprintf(stderr, "[Text] nothing placed (font='%s')\n",
+                     m_textFontPath.c_str());
     }
 }
 

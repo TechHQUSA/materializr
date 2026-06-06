@@ -237,13 +237,15 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         ofs << "POINT_COUNT " << static_cast<int>(pts.size()) << "\n";
         for (const auto& p : pts)
             ofs << "P " << p.id << " " << p.pos.x << " " << p.pos.y << " "
-                << (p.isConstruction ? 1 : 0) << "\n";
+                << (p.isConstruction ? 1 : 0) << " "
+                << (p.fromText ? 1 : 0) << "\n";
 
         const auto& lns = sk->getLines();
         ofs << "LINE_COUNT " << static_cast<int>(lns.size()) << "\n";
         for (const auto& l : lns)
             ofs << "L " << l.id << " " << l.startPointId << " " << l.endPointId << " "
-                << (l.isConstruction ? 1 : 0) << "\n";
+                << (l.isConstruction ? 1 : 0) << " "
+                << (l.fromText ? 1 : 0) << "\n";
 
         const auto& cs = sk->getCircles();
         ofs << "CIRCLE_COUNT " << static_cast<int>(cs.size()) << "\n";
@@ -466,6 +468,7 @@ void parseSketchBody(std::istream& ifs, materializr::Sketch& sk,
             for (int i = 0; i < n && std::getline(ifs, line); ++i) {
                 std::istringstream s(line); std::string t; SketchPoint p; int c = 0;
                 s >> t >> p.id >> p.pos.x >> p.pos.y >> c; p.isConstruction = (c != 0);
+                int ft = 0; if (s >> ft) p.fromText = (ft != 0); // optional (added post-0.8.4)
                 bump(p.id); sk.addRawPoint(p);
             }
         } else if (tok == "LINE_COUNT") {
@@ -473,6 +476,7 @@ void parseSketchBody(std::istream& ifs, materializr::Sketch& sk,
             for (int i = 0; i < n && std::getline(ifs, line); ++i) {
                 std::istringstream s(line); std::string t; SketchLine l; int c = 0;
                 s >> t >> l.id >> l.startPointId >> l.endPointId >> c; l.isConstruction = (c != 0);
+                int ft = 0; if (s >> ft) l.fromText = (ft != 0); // optional (added post-0.8.4)
                 bump(l.id); sk.addRawLine(l);
             }
         } else if (tok == "CIRCLE_COUNT") {

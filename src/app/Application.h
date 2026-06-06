@@ -81,6 +81,10 @@ public:
 private:
     void initImGui();
     void shutdownImGui();
+    // Locate a TTF from assets/fonts across AppImage / dev / Windows-zip
+    // layouts; "" when missing. Used by the UI font load + the Text tool.
+    std::string resolveBundledFont(const std::string& fname) const;
+    void renderTextToolPanel(); // sketch Text tool settings (floating)
     void initRenderers();
     void setupCommands();
     void beginFrame();
@@ -664,13 +668,22 @@ private:
     ShellController m_shellCtl;
     TaperController m_taperCtl;
     ScaleFaceController m_scaleFaceCtl;
-    std::array<InteractiveOpController*, 3> m_iops{
-        &m_shellCtl, &m_taperCtl, &m_scaleFaceCtl};
+    ProjectSketchController m_projectSketchCtl;
+    std::array<InteractiveOpController*, 4> m_iops{
+        &m_shellCtl, &m_taperCtl, &m_scaleFaceCtl, &m_projectSketchCtl};
     IopContext iopContext();
     bool anyIopActive() const {
         for (auto* c : m_iops) if (c->active()) return true;
         return false;
     }
+    // Single-flight: starting one interactive op cancels any other live
+    // preview — controller or legacy (push/pull, extrude, pattern, resize,
+    // thread). Two concurrent previews on the same body snapshot each
+    // other's PREVIEW state — cancelling the first then restores the
+    // second's contaminated snapshot, leaving phantom geometry with no
+    // history step (Steve's "cancelled the projection and it still stuck").
+    void beginIop(InteractiveOpController& ctl);
+    void cancelActiveIops(); // controller half, callable from legacy begins
 
     // Resolve the pull direction + neutral-plane point from the current
     // axis choice, the picked faces, and the body's bounds.
