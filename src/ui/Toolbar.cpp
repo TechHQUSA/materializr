@@ -276,6 +276,10 @@ ToolAction Toolbar::renderSketchTools() {
     tip("Insert text as real outline geometry: set string, font and letter "
         "height in the popup, then click to place. Letters become closed "
         "regions - extrude them or engrave them onto a face.");
+    if (skBtn("Import SVG", 10))   action = ToolAction::SketchSvg;
+    tip("Import an SVG file as sketch outlines: pick the file, set the "
+        "width in the popup, click to place. Paths become closed regions - "
+        "extrude a logo or engrave it onto a face.");
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip("Trim a sketch segment at the nearest intersections.");
 
@@ -482,11 +486,12 @@ ToolAction Toolbar::renderFaceTools() {
     tip("Pinch or flare the body toward a scaled copy of this END face - "
         "shrink a wing tip profile into a winglet taper. Scale, blend "
         "length and extend/pinch mode in the popup.");
-    if (ImGui::Button("Project Sketch", ImVec2(-1, 30)))
+    if (ImGui::Button("Projection", ImVec2(-1, 30)))
         action = ToolAction::ProjectSketch;
     tip("Project a sketch onto this face along the sketch's normal, then "
         "engrave (cut in) or emboss (raise out) to a depth - wrap a logo "
-        "or text onto a cylinder. Sketch, mode and depth in the popup.");
+        "or text onto a cylinder. Sketch, mode and depth in the popup; "
+        "click sketch regions in the viewport to project only those.");
     if (m_canEditDiameter &&
         ImGui::Button("Edit Diameter", ImVec2(-1, 30)))
         action = ToolAction::EditDiameter;
@@ -551,7 +556,10 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     tip("Re-enter sketch mode to revise this sketch's geometry.");
     if (ImGui::Button("Extrude From", ImVec2(-1, 30)))
         action = ToolAction::ExtrudeSketch;
-    tip("Make a new body by extruding the sketch's closed regions.");
+    tip("Make a new body by extruding the sketch's closed regions. "
+        "Whole-sketch extrude assumes ONE outer boundary - for multi-shape "
+        "sketches (SVG imports, text), click individual regions in the "
+        "viewport (Ctrl+click for several) and extrude those instead.");
     if (ImGui::Button("Subtract Sketch", ImVec2(-1, 30)))
         action = ToolAction::SubtractSketch;
     tip("Cut the extruded regions out of the body the sketch was drawn on.");

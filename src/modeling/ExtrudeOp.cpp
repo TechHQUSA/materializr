@@ -31,43 +31,17 @@ void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
     m_profile = wire;
 }
 
-// Rebuild m_profile from the currently-live source sketch. Mirrors the
-// Application::buildSketchProfileFace algorithm so the cascade produces the
-// same shape the original extrude got (largest-bbox wire as outer, the rest
-// reversed as holes). Returns false if there's nothing to rebuild from.
+// Rebuild m_profile from the currently-live source sketch, using the same
+// even-odd island construction the interactive extrude uses (see
+// Sketch::buildProfileShape) so the cascade reproduces the original shape.
 bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
     if (m_sketchId < 0) return false;
     auto sk = doc.getSketch(m_sketchId);
     if (!sk) return false;
 
-    auto wires = sk->buildWires();
-    if (wires.empty()) return false;
-
-    int outerIdx = 0;
-    double bestExtent = -1.0;
-    std::vector<double> extents(wires.size(), 0.0);
-    for (size_t i = 0; i < wires.size(); ++i) {
-        Bnd_Box bb;
-        BRepBndLib::Add(wires[i], bb);
-        if (bb.IsVoid()) continue;
-        double xmin, ymin, zmin, xmax, ymax, zmax;
-        bb.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-        double dx = xmax - xmin, dy = ymax - ymin, dz = zmax - zmin;
-        double diag = dx*dx + dy*dy + dz*dz;
-        extents[i] = diag;
-        if (diag > bestExtent) {
-            bestExtent = diag;
-            outerIdx = static_cast<int>(i);
-        }
-    }
-
-    BRepBuilderAPI_MakeFace faceMaker(sk->getPlane(), wires[outerIdx]);
-    for (size_t i = 0; i < wires.size(); ++i) {
-        if (static_cast<int>(i) == outerIdx) continue;
-        faceMaker.Add(TopoDS::Wire(wires[i].Reversed()));
-    }
-    if (!faceMaker.IsDone()) return false;
-    m_profile = faceMaker.Face();
+    TopoDS_Shape profile = sk->buildProfileShape();
+    if (profile.IsNull()) return false;
+    m_profile = profile;
     return true;
 }
 
@@ -99,10 +73,19 @@ bool ExtrudeOp::execute(Document& doc) {
     try {
         TopoDS_Shape extrudedShape;
 
-        // Compute extrude direction from the profile face's normal
+        // Compute extrude direction from the profile face's normal. A
+        // compound profile (multi-island extrude) uses its first face —
+        // all islands of one sketch are coplanar. Falling through to the
+        // old default-Z here swept sketches whose plane contains Z along
+        // their own plane: flat "2D projection" bodies.
         gp_Vec faceNormal(0, 0, 1); // default Z
-        if (m_profile.ShapeType() == TopAbs_FACE) {
-            BRepGProp_Face prop(TopoDS::Face(m_profile));
+        TopoDS_Shape normShape = m_profile;
+        if (normShape.ShapeType() != TopAbs_FACE) {
+            TopExp_Explorer fx(normShape, TopAbs_FACE);
+            if (fx.More()) normShape = fx.Current();
+        }
+        if (normShape.ShapeType() == TopAbs_FACE) {
+            BRepGProp_Face prop(TopoDS::Face(normShape));
             gp_Pnt center;
             gp_Vec norm;
             double u1, u2, v1, v2;

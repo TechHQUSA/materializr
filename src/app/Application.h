@@ -85,6 +85,9 @@ private:
     // layouts; "" when missing. Used by the UI font load + the Text tool.
     std::string resolveBundledFont(const std::string& fname) const;
     void renderTextToolPanel(); // sketch Text tool settings (floating)
+    void renderSvgToolPanel();  // SVG placement settings (floating)
+    // Camera-upright default rotation for Text/SVG placement.
+    void seedUprightPlacementAngle();
     void initRenderers();
     void setupCommands();
     void beginFrame();
@@ -684,6 +687,14 @@ private:
     // history step (Steve's "cancelled the projection and it still stuck").
     void beginIop(InteractiveOpController& ctl);
     void cancelActiveIops(); // controller half, callable from legacy begins
+    bool anyInteractivePreviewActive() const; // controllers + legacy previews
+    void cancelAllInteractivePreviews();      // both halves; saves call this
+
+    // Last hover pick, reused by cursor-zoom so wheel ticks never ray-cast
+    // the document themselves (see Application_Viewport zoom handler).
+    bool m_zoomFocusHit = false;
+    glm::vec3 m_zoomFocusPoint{0.0f};
+    int m_zoomFocusFrame = -1;
 
     // Resolve the pull direction + neutral-plane point from the current
     // axis choice, the picked faces, and the body's bounds.

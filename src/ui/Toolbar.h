@@ -14,6 +14,7 @@ enum class ToolAction {
     // Sketch tools (still dispatched via ToolAction — tightly coupled to viewport)
     StartSketch, StartSketchXY, StartSketchXZ, StartSketchYZ,
     SketchOnFace, SelectSketch, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, SketchText,
+    SketchSvg,
     FinishSketch, ExitSketchDiscard, EditSketch, ExtrudeSketch, SubtractSketch, PushPull, LookAtSketch,
     SketchCopy, SketchMirror, SketchLinearPattern, SketchRadialPattern,
     // 3D tools that still need the old dispatch path. (Face extrude is owned by

@@ -33,7 +33,7 @@ public:
 
     bool execute(Document& doc) override;
     bool undo(Document& doc) override;
-    std::string name() const override { return "Project Sketch"; }
+    std::string name() const override { return "Projection"; }
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "project_sketch"; }

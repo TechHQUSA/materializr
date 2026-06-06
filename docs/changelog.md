@@ -3,6 +3,66 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.9.0] — 2026-06-06
+
+Feature-complete for the original vision: from here to 1.0 is polish and
+field testing.
+
+### Added
+
+- **SVG import** — two ways in. The sketch toolbar's **Import SVG** tool
+  places artwork interactively: live ghost preview of the actual paths at
+  the cursor, width in mm, 90° rotation, click to stamp, **Backspace to
+  remove the last placement** (also works in the Text tool). Or
+  **File → Import → SVG** for the quick path: the file lands as a named
+  sketch on the ground plane at natural size. Paths, shapes, transforms,
+  groups and viewBox all handled (vendored nanosvg); imported outlines
+  form true closed regions — extrude a logo or engrave it onto a
+  cylinder. Stroke-only SVGs import as open centrelines (no regions);
+  convert strokes to paths for full geometry.
+- **Region-granular selection everywhere** — box-select now picks up the
+  individual closed regions inside the rectangle (same as Ctrl+clicking
+  each one), so multi-shape sketches get the same tools and the same
+  correct extrudes as single picks. **Ctrl+click toggles**: clicking a
+  selected region deselects it. Selected regions render with a
+  **translucent fill** (hover gets a lighter wash) so the selection reads
+  as surfaces, not outlines.
+- **Multi-island extrude** — extruding a whole sketch (or a box-selected
+  set) now groups closed wires even-odd by containment: every island
+  extrudes with its proper holes. Previously the largest outline
+  swallowed every other wire as a "hole", which fed OCCT inverted
+  geometry and produced non-manifold bodies on SVG/text sketches. The
+  parametric rebuild path uses the same construction, so reloaded
+  extrudes reproduce exactly.
+
+### Changed
+
+- **"Project Sketch" is now "Projection"** — the noun reads one way.
+  Projection scoping (click regions in the viewport while the panel is
+  open) is mentioned in the tooltip so it's discoverable.
+
+### Fixed
+
+- **Projection of regions with several holes** failed with a misleading
+  "sketch must land fully inside the face" message — a six-bladed logo
+  couldn't engrave. The face assembly now builds each projected wire
+  independently and subtracts holes with a boolean, which needs no wire
+  winding coordination.
+- **Multi-island and multi-region extrudes swept in the wrong direction**
+  (flat "2D projection" bodies) when the sketch plane contained the world
+  Z axis — compound profiles fell back to a default direction instead of
+  the profile's own normal.
+- **SVG circles vanishing from region detection** — SVG paths legally
+  contain zero-length curve segments at joints; one zero-length sketch
+  line made the wire builder silently discard the whole loop. Degenerate
+  segments are now scrubbed at import AND skipped by the wire builder, so
+  affected sketches heal on load.
+- **Zoom stutter on dense scenes** — every scroll tick ray-cast the whole
+  document to find the zoom focus; it now reuses the hover pick.
+- **Saving while a tool preview was live** could crash, and silently
+  persisted the preview body into the project file. Autosave now waits
+  for tools to close; a manual save cancels live previews first.
+
 ## [0.8.5] — 2026-06-06
 
 ### Added

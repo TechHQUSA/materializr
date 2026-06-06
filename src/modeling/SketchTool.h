@@ -1,6 +1,7 @@
 #pragma once
 #include "Sketch.h"
 #include "SketchSolver.h"
+#include "SvgImport.h"
 #include <glm/glm.hpp>
 #include <functional>
 #include <set>
@@ -8,7 +9,7 @@
 
 namespace materializr {
 
-enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text };
+enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text, Svg };
 
 // One drawing-time alignment hint. Inferences are transient — they describe
 // what the cursor IS aligned to right now, get drawn as coloured ghost lines /
@@ -114,6 +115,16 @@ public:
         m_textPrevMin = mn; m_textPrevMax = mx; m_textPrevValid = true;
     }
     void clearTextPreviewBox() { m_textPrevValid = false; }
+    // SVG placement (shares the Text tool's placement frame: same angle,
+    // same cursor preview box, same fromText suppression on the result).
+    void setSvgPaths(SvgPaths svg) { m_svgPaths = std::move(svg); }
+    const SvgPaths& getSvgPaths() const { return m_svgPaths; }
+    float getSvgWidth() const { return m_svgWidth; }
+    void setSvgWidth(float w) { m_svgWidth = (w < 0.1f) ? 0.1f : w; }
+    // Backspace while the Text/SVG tool is active yanks the whole last
+    // stamp — a misplaced 550-line logo is not undoable element-by-element.
+    bool hasLastStamp() const { return !m_lastStampIds.empty(); }
+    void undoLastStamp();
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter the vertical (and commits). Stage 0 =
     // expecting H, 1 = expecting V. Read by the UI to swap the popup label.
@@ -190,6 +201,7 @@ private:
     void handleSplineTool(glm::vec2 pos);
     void handlePolygonTool(glm::vec2 pos);
     void handleTextTool(glm::vec2 pos);
+    void handleSvgTool(glm::vec2 pos);
     void handleTrimTool(glm::vec2 pos);
     void computeTrimHover(glm::vec2 pos); // updates m_trimHoverPoints (no mutation)
 
@@ -226,6 +238,15 @@ private:
     bool  m_textPrevValid = false;
     glm::vec2 m_textPrevMin{0.0f};
     glm::vec2 m_textPrevMax{0.0f};
+
+    // SVG placement state (see SvgImport.h)
+    SvgPaths m_svgPaths;
+    float m_svgWidth = 50.0f; // target artwork width, mm
+
+    // Element ids of the most recent Text/SVG stamp (lines first, then
+    // points, so removal order never orphans references).
+    std::vector<int> m_lastStampIds;
+    void recordStamp(size_t pointsBefore, size_t linesBefore);
 
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter sets the vertical side and commits.

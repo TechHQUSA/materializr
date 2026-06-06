@@ -5,6 +5,11 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BOPAlgo_Builder.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <ShapeFix_Face.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
@@ -758,6 +763,20 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         bool valid = true;
         for (int idx : chain) {
             const EdgeSpec& es = edges[idx];
+            // A zero-length line (degenerate input — duplicate consecutive
+            // points) contributes no curve. SKIP it instead of failing:
+            // failing here used to silently drop the ENTIRE closed wire,
+            // which is how SVG circles with degenerate joint cubics
+            // vanished from region detection.
+            if (!es.isArc && es.splineIdx < 0) {
+                auto sc = coord.find(es.startPtId);
+                auto ec = coord.find(es.endPtId);
+                if (sc != coord.end() && ec != coord.end() &&
+                    glm::length(sc->second - ec->second) < 1e-6f) {
+                    curPt = otherEnd(es, curPt);
+                    continue;
+                }
+            }
             if (!emitOcctEdge(es, curPt, wireMaker)) { valid = false; break; }
             curPt = otherEnd(es, curPt);
         }
@@ -898,6 +917,99 @@ uint64_t Sketch::geometryHash() const {
         m_sourceFace.IsNull() ? nullptr : m_sourceFace.TShape().get();
     mix(&tsh, sizeof tsh);
     return h;
+}
+
+TopoDS_Shape Sketch::buildProfileShape() const {
+    auto wires = buildWires();
+    if (wires.empty()) return TopoDS_Shape();
+    const size_t n = wires.size();
+
+    // Containment matrix from densified 2D polygons. n is small (a busy
+    // SVG is a few dozen wires); the n² point-in-polygon pass is trivial
+    // next to the boolean work below.
+    std::vector<std::vector<glm::vec2>> polys(n);
+    for (size_t i = 0; i < n; ++i)
+        densifyWire2D(wires[i], m_plane, polys[i]);
+
+    std::vector<std::vector<bool>> inside(n, std::vector<bool>(n, false));
+    std::vector<int> depth(n, 0);
+    for (size_t i = 0; i < n; ++i) {
+        if (polys[i].empty()) continue;
+        const glm::vec2 rep = polys[i][0];
+        for (size_t j = 0; j < n; ++j) {
+            if (i == j || polys[j].size() < 3) continue;
+            if (pointInPolygon2D(polys[j], rep)) {
+                inside[i][j] = true;
+                depth[i]++;
+            }
+        }
+    }
+    // Direct parent of an odd-depth wire: its container one level up.
+    std::vector<int> parent(n, -1);
+    for (size_t i = 0; i < n; ++i) {
+        if (depth[i] % 2 == 0) continue;
+        for (size_t j = 0; j < n; ++j) {
+            if (inside[i][j] && depth[j] == depth[i] - 1) {
+                parent[i] = static_cast<int>(j);
+                break;
+            }
+        }
+    }
+
+    // One face per island; holes removed by boolean cut (no wire-winding
+    // coordination — the lesson from the projection op's aperture bug).
+    auto wireFace = [&](TopoDS_Wire w) -> TopoDS_Face {
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            BRepBuilderAPI_MakeFace mf(m_plane, w);
+            if (!mf.IsDone()) return TopoDS_Face();
+            ShapeFix_Face fix(mf.Face());
+            fix.FixOrientationMode() = 1;
+            fix.FixWireMode() = 1;
+            fix.Perform();
+            TopoDS_Face cand = fix.Face();
+            GProp_GProps g;
+            BRepGProp::SurfaceProperties(cand, g);
+            if (g.Mass() > 0.0 && BRepCheck_Analyzer(cand).IsValid())
+                return cand;
+            w.Reverse();
+        }
+        return TopoDS_Face();
+    };
+
+    TopoDS_Compound comp;
+    BRep_Builder bb;
+    bb.MakeCompound(comp);
+    int islands = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (depth[i] % 2 != 0) continue; // hole, consumed by its parent
+        TopoDS_Face outer = wireFace(wires[i]);
+        if (outer.IsNull()) continue;
+        TopTools_ListOfShape holeFaces;
+        for (size_t j = 0; j < n; ++j) {
+            if (parent[j] != static_cast<int>(i)) continue;
+            TopoDS_Face hf = wireFace(wires[j]);
+            if (!hf.IsNull()) holeFaces.Append(hf);
+        }
+        TopoDS_Shape island = outer;
+        if (!holeFaces.IsEmpty()) {
+            try {
+                BRepAlgoAPI_Cut cut;
+                TopTools_ListOfShape args;
+                args.Append(outer);
+                cut.SetArguments(args);
+                cut.SetTools(holeFaces);
+                cut.Build();
+                if (cut.IsDone() && !cut.Shape().IsNull())
+                    island = cut.Shape();
+            } catch (...) {}
+        }
+        for (TopExp_Explorer fx(island, TopAbs_FACE); fx.More(); fx.Next()) {
+            bb.Add(comp, fx.Current());
+            islands++;
+        }
+    }
+    if (islands == 0) return TopoDS_Shape();
+    return comp;
 }
 
 std::vector<Sketch::Region> Sketch::buildRegionsUncached() const {

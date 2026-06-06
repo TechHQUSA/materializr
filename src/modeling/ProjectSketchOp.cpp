@@ -58,16 +58,13 @@ TopoDS_Wire projectNearest(const TopoDS_Wire& w, const TopoDS_Face& f,
     return best;
 }
 
-// Rebuild the projected wires as an oriented face lying ON the target
-// face's surface. ShapeFix_Face supplies pcurves / natural-bound trimming
-// on periodic surfaces; a clockwise-wound outer wire shows up as negative
-// area, in which case one reversed retry fixes it.
-TopoDS_Face faceOnSurface(const TopoDS_Face& target, TopoDS_Wire outer,
-                          const std::vector<TopoDS_Wire>& holes) {
-    Handle(Geom_Surface) surf = BRep_Tool::Surface(target);
+// One projected wire as an oriented face ON the target's surface.
+// ShapeFix_Face supplies pcurves / natural-bound trimming on periodic
+// surfaces; a clockwise-wound wire shows up as negative area, in which
+// case one reversed retry fixes it.
+TopoDS_Face singleWireFace(const Handle(Geom_Surface)& surf, TopoDS_Wire w) {
     for (int attempt = 0; attempt < 2; ++attempt) {
-        BRepBuilderAPI_MakeFace mf(surf, outer);
-        for (TopoDS_Wire h : holes) { h.Reverse(); mf.Add(h); }
+        BRepBuilderAPI_MakeFace mf(surf, w);
         if (!mf.IsDone()) return TopoDS_Face();
         ShapeFix_Face fix(mf.Face());
         fix.FixOrientationMode() = 1;
@@ -76,9 +73,42 @@ TopoDS_Face faceOnSurface(const TopoDS_Face& target, TopoDS_Wire outer,
         TopoDS_Face cand = fix.Face();
         if (faceArea(cand) > 0.0 && BRepCheck_Analyzer(cand).IsValid())
             return cand;
-        outer.Reverse();
+        w.Reverse();
     }
     return TopoDS_Face();
+}
+
+// Region face on the target surface: outer wire face MINUS hole wire
+// faces, via a boolean cut. Building outer+holes into one MakeFace needs
+// every wire's winding coordinated — with several projected holes the
+// orientation search chased its tail (a six-bladed aperture logo failed
+// both flip attempts). Single-wire faces orient reliably, and the cut
+// needs no orientation reasoning at all.
+TopoDS_Shape faceOnSurface(const TopoDS_Face& target, TopoDS_Wire outer,
+                           const std::vector<TopoDS_Wire>& holes) {
+    Handle(Geom_Surface) surf = BRep_Tool::Surface(target);
+    TopoDS_Face outerF = singleWireFace(surf, outer);
+    if (outerF.IsNull()) return TopoDS_Shape();
+    if (holes.empty()) return outerF;
+
+    TopTools_ListOfShape holeFaces;
+    for (const auto& h : holes) {
+        TopoDS_Face hf = singleWireFace(surf, h);
+        if (hf.IsNull()) return TopoDS_Shape();
+        holeFaces.Append(hf);
+    }
+    try {
+        BRepAlgoAPI_Cut cut;
+        TopTools_ListOfShape args;
+        args.Append(outerF);
+        cut.SetArguments(args);
+        cut.SetTools(holeFaces);
+        cut.Build();
+        if (!cut.IsDone()) return TopoDS_Shape();
+        TopoDS_Shape res = cut.Shape();
+        if (res.IsNull() || faceArea(res) <= 0.0) return TopoDS_Shape();
+        return res;
+    } catch (...) { return TopoDS_Shape(); }
 }
 
 } // namespace
@@ -153,7 +183,7 @@ bool ProjectSketchOp::execute(Document& doc) {
                 holes.push_back(ph);
             }
             if (!holesOk) { skipped++; continue; }
-            TopoDS_Face sub = faceOnSurface(m_targetFace, outer, holes);
+            TopoDS_Shape sub = faceOnSurface(m_targetFace, outer, holes);
             if (sub.IsNull()) { skipped++; continue; }
 
             gp_Trsf shift;
@@ -248,7 +278,7 @@ std::string ProjectSketchOp::description() const {
 }
 
 void ProjectSketchOp::renderProperties() {
-    ImGui::Text("Project Sketch");
+    ImGui::Text("Projection");
     ImGui::Separator();
     ImGui::Text("Mode: %s",
                 m_mode == Mode::Engrave ? "Engrave" : "Emboss");

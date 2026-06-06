@@ -116,6 +116,16 @@ public:
     // Convert closed profiles to OCCT wires for extrusion
     std::vector<TopoDS_Wire> buildWires() const;
 
+    // Whole-profile shape for "extrude everything this sketch encloses":
+    // closed wires grouped even-odd by containment depth — every
+    // even-depth wire is an island outer, its directly-contained
+    // odd-depth wires are holes. Returns a compound of faces (one per
+    // island), or a null shape when no closed wires exist. This replaced
+    // the old single-face "largest wire + everything else as holes"
+    // construction, which fed OCCT inverted/disjoint holes on multi-shape
+    // sketches (SVG imports, text) and extruded non-manifold garbage.
+    TopoDS_Shape buildProfileShape() const;
+
     // A planar region of the sketch (one outer boundary + zero or more holes).
     // Built from the closed wires via 2D containment analysis.
     struct Region {

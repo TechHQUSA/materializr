@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 0.8.5 LANGUAGES CXX)
+project(Materializr VERSION 0.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,6 +155,7 @@ add_executable(materializr
     src/plugins/SketchPlugin.cpp
     src/plugins/GizmoDragPlugin.cpp
     src/plugins/LoftPlugin.cpp
+    src/plugins/SvgImportPlugin.cpp
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp
@@ -192,6 +193,7 @@ add_executable(materializr
     src/modeling/CopyOp.cpp
     src/modeling/DeleteOp.cpp
     src/modeling/TextSketchOp.cpp
+    src/modeling/SvgImport.cpp
     src/modeling/Sketch.cpp
     src/modeling/SketchSolver.cpp
     src/modeling/SketchTool.cpp

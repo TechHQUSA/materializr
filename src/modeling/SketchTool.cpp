@@ -89,6 +89,9 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
         case SketchToolMode::Text:
             handleTextTool(snapped);
             break;
+        case SketchToolMode::Svg:
+            handleSvgTool(snapped);
+            break;
         default:
             break;
     }
@@ -1948,13 +1951,46 @@ void SketchTool::handleTextTool(glm::vec2 pos) {
     // Single click places the text with the popup's current settings; the
     // click point is the baseline-left anchor. The tool stays active, so
     // several labels can be stamped in a row.
+    size_t p0 = m_sketch->getPoints().size();
+    size_t l0 = m_sketch->getLines().size();
     int loops = TextSketch::generate(m_sketch, m_textString, m_textFontPath,
                                      pos, m_textHeight,
                                      static_cast<float>(m_textAngle));
     if (loops <= 0) {
         std::fprintf(stderr, "[Text] nothing placed (font='%s')\n",
                      m_textFontPath.c_str());
+        return;
     }
+    recordStamp(p0, l0);
+}
+
+void SketchTool::handleSvgTool(glm::vec2 pos) {
+    // Same single-click stamp as Text; the click point is the artwork's
+    // bounding-box centre.
+    size_t p0 = m_sketch->getPoints().size();
+    size_t l0 = m_sketch->getLines().size();
+    if (SvgImport::place(m_sketch, m_svgPaths, pos, m_svgWidth,
+                         static_cast<float>(m_textAngle)) > 0) {
+        recordStamp(p0, l0);
+    }
+}
+
+void SketchTool::recordStamp(size_t pointsBefore, size_t linesBefore) {
+    m_lastStampIds.clear();
+    const auto& lns = m_sketch->getLines();
+    const auto& pts = m_sketch->getPoints();
+    for (size_t i = linesBefore; i < lns.size(); ++i)
+        m_lastStampIds.push_back(lns[i].id);
+    for (size_t i = pointsBefore; i < pts.size(); ++i)
+        m_lastStampIds.push_back(pts[i].id);
+}
+
+void SketchTool::undoLastStamp() {
+    if (!m_sketch || m_lastStampIds.empty()) return;
+    for (int id : m_lastStampIds) m_sketch->removeElement(id);
+    std::fprintf(stderr, "[Stamp] removed last placement (%zu elements)\n",
+                 m_lastStampIds.size());
+    m_lastStampIds.clear();
 }
 
 } // namespace materializr

@@ -12,6 +12,9 @@
 #include <BRepTools.hxx>
 #include <Geom_Curve.hxx>
 #include <BRepTools_WireExplorer.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <Poly_Triangulation.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
@@ -32,9 +35,10 @@ void main() {
 static const char* s_fragSource = R"(
 #version 330 core
 uniform vec3 u_color;
+uniform float u_alpha;
 out vec4 fragColor;
 void main() {
-    fragColor = vec4(u_color, 1.0);
+    fragColor = vec4(u_color, u_alpha);
 }
 )";
 
@@ -71,6 +75,7 @@ bool SketchRenderer::initialize() {
 
     m_locMVP = glGetUniformLocation(m_program, "u_mvp");
     m_locColor = glGetUniformLocation(m_program, "u_color");
+    m_locAlpha = glGetUniformLocation(m_program, "u_alpha");
 
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
@@ -92,6 +97,7 @@ void SketchRenderer::uploadAndDraw(const std::vector<float>& verts, GLenum mode,
     glUseProgram(m_program);
     glUniformMatrix4fv(m_locMVP, 1, GL_FALSE, glm::value_ptr(vp));
     glUniform3fv(m_locColor, 1, glm::value_ptr(color));
+    glUniform1f(m_locAlpha, 1.0f);
 
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
@@ -161,6 +167,7 @@ void SketchRenderer::render(const Sketch* sketch, const SketchTool* tool,
     if (tool) {
         drawPreview(sketch, tool, vp);
         drawTrimHover(sketch, tool, vp);
+        drawSvgGhost(sketch, tool, vp);
     }
 
     glEnable(GL_DEPTH_TEST);
@@ -382,6 +389,44 @@ void SketchRenderer::drawMidpointDots(const Sketch* sketch, const glm::mat4& vp)
     if (verts.empty()) return;
     glm::vec3 green(0.2f, 1.0f, 0.4f);
     uploadAndDraw(verts, GL_POINTS, green, vp, 4.0f);
+}
+
+// Live ghost of the SVG artwork at the cursor — the actual paths, scaled /
+// rotated / Y-flipped exactly as SvgImport::place will stamp them, so the
+// user sees the real thing before clicking (the dashed box alone made
+// placement a guess for detailed art).
+void SketchRenderer::drawSvgGhost(const Sketch* sketch, const SketchTool* tool,
+                                  const glm::mat4& vp) {
+    if (!sketch || !tool || tool->getMode() != SketchToolMode::Svg) return;
+    const SvgPaths& svg = tool->getSvgPaths();
+    if (svg.empty()) return;
+    glm::vec2 size = svg.size();
+    float rawW = (size.x > 1e-6f) ? size.x : size.y;
+    if (rawW <= 1e-6f) return;
+
+    const glm::vec2 pos = tool->getCurrentPos();
+    const float scale = tool->getSvgWidth() / rawW;
+    const glm::vec2 center = 0.5f * (svg.bbMin + svg.bbMax);
+    const float a =
+        glm::radians(static_cast<float>(tool->getTextAngle()));
+    const float ca = std::cos(a), sa = std::sin(a);
+    auto map = [&](glm::vec2 p) {
+        glm::vec2 l = (p - center) * scale;
+        l.y = -l.y;
+        return pos + glm::vec2(l.x * ca - l.y * sa, l.x * sa + l.y * ca);
+    };
+
+    std::vector<float> verts;
+    auto push = [&](glm::vec2 q) {
+        glm::vec3 w = toWorld(sketch, map(q));
+        verts.push_back(w.x); verts.push_back(w.y); verts.push_back(w.z);
+    };
+    for (size_t li = 0; li < svg.loops.size(); ++li) {
+        const auto& L = svg.loops[li];
+        for (size_t i = 0; i + 1 < L.size(); ++i) { push(L[i]); push(L[i + 1]); }
+        if (svg.closed[li] && L.size() >= 3) { push(L.back()); push(L.front()); }
+    }
+    uploadAndDraw(verts, GL_LINES, glm::vec3(1.0f, 0.85f, 0.2f), vp, 1.5f);
 }
 
 void SketchRenderer::drawPreview(const Sketch* sketch, const SketchTool* tool,
@@ -863,6 +908,64 @@ void SketchRenderer::renderRegionBoundary(const Sketch* sketch, int regionIndex,
 
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
+}
+
+void SketchRenderer::renderRegionFill(const Sketch* sketch, int regionIndex,
+                                      const glm::vec3& color, float alpha,
+                                      const glm::mat4& view,
+                                      const glm::mat4& projection) {
+    if (!sketch || !m_program) return;
+    auto regions = sketch->buildRegions();
+    if (regionIndex < 0 || regionIndex >= static_cast<int>(regions.size()))
+        return;
+    const TopoDS_Face& face = regions[regionIndex].face;
+    if (face.IsNull()) return;
+
+    // Triangulate (cheap for planar faces; the mesher caches on the shape,
+    // and buildRegions itself is cached, so repeated frames cost ~nothing).
+    TopLoc_Location loc;
+    Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+    if (tri.IsNull()) {
+        try {
+            BRepMesh_IncrementalMesh mesher(face, 0.2);
+            tri = BRep_Tool::Triangulation(face, loc);
+        } catch (...) {}
+        if (tri.IsNull()) return;
+    }
+
+    std::vector<float> verts;
+    verts.reserve(static_cast<size_t>(tri->NbTriangles()) * 9);
+    const gp_Trsf& trsf = loc.Transformation();
+    for (int i = 1; i <= tri->NbTriangles(); ++i) {
+        Poly_Triangle t = tri->Triangle(i);
+        int a, b, c;
+        t.Get(a, b, c);
+        for (int n : {a, b, c}) {
+            gp_Pnt p = tri->Node(n).Transformed(trsf);
+            verts.push_back(static_cast<float>(p.X()));
+            verts.push_back(static_cast<float>(p.Y()));
+            verts.push_back(static_cast<float>(p.Z()));
+        }
+    }
+    if (verts.empty()) return;
+
+    glm::mat4 vp = projection * view;
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(m_program);
+    glUniformMatrix4fv(m_locMVP, 1, GL_FALSE, glm::value_ptr(vp));
+    glUniform3fv(m_locColor, 1, glm::value_ptr(color));
+    glUniform1f(m_locAlpha, alpha);
+    glBindVertexArray(m_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(),
+                 GL_DYNAMIC_DRAW);
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<int>(verts.size() / 3));
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void SketchRenderer::renderSketchHighlight(const Sketch* sketch,

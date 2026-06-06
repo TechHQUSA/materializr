@@ -26,6 +26,12 @@ public:
                               const glm::vec3& color, float lineWidth,
                               const glm::mat4& view, const glm::mat4& projection);
 
+    // Translucent fill of a region's face (triangulated). Drawn under the
+    // boundary so selected/hovered regions read as surfaces, not outlines.
+    void renderRegionFill(const Sketch* sketch, int regionIndex,
+                          const glm::vec3& color, float alpha,
+                          const glm::mat4& view, const glm::mat4& projection);
+
     // Highlight every primitive in a sketch (lines, circles, arcs, splines,
     // polygon edges) in a single colour at the given line width — used when
     // the whole sketch is in the selection, including open profiles that
@@ -50,6 +56,7 @@ private:
     void drawSplines(const Sketch* sketch, const glm::mat4& vp);
     void drawPolygons(const Sketch* sketch, const glm::mat4& vp);
     void drawPreview(const Sketch* sketch, const SketchTool* tool, const glm::mat4& vp);
+    void drawSvgGhost(const Sketch* sketch, const SketchTool* tool, const glm::mat4& vp);
     void drawTrimHover(const Sketch* sketch, const SketchTool* tool, const glm::mat4& vp);
     void drawMidpointDots(const Sketch* sketch, const glm::mat4& vp);
     void drawConstraints(const Sketch* sketch, const SketchSolver* solver, const glm::mat4& vp);
@@ -65,6 +72,7 @@ private:
     unsigned int m_vbo = 0;
     int m_locMVP = -1;
     int m_locColor = -1;
+    int m_locAlpha = -1;
 };
 
 } // namespace materializr

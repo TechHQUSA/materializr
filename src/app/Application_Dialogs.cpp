@@ -2603,11 +2603,65 @@ void Application::renderTextToolPanel() {
         }
 
         ImGui::TextDisabled("Click in the sketch to place.");
+        if (m_sketchTool->hasLastStamp())
+            ImGui::TextDisabled("Backspace removes the last placement.");
         if (m_sketchTool->getTextFontPath().empty()) {
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
                                "Font file not found - cannot place text.");
         }
 
+    }
+    ImGui::End();
+    if (!open) m_sketchTool->setMode(SketchToolMode::Select);
+}
+
+void Application::renderSvgToolPanel() {
+    if (!m_inSketchMode || !m_sketchTool ||
+        m_sketchTool->getMode() != SketchToolMode::Svg)
+        return;
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 60.0f),
+        ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    bool open = true;
+    if (ImGui::Begin("Import SVG", &open,
+                     ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings)) {
+        const auto& svg = m_sketchTool->getSvgPaths();
+        ImGui::TextDisabled("%d path(s) ready.",
+                            static_cast<int>(svg.loops.size()));
+
+        float w = m_sketchTool->getSvgWidth();
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderFloat("Width (mm)", &w, 1.0f, 300.0f, "%.1f",
+                               ImGuiSliderFlags_Logarithmic))
+            m_sketchTool->setSvgWidth(w);
+
+        int ang = m_sketchTool->getTextAngle();
+        if (ImGui::Button("Rotate left"))
+            m_sketchTool->setTextAngle(ang + 90);
+        ImGui::SameLine();
+        if (ImGui::Button("Rotate right"))
+            m_sketchTool->setTextAngle(ang - 90);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d deg", m_sketchTool->getTextAngle());
+
+        // Preview box: artwork extents centred on the cursor anchor.
+        {
+            glm::vec2 size = svg.size();
+            float rawW = (size.x > 1e-6f) ? size.x : size.y;
+            if (rawW > 1e-6f) {
+                float scale = m_sketchTool->getSvgWidth() / rawW;
+                glm::vec2 half = 0.5f * size * scale;
+                m_sketchTool->setTextPreviewBox(-half, half);
+            }
+        }
+
+        ImGui::TextDisabled("Click in the sketch to place.");
+        if (m_sketchTool->hasLastStamp())
+            ImGui::TextDisabled("Backspace removes the last placement.");
     }
     ImGui::End();
     if (!open) m_sketchTool->setMode(SketchToolMode::Select);

@@ -49,7 +49,7 @@ private:
 // engrave or emboss the projected regions — text wrapped onto a cylinder.
 class ProjectSketchController : public InteractiveOpController {
 protected:
-    const char* title() const override { return "Project Sketch"; }
+    const char* title() const override { return "Projection"; }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
     void panelBody(const IopContext& ctx, bool& changed) override;

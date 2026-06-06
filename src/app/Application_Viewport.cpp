@@ -519,20 +519,26 @@ void Application::renderViewport() {
                                      m_sketchSolver.get());
         }
 
-        // Highlight hovered/selected sketch regions
-        auto highlightRegion = [&](int sketchId, int regionIdx, const glm::vec3& color, float w) {
+        // Highlight hovered/selected sketch regions: translucent fill +
+        // boundary, so a selected region reads as a surface (Steve: "a
+        // slight shading of the selected sketch regions").
+        auto highlightRegion = [&](int sketchId, int regionIdx, const glm::vec3& color, float w,
+                                   float fillAlpha) {
             if (sketchId < 0 || regionIdx < 0) return;
             std::shared_ptr<Sketch> sk;
             if (sketchId == m_activeSketchId && m_activeSketch) sk = m_activeSketch;
             else sk = m_document->getSketch(sketchId);
             if (!sk) return;
+            if (fillAlpha > 0.0f)
+                m_sketchRenderer->renderRegionFill(sk.get(), regionIdx, color,
+                                                   fillAlpha, view, proj);
             m_sketchRenderer->renderRegionBoundary(sk.get(), regionIdx, color, w, view, proj);
         };
         // Selected regions in solid yellow
         for (const auto& e : m_selection->getSelection()) {
             if (e.type == SelectionType::SketchRegion) {
                 highlightRegion(e.sketchId, e.subShapeIndex,
-                                glm::vec3(1.0f, 0.85f, 0.1f), 4.0f);
+                                glm::vec3(1.0f, 0.85f, 0.1f), 4.0f, 0.28f);
             } else if (e.type == SelectionType::Sketch && e.sketchId >= 0) {
                 // Whole-sketch highlight — covers every primitive (so open
                 // profiles light up too, not just closed regions).
@@ -547,7 +553,7 @@ void Application::renderViewport() {
         }
         // Hovered region in cyan (drawn last so it's on top)
         highlightRegion(m_hoveredSketchId, m_hoveredRegionIndex,
-                        glm::vec3(0.2f, 0.9f, 1.0f), 3.0f);
+                        glm::vec3(0.2f, 0.9f, 1.0f), 3.0f, 0.12f);
 
         // Box-select rectangle (screen-space, drawn last so it's on top).
         if (m_boxSelect && m_boxSelect->isActive()) {
@@ -1338,11 +1344,12 @@ void Application::renderViewport() {
                     }
                 }
 
-                // Text tool: dashed placement rectangle following the
-                // cursor — the measured (rotated) extents of the string, so
-                // the user sees exactly where the letters will land before
+                // Text / SVG placement: dashed rectangle following the
+                // cursor — the measured (rotated) extents of the artwork,
+                // so the user sees exactly where it will land before
                 // clicking. Baseline drawn solid for orientation.
-                if (m_sketchTool->getMode() == SketchToolMode::Text &&
+                if ((m_sketchTool->getMode() == SketchToolMode::Text ||
+                     m_sketchTool->getMode() == SketchToolMode::Svg) &&
                     m_sketchTool->hasTextPreviewBox()) {
                     const glm::vec2 anchor = m_sketchTool->getCurrentPos();
                     const glm::vec2 mn = m_sketchTool->getTextPreviewMin();
@@ -1742,14 +1749,18 @@ void Application::renderViewport() {
                 float ly = mp.y - wpz.y;
                 glm::vec3 focus = cam.getTarget();
                 bool gotHit = false;
-                try {
-                    auto hit = m_picker->pick(lx, ly, contentSize.x, contentSize.y,
-                                              cam, *m_document);
-                    if (hit.hit) {
-                        focus = hit.hitPoint;
+                // Reuse this frame's (or last frame's) hover pick — same
+                // cursor, same ray. A fresh full-document ray-cast per
+                // wheel tick was the zoom stutter on dense scenes; when
+                // the hover pick was skipped (mid-drag etc.) the plane
+                // fallback below still gives a sensible focus.
+                if (m_zoomFocusFrame >= 0 &&
+                    ImGui::GetFrameCount() - m_zoomFocusFrame <= 2) {
+                    if (m_zoomFocusHit) {
+                        focus = m_zoomFocusPoint;
                         gotHit = true;
                     }
-                } catch (...) {}
+                }
                 if (!gotHit) {
                     // Unproject the cursor into the world (NDC → ray) and
                     // intersect with the plane through the camera target
@@ -2630,6 +2641,14 @@ void Application::renderViewport() {
                     !camDragging) {
                     auto result = m_picker->pick(localX, localY,
                         contentSize.x, contentSize.y, cam, *m_document);
+                    // Cache for the zoom handler: cursor-zoom needs the
+                    // point under the cursor, and re-picking the whole
+                    // document on EVERY wheel tick made zooming stutter on
+                    // dense scenes (SVG-extruded bodies carry hundreds of
+                    // faces). This frame's hover pick is the same ray.
+                    m_zoomFocusHit = result.hit;
+                    m_zoomFocusPoint = result.hitPoint;
+                    m_zoomFocusFrame = ImGui::GetFrameCount();
 
                     m_hoveredBodyId = result.hit ? result.bodyId : -1;
 
@@ -2683,7 +2702,11 @@ void Application::renderViewport() {
                         entry.sketchId = regionHit.sketchId;
                         entry.subShapeIndex = regionHit.regionIndex;
                         if (io.KeyCtrl) {
-                            m_selection->addToSelection(entry);
+                            // Toggle: Ctrl+clicking an already-selected
+                            // region deselects it — fixing a bad pick in a
+                            // multi-region selection shouldn't mean starting
+                            // the whole selection over.
+                            m_selection->toggleSelection(entry);
                         } else {
                             m_selection->select(entry);
                         }
@@ -2969,8 +2992,44 @@ void Application::renderViewport() {
                                 auto considerSketch = [&](int sid, const Sketch& sk) {
                                     glm::vec2 bMin, bMax;
                                     if (!projectSketch(sk, bMin, bMax)) return;
-                                    if (bMax.x >= mn.x && bMin.x <= mx.x &&
-                                        bMax.y >= mn.y && bMin.y <= mx.y) {
+                                    if (!(bMax.x >= mn.x && bMin.x <= mx.x &&
+                                          bMax.y >= mn.y && bMin.y <= mx.y))
+                                        return;
+                                    // Region-granular: box-select picks up
+                                    // the sketch's closed REGIONS, exactly
+                                    // like Ctrl+clicking each one — so the
+                                    // toolbar offers the same per-region
+                                    // tools and downstream ops take the
+                                    // same (working) path. The whole-sketch
+                                    // entry survives only for open profiles
+                                    // that have no regions to offer.
+                                    auto regions = sk.buildRegions();
+                                    int added = 0;
+                                    const gp_Pln& pln = sk.getPlane();
+                                    const gp_Ax3& rax = pln.Position();
+                                    glm::vec3 rorigin(rax.Location().X(), rax.Location().Y(), rax.Location().Z());
+                                    glm::vec3 rxd(rax.XDirection().X(), rax.XDirection().Y(), rax.XDirection().Z());
+                                    glm::vec3 ryd(rax.YDirection().X(), rax.YDirection().Y(), rax.YDirection().Z());
+                                    for (size_t ri = 0; ri < regions.size(); ++ri) {
+                                        glm::vec2 rp = regions[ri].representativePoint;
+                                        glm::vec3 w = rorigin + rxd * rp.x + ryd * rp.y;
+                                        glm::vec4 cp = vp * glm::vec4(w, 1.0f);
+                                        if (cp.w <= 0.0f) continue;
+                                        glm::vec2 ndc(cp.x / cp.w, cp.y / cp.w);
+                                        glm::vec2 sp(
+                                            (ndc.x * 0.5f + 0.5f) * contentSize.x,
+                                            (1.0f - (ndc.y * 0.5f + 0.5f)) * contentSize.y);
+                                        if (sp.x < mn.x || sp.x > mx.x ||
+                                            sp.y < mn.y || sp.y > mx.y)
+                                            continue;
+                                        SelectionEntry e;
+                                        e.type = SelectionType::SketchRegion;
+                                        e.sketchId = sid;
+                                        e.subShapeIndex = static_cast<int>(ri);
+                                        m_selection->addToSelection(e);
+                                        added++;
+                                    }
+                                    if (added == 0 && regions.empty()) {
                                         SelectionEntry e;
                                         e.type = SelectionType::Sketch;
                                         e.sketchId = sid;

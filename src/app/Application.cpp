@@ -57,6 +57,7 @@
 #include "io/StepIO.h"
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
+#include "modeling/SvgImport.h"
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
 #include "core/EventBus.h"
@@ -520,13 +521,41 @@ materializr::IopContext Application::iopContext() {
         [this] { m_meshesDirty = true; }};
 }
 
+// Seed the placement rotation (shared by the Text and SVG tools) so the
+// artwork reads upright in the CURRENT view — some sketch planes have
+// their 2D axes pointing away from the camera's right/up, and unrotated
+// placements came out sideways or upside-down. Projects the camera's
+// right vector into sketch space and snaps to the nearest 90°.
+void Application::seedUprightPlacementAngle() {
+    if (!m_activeSketch || !m_viewport || !m_sketchTool) return;
+    const gp_Ax3& ax = m_activeSketch->getPlane().Position();
+    glm::vec3 xd(ax.XDirection().X(), ax.XDirection().Y(),
+                 ax.XDirection().Z());
+    glm::vec3 yd(ax.YDirection().X(), ax.YDirection().Y(),
+                 ax.YDirection().Z());
+    const Camera& cam = m_viewport->getCamera();
+    glm::vec3 fwd = glm::normalize(cam.getTarget() - cam.getPosition());
+    glm::vec3 right = glm::normalize(glm::cross(fwd, cam.getUp()));
+    glm::vec2 d(glm::dot(right, xd), glm::dot(right, yd));
+    if (glm::length(d) > 1e-4f) {
+        float aDeg = glm::degrees(std::atan2(d.y, d.x));
+        m_sketchTool->setTextAngle(
+            static_cast<int>(std::round(aDeg / 90.0f)) * 90);
+    }
+}
+
 void Application::cancelActiveIops() {
     auto ctx = iopContext();
     for (auto* c : m_iops)
         if (c->active()) c->cancel(ctx);
 }
 
-void Application::beginIop(materializr::InteractiveOpController& ctl) {
+bool Application::anyInteractivePreviewActive() const {
+    return anyIopActive() || m_extruding || m_pushPullActive ||
+           m_patternActive || m_resizeCylActive || m_threadActive;
+}
+
+void Application::cancelAllInteractivePreviews() {
     cancelActiveIops();
     // Legacy history-replay previews write the document every frame; a
     // controller preview running beside one corrupts both restore paths.
@@ -535,6 +564,10 @@ void Application::beginIop(materializr::InteractiveOpController& ctl) {
     if (m_patternActive) cancelPattern();
     if (m_resizeCylActive) cancelResizeCylindrical();
     if (m_threadActive) cancelThread();
+}
+
+void Application::beginIop(materializr::InteractiveOpController& ctl) {
+    cancelAllInteractivePreviews();
     ctl.begin(iopContext());
 }
 
@@ -1149,32 +1182,23 @@ void Application::handleToolAction(int action) {
                     m_sketchTool->setTextFontPath(
                         resolveBundledFont("JetBrainsMono-Regular.ttf"));
                 }
-                // Seed the rotation so text reads upright in the CURRENT
-                // view — some sketch planes have their 2D axes pointing
-                // away from the camera's right/up, and unrotated text came
-                // out sideways or upside-down. Project the camera's right
-                // vector into sketch space and snap to the nearest 90°.
-                if (m_activeSketch && m_viewport) {
-                    const gp_Ax3& ax =
-                        m_activeSketch->getPlane().Position();
-                    glm::vec3 xd(ax.XDirection().X(), ax.XDirection().Y(),
-                                 ax.XDirection().Z());
-                    glm::vec3 yd(ax.YDirection().X(), ax.YDirection().Y(),
-                                 ax.YDirection().Z());
-                    const Camera& cam = m_viewport->getCamera();
-                    glm::vec3 fwd = glm::normalize(cam.getTarget() -
-                                                   cam.getPosition());
-                    glm::vec3 right =
-                        glm::normalize(glm::cross(fwd, cam.getUp()));
-                    glm::vec2 d(glm::dot(right, xd), glm::dot(right, yd));
-                    if (glm::length(d) > 1e-4f) {
-                        float aDeg =
-                            glm::degrees(std::atan2(d.y, d.x));
-                        m_sketchTool->setTextAngle(
-                            static_cast<int>(std::round(aDeg / 90.0f)) * 90);
-                    }
-                }
+                seedUprightPlacementAngle();
                 m_sketchTool->setMode(SketchToolMode::Text);
+            }
+            break;
+
+        case ToolAction::SketchSvg:
+            if (m_inSketchMode) {
+                materializr::FileDialogs::openFile(
+                    "Import SVG", {{"SVG Files", "*.svg *.SVG"}},
+                    [this](const std::string& path) {
+                        if (path.empty() || !m_sketchTool) return;
+                        materializr::SvgPaths svg;
+                        if (!materializr::SvgImport::load(path, svg)) return;
+                        m_sketchTool->setSvgPaths(std::move(svg));
+                        seedUprightPlacementAngle();
+                        m_sketchTool->setMode(SketchToolMode::Svg);
+                    });
             }
             break;
 
@@ -1692,6 +1716,16 @@ void Application::handleShortcuts() {
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         recordSketchMutation([&] { m_sketchTool->removeLastSplinePoint(); });
     }
+    // Backspace while the Text / SVG tool is active removes the WHOLE last
+    // stamp — re-place a misjudged logo without leaving the tool.
+    if (m_inSketchMode && m_sketchTool &&
+        (m_sketchTool->getMode() == SketchToolMode::Text ||
+         m_sketchTool->getMode() == SketchToolMode::Svg) &&
+        m_sketchTool->hasLastStamp() &&
+        !ImGui::GetIO().WantTextInput &&
+        ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+        recordSketchMutation([&] { m_sketchTool->undoLastStamp(); });
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         if (m_sketchGizmoHandle != SketchGizmoHandle::None) {
             // Revert each involved point to its drag-start position and exit
@@ -2079,6 +2113,11 @@ void Application::saveProject() {
 }
 
 void Application::saveProjectQuick() {
+    // Saving mid-preview would persist the preview body and its phantom
+    // history step into the file (and the half-applied state crashed at
+    // least once). An explicit save expresses "keep what's committed" —
+    // cancel live previews first.
+    cancelAllInteractivePreviews();
     if (m_currentProjectPath.empty()) {
         saveProject();
         return;
@@ -2978,7 +3017,10 @@ void Application::editSketch(int sketchId) {
 void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
-    TopoDS_Face profile = buildSketchProfileFace(*sketch);
+    // Even-odd island compound — multi-shape sketches (SVG, text) extrude
+    // every island with its proper holes instead of feeding OCCT one face
+    // with disjoint "holes" (which came out non-manifold).
+    TopoDS_Shape profile = sketch->buildProfileShape();
     if (profile.IsNull()) {
         std::fprintf(stderr, "Sketch has no closed profile to extrude\n");
         return;
@@ -3443,6 +3485,7 @@ void Application::run() {
             renderThreadPanel();
             renderSectionPanel();
             renderTextToolPanel();
+            renderSvgToolPanel();
             renderLoftPanel();
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
@@ -3505,6 +3548,10 @@ void Application::run() {
                     // tip or push a new op (which discards the tail anyway).
                     if (m_history && m_history->canRedo()) {
                         // hold off — keep checking each interval
+                    } else if (anyInteractivePreviewActive()) {
+                        // hold off — an autosave must never cancel (or
+                        // serialize) a live tool preview out from under
+                        // the user; resume once the tool closes.
                     } else if (now - m_lastAutosaveTime >= m_autosaveIntervalSec) {
                         saveProjectQuick();
                         m_lastAutosaveTime = now;
