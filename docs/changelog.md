@@ -3,6 +3,44 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.8.2] — 2026-06-05
+
+The dogfood release: ten fixes straight from real from-scratch modeling
+sessions.
+
+### Fixed
+
+- **First polygon per session came out scrambled** — vertices missing their
+  centre offset or landing ~10²⁶ mm away. A dangling pointer into the
+  sketch-point array across a reallocation; an undo retained the grown
+  capacity, which is why retrying the same clicks always worked.
+- **Arc tool committed on the wrong side of the chord, seemingly at
+  random** — the mid (bulge) click was discarded after computing the
+  centre while everything downstream sweeps CCW start→end. Endpoints are
+  now stored in the order whose sweep passes through the clicked bulge.
+- **Sketch-on-face landed the camera on the wrong side** for faces whose
+  stored normal points into the body (narrow side faces) — the camera now
+  stands off on the face's outward side.
+- **The sketch grid vanished when zooming in** — the fade was centred on
+  the orbit target, which cursor-zoom walks away from; it now centres on
+  the view ray's intersection with the grid plane.
+- **Construction axis from a planar face** fires from the face centroid
+  instead of a corner (the surface's parametric origin).
+- **Polygon dimension popup rendered half cut-off** until typing forced a
+  re-measure (wrapped text inside an auto-resizing window).
+- Inference guide label no longer sits on top of the measurement readout
+  on short lines.
+
+### Changed
+
+- **Ctrl+Z during an in-progress sketch placement cancels the shape being
+  drawn**; committed elements undo on the next press.
+- **Backspace removes the last spline control point** during placement
+  (cleaning up its dot unless something else uses the point); Esc on an
+  in-progress spline removes all its placed points.
+- **Picking a snap-grid step closes the snap popup** — no click-away
+  needed before resuming drawing.
+
 ## [0.8.1] — 2026-06-05
 
 Section View actually works out of the box.
