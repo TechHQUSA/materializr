@@ -1892,6 +1892,15 @@ void SketchTool::handlePolygonTool(glm::vec2 pos) {
             int existing = findCoincidentPoint(m_firstClick, -1);
             int centerId = (existing >= 0) ? existing : m_sketch->addPoint(m_firstClick);
             double rotation = std::atan2(delta.y, delta.x);
+            // Diagnostic for the "first polygon comes out scrambled in the
+            // wrong place" dogfood bug — logs what the tool THINKS it is
+            // committing so the discrepancy point is identifiable.
+            std::fprintf(stderr, "[Polygon] commit: center=(%.3f, %.3f) "
+                                 "reusedPt=%d r=%.3f rot=%.1fdeg sides=%d "
+                                 "clickPos=(%.3f, %.3f)\n",
+                         m_firstClick.x, m_firstClick.y, existing,
+                         radius, rotation * 180.0 / M_PI, m_polygonSides,
+                         pos.x, pos.y);
             m_sketch->addPolygon(centerId, static_cast<double>(radius),
                                  m_polygonSides, rotation);
         }

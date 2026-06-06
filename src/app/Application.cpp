@@ -1291,7 +1291,12 @@ void Application::handleShortcuts() {
                     glfwGetKey(m_window->handle(), GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         if (!m_edgeOpActive && !m_extruding && !m_pushPullActive) {
-            if (m_history->canUndo()) {
+            // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
+            // editor convention — and Steve's muscle memory); the next
+            // Ctrl+Z then undoes committed elements as usual.
+            if (m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing()) {
+                m_sketchTool->onCancel();
+            } else if (m_history->canUndo()) {
                 m_history->undo(*m_document);
                 // In sketch mode, the host face is the anchor for the whole
                 // sketch session — clearing the selection would drop its blue

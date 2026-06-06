@@ -161,6 +161,13 @@ int Sketch::addPolygon(int centerPtId, double radius, int sides, double rotation
 
     const SketchPoint* center = getPoint(centerPtId);
     if (!center) return -1;
+    // COPY the centre position — `center` points INTO m_points, and the
+    // addPoint calls below reallocate that vector. The dangling pointer
+    // produced vertices missing the centre offset or at ±1e26 ("many
+    // meters long"), and only on the FIRST polygon per session: the first
+    // commit grows the vector past capacity; after an undo the capacity
+    // remains, the retry doesn't reallocate, and the same clicks succeed.
+    const glm::vec2 centerPos = center->pos;
 
     // Create N vertex points evenly spaced around center. The first vertex
     // lands at angle `rotationRad` so the caller can align it with the cursor
@@ -168,8 +175,8 @@ int Sketch::addPolygon(int centerPtId, double radius, int sides, double rotation
     // grid (the first vertex is exactly under the snapped cursor).
     for (int i = 0; i < sides; ++i) {
         double angle = rotationRad + 2.0 * M_PI * i / sides;
-        float vx = center->pos.x + static_cast<float>(radius * std::cos(angle));
-        float vy = center->pos.y + static_cast<float>(radius * std::sin(angle));
+        float vx = centerPos.x + static_cast<float>(radius * std::cos(angle));
+        float vy = centerPos.y + static_cast<float>(radius * std::sin(angle));
         int ptId = addPoint(glm::vec2(vx, vy));
         polygon.vertexPointIds.push_back(ptId);
     }
