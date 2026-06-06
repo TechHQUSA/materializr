@@ -833,8 +833,8 @@ void Application::renderScaleFacePanel() {
 
     if (m_scaleFacePreviewOk) {
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
-                           "Previewing %.0f%% over %.1f mm",
-                           m_scaleFacePct, m_scaleFaceLen);
+                           "Previewing %.0f%% x %.0f%% over %.1f mm",
+                           m_scaleFacePctU, m_scaleFacePctV, m_scaleFaceLen);
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
@@ -844,8 +844,26 @@ void Application::renderScaleFacePanel() {
     }
 
     bool changed = false;
-    if (ImGui::SliderFloat("Scale", &m_scaleFacePct, 5.0f, 200.0f, "%.0f %%"))
+    if (ImGui::Checkbox("Uniform", &m_scaleFaceUniform) &&
+        m_scaleFaceUniform) {
+        m_scaleFacePctV = m_scaleFacePctU;
         changed = true;
+    }
+    if (m_scaleFaceUniform) {
+        if (ImGui::SliderFloat("Scale", &m_scaleFacePctU, 5.0f, 200.0f,
+                               "%.0f %%")) {
+            m_scaleFacePctV = m_scaleFacePctU;
+            changed = true;
+        }
+    } else {
+        if (ImGui::SliderFloat("Scale U", &m_scaleFacePctU, 5.0f, 200.0f,
+                               "%.0f %%"))
+            changed = true;
+        if (ImGui::SliderFloat("Scale V", &m_scaleFacePctV, 5.0f, 200.0f,
+                               "%.0f %%"))
+            changed = true;
+    }
+    ImGui::TextDisabled("Or drag the two arrows on the face.");
     if (ImGui::SliderFloat("Length", &m_scaleFaceLen, 0.5f,
                            std::max(m_scaleFaceLenMax, 1.0f), "%.1f mm"))
         changed = true;

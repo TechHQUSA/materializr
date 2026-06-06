@@ -693,12 +693,23 @@ private:
     bool m_scaleFaceActive = false;
     int  m_scaleFaceBodyId = -1;
     TopoDS_Face m_scaleFaceFace;
-    float m_scaleFacePct = 30.0f;
+    float m_scaleFacePctU = 30.0f;  // percent along the face's in-plane X
+    float m_scaleFacePctV = 30.0f;  // percent along the face's in-plane Y
+    bool  m_scaleFaceUniform = true;
     float m_scaleFaceLen = 10.0f;
     float m_scaleFaceLenMax = 100.0f; // body depth behind the face
     int   m_scaleFaceMode = 1; // 0=Extend, 1=Pinch (default: whole body follows)
     bool  m_scaleFacePreviewOk = false;
     TopoDS_Shape m_scaleFacePreviousShape;
+    // 2D scale gizmo: two draggable arrow handles on the face along its
+    // in-plane axes. Drag a handle to scale that direction; the panel's
+    // Uniform checkbox links them.
+    glm::vec3 m_scaleFaceCenter{0.0f};
+    glm::vec3 m_scaleFaceAxisU{1.0f, 0.0f, 0.0f};
+    glm::vec3 m_scaleFaceAxisV{0.0f, 0.0f, 1.0f};
+    float m_scaleFaceHalfU = 10.0f; // face half-extents along each axis
+    float m_scaleFaceHalfV = 10.0f;
+    int   m_scaleFaceDragAxis = -1; // -1 none, 0=U, 1=V
 
     void beginInteractiveScaleFace();
     void updateInteractiveScaleFace();

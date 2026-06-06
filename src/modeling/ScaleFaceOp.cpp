@@ -25,6 +25,9 @@
 #include <Geom_Plane.hxx>
 #include <Geom_Surface.hxx>
 #include <gp_Trsf.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Mat.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
 #include <gp_Vec.hxx>
 #include <gp_Pln.hxx>
 #include <imgui.h>
@@ -33,14 +36,20 @@ ScaleFaceOp::ScaleFaceOp() = default;
 
 void ScaleFaceOp::setBody(int id) { m_bodyId = id; }
 void ScaleFaceOp::setFace(const TopoDS_Face& f) { m_face = f; }
-void ScaleFaceOp::setScalePercent(double s) { m_scalePct = s; }
+void ScaleFaceOp::setScalePercent(double s) { m_scaleU = m_scaleV = s; }
+void ScaleFaceOp::setScaleUV(double su, double sv) {
+    m_scaleU = su;
+    m_scaleV = sv;
+}
 void ScaleFaceOp::setLength(double l) { m_length = l; }
 void ScaleFaceOp::setMode(Mode m) { m_mode = m; }
 
 bool ScaleFaceOp::execute(Document& doc) {
     if (m_bodyId < 0 || m_face.IsNull() || m_length <= 1e-6 ||
-        m_scalePct < 1.0 || m_scalePct > 500.0 ||
-        std::abs(m_scalePct - 100.0) < 1e-6) {
+        m_scaleU < 1.0 || m_scaleU > 500.0 ||
+        m_scaleV < 1.0 || m_scaleV > 500.0 ||
+        (std::abs(m_scaleU - 100.0) < 1e-6 &&
+         std::abs(m_scaleV - 100.0) < 1e-6)) {
         return false;
     }
     try {
@@ -71,17 +80,38 @@ bool ScaleFaceOp::execute(Document& doc) {
         TopoDS_Wire capWire = BRepTools::OuterWire(m_face);
         if (capWire.IsNull()) return false;
 
-        double s = m_scalePct / 100.0;
+        double su = m_scaleU / 100.0;
+        double sv = m_scaleV / 100.0;
 
-        // Scaled copy of the cap outline about its centroid, then a second
-        // copy offset along ±normal. Both loft profiles are transformed
-        // copies of ONE wire, so ThruSections compatibility is exact.
-        gp_Trsf scaleT;
-        scaleT.SetScale(centroid, s);
+        // NON-UNIFORM scale about the centroid in the face plane's own
+        // X / Y directions (deterministic per face, so reload-safe):
+        // M = su*(u (x) u) + sv*(v (x) v) + (n (x) n), translation keeps
+        // the centroid fixed. gp_Trsf can't do this; gp_GTrsf can.
+        const gp_Ax3& fax = pl->Pln().Position();
+        gp_Dir ud = fax.XDirection();
+        gp_Dir vd = fax.YDirection();
+        gp_Dir nd = fax.Direction();
+        auto outer = [](const gp_Dir& a, double k) {
+            return gp_Mat(k * a.X() * a.X(), k * a.X() * a.Y(), k * a.X() * a.Z(),
+                          k * a.Y() * a.X(), k * a.Y() * a.Y(), k * a.Y() * a.Z(),
+                          k * a.Z() * a.X(), k * a.Z() * a.Y(), k * a.Z() * a.Z());
+        };
+        gp_Mat M = outer(ud, su);
+        M += outer(vd, sv);
+        M += outer(nd, 1.0);
+        gp_XYZ c(centroid.X(), centroid.Y(), centroid.Z());
+        gp_GTrsf scaleT;
+        scaleT.SetVectorialPart(M);
+        scaleT.SetTranslationPart(c - M * c);
 
         auto movedWire = [&](const TopoDS_Wire& w,
                              const gp_Trsf& t) -> TopoDS_Wire {
             BRepBuilderAPI_Transform xf(w, t, Standard_True);
+            return TopoDS::Wire(xf.Shape());
+        };
+        auto gMovedWire = [&](const TopoDS_Wire& w,
+                              const gp_GTrsf& t) -> TopoDS_Wire {
+            BRepBuilderAPI_GTransform xf(w, t, Standard_True);
             return TopoDS::Wire(xf.Shape());
         };
 
@@ -90,8 +120,7 @@ bool ScaleFaceOp::execute(Document& doc) {
             // Tip extension: cap outline → scaled outline at +L outward.
             gp_Trsf off;
             off.SetTranslation(gp_Vec(n) * m_length);
-            gp_Trsf comb = off.Multiplied(scaleT);
-            TopoDS_Wire wTip = movedWire(capWire, comb);
+            TopoDS_Wire wTip = movedWire(gMovedWire(capWire, scaleT), off);
 
             BRepOffsetAPI_ThruSections loft(Standard_True);
             loft.AddWire(capWire);
@@ -145,7 +174,7 @@ bool ScaleFaceOp::execute(Document& doc) {
             gp_Trsf back;
             back.SetTranslation(gp_Vec(n) * (-m_length));
             TopoDS_Wire wBase = movedWire(capWire, back);
-            TopoDS_Wire wTip = movedWire(capWire, scaleT);
+            TopoDS_Wire wTip = gMovedWire(capWire, scaleT);
 
             BRepOffsetAPI_ThruSections loft(Standard_True);
             loft.AddWire(wBase);
@@ -230,8 +259,9 @@ bool ScaleFaceOp::undo(Document& doc) {
 
 std::string ScaleFaceOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "Scale face to %.0f%% over %.1f mm (%s)",
-                  m_scalePct, m_length,
+    std::snprintf(buf, sizeof(buf),
+                  "Scale face to %.0f%%/%.0f%% over %.1f mm (%s)",
+                  m_scaleU, m_scaleV, m_length,
                   m_mode == Mode::Extend ? "extend" : "pinch");
     return buf;
 }
@@ -239,7 +269,8 @@ std::string ScaleFaceOp::description() const {
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("Scale Face");
     ImGui::Separator();
-    ImGui::InputDouble("Scale (%)", &m_scalePct, 1.0, 10.0, "%.1f");
+    ImGui::InputDouble("Scale U (%)", &m_scaleU, 1.0, 10.0, "%.1f");
+    ImGui::InputDouble("Scale V (%)", &m_scaleV, 1.0, 10.0, "%.1f");
     ImGui::InputDouble("Length (mm)", &m_length, 0.5, 5.0, "%.2f");
     ImGui::Text("Mode: %s", m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text("Body ID: %d", m_bodyId);
@@ -248,8 +279,9 @@ void ScaleFaceOp::renderProperties() {
 std::string ScaleFaceOp::serializeParams() const {
     std::string blob;
     char buf[128];
-    std::snprintf(buf, sizeof(buf), "body=%d;scale=%.6f;len=%.6f;mode=%d",
-                  m_bodyId, m_scalePct, m_length,
+    std::snprintf(buf, sizeof(buf),
+                  "body=%d;scaleu=%.6f;scalev=%.6f;len=%.6f;mode=%d",
+                  m_bodyId, m_scaleU, m_scaleV, m_length,
                   static_cast<int>(m_mode));
     blob += buf;
     if (!m_previousShape.IsNull() && !m_face.IsNull()) {
@@ -272,7 +304,9 @@ bool ScaleFaceOp::deserializeParams(const std::string& blob) {
         std::string key = blob.substr(pos, eq - pos);
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "body")  { m_bodyId = std::atoi(val.c_str()); any = true; }
-        else if (key == "scale") { m_scalePct = std::atof(val.c_str()); any = true; }
+        else if (key == "scale") { m_scaleU = m_scaleV = std::atof(val.c_str()); any = true; }
+        else if (key == "scaleu") { m_scaleU = std::atof(val.c_str()); any = true; }
+        else if (key == "scalev") { m_scaleV = std::atof(val.c_str()); any = true; }
         else if (key == "len")   { m_length = std::atof(val.c_str()); any = true; }
         else if (key == "mode")  {
             m_mode = std::atoi(val.c_str()) == 1 ? Mode::Pinch : Mode::Extend;

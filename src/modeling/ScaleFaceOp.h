@@ -25,12 +25,16 @@ public:
 
     void setBody(int id);
     void setFace(const TopoDS_Face& f);
-    void setScalePercent(double s); // 100 = unchanged
+    void setScalePercent(double s); // uniform: sets both U and V
+    void setScaleUV(double su, double sv); // percent along the face's
+                                           // in-plane X / Y directions
     void setLength(double l);       // blend length along the face normal
     void setMode(Mode m);
 
     int    getBodyId() const { return m_bodyId; }
-    double getScalePercent() const { return m_scalePct; }
+    double getScalePercent() const { return 0.5 * (m_scaleU + m_scaleV); }
+    double getScaleU() const { return m_scaleU; }
+    double getScaleV() const { return m_scaleV; }
     double getLength() const { return m_length; }
     Mode   getMode() const { return m_mode; }
 
@@ -50,7 +54,8 @@ private:
     int m_bodyId = -1;
     TopoDS_Face m_face;             // live ref (fresh ops)
     std::vector<int> m_faceIndices; // SubShapeIndex ordinal (reloaded ops)
-    double m_scalePct = 30.0;
+    double m_scaleU = 30.0; // percent along the face plane's XDirection
+    double m_scaleV = 30.0; // percent along the face plane's YDirection
     double m_length = 10.0;
     Mode m_mode = Mode::Extend;
     TopoDS_Shape m_previousShape;

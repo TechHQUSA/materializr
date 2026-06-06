@@ -910,7 +910,9 @@ void Application::beginInteractiveScaleFace() {
     try {
         m_scaleFacePreviousShape = m_document->getBody(m_scaleFaceBodyId);
     } catch (...) { return; }
-    m_scaleFacePct = 30.0f;
+    m_scaleFacePctU = m_scaleFacePctV = 30.0f;
+    m_scaleFaceUniform = true;
+    m_scaleFaceDragAxis = -1;
     m_scaleFaceMode = 1; // Pinch: "scale this face, the body follows"
     // Default blend length = the FULL depth of the body behind the face,
     // so scaling the top of a box re-slopes the sides from the BASE
@@ -946,6 +948,45 @@ void Application::beginInteractiveScaleFace() {
                 m_scaleFaceLen = m_scaleFaceLenMax; // whole body follows
             }
         }
+        // Gizmo frame: the face plane's own axes + the face's half-extents
+        // along them (handle length / drag scaling).
+        Handle(Geom_Plane) gpl = Handle(Geom_Plane)::DownCast(
+            BRep_Tool::Surface(m_scaleFaceFace));
+        if (!gpl.IsNull()) {
+            const gp_Ax3& fax = gpl->Pln().Position();
+            gp_Dir ud = fax.XDirection(), vd2 = fax.YDirection();
+            m_scaleFaceAxisU = glm::vec3((float)ud.X(), (float)ud.Y(),
+                                         (float)ud.Z());
+            m_scaleFaceAxisV = glm::vec3((float)vd2.X(), (float)vd2.Y(),
+                                         (float)vd2.Z());
+            GProp_GProps fpr;
+            BRepGProp::SurfaceProperties(m_scaleFaceFace, fpr);
+            gp_Pnt fc = fpr.CentreOfMass();
+            m_scaleFaceCenter = glm::vec3((float)fc.X(), (float)fc.Y(),
+                                          (float)fc.Z());
+            Bnd_Box fbb;
+            BRepBndLib::Add(m_scaleFaceFace, fbb);
+            if (!fbb.IsVoid()) {
+                double fx0, fy0, fz0, fx1, fy1, fz1;
+                fbb.Get(fx0, fy0, fz0, fx1, fy1, fz1);
+                gp_Pnt fcs[8] = {
+                    gp_Pnt(fx0, fy0, fz0), gp_Pnt(fx1, fy0, fz0),
+                    gp_Pnt(fx0, fy1, fz0), gp_Pnt(fx1, fy1, fz0),
+                    gp_Pnt(fx0, fy0, fz1), gp_Pnt(fx1, fy0, fz1),
+                    gp_Pnt(fx0, fy1, fz1), gp_Pnt(fx1, fy1, fz1)};
+                float hu = 1.0f, hv = 1.0f;
+                for (const auto& cpt : fcs) {
+                    glm::vec3 d(
+                        (float)cpt.X() - m_scaleFaceCenter.x,
+                        (float)cpt.Y() - m_scaleFaceCenter.y,
+                        (float)cpt.Z() - m_scaleFaceCenter.z);
+                    hu = std::max(hu, std::abs(glm::dot(d, m_scaleFaceAxisU)));
+                    hv = std::max(hv, std::abs(glm::dot(d, m_scaleFaceAxisV)));
+                }
+                m_scaleFaceHalfU = hu;
+                m_scaleFaceHalfV = hv;
+            }
+        }
     } catch (...) {}
     m_scaleFaceActive = true;
     updateInteractiveScaleFace();
@@ -960,7 +1001,8 @@ void Application::updateInteractiveScaleFace() {
         auto op = std::make_unique<ScaleFaceOp>();
         op->setBody(m_scaleFaceBodyId);
         op->setFace(m_scaleFaceFace);
-        op->setScalePercent(static_cast<double>(m_scaleFacePct));
+        op->setScaleUV(static_cast<double>(m_scaleFacePctU),
+                       static_cast<double>(m_scaleFacePctV));
         op->setLength(static_cast<double>(m_scaleFaceLen));
         op->setMode(m_scaleFaceMode == 1 ? ScaleFaceOp::Mode::Pinch
                                          : ScaleFaceOp::Mode::Extend);
@@ -986,7 +1028,8 @@ void Application::commitInteractiveScaleFace() {
     auto op = std::make_unique<ScaleFaceOp>();
     op->setBody(m_scaleFaceBodyId);
     op->setFace(m_scaleFaceFace);
-    op->setScalePercent(static_cast<double>(m_scaleFacePct));
+    op->setScaleUV(static_cast<double>(m_scaleFacePctU),
+                   static_cast<double>(m_scaleFacePctV));
     op->setLength(static_cast<double>(m_scaleFaceLen));
     op->setMode(m_scaleFaceMode == 1 ? ScaleFaceOp::Mode::Pinch
                                      : ScaleFaceOp::Mode::Extend);
