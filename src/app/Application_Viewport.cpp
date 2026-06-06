@@ -228,6 +228,8 @@ void Application::renderViewport() {
                         o.Z() + n.Z() * m_sectionOffset);
             m_shapeRenderer->setSectionPlane(true, p,
                                              glm::vec3(n.X(), n.Y(), n.Z()));
+            m_edgeRenderer->setSectionPlane(true, p,
+                                            glm::vec3(n.X(), n.Y(), n.Z()));
             if (m_sectionDirty || geomChanged) {
                 m_sectionView->setEnabled(true);
                 m_sectionView->setPlane(pl);
@@ -238,6 +240,8 @@ void Application::renderViewport() {
         } else {
             m_shapeRenderer->setSectionPlane(false, glm::vec3(0.0f),
                                              glm::vec3(0.0f, 1.0f, 0.0f));
+            m_edgeRenderer->setSectionPlane(false, glm::vec3(0.0f),
+                                            glm::vec3(0.0f, 1.0f, 0.0f));
             if (m_sectionView) m_sectionView->setEnabled(false);
         }
         m_shapeRenderer->render(view, proj, cam.getPosition());

@@ -20,16 +20,24 @@ static const char* s_edgeVertSource = R"(
 #version 330 core
 layout(location = 0) in vec3 a_position;
 uniform mat4 u_mvp;
+out vec3 v_worldPos;
 void main() {
+    v_worldPos = a_position; // edge buffers are world-space
     gl_Position = u_mvp * vec4(a_position, 1.0);
 }
 )";
 
 static const char* s_edgeFragSource = R"(
 #version 330 core
+in vec3 v_worldPos;
 uniform vec3 u_color;
+uniform bool u_sectionEnabled; // section view: clip like the body shader,
+uniform vec3 u_sectionPoint;   // or the full wireframe ghosts through the
+uniform vec3 u_sectionNormal;  // clipped half
 out vec4 fragColor;
 void main() {
+    if (u_sectionEnabled &&
+        dot(v_worldPos - u_sectionPoint, u_sectionNormal) > 0.0) discard;
     fragColor = vec4(u_color, 1.0);
 }
 )";
@@ -67,6 +75,9 @@ bool EdgeRenderer::initialize() {
 
     m_locMVP = glGetUniformLocation(m_program, "u_mvp");
     m_locColor = glGetUniformLocation(m_program, "u_color");
+    m_locSectionEnabled = glGetUniformLocation(m_program, "u_sectionEnabled");
+    m_locSectionPoint = glGetUniformLocation(m_program, "u_sectionPoint");
+    m_locSectionNormal = glGetUniformLocation(m_program, "u_sectionNormal");
 
     return true;
 }
@@ -178,6 +189,9 @@ void EdgeRenderer::render(const glm::mat4& view, const glm::mat4& projection) {
     // Dark gray edge color
     glm::vec3 edgeColor(0.15f, 0.15f, 0.18f);
     glUniform3fv(m_locColor, 1, glm::value_ptr(edgeColor));
+    glUniform1i(m_locSectionEnabled, m_sectionEnabled ? 1 : 0);
+    glUniform3fv(m_locSectionPoint, 1, glm::value_ptr(m_sectionPoint));
+    glUniform3fv(m_locSectionNormal, 1, glm::value_ptr(m_sectionNormal));
 
     // Enable depth test but apply a slight bias so edges render on top of faces
     glEnable(GL_DEPTH_TEST);

@@ -627,7 +627,10 @@ private:
     // the true B-rep intersection curves on the cut.
     bool   m_sectionEnabled    = false;
     int    m_sectionPlaneId    = -1;  // construction plane id; -1 = world
-    int    m_sectionWorldPlane = 1;   // 0=XY 1=XZ 2=YZ (when planeId < 0)
+    int    m_sectionWorldPlane = 0;   // 0=XY 1=XZ 2=YZ (when planeId < 0).
+                                      // XY (vertical, normal Z) — the old
+                                      // XZ/ground default clipped everything
+                                      // above the floor.
     float  m_sectionOffset     = 0.0f;
     bool   m_sectionFlip       = false;
     bool   m_sectionDirty      = true; // recompute overlay curves next frame

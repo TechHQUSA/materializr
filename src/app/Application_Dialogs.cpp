@@ -2502,10 +2502,13 @@ gp_Pln Application::sectionBasePlane() const {
 void Application::renderSectionPanel() {
     if (!m_sectionEnabled) return;
 
+    // Top-centre, like the other tool popups. The first version pinned this
+    // top-RIGHT — squarely behind the Items/Properties panels, so the plane
+    // picker existed but was never seen.
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
-        ImVec2(vp->WorkPos.x + vp->WorkSize.x - 16.0f, vp->WorkPos.y + 60.0f),
-        ImGuiCond_FirstUseEver, ImVec2(1.0f, 0.0f));
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 60.0f),
+        ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.92f);
     bool open = true;
     if (ImGui::Begin("Section View", &open,
@@ -2551,12 +2554,18 @@ void Application::renderSectionPanel() {
         }
 
         ImGui::SetNextItemWidth(200.0f);
-        if (ImGui::DragFloat("Offset (mm)", &m_sectionOffset, 0.25f))
-            m_sectionDirty = true;
+        if (ImGui::SliderFloat("Offset (mm)", &m_sectionOffset,
+                               -100.0f, 100.0f, "%.1f"))
+            m_sectionDirty = true; // Ctrl+click types exact values past ±100
         if (ImGui::Checkbox("Flip side", &m_sectionFlip))
             m_sectionDirty = true;
 
         ImGui::TextDisabled("View-only: bodies are not modified.");
+        ImGui::Separator();
+        if (ImGui::Button("Exit Section View", ImVec2(200, 0)) ||
+            ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            open = false;
+        }
     }
     ImGui::End();
     if (!open) m_sectionEnabled = false;

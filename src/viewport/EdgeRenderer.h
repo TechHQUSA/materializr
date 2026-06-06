@@ -63,6 +63,23 @@ private:
     unsigned int m_program = 0;
     int m_locMVP = -1;
     int m_locColor = -1;
+    int m_locSectionEnabled = -1;
+    int m_locSectionPoint = -1;
+    int m_locSectionNormal = -1;
+    bool m_sectionEnabled = false;
+    glm::vec3 m_sectionPoint = glm::vec3(0.0f);
+    glm::vec3 m_sectionNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+
+public:
+    /// Section view: clip edges past the plane, matching the body shader.
+    void setSectionPlane(bool enabled, const glm::vec3& point,
+                         const glm::vec3& normal) {
+        m_sectionEnabled = enabled;
+        m_sectionPoint = point;
+        m_sectionNormal = normal;
+    }
+
+private:
 };
 
 } // namespace materializr

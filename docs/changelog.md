@@ -3,6 +3,27 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.8.1] — 2026-06-05
+
+Section View actually works out of the box.
+
+### Fixed
+
+- **Section View default plane** was the ground plane with its normal up —
+  enabling it clipped everything above the floor, showing only the bottom
+  face. Default is now a vertical (front) plane, and toggling Section View
+  on auto-aims the cut through the centre of the visible bodies.
+- **Edge wireframes now clip with the section plane** — previously the full
+  body's edge overlay ghosted through the removed half.
+
+### Changed
+
+- The Section View panel moved to the top-centre of the viewport (it was
+  pinned top-right, hidden behind the Items/Properties panels) and gained an
+  **Exit Section View** button (Escape also exits).
+- Offset is a slider (−100 to +100 mm; Ctrl+click to type exact values
+  beyond the range).
+
 ## [0.8.0] — 2026-06-05
 
 The "threads and curves" release: real modeled ISO threads with a validated

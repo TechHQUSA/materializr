@@ -604,6 +604,28 @@ void Application::renderMenuBar() {
             if (ImGui::MenuItem("Reset Camera", "Home")) m_viewport->getCamera().reset();
             if (ImGui::MenuItem("Section View", nullptr, &m_sectionEnabled)) {
                 m_sectionDirty = true;
+                if (m_sectionEnabled) {
+                    // Aim the plane through the middle of the visible
+                    // bodies so enabling it visibly halves the scene —
+                    // a zero-offset plane at the world origin can sit
+                    // entirely outside (or under) everything.
+                    try {
+                        Bnd_Box bb;
+                        for (int id : m_document->getAllBodyIds())
+                            if (m_document->isBodyVisible(id))
+                                BRepBndLib::Add(m_document->getBody(id), bb);
+                        if (!bb.IsVoid()) {
+                            double x0, y0, z0, x1, y1, z1;
+                            bb.Get(x0, y0, z0, x1, y1, z1);
+                            gp_Pnt c(0.5 * (x0 + x1), 0.5 * (y0 + y1),
+                                     0.5 * (z0 + z1));
+                            gp_Pln pl = sectionBasePlane();
+                            m_sectionOffset = static_cast<float>(
+                                gp_Vec(pl.Location(), c)
+                                    .Dot(gp_Vec(pl.Axis().Direction())));
+                        }
+                    } catch (...) {}
+                }
             }
             ImGui::Separator();
             if (m_themeManager->renderSelector()) {
