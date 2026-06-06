@@ -1100,38 +1100,9 @@ void Application::beginPushPull() {
             gp_Pnt c; gp_Vec n;
             prop.Normal((u1 + u2) * 0.5, (v1 + v2) * 0.5, c, n);
             if (n.Magnitude() > 1e-10) {
-                // Classifier-based outward verification — mirror of the same
-                // check in PushPullOp::execute so the live arrow and the
-                // executed extrusion agree on direction even on STEP-imported
-                // faces whose surface normal points the wrong way.
-                if (tgt0.sourceBodyId >= 0) {
-                    try {
-                        const TopoDS_Shape& body = m_document->getBody(tgt0.sourceBodyId);
-                        if (!body.IsNull()) {
-                            // Geometric outward check — same as PushPullOp::
-                            // execute. The body bbox centre is in the body's
-                            // interior; if the face normal points TOWARD it,
-                            // the normal is inward and gets flipped. Far
-                            // more reliable than probe-classifier on thin
-                            // bodies / edge-adjacent faces.
-                            Bnd_Box bodyBB;
-                            BRepBndLib::Add(body, bodyBB);
-                            Bnd_Box faceBB;
-                            BRepBndLib::Add(f, faceBB);
-                            if (!bodyBB.IsVoid() && !faceBB.IsVoid()) {
-                                double bxmn,bymn,bzmn,bxmx,bymx,bzmx;
-                                double fxmn,fymn,fzmn,fxmx,fymx,fzmx;
-                                bodyBB.Get(bxmn,bymn,bzmn,bxmx,bymx,bzmx);
-                                faceBB.Get(fxmn,fymn,fzmn,fxmx,fymx,fzmx);
-                                gp_Vec toBodyCentre(
-                                    (bxmn+bxmx)*0.5 - (fxmn+fxmx)*0.5,
-                                    (bymn+bymx)*0.5 - (fymn+fymx)*0.5,
-                                    (bzmn+bzmx)*0.5 - (fzmn+fzmx)*0.5);
-                                if (n.Dot(toBodyCentre) > 0) n.Reverse();
-                            }
-                        }
-                    } catch (...) {}
-                }
+                // NO outward correction — BRepGProp_Face::Normal() already
+                // applies face orientation; this IS outward. MUST mirror
+                // PushPullOp::execute (see the war-story comment there).
                 gp_Vec dir = n;
                 Handle(Geom_Surface) surf = BRep_Tool::Surface(f);
                 gp_Dir axis;

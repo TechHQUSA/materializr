@@ -411,6 +411,41 @@ bool SketchTool::isActive() const {
     return m_isPlacing;
 }
 
+glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
+    // Directional inferences (perpendicular / parallel / tangent / axis /
+    // angle) override grid snap by design — but when the inferred segment
+    // comes out NEARLY axis-aligned, "nearly" is the bug: 1° over 80 mm is
+    // a visibly crooked line the user never asked for, and every later
+    // inference aligns to it, breeding more. Rule (Steve's): keep the
+    // inference while it's genuinely slanted; once it gets close to
+    // parallel with an axis, the axis wins — flatten exactly, and re-grid
+    // the free coordinate so the endpoint is lattice-true again.
+    if (!m_isPlacing) return target;
+    glm::vec2 d = target - m_firstClick;
+    float len = glm::length(d);
+    if (len < 1e-4f) return target;
+    const float axisTol = glm::radians(4.0f);
+    float ang = std::atan2(d.y, d.x);
+    const float PI = static_cast<float>(M_PI);
+    auto nearAng = [&](float ref) {
+        float dd = std::abs(ang - ref);
+        if (dd > PI) dd = 2.0f * PI - dd;
+        return dd < axisTol;
+    };
+    const bool gridOn = m_snapToGridEnabled && m_gridStep > 0.0f;
+    auto grid = [&](float v) {
+        return gridOn ? std::round(v / m_gridStep) * m_gridStep : v;
+    };
+    if (nearAng(0.0f) || nearAng(PI) || nearAng(-PI)) {
+        target.y = m_firstClick.y;       // exactly horizontal
+        target.x = grid(target.x);
+    } else if (nearAng(PI * 0.5f) || nearAng(-PI * 0.5f)) {
+        target.x = m_firstClick.x;       // exactly vertical
+        target.y = grid(target.y);
+    }
+    return target;
+}
+
 glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // Fresh inference set every snap — the renderer treats this as "what's
     // active right now".
@@ -627,7 +662,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                 if (p1 && p2) from = 0.5f * (p1->pos + p2->pos);
                 m_activeInferences.push_back(
                     {InferenceGuide::OnLineExtension, from, bestProj, bestLn->id});
-                return bestProj;
+                return rectifyNearAxis(bestProj);
             }
         }
 
@@ -821,7 +856,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // applyDirLock above (perp/parallel/tangent + axis → intersection),
         // which is the actually-useful case. Angle snap and endpoint snap
         // cover everything else.
-        if (snapped) return result;
+        if (snapped) return rectifyNearAxis(result);
 
         // Angle-snap fallback: while drawing a line, if nothing above fired,
         // check if the cursor direction from the anchor is within ~3° of a
@@ -854,7 +889,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                         m_activeInferences.push_back(
                             {InferenceGuide::AngleSnap, m_firstClick,
                              snappedPos, -1});
-                        return snappedPos;
+                        return rectifyNearAxis(snappedPos);
                     }
                 }
             }

@@ -3,6 +3,29 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.9.1] — 2026-06-06
+
+Bugfix release — the first finds of the post-0.9.0 field-testing phase.
+
+### Fixed
+
+- **Push/pull works on interior and pocketed faces.** The outward
+  direction came from a bounding-box heuristic that was exactly backwards
+  for hollow bodies: cavity walls no-opped entirely, pocket floors
+  pushed/pulled inverted. The face normal OCCT reports is already
+  outward-corrected, so the heuristics (all three generations of them)
+  are simply gone.
+- **No more slightly-crooked "snapped" lines.** Directional sketch
+  inferences (perpendicular / parallel / tangent / axis / angle) could
+  place an endpoint a hair off-axis, producing lines 1° off horizontal
+  that every later inference then aligned to. An inferred segment within
+  ~4° of an axis now collapses exactly onto it (and back onto the grid);
+  genuinely slanted inferences are untouched.
+
+### Added
+
+- Vector logo drafts (full-colour + mono engrave variant) in `docs/`.
+
 ## [0.9.0] — 2026-06-06
 
 Feature-complete for the original vision: from here to 1.0 is polish and

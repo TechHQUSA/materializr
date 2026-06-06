@@ -120,46 +120,16 @@ bool PushPullOp::execute(Document& doc) {
             prop.Normal((u1 + u2) * 0.5, (v1 + v2) * 0.5, center, n);
             if (n.Magnitude() > 1e-10) {
                 faceNormal = n.Normalized();
-                // Verify the surface normal actually points OUTWARD from the
-                // source body. STEP-imported faces sometimes carry surface
-                // normals that point INTO the body, in which case the prism
-                // ends up extruding into the solid (push) and pulling into
-                // empty space (cut with no overlap). Probe the body's
-                // classifier on BOTH sides of the face at 1 mm; only flip
-                // when "forward is IN, backward is OUT" — an unambiguous
-                // disagreement that's safe to act on.
-                if (tgt.sourceBodyId >= 0) {
-                    try {
-                        TopoDS_Shape body = doc.getBody(tgt.sourceBodyId);
-                        if (!body.IsNull()) {
-                            // Pick the outward direction geometrically: the
-                            // body's bbox centre lies roughly in the body's
-                            // interior, so a face whose normal points TOWARD
-                            // the bbox centre is pointing INWARD and needs
-                            // to be flipped. This is far more robust than the
-                            // BRepClass3d probe approach on thin bodies and
-                            // around edges (where the classifier returns
-                            // ON / OUT instead of IN and the reversal misses).
-                            Bnd_Box bodyBB;
-                            BRepBndLib::Add(body, bodyBB);
-                            Bnd_Box faceBB;
-                            BRepBndLib::Add(tgt.profile, faceBB);
-                            if (!bodyBB.IsVoid() && !faceBB.IsVoid()) {
-                                double bxmn,bymn,bzmn,bxmx,bymx,bzmx;
-                                double fxmn,fymn,fzmn,fxmx,fymx,fzmx;
-                                bodyBB.Get(bxmn,bymn,bzmn,bxmx,bymx,bzmx);
-                                faceBB.Get(fxmn,fymn,fzmn,fxmx,fymx,fzmx);
-                                gp_Vec toBodyCentre(
-                                    (bxmn+bxmx)*0.5 - (fxmn+fxmx)*0.5,
-                                    (bymn+bymx)*0.5 - (fymn+fymx)*0.5,
-                                    (bzmn+bzmx)*0.5 - (fzmn+fzmx)*0.5);
-                                if (faceNormal.Dot(toBodyCentre) > 0) {
-                                    faceNormal.Reverse();
-                                }
-                            }
-                        }
-                    } catch (...) {}
-                }
+                // NO outward correction: BRepGProp_Face::Normal() already
+                // applies the face's topological orientation, so this IS
+                // the outward normal — verified against the solid
+                // classifier on every face of a pocketed box (REVERSED
+                // cavity walls included). Two generations of "fixes" here
+                // each broke a case by distrusting it: a classifier probe
+                // (misfired on thin bodies), then a bbox-centre heuristic
+                // (flipped cavity walls of hollow bodies), then an
+                // orientation-flag flip (double-applied what BRepGProp had
+                // already done, inverting pocket faces).
                 Handle(Geom_Surface) surf = BRep_Tool::Surface(tgt.profile);
                 gp_Dir axis; bool hasAxis = false;
                 if (auto cone = Handle(Geom_ConicalSurface)::DownCast(surf);

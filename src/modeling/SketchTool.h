@@ -202,6 +202,9 @@ private:
     void handlePolygonTool(glm::vec2 pos);
     void handleTextTool(glm::vec2 pos);
     void handleSvgTool(glm::vec2 pos);
+    // Collapse a directional-inference result onto the axis (+ grid) when
+    // it's within a few degrees of horizontal/vertical — crooked-line guard.
+    glm::vec2 rectifyNearAxis(glm::vec2 target) const;
     void handleTrimTool(glm::vec2 pos);
     void computeTrimHover(glm::vec2 pos); // updates m_trimHoverPoints (no mutation)
 
