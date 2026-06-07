@@ -340,8 +340,15 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
     // the new tessellation actually succeeds.
     int appendedSlot = tessellate(shape, deflection, angularDeflection);
     if (appendedSlot < 0) {
-        // Failed — leave the existing slot (if any) in place.
+        // Failed — leave the existing slot (if any) in place. LOUDLY: a
+        // kept stale slot means the screen shows geometry the document no
+        // longer has (phantom bodies, "unclickable" faces).
         auto it = m_bodyToSlot.find(bodyId);
+        std::fprintf(stderr,
+                     "[Mesh] tessellation FAILED for body %d — %s\n", bodyId,
+                     (it == m_bodyToSlot.end())
+                         ? "no previous mesh, body will not render"
+                         : "KEEPING STALE MESH (render != document!)");
         return (it == m_bodyToSlot.end()) ? -1 : it->second;
     }
     auto it = m_bodyToSlot.find(bodyId);
@@ -547,6 +554,18 @@ void ShapeRenderer::clear()
     }
     m_meshes.clear();
     m_bodyToSlot.clear();
+}
+
+void ShapeRenderer::debugDumpSlots() const
+{
+    std::fprintf(stderr, "  [Slots] %zu mesh slots:\n", m_meshes.size());
+    for (size_t i = 0; i < m_meshes.size(); ++i) {
+        const auto& m = m_meshes[i];
+        std::fprintf(stderr,
+                     "    slot %zu: body=%d verts=%d sel=%d subPrev=%d\n",
+                     i, m.bodyId, m.vertexCount, m.selected ? 1 : 0,
+                     m.subtractPreview ? 1 : 0);
+    }
 }
 
 glm::vec3 ShapeRenderer::bodyColor(int index)

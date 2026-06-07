@@ -2686,7 +2686,40 @@ void Application::renderViewport() {
                             result.pickedShape.ShapeType() == TopAbs_FACE) {
                             onHostFace = sk->getSourceFace().IsSame(result.pickedShape);
                         }
-                        if (!onHostFace && bodyD < sketchD - tol) {
+                        // NEAREST-FIRST + BIDIRECTIONAL CYCLING. The two
+                        // ambiguous cases — a sketch slot between bodies
+                        // pulled FROM it (intent: the face behind) vs a
+                        // sketch floating in front of unrelated geometry
+                        // (intent: the sketch) — are indistinguishable by
+                        // any stateless distance rule; we tried them all.
+                        // So: whatever is nearest along the ray wins the
+                        // FIRST click, and clicking the SAME spot again
+                        // cycles to the other. Everything is reachable in
+                        // at most two clicks, nothing is ever unselectable,
+                        // and hover always highlights what a click would
+                        // pick. Host-face regions (sketch-on-face) keep
+                        // outright priority.
+                        ImVec2 mpNow = ImGui::GetMousePos();
+                        bool sameSpot =
+                            std::abs(mpNow.x - m_pickCyclePos.x) < 6.0f &&
+                            std::abs(mpNow.y - m_pickCyclePos.y) < 6.0f;
+                        int forced = -1; // -1 none, 0 face, 1 region
+                        if (sameSpot && m_pickCycleLast == 0) forced = 1;
+                        else if (sameSpot && m_pickCycleLast == 1) forced = 0;
+                        // DEFAULT = the ORIGINAL pre-saga semantics:
+                        // region wins on ties / when nearer, face wins only
+                        // when the body surface is CLEARLY in front. Every
+                        // alternative rule tried during the dual-pull saga
+                        // was judged against a document the old preview
+                        // engine was corrupting per-frame; with the engine
+                        // fixed, the original rule gets retried on honest
+                        // evidence. Cycling remains purely as an escape
+                        // hatch on deliberate same-spot re-clicks.
+                        const bool bodyClearlyNearer = bodyD < sketchD - tol;
+                        const bool pickRegion =
+                            onHostFace || forced == 1 ||
+                            (forced == -1 && !bodyClearlyNearer);
+                        if (!pickRegion) {
                             regionHit.sketchId = -1;
                             regionHit.regionIndex = -1;
                         }
@@ -2694,8 +2727,23 @@ void Application::renderViewport() {
                     m_hoveredSketchId = regionHit.sketchId;
                     m_hoveredRegionIndex = regionHit.regionIndex;
 
+                    // Selection clicks are OFF while a legacy history-churn
+                    // preview is live (push/pull, extrude, pattern, resize,
+                    // thread): those previews undo + re-push their op every
+                    // frame, so the document's bodies flicker out of
+                    // existence and change ids mid-frame — a click can land
+                    // in the gap and select nothing, the stale id, or the
+                    // sketch region behind the preview ("the pulled face is
+                    // unclickable"). Controller iops (Shell/Taper/Scale/
+                    // Projection) keep clicks: their previews don't churn
+                    // the document, and Projection's live region scoping
+                    // NEEDS clicks while its panel is open.
+                    const bool clickSelectionAllowed =
+                        !m_pushPullActive && !m_extruding &&
+                        !m_patternActive && !m_resizeCylActive &&
+                        !m_threadActive;
                     bool regionConsumedClick = false;
-                    if (regionHit.regionIndex >= 0 &&
+                    if (clickSelectionAllowed && regionHit.regionIndex >= 0 &&
                         ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                         SelectionEntry entry;
                         entry.type = SelectionType::SketchRegion;
@@ -2710,6 +2758,11 @@ void Application::renderViewport() {
                         } else {
                             m_selection->select(entry);
                         }
+                        {
+                            ImVec2 mp2 = ImGui::GetMousePos();
+                            m_pickCyclePos = glm::vec2(mp2.x, mp2.y);
+                        }
+                        m_pickCycleLast = 1; // region picked; same-spot → face
                         regionConsumedClick = true;
                     }
                     // Edge-only hit (open profile — arc, spline, polyline that
@@ -2717,7 +2770,8 @@ void Application::renderViewport() {
                     // can pick open vertical sketches that would otherwise be
                     // unpickable from the viewport. Skipped when a body face
                     // sits in front of the edge.
-                    else if (regionHit.regionIndex < 0 && regionHit.sketchId >= 0 &&
+                    else if (clickSelectionAllowed &&
+                             regionHit.regionIndex < 0 && regionHit.sketchId >= 0 &&
                              ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                         // Same generous occlusion tolerance + source-face
                         // exemption as the region branch above — sketches on
@@ -2735,7 +2789,19 @@ void Application::renderViewport() {
                                 result.pickedShape.ShapeType() == TopAbs_FACE) {
                                 onHostFace = sk->getSourceFace().IsSame(result.pickedShape);
                             }
-                            if (!onHostFace && bodyD < sketchD - tol) occluded = true;
+                            // Mirror of the region branch above:
+                            // nearest-first with same-spot cycling.
+                            ImVec2 mpE = ImGui::GetMousePos();
+                            bool sameSpotE =
+                                std::abs(mpE.x - m_pickCyclePos.x) < 6.0f &&
+                                std::abs(mpE.y - m_pickCyclePos.y) < 6.0f;
+                            int forcedE = -1;
+                            if (sameSpotE && m_pickCycleLast == 0) forcedE = 1;
+                            else if (sameSpotE && m_pickCycleLast == 1) forcedE = 0;
+                            bool bodyClearlyNearerE = bodyD < sketchD - tol;
+                            if (!(onHostFace || forcedE == 1 ||
+                                  (forcedE == -1 && !bodyClearlyNearerE)))
+                                occluded = true;
                         }
                         if (!occluded) {
                             SelectionEntry entry;
@@ -2790,11 +2856,48 @@ void Application::renderViewport() {
                     }
                     (void)measureConsumedClick;
 
+                    // Click-resolution diagnostic: one line per left click,
+                    // stating exactly what the pick decided — body/face hit,
+                    // region hit, and which path consumed the click. Cheap
+                    // (clicks only) and exactly what's needed when a face
+                    // "won't select" in the field.
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        std::fprintf(stderr,
+                            "[Click] hit=%d body=%d shape=%s edgeDist=%.1f | "
+                            "region sk=%d idx=%d | consumed=%d\n",
+                            result.hit ? 1 : 0, result.bodyId,
+                            result.pickedShape.IsNull() ? "null"
+                            : (result.pickedShape.ShapeType() == TopAbs_FACE
+                                   ? "face" : "other"),
+                            result.edgeScreenDist,
+                            regionHit.sketchId, regionHit.regionIndex,
+                            regionConsumedClick ? 1 : 0);
+                        // When the pick MISSED, re-run it verbosely so each
+                        // body reports bbox/triangle verdicts, and dump the
+                        // renderer's slot table — a slot whose body isn't in
+                        // the document (or whose mesh is stale) is the
+                        // phantom the user is clicking.
+                        if (!result.hit) {
+                            Picker::s_verbose = true;
+                            (void)m_picker->pick(localX, localY,
+                                contentSize.x, contentSize.y, cam,
+                                *m_document);
+                            Picker::s_verbose = false;
+                            m_shapeRenderer->debugDumpSlots();
+                            for (int id : m_document->getAllBodyIds())
+                                std::fprintf(stderr, "  [Doc] body %d%s\n",
+                                             id,
+                                             m_document->isBodyVisible(id)
+                                                 ? "" : " (hidden)");
+                        }
+                    }
+
                     // Double-click to select body, single-click to select face.
                     // Axis / plane hits don't have a body to escalate to, so
                     // the double-click falls through to the single-click
                     // handler below (which builds the right Selection entry).
-                    if (!regionConsumedClick && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                    if (clickSelectionAllowed && !regionConsumedClick &&
+                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
                         result.hit && result.bodyId >= 0) {
                         SelectionEntry entry;
                         entry.type = SelectionType::Body;
@@ -2805,7 +2908,8 @@ void Application::renderViewport() {
                         } else {
                             m_selection->select(entry);
                         }
-                    } else if (!regionConsumedClick && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    } else if (clickSelectionAllowed && !regionConsumedClick &&
+                               ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
                         if (result.hit && result.axisId >= 0) {
                             // Construction-axis hit — own selection path,
@@ -2859,6 +2963,14 @@ void Application::renderViewport() {
                             } else {
                                 m_selection->select(entry);
                             }
+                            // Click-cycling: a face was picked here; the
+                            // next click at the SAME spot offers the
+                            // covered sketch region instead (if any).
+                            {
+                                ImVec2 mp2 = ImGui::GetMousePos();
+                                m_pickCyclePos = glm::vec2(mp2.x, mp2.y);
+                            }
+                            m_pickCycleLast = 0; // face picked; same-spot → region
                         } else {
                             // Empty-space click: begin a box-select drag instead of
                             // clearing immediately. The release handler below decides

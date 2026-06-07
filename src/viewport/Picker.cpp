@@ -1,6 +1,7 @@
 #include "Picker.h"
 #include "Camera.h"
 #include "../core/Document.h"
+#include <cstdio>
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -25,6 +26,8 @@
 namespace materializr {
 
 Picker::Picker() {}
+
+bool Picker::s_verbose = false;
 
 void Picker::screenToRay(float sx, float sy, float vpW, float vpH,
                          const Camera& camera,
@@ -148,6 +151,22 @@ int Picker::findNearestFace(const glm::vec3& origin, const glm::vec3& dir,
         const TopoDS_Face& face = TopoDS::Face(explorer.Current());
         TopLoc_Location location;
         Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, location);
+
+        if (s_verbose) {
+            if (triangulation.IsNull()) {
+                std::fprintf(stderr, "      face %d: NULL triangulation\n",
+                             currentFace);
+            } else {
+                gp_Pnt n1 = triangulation->Node(1).Transformed(
+                    location.Transformation());
+                std::fprintf(stderr,
+                    "      face %d: %d tris, node1=(%.1f,%.1f,%.1f) "
+                    "defl=%.3f\n",
+                    currentFace, triangulation->NbTriangles(),
+                    n1.X(), n1.Y(), n1.Z(),
+                    triangulation->Deflection());
+            }
+        }
 
         if (triangulation.IsNull()) {
             ++currentFace;
@@ -278,14 +297,30 @@ PickResult Picker::pick(float screenX, float screenY,
 
     std::vector<int> bodyIds = doc.getAllBodyIds();
     for (int bodyId : bodyIds) {
-        if (!doc.isBodyVisible(bodyId)) continue;
+        if (!doc.isBodyVisible(bodyId)) {
+            if (s_verbose)
+                std::fprintf(stderr, "  [Pick] body %d: INVISIBLE\n", bodyId);
+            continue;
+        }
 
         const TopoDS_Shape& shape = doc.getBody(bodyId);
-        if (shape.IsNull()) continue;
+        if (shape.IsNull()) {
+            if (s_verbose)
+                std::fprintf(stderr, "  [Pick] body %d: NULL shape\n", bodyId);
+            continue;
+        }
 
         // Quick bounding box rejection
         float bboxT = 0.0f;
         if (!rayIntersectsBBox(rayOrigin, rayDir, shape, bboxT)) {
+            if (s_verbose) {
+                Bnd_Box bb;
+                BRepBndLib::Add(shape, bb);
+                double x0,y0,z0,x1,y1,z1; bb.Get(x0,y0,z0,x1,y1,z1);
+                std::fprintf(stderr,
+                    "  [Pick] body %d: bbox MISS (%.1f,%.1f,%.1f..%.1f,%.1f,%.1f)\n",
+                    bodyId, x0, y0, z0, x1, y1, z1);
+            }
             continue;
         }
 
@@ -294,6 +329,10 @@ PickResult Picker::pick(float screenX, float screenY,
         glm::vec3 faceHitPt(0.0f);
         TopoDS_Shape faceShape;
         int faceIdx = findNearestFace(rayOrigin, rayDir, shape, faceDist, faceHitPt, faceShape);
+        if (s_verbose)
+            std::fprintf(stderr,
+                "  [Pick] body %d: bbox ok, faceIdx=%d dist=%.2f\n",
+                bodyId, faceIdx, faceDist);
 
         if (faceIdx >= 0 && faceDist < nearestDist) {
             nearestDist = faceDist;

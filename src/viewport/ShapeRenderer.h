@@ -89,6 +89,11 @@ public:
     /// Remove all meshes.
     void clear();
 
+    /// Diagnostic: print every slot (bodyId, vertex count, flags) to
+    /// stderr — used by the click-miss diagnostic to expose phantom slots
+    /// whose body no longer exists or whose mesh is stale.
+    void debugDumpSlots() const;
+
     /// Get a color from a cycling palette for the given body index.
     static glm::vec3 bodyColor(int index);
 

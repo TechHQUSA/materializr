@@ -745,10 +745,14 @@ void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
     op->setDistance(extrudeOpDistance());
     op->setMode(ExtrudeMode::NewBody);
     op->setSketchSource(m_extrudeSketchId);
-    if (m_history->pushOperation(std::move(op), *m_document)) {
-        auto ids = m_document->getAllBodyIds();
-        m_extrudePreviewBodyId = ids.back();
-        m_meshesDirty = true;
+    {
+        const Operation* raw = op.get();
+        if (m_history->pushOperation(std::move(op), *m_document)) {
+            m_extrudePreviewOp = raw;
+            auto ids = m_document->getAllBodyIds();
+            m_extrudePreviewBodyId = ids.back();
+            m_meshesDirty = true;
+        }
     }
 }
 
@@ -756,16 +760,27 @@ void Application::updateInteractiveExtrude() {
     if (!m_extruding || m_extrudePreviewBodyId < 0) return;
     if (!std::isfinite(m_extrudeDistance)) { m_extrudeDistance = 0.0f; return; }
 
-    // Remove old preview and create new one at current distance
+    // Remove old preview and create new one at current distance. The undo
+    // is VERIFIED against the recorded preview op so an outside history
+    // touch can never make us pop a committed step (see updatePushPull).
     m_document->removeBody(m_extrudePreviewBodyId);
-    m_history->undo(*m_document); // undo the last extrude
+    if (m_history->canUndo() &&
+        m_history->getStep(m_history->currentStep()) == m_extrudePreviewOp) {
+        m_history->undo(*m_document);
+    } else {
+        std::fprintf(stderr, "[Extrude] preview op no longer on top of "
+                             "history — resyncing without undo\n");
+    }
+    m_extrudePreviewOp = nullptr;
 
     auto op = std::make_unique<ExtrudeOp>();
     op->setProfile(m_extrudeProfile);
     op->setDistance(extrudeOpDistance());
     op->setMode(ExtrudeMode::NewBody);
     op->setSketchSource(m_extrudeSketchId);
+    const Operation* raw = op.get();
     if (m_history->pushOperation(std::move(op), *m_document)) {
+        m_extrudePreviewOp = raw;
         auto ids = m_document->getAllBodyIds();
         m_extrudePreviewBodyId = ids.back();
         m_meshesDirty = true;
@@ -778,7 +793,12 @@ void Application::commitInteractiveExtrude() {
         // cut against the body the sketch was drawn on.
         if (m_extrudePreviewBodyId >= 0) {
             m_document->removeBody(m_extrudePreviewBodyId);
-            m_history->undo(*m_document);
+            if (m_history->canUndo() &&
+                m_history->getStep(m_history->currentStep()) ==
+                    m_extrudePreviewOp) {
+                m_history->undo(*m_document);
+            }
+            m_extrudePreviewOp = nullptr;
         }
         auto op = std::make_unique<ExtrudeOp>();
         op->setProfile(m_extrudeProfile);
@@ -809,7 +829,12 @@ void Application::commitInteractiveExtrude() {
 void Application::cancelInteractiveExtrude() {
     if (m_extrudePreviewBodyId >= 0) {
         m_document->removeBody(m_extrudePreviewBodyId);
-        m_history->undo(*m_document);
+        if (m_history->canUndo() &&
+            m_history->getStep(m_history->currentStep()) ==
+                m_extrudePreviewOp) {
+            m_history->undo(*m_document);
+        }
+        m_extrudePreviewOp = nullptr;
     }
     m_extruding = false;
     m_extrudeProfile.Nullify();
@@ -1037,7 +1062,8 @@ void Application::beginPushPull() {
     m_pushPullTargets.clear();
     m_pushPullPreviewBodyIds.clear();
     m_pushPullPreviousBodies.clear();
-    m_pushPullPreviewPushed = false;
+    m_pushPullLiveOp.reset();
+    m_pushPullPreviewApplied = false;
 
     // Gather all selected SketchRegion entries AND body face selections.
     for (const auto& e : m_selection->getSelection()) {
@@ -1209,15 +1235,24 @@ void Application::updatePushPull() {
         return;
     }
 
-    // Only undo OUR previous preview — not any other pushpull that may already be
-    // committed at the top of the history.
-    if (m_pushPullPreviewPushed && m_history->canUndo()) {
-        m_history->undo(*m_document);
-        m_pushPullPreviewPushed = false;
+    // SNAPSHOT/RESTORE preview engine — history is NOT involved. One live
+    // op instance is undone and re-executed directly against the document:
+    // PushPullOp::undo() removes its created bodies into the id-reuse pool
+    // (so re-execution keeps the SAME ids) and restores mutated sources.
+    // History sees a single pushExecuted() at commit. This replaces the
+    // per-frame history undo/push churn that produced an entire class of
+    // bugs: body ids changing every frame, empty-document click windows,
+    // and outside history touches corrupting the preview bookkeeping.
+    if (!m_pushPullLiveOp) m_pushPullLiveOp = makePushPullOpFromState();
+    if (m_pushPullPreviewApplied) {
+        m_pushPullLiveOp->undo(*m_document);
+        m_pushPullPreviewApplied = false;
     }
-
-    if (m_history->pushOperation(makePushPullOpFromState(), *m_document)) {
-        m_pushPullPreviewPushed = true;
+    if (std::abs(m_pushPullDistance) > 1e-6) {
+        m_pushPullLiveOp->setDistance(
+            static_cast<double>(m_pushPullDistance));
+        if (m_pushPullLiveOp->execute(*m_document))
+            m_pushPullPreviewApplied = true;
     }
     // Mark only the bodies the push/pull actually touched as dirty. On a
     // 100+ body project this turns each preview frame from "re-tessellate
@@ -1277,9 +1312,14 @@ void Application::commitPushPull() {
         }
         m_pushPullHeavyPreview = false;
     }
-    // Light path: the last preview push IS the final state — just clean up
+    // Light path: the preview already applied the final state directly —
+    // append the live op to history WITHOUT re-executing it.
+    if (m_pushPullLiveOp && m_pushPullPreviewApplied) {
+        m_history->pushExecuted(std::move(m_pushPullLiveOp));
+    }
+    m_pushPullLiveOp.reset();
+    m_pushPullPreviewApplied = false;
     m_pushPullActive = false;
-    m_pushPullPreviewPushed = false;
     m_pushPullTargets.clear();
     m_meshesDirty = true;
     m_selection->clear();
@@ -1292,10 +1332,11 @@ void Application::cancelPushPull() {
         m_shapeRenderer->removeBody(-7777); // ghost only — nothing was pushed
         m_pushPullHeavyPreview = false;
     }
-    if (m_pushPullPreviewPushed && m_history->canUndo()) {
-        m_history->undo(*m_document);
-        m_pushPullPreviewPushed = false;
+    if (m_pushPullLiveOp && m_pushPullPreviewApplied) {
+        m_pushPullLiveOp->undo(*m_document);
     }
+    m_pushPullLiveOp.reset();
+    m_pushPullPreviewApplied = false;
     m_pushPullActive = false;
     m_pushPullTargets.clear();
     m_meshesDirty = true;

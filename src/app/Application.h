@@ -339,7 +339,12 @@ private:
 
     // Push/Pull interactive operation state
     bool m_pushPullActive = false;
-    bool m_pushPullPreviewPushed = false; // true while a preview PushPullOp is on the history stack
+    // Live preview op (snapshot/restore engine): undone + re-executed
+    // directly against the document each preview frame, appended to history
+    // exactly once via pushExecuted() at commit. History is untouched
+    // during the preview — see updatePushPull.
+    std::unique_ptr<PushPullOp> m_pushPullLiveOp;
+    bool m_pushPullPreviewApplied = false;
     float m_pushPullDistance = 5.0f;
     char m_pushPullInputBuf[32] = "5.0";
     bool m_pushPullInputFocus = true;
@@ -696,6 +701,13 @@ private:
     glm::vec3 m_zoomFocusPoint{0.0f};
     int m_zoomFocusFrame = -1;
 
+    // Click-cycling state: first click at a spot picks the visible FACE,
+    // a second click at the same spot cycles to the sketch region covered
+    // by / behind that face — resolves the face-vs-region ambiguity when
+    // bodies sit on both sides of their source sketch plane.
+    glm::vec2 m_pickCyclePos{-1000.0f, -1000.0f};
+    int m_pickCycleLast = -1; // -1 none, 0 face, 1 region
+
     // Resolve the pull direction + neutral-plane point from the current
     // axis choice, the picked faces, and the body's bounds.
     bool resolveTaperFrame(glm::vec3& dirOut, glm::vec3& neutralOut) const;
@@ -1006,6 +1018,9 @@ private:
     glm::vec3 m_extrudeOrigin{0};
     float m_extrudeDistance = 5.0f;
     int m_extrudePreviewBodyId = -1;
+    // The exact preview op we pushed — undo is VERIFIED against this so an
+    // outside history touch can never make the preview pop a committed step.
+    const Operation* m_extrudePreviewOp = nullptr;
     char m_extrudeInputBuf[32] = "5.0";
     bool m_extrudeInputFocus = true;
     // NewBody (default) or Subtract: Subtract cuts the extruded profile out of

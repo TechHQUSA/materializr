@@ -718,11 +718,20 @@ void Application::renderMenuBar() {
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false, m_history->canUndo())) {
+            // Disabled while a legacy preview is live: those previews
+            // undo/re-push their op per frame, and an outside undo pops the
+            // preview op so the preview's NEXT cycle pops the user's last
+            // COMMITTED op instead — which then gets erased for good when
+            // the preview pushes over the redo tail. (How "pull, confirm,
+            // pull the other way" ate the first body.)
+            const bool histLocked = anyInteractivePreviewActive();
+            if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+                                !histLocked && m_history->canUndo())) {
                 m_history->undo(*m_document);
                 m_meshesDirty = true;
             }
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false, m_history->canRedo())) {
+            if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+                                !histLocked && m_history->canRedo())) {
                 m_history->redo(*m_document);
                 m_meshesDirty = true;
             }
@@ -3501,6 +3510,7 @@ void Application::run() {
                 m_measureTool->renderPanel();
             }
 
+            m_historyPanel->setHistoryLocked(anyInteractivePreviewActive());
             if (m_historyPanel->render()) {
                 m_meshesDirty = true;
             }

@@ -18,6 +18,12 @@ public:
     void setDocument(Document* doc);
     void setEventBus(EventBus* bus) { m_eventBus = bus; }
 
+    // Lock history mutation (undo/redo buttons) while a live tool preview
+    // owns the top of the history — an outside undo during a preview pops
+    // the preview op, and the preview's next frame then pops the user's
+    // last COMMITTED step (which the following push erases for good).
+    void setHistoryLocked(bool locked) { m_historyLocked = locked; }
+
     // Render the panel. Returns true if history was modified (undo/redo/edit).
     bool render();
 
@@ -28,6 +34,7 @@ public:
 
 private:
     History* m_history = nullptr;
+    bool m_historyLocked = false;
     Document* m_document = nullptr;
     materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;

@@ -37,6 +37,11 @@ class Picker {
 public:
     Picker();
 
+    // Per-body diagnostic prints inside pick() — set for ONE call (the
+    // re-pick the click diagnostic runs), then cleared. Static so call
+    // sites need no plumbing.
+    static bool s_verbose;
+
     // Cast a ray from screen coordinates and find the nearest hit
     PickResult pick(float screenX, float screenY,
                     float viewportWidth, float viewportHeight,

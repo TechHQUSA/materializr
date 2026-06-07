@@ -3,6 +3,39 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.9.2] — 2026-06-07
+
+Fixes the dual-direction push/pull workflow end to end — pulling a sketch
+region both ways no longer produces bodies that look unselectable, and the
+interactive preview can no longer interfere with your committed work. Two
+deep bugs wearing one symptom:
+
+### Fixed
+
+- **Bodies pulled from the same sketch are now fully independent.** OCCT's
+  prism builder reuses the profile face as the prism's caps, so two pulls
+  from one region produced bodies literally sharing faces (with each other
+  and the sketch) — selections on them worked internally but the highlight
+  and face menus didn't respond, making faces look unclickable. Every
+  push/pull and extrude now builds from its own copy of the profile.
+- **The push/pull preview no longer touches the history at all.** The old
+  preview re-wrote the history stack every frame, which made body ids
+  churn, opened click-windows where the document was momentarily empty,
+  and — if anything else touched history mid-preview (the Edit menu, the
+  History panel) — could permanently erase the last committed step. The
+  preview now snapshots and restores directly, and commits exactly one
+  step. Undo/redo and the History panel are disabled while a preview is
+  live; viewport selection clicks are ignored during legacy previews.
+- **Selection depth cycling**: when a sketch region and a body face
+  overlap under the cursor, the nearest one is picked first and clicking
+  the same spot again selects the other — nothing is ever unreachable.
+
+### Internal
+
+- Click/pick/renderer-slot/mesh-failure diagnostics now log to stderr
+  (one line per click; detailed dumps only on misses) — field reports of
+  "can't click X" are now self-explanatory from the log.
+
 ## [0.9.1] — 2026-06-06
 
 Bugfix release — the first finds of the post-0.9.0 field-testing phase.

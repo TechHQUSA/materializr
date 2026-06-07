@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
@@ -96,16 +97,20 @@ bool ExtrudeOp::execute(Document& doc) {
             }
         }
 
+        // Own TShapes for this extrusion — same TShape-sharing hazard as
+        // PushPullOp (see comment there).
+        TopoDS_Shape ownProfile = BRepBuilderAPI_Copy(m_profile).Shape();
+
         if (m_direction == ExtrudeDirection::Symmetric) {
             double halfDist = m_distance / 2.0;
             gp_Vec vecUp = faceNormal * halfDist;
             gp_Vec vecDown = faceNormal * (-halfDist);
 
-            BRepPrimAPI_MakePrism prismUp(m_profile, vecUp);
+            BRepPrimAPI_MakePrism prismUp(ownProfile, vecUp);
             prismUp.Build();
             if (!prismUp.IsDone()) return false;
 
-            BRepPrimAPI_MakePrism prismDown(m_profile, vecDown);
+            BRepPrimAPI_MakePrism prismDown(ownProfile, vecDown);
             prismDown.Build();
             if (!prismDown.IsDone()) return false;
 
@@ -121,7 +126,7 @@ bool ExtrudeOp::execute(Document& doc) {
             } catch (...) { /* keep un-unified result */ }
         } else {
             gp_Vec direction = faceNormal * m_distance;
-            BRepPrimAPI_MakePrism prism(m_profile, direction);
+            BRepPrimAPI_MakePrism prism(ownProfile, direction);
             prism.Build();
             if (!prism.IsDone()) {
                 return false;

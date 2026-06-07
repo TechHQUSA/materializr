@@ -320,7 +320,7 @@ bool HistoryPanel::render() {
     // Bottom section: Undo/Redo + step counter
     ImGui::Separator();
 
-    ImGui::BeginDisabled(!m_history->canUndo());
+    ImGui::BeginDisabled(m_historyLocked || !m_history->canUndo());
     if (ImGui::Button("Undo")) {
         m_history->undo(*m_document);
         modified = true;
@@ -329,7 +329,7 @@ bool HistoryPanel::render() {
 
     ImGui::SameLine();
 
-    ImGui::BeginDisabled(!m_history->canRedo());
+    ImGui::BeginDisabled(m_historyLocked || !m_history->canRedo());
     if (ImGui::Button("Redo")) {
         m_history->redo(*m_document);
         modified = true;

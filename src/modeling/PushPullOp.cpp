@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepGProp_Face.hxx>
@@ -154,7 +155,15 @@ bool PushPullOp::execute(Document& doc) {
 
         TopoDS_Shape prism;
         try {
-            BRepPrimAPI_MakePrism mk(tgt.profile, prismVec);
+            // Deep-copy the profile so this prism gets its OWN TShapes.
+            // MakePrism INSTANCES the profile face as the prism's caps, so
+            // two pulls from the same cached region face produced bodies
+            // SHARING face TShapes (with each other AND the sketch region)
+            // — which scrambled every TShape-keyed subsystem (selection
+            // highlight, face context, hover): clicks selected correctly
+            // but looked dead.
+            TopoDS_Shape ownProfile = BRepBuilderAPI_Copy(tgt.profile).Shape();
+            BRepPrimAPI_MakePrism mk(ownProfile, prismVec);
             mk.Build();
             if (!mk.IsDone()) continue;
             prism = mk.Shape();
