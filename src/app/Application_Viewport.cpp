@@ -1978,8 +1978,9 @@ void Application::renderViewport() {
             if (m_pushPullActive && m_pushPullHasArrow && !camDragging &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
-                m_pushPullDistance += projectDragOntoNormal(m_pushPullOrigin, m_pushPullNormal,
-                                                            md, proj * view);
+                m_pushPullDistanceRaw += projectDragOntoNormal(
+                    m_pushPullOrigin, m_pushPullNormal, md, proj * view);
+                m_pushPullDistance = m_pushPullDistanceRaw; // snapped in updatePushPull
                 std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
                 updatePushPull();
             }
@@ -4006,12 +4007,14 @@ void Application::renderViewport() {
         if (ImGui::InputText("##ppdist", m_pushPullInputBuf, sizeof(m_pushPullInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             m_pushPullDistance = static_cast<float>(std::atof(m_pushPullInputBuf));
+            m_pushPullDistanceRaw = m_pushPullDistance;
             updatePushPull();
             commitPushPull();
         } else {
             float parsed = static_cast<float>(std::atof(m_pushPullInputBuf));
             if (std::abs(parsed - m_pushPullDistance) > 0.01f) {
                 m_pushPullDistance = parsed;
+                m_pushPullDistanceRaw = parsed;
                 updatePushPull();
             }
         }
@@ -4024,6 +4027,7 @@ void Application::renderViewport() {
         if (ImGui::SliderFloat("##ppslider", &m_pushPullDistance,
                                m_pushPullSymmetric ? 0.1f : -50.0f, 50.0f,
                                "%.1f mm")) {
+            m_pushPullDistanceRaw = m_pushPullDistance;
             std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
             updatePushPull();
         }

@@ -1065,6 +1065,7 @@ void Application::beginPushPull() {
     m_pushPullLiveOp.reset();
     m_pushPullPreviewApplied = false;
     m_pushPullSymmetric = false;
+    m_pushPullDistanceRaw = 0.0f;
 
     // Gather all selected SketchRegion entries AND body face selections.
     for (const auto& e : m_selection->getSelection()) {

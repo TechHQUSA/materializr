@@ -668,7 +668,7 @@ void Application::renderMenuBar() {
             if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
             if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
             if (ImGui::MenuItem("Save Project As...")) saveProject();
-            if (ImGui::MenuItem("Close Project")) closeProject();
+            if (ImGui::MenuItem("New Project")) closeProject();
             ImGui::Separator();
 
             // Build Import submenu from IOFormat contributions
@@ -3523,6 +3523,19 @@ void Application::run() {
                 m_meshesDirty = true;
             }
             m_statusBar->setSketchMode(m_inSketchMode);
+            // Project name = the save file's basename (no extension), or
+            // "New project" when unsaved.
+            {
+                std::string pn;
+                if (!m_currentProjectPath.empty()) {
+                    pn = m_currentProjectPath;
+                    auto slash = pn.find_last_of("/\\");
+                    if (slash != std::string::npos) pn = pn.substr(slash + 1);
+                    auto dot = pn.rfind(".materializr");
+                    if (dot != std::string::npos) pn = pn.substr(0, dot);
+                }
+                m_statusBar->setProjectName(pn);
+            }
             // Spline placement is the one tool that needs a keyboard step
             // to finish — without this hint it reads as "adds dots and
             // then nothing" (Steve, verbatim).

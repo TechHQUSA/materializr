@@ -347,6 +347,13 @@ private:
     bool m_pushPullPreviewApplied = false;
     bool m_pushPullSymmetric = false; // panel checkbox (plane-sketch targets)
     float m_pushPullDistance = 5.0f;
+    // Unsnapped drag accumulator. The grid snap in updatePushPull mutates
+    // m_pushPullDistance itself (so the readouts show the snapped value),
+    // which would erase sub-step drag motion every frame — a slow drag
+    // accumulated nothing, then a fast flick jumped a whole step. The drag
+    // adds into THIS instead, and m_pushPullDistance is derived + snapped
+    // from it. Typing/sliding a value re-bases the accumulator.
+    float m_pushPullDistanceRaw = 0.0f;
     char m_pushPullInputBuf[32] = "5.0";
     bool m_pushPullInputFocus = true;
     // Face arrow: drag along this normal to drive the distance (set from the first

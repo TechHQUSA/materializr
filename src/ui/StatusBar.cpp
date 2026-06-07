@@ -57,6 +57,12 @@ void StatusBar::render() {
             bodyCount = m_document->bodyCount();
         }
 
+        // Project name first — the thing people most want to confirm.
+        ImGui::Text("Project: %s",
+                    m_projectName.empty() ? "New project"
+                                          : m_projectName.c_str());
+        ImGui::SameLine(); ImGui::Text("|"); ImGui::SameLine();
+
         char bodiesText[64];
         std::snprintf(bodiesText, sizeof(bodiesText), "Bodies: %d", bodyCount);
         ImGui::Text("%s", bodiesText);

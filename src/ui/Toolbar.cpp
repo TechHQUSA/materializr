@@ -652,6 +652,11 @@ ToolAction Toolbar::renderSketchRegionTools() {
         action = ToolAction::PushPull;
     tip("Drag the arrow to extrude this region into a body, or cut it into the parent.");
 
+    if (ImGui::Button("Extrude From", ImVec2(-1, 30)))
+        action = ToolAction::ExtrudeSketch;
+    tip("Make a NEW body from this region (Ctrl+click several regions to "
+        "extrude them together). The source sketch/body is left unchanged.");
+
     // Subtract: cut this region out of the body the sketch sits on, with a red
     // preview of the removed volume. Disabled when the sketch has no source body.
     if (ImGui::Button("Subtract", ImVec2(-1, 30)))

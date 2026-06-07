@@ -15,6 +15,7 @@ public:
     void setCurrentTool(const std::string& tool);
     void setSketchMode(bool active);
     void setMessage(const std::string& msg); // transient status message
+    void setProjectName(const std::string& name) { m_projectName = name; }
 
     void render();
 
@@ -24,6 +25,7 @@ private:
     std::string m_currentTool = "Select";
     bool m_sketchMode = false;
     std::string m_message;
+    std::string m_projectName = "New project";
 };
 
 } // namespace materializr
