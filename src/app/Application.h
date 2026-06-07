@@ -345,6 +345,7 @@ private:
     // during the preview — see updatePushPull.
     std::unique_ptr<PushPullOp> m_pushPullLiveOp;
     bool m_pushPullPreviewApplied = false;
+    bool m_pushPullSymmetric = false; // panel checkbox (plane-sketch targets)
     float m_pushPullDistance = 5.0f;
     char m_pushPullInputBuf[32] = "5.0";
     bool m_pushPullInputFocus = true;

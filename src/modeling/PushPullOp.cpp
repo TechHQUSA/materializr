@@ -6,6 +6,7 @@
 
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepGProp_Face.hxx>
@@ -163,10 +164,26 @@ bool PushPullOp::execute(Document& doc) {
             // highlight, face context, hover): clicks selected correctly
             // but looked dead.
             TopoDS_Shape ownProfile = BRepBuilderAPI_Copy(tgt.profile).Shape();
+            if (m_symmetric) {
+                // One prism spanning BOTH sides: start the sweep a full
+                // |distance| behind the plane and sweep 2x forward.
+                gp_Trsf back;
+                back.SetTranslation(prismVec * -1.0);
+                ownProfile =
+                    BRepBuilderAPI_Transform(ownProfile, back).Shape();
+                prismVec *= 2.0;
+            }
             BRepPrimAPI_MakePrism mk(ownProfile, prismVec);
             mk.Build();
             if (!mk.IsDone()) continue;
-            prism = mk.Shape();
+            // Deep-copy the RESULT too: MakePrism instances the profile
+            // TShape as BOTH caps, so even with a copied profile the
+            // front and back cap of one prism share a face object — and
+            // the TShape-keyed selection highlight then draws the back
+            // cap's highlight on the front instance (invisible from
+            // behind: "selection doesn't register"). Copying the prism
+            // makes every face unique.
+            prism = BRepBuilderAPI_Copy(mk.Shape()).Shape();
         } catch (...) { continue; }
 
         if (tgt.sourceBodyId >= 0) {
@@ -271,8 +288,9 @@ std::string PushPullOp::serializeParams() const {
     // persistent topological naming to survive a reload.
     std::string blob;
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "dist=%.6f;count=%d",
-                  m_distance, static_cast<int>(m_targets.size()));
+    std::snprintf(buf, sizeof(buf), "dist=%.6f;sym=%d;count=%d",
+                  m_distance, m_symmetric ? 1 : 0,
+                  static_cast<int>(m_targets.size()));
     blob += buf;
     for (size_t i = 0; i < m_targets.size(); ++i) {
         int sk = (i < m_sketchSourceIds.size())     ? m_sketchSourceIds[i]     : -1;
@@ -314,6 +332,7 @@ bool PushPullOp::deserializeParams(const std::string& blob) {
         std::string key = blob.substr(pos, eq - pos);
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "dist")  { m_distance = std::atof(val.c_str()); any = true; }
+        else if (key == "sym")   { m_symmetric = std::atoi(val.c_str()) != 0; any = true; }
         else if (key == "count") { count = std::atoi(val.c_str()); any = true; }
         pos = end + 1;
     }

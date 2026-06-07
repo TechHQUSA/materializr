@@ -131,7 +131,9 @@ bool ExtrudeOp::execute(Document& doc) {
             if (!prism.IsDone()) {
                 return false;
             }
-            extrudedShape = prism.Shape();
+            // Result copy: see PushPullOp — prism caps share a TShape
+            // otherwise, ghosting the selection highlight.
+            extrudedShape = BRepBuilderAPI_Copy(prism.Shape()).Shape();
 
             // Apply draft angle to lateral faces if specified
             if (std::abs(m_draftAngle) > 0.01) {

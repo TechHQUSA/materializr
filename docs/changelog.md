@@ -3,6 +3,32 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.9.3] — 2026-06-07
+
+### Added
+
+- **Symmetric push/pull** — a checkbox in the push/pull panel (plane
+  sketches) sweeps the region the same distance to BOTH sides of the
+  sketch plane as a single body: no mid-plane seam edge, ever. The panel
+  shows the per-side distance and a live total-width readout; the slider
+  stays positive while symmetric. (Unioning two separately pulled halves
+  keeps a seam edge on curved walls — an upstream OCCT limitation, since
+  its face unifier only merges flat/elementary surfaces. Symmetric mode
+  sidesteps it by construction.)
+
+### Fixed
+
+- **Selection highlight on prism caps** — the geometry kernel reuses one
+  face object for both caps of a prism, and the highlight system drew the
+  back cap's selection on the front cap (invisible from behind), so back
+  faces seemed to ignore clicks. Every push/pull and extrude result now
+  carries fully independent faces.
+- **Thin and symmetric bodies no longer lose their caps to the sketch** —
+  when a body's surface sits within tolerance of its sketch plane, clicks
+  on the caps used to select the sketch region instead. Ties now go to
+  the face; the region (or anything else beneath) is one same-spot click
+  away via selection cycling.
+
 ## [0.9.2] — 2026-06-07
 
 Fixes the dual-direction push/pull workflow end to end — pulling a sketch

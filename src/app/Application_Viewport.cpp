@@ -2715,10 +2715,18 @@ void Application::renderViewport() {
                         // fixed, the original rule gets retried on honest
                         // evidence. Cycling remains purely as an escape
                         // hatch on deliberate same-spot re-clicks.
-                        const bool bodyClearlyNearer = bodyD < sketchD - tol;
+                        // Ties go to the FACE: a body whose surface sits
+                        // within tolerance of the sketch plane (thin or
+                        // symmetric pulls — the plane runs through the
+                        // body's middle) must not have its caps stolen by
+                        // the region. The region wins only when STRICTLY
+                        // nearer; everything demoted is one same-spot
+                        // click away via cycling.
+                        const bool regionStrictlyNearer =
+                            sketchD < bodyD - tol;
                         const bool pickRegion =
                             onHostFace || forced == 1 ||
-                            (forced == -1 && !bodyClearlyNearer);
+                            (forced == -1 && regionStrictlyNearer);
                         if (!pickRegion) {
                             regionHit.sketchId = -1;
                             regionHit.regionIndex = -1;
@@ -2798,9 +2806,10 @@ void Application::renderViewport() {
                             int forcedE = -1;
                             if (sameSpotE && m_pickCycleLast == 0) forcedE = 1;
                             else if (sameSpotE && m_pickCycleLast == 1) forcedE = 0;
-                            bool bodyClearlyNearerE = bodyD < sketchD - tol;
+                            bool sketchStrictlyNearerE =
+                                sketchD < bodyD - tol;
                             if (!(onHostFace || forcedE == 1 ||
-                                  (forcedE == -1 && !bodyClearlyNearerE)))
+                                  (forcedE == -1 && sketchStrictlyNearerE)))
                                 occluded = true;
                         }
                         if (!occluded) {
@@ -3985,7 +3994,8 @@ void Application::renderViewport() {
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text("Distance (mm) - signed");
+        ImGui::Text(m_pushPullSymmetric ? "Distance per side (mm)"
+                                        : "Distance (mm) - signed");
         ImGui::Separator();
 
         if (m_pushPullInputFocus) {
@@ -4009,9 +4019,39 @@ void Application::renderViewport() {
         ImGui::SameLine();
         ImGui::Text("mm");
 
-        if (ImGui::SliderFloat("##ppslider", &m_pushPullDistance, -50.0f, 50.0f, "%.1f mm")) {
+        // Symmetric sweeps both ways, so a negative distance is just the
+        // positive one — clamp the range to positive while ticked.
+        if (ImGui::SliderFloat("##ppslider", &m_pushPullDistance,
+                               m_pushPullSymmetric ? 0.1f : -50.0f, 50.0f,
+                               "%.1f mm")) {
             std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
             updatePushPull();
+        }
+
+        // Symmetric: one prism swept the distance to BOTH sides of the
+        // sketch plane (plane sketches only — on a body face it would
+        // push into and out of the body at once). Single body, no
+        // mid-plane seam.
+        {
+            bool allFree = !m_pushPullTargets.empty();
+            for (const auto& t : m_pushPullTargets)
+                if (t.sourceBodyId >= 0) { allFree = false; break; }
+            if (allFree &&
+                ImGui::Checkbox("Symmetric (both sides)",
+                                &m_pushPullSymmetric)) {
+                if (m_pushPullSymmetric && m_pushPullDistance < 0.1f) {
+                    m_pushPullDistance = std::abs(m_pushPullDistance);
+                    if (m_pushPullDistance < 0.1f) m_pushPullDistance = 0.1f;
+                    std::snprintf(m_pushPullInputBuf,
+                                  sizeof(m_pushPullInputBuf), "%.1f",
+                                  m_pushPullDistance);
+                }
+                updatePushPull();
+            }
+            if (allFree && m_pushPullSymmetric) {
+                ImGui::Text("Total width: %.1f mm",
+                            m_pushPullDistance * 2.0f);
+            }
         }
 
         ImGui::Spacing();

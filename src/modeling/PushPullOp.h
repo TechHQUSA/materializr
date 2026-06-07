@@ -18,6 +18,11 @@ public:
 
     void setTargets(std::vector<Target> targets);
     void setDistance(double d); // signed: positive = extrude, negative = cut
+    // Symmetric: sweep ±distance about the profile plane as ONE prism —
+    // both sides in a single body, no mid-plane seam (the fused-halves
+    // union keeps a seam edge on spline walls; OCCT can't unify those).
+    void setSymmetric(bool s) { m_symmetric = s; }
+    bool isSymmetric() const { return m_symmetric; }
 
     double getDistance() const { return m_distance; }
 
@@ -57,6 +62,7 @@ private:
 
     // Undo state
     std::vector<std::pair<int, TopoDS_Shape>> m_previousBodies; // sourceBody mutations
+    bool m_symmetric = false;
     std::vector<int> m_createdBodyIds;                          // NewBody additions
 
     // Persisted across undo so the next execute (redo) reinserts free-floating

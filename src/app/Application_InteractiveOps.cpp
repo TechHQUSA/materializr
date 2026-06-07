@@ -1064,6 +1064,7 @@ void Application::beginPushPull() {
     m_pushPullPreviousBodies.clear();
     m_pushPullLiveOp.reset();
     m_pushPullPreviewApplied = false;
+    m_pushPullSymmetric = false;
 
     // Gather all selected SketchRegion entries AND body face selections.
     for (const auto& e : m_selection->getSelection()) {
@@ -1251,6 +1252,7 @@ void Application::updatePushPull() {
     if (std::abs(m_pushPullDistance) > 1e-6) {
         m_pushPullLiveOp->setDistance(
             static_cast<double>(m_pushPullDistance));
+        m_pushPullLiveOp->setSymmetric(m_pushPullSymmetric);
         if (m_pushPullLiveOp->execute(*m_document))
             m_pushPullPreviewApplied = true;
     }
@@ -1285,6 +1287,7 @@ std::unique_ptr<PushPullOp> Application::makePushPullOpFromState() const {
     }
     op->setTargets(std::move(targets));
     op->setDistance(static_cast<double>(m_pushPullDistance));
+    op->setSymmetric(m_pushPullSymmetric);
     // Cascade plumbing: stamp the originating sketch+region on every target.
     // setTargets() above pre-sizes the source arrays to all -1, so this
     // upgrades them where we actually have a sketch source. Free-face
