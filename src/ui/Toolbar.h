@@ -17,6 +17,8 @@ enum class ToolAction {
     SketchSvg,
     FinishSketch, ExitSketchDiscard, EditSketch, ExtrudeSketch, SubtractSketch, PushPull, LookAtSketch,
     SketchCopy, SketchMirror, SketchLinearPattern, SketchRadialPattern,
+    // Cycle the drawing-inference level Full → Reduced → Off.
+    SketchCycleInference,
     // 3D tools that still need the old dispatch path. (Face extrude is owned by
     // ExtrudePlugin's toolbar button; the inline interactive extrude is reached
     // from sketch-extrude and the viewport context menu, not via a ToolAction.)
@@ -82,10 +84,10 @@ public:
         m_selCircles = circles;
         m_selArcs    = arcs;
     }
-    // Settings → Interface → Sketch helper. 0 = Inferences (no formal-
-    // constraints buttons in the toolbar), 1 = Constraints (buttons appear
-    // when sketch elements are selected, like Session 1's original UI).
-    void setSketchHelperMode(int mode) { m_sketchHelperMode = mode; }
+    // Live inference level shown on the sketch toolbar toggle. Int mirrors
+    // SketchTool::InferenceLevel (0=Full, 1=Reduced, 2=Off) to keep Toolbar
+    // free of a SketchTool.h dependency.
+    void setInferenceLevel(int lvl) { m_inferenceLevel = lvl; }
     // Most recent SketchSolver state: 0 = Fully, 1 = Under, 2 = Over (matches
     // the SketchState enum). Drives the small status badge at the top of the
     // sketch toolbar so the user knows whether the current constraint set is
@@ -115,7 +117,7 @@ private:
     int  m_selArcs = 0;          // sketch arcs currently selected
     int  m_sketchSolverState = -1; // -1=none, 0=Fully, 1=Under, 2=Over
     int  m_sketchSolverDof = 0;
-    int  m_sketchHelperMode = 0; // 0=Inferences, 1=Constraint buttons (see setSketchHelperMode)
+    int  m_inferenceLevel = 0; // 0=Full, 1=Reduced, 2=Off (see setInferenceLevel)
 
     ToolAction renderSketchTools();
     ToolAction renderSketchSelectedTools();

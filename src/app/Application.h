@@ -413,9 +413,6 @@ private:
     int   m_meshQuality = 1;        // tessellation density: 0=Low..3=Ultra
     float m_selectionLineWidth = 3.0f; // px width of highlighted edges/body outlines
     bool  m_showToolbarTooltips = true; // hover description on each toolbar button
-    // 0 = Inferences (draw-time ghost guides, default), 1 = Constraint buttons
-    // (formal-constraints toolbar section). See AppSettings::sketchHelperMode.
-    int   m_sketchHelperMode = 0;
     // Apply m_light*/m_msaaSamples/m_selectionLineWidth to the renderer + viewport.
     void applyRenderingSettings();
     // Map m_meshQuality to OCCT tessellation parameters.

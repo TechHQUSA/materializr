@@ -915,7 +915,6 @@ AppSettings Application::currentSettings() const {
     s.meshQuality = m_meshQuality;
     s.selectionLineWidth = m_selectionLineWidth;
     s.showToolbarTooltips = m_showToolbarTooltips;
-    s.sketchHelperMode = m_sketchHelperMode;
     s.autoOpenLastProject = m_autoOpenLastProject;
     s.lastProjectPath = m_currentProjectPath; // empty after closeProject()
     s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
@@ -949,7 +948,6 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_meshQuality = s.meshQuality;
     m_selectionLineWidth = s.selectionLineWidth;
     m_showToolbarTooltips = s.showToolbarTooltips;
-    m_sketchHelperMode = s.sketchHelperMode;
     m_autoOpenLastProject = s.autoOpenLastProject;
     m_checkForUpdatesOnLaunch = s.checkForUpdatesOnLaunch;
     m_snapToGrid = s.snapToGrid;
@@ -1369,6 +1367,15 @@ void Application::handleToolAction(int action) {
             break;
         case ToolAction::SketchRadialPattern:
             beginSketchPattern(PatternKind::Radial);
+            break;
+        case ToolAction::SketchCycleInference:
+            if (m_sketchTool) {
+                using IL = SketchTool::InferenceLevel;
+                IL next = m_sketchTool->getInferenceLevel() == IL::Full ? IL::Reduced
+                        : m_sketchTool->getInferenceLevel() == IL::Reduced ? IL::Off
+                                                                           : IL::Full;
+                m_sketchTool->setInferenceLevel(next);
+            }
             break;
 
         case ToolAction::ResetCamera: m_viewport->getCamera().reset(); break;
@@ -3379,7 +3386,11 @@ void Application::run() {
             m_toolbar->setCanEditDiameter(!m_resizeCylActive &&
                                           detectCylindricalResizeCandidate());
             m_toolbar->setShowTooltips(m_showToolbarTooltips);
-            m_toolbar->setSketchHelperMode(m_sketchHelperMode);
+            // Mirror the live inference level (Full/Reduced/Off) so the sketch
+            // toolbar button shows the current state. Int to keep Toolbar free
+            // of a SketchTool.h dependency (matches setActiveSketchMode).
+            m_toolbar->setInferenceLevel(m_inSketchMode && m_sketchTool
+                ? static_cast<int>(m_sketchTool->getInferenceLevel()) : 0);
             // Pass the active sketch tool mode so the matching button gets
             // a highlight border — disambiguates which tool is currently in
             // use (Line vs Circle vs etc.) when in sketch mode.

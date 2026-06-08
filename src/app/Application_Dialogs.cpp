@@ -164,31 +164,22 @@ void Application::renderSettings() {
                     ImGui::EndTabItem();
                 }
 
-                // ── Sketch helpers (constraints + tooltips) ───────────────
-                // Tucked into its own tab so the two "how much help do you
-                // want?" toggles live together rather than scattered under
-                // General. Default settings (Inferences + tooltips on) match
-                // what we ship; the toggles are for users who want to dial
-                // back the assist as they get fluent.
+                // ── Sketch helpers (tooltips) ─────────────────────────────
+                // Inference assistance now lives on a live Full/Reduced/Off
+                // toggle in the sketch toolbar (no longer a persisted setting);
+                // constraints are always on the right-click "Add Constraint"
+                // menu. This tab keeps the toolbar-tooltip toggle.
                 if (ImGui::BeginTabItem("Sketch")) {
-                    ImGui::SeparatorText("Drawing helper");
-                    ImGui::TextUnformatted("Sketch helper mode:");
-                    const char* helperLabels[] = { "Inferences (default)", "Constraint buttons" };
-                    if (ImGui::Combo("##sketchHelperMode", &m_sketchHelperMode,
-                                     helperLabels, IM_ARRAYSIZE(helperLabels))) {
-                        changed = true;
-                    }
+                    ImGui::SeparatorText("Drawing inferences");
                     ImGui::TextWrapped(
-                        m_sketchHelperMode == 0
-                            ? "Inferences: as you draw, coloured ghost guides show alignment "
-                              "(perpendicular to last line, even with another point, on midpoint, "
-                              "etc.) and the cursor snaps. Nothing is locked afterward — every "
-                              "placed point is free to drag. The right-click \"Add Constraint\" "
-                              "menu is still available if you want a parametric lock."
-                            : "Constraint buttons: when sketch elements are selected, a Constraints "
-                              "section appears in the toolbar with Horizontal / Vertical / Parallel "
-                              "/ etc. buttons. Applied constraints stay enforced on subsequent "
-                              "drags. Inferences and the right-click menu still work too.");
+                        "As you draw, coloured ghost guides show alignment "
+                        "(perpendicular, parallel, on-axis, on-midpoint, etc.) "
+                        "and the cursor snaps. The Full / Reduced / Off button "
+                        "in the sketch toolbar dials this live: Full adds "
+                        "hover-to-charge references (dwell on a point to align "
+                        "from it), Reduced is the classic guides, Off is grid + "
+                        "endpoint only. Constraints live on the sketch "
+                        "right-click \"Add Constraint\" menu.");
 
                     ImGui::Spacing();
                     ImGui::SeparatorText("Toolbar tooltips");

@@ -1284,6 +1284,12 @@ void Application::renderViewport() {
                         case InferenceGuide::TangentToCircle:
                             dashed = true;
                             break;
+                        case InferenceGuide::PerpToRef:
+                            // Hover-charged perpendicular ray — cyan to stand
+                            // apart from the chain-relative guides.
+                            dashed = true;
+                            col = IM_COL32(80, 220, 235, 255);
+                            break;
                     }
                     ImVec2 sa, sb;
                     if (!toImg(sk2w(g.from), sa)) continue;
@@ -1337,10 +1343,27 @@ void Application::renderViewport() {
                         // Marker at the reference point so the user can see
                         // which existing feature the guide is sourced from.
                         if (g.kind == InferenceGuide::AxisHFromPoint ||
-                            g.kind == InferenceGuide::AxisVFromPoint) {
+                            g.kind == InferenceGuide::AxisVFromPoint ||
+                            g.kind == InferenceGuide::PerpToRef) {
                             dl->AddCircleFilled(sa, 5.5f, halo);
                             dl->AddCircleFilled(sa, 4.0f, col);
                         }
+                    }
+                }
+
+                // Hover-charged reference: a cyan ring on the point the cursor
+                // dwelled on, so it's clear which point is feeding the guides.
+                {
+                    int charged = m_sketchTool->getChargedRefPoint();
+                    const SketchPoint* cp =
+                        (charged >= 0 && m_activeSketch)
+                            ? m_activeSketch->getPoint(charged) : nullptr;
+                    ImVec2 cs;
+                    if (cp && toImg(sk2w(cp->pos), cs)) {
+                        const ImU32 ring = IM_COL32(80, 220, 235, 235);
+                        dl->AddCircle(cs, 9.0f, halo, 0, 4.0f);
+                        dl->AddCircle(cs, 9.0f, ring, 0, 2.0f);
+                        dl->AddCircleFilled(cs, 2.5f, ring);
                     }
                 }
 
@@ -1413,6 +1436,7 @@ void Application::renderViewport() {
                             case InferenceGuide::AngleSnap:      return "Angle Snap (15°)";
                             case InferenceGuide::OnLineExtension: return "On Line Extension";
                             case InferenceGuide::TangentToCircle: return "Tangent to Circle";
+                            case InferenceGuide::PerpToRef:       return "Perpendicular from Point";
                         }
                         return "";
                     };
@@ -3776,7 +3800,13 @@ void Application::renderViewport() {
                         m_sketchDragBefore.reset();
                     }
                 }
-                if (!gizmoOwnsInput) m_sketchTool->onMouseMove(sketchCoord);
+                if (!gizmoOwnsInput) {
+                    // Drive the hover-to-charge dwell timer every frame (even
+                    // when the cursor is still) so a paused hover can charge a
+                    // reference point; then update the rubber-band snap.
+                    m_sketchTool->updateHoverCharge(ImGui::GetTime(), sketchCoord);
+                    m_sketchTool->onMouseMove(sketchCoord);
+                }
                 } // if (!patternPickingNow)
             }
         }

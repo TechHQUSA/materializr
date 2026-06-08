@@ -27,6 +27,7 @@ struct InferenceGuide {
         AngleSnap,         // cursor is on a 15° / 30° / 45° / etc. ray from the chain anchor → grey guide
         OnLineExtension,   // cursor is on the infinite extension of an existing line → lavender dashed guide
         TangentToCircle,   // cursor lies on the tangent line touching a circle/arc → orange dashed guide
+        PerpToRef,         // cursor is on the perpendicular ray through a hover-charged point → cyan guide
     };
     Kind kind;
     glm::vec2 from;    // ghost guide line start (sketch-space)
@@ -145,6 +146,24 @@ public:
     // inferences snap and the cursor lands at sub-grid precision.
     void setSnapToGridEnabled(bool b) { m_snapToGridEnabled = b; }
 
+    // How much drawing-time inference assistance to apply. Cycled live from the
+    // sketch toolbar (no longer a persisted setting). Full = every guide incl.
+    // hover-charged references; Reduced = lock-onto-existing-geometry snaps only
+    // (endpoint / midpoint / on-line / axis-from-point), no directional ray
+    // guides or dwell-charging; Off = grid + endpoint only.
+    enum class InferenceLevel { Full, Reduced, Off };
+    void setInferenceLevel(InferenceLevel lvl) { m_inferenceLevel = lvl; }
+    InferenceLevel getInferenceLevel() const { return m_inferenceLevel; }
+
+    // Hover-to-charge references (Full level only). Call once per frame during
+    // sketch placement with the current time and the sketch-space cursor. After
+    // the cursor dwells ~0.3 s on an existing point it becomes "charged" and
+    // projects axis + perpendicular guides anchored AT that point — until a
+    // different point charges or the placement ends. The renderer reads
+    // getChargedRefPoint() to draw the glow.
+    void updateHoverCharge(double tNow, glm::vec2 cursorSketchPos);
+    int  getChargedRefPoint() const { return m_chargedPointId; }
+
     // Current state for rendering preview
     bool hasPreview() const;
     glm::vec2 getPreviewStart() const;
@@ -167,6 +186,13 @@ private:
     SketchToolMode m_mode = SketchToolMode::None;
     Sketch* m_sketch = nullptr;
     SketchSolver* m_solver = nullptr;
+    InferenceLevel m_inferenceLevel = InferenceLevel::Full;
+    // Hover-charge state (see updateHoverCharge). m_chargedPointId is the
+    // active reference; the m_hover* fields track the in-progress dwell.
+    int    m_chargedPointId  = -1;
+    int    m_hoverCandidateId = -1;
+    double m_hoverProbeStart = 0.0;
+    glm::vec2 m_hoverProbePos{0.0f};
 
     // State for multi-click tools
     bool m_isPlacing = false;

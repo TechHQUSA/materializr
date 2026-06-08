@@ -297,56 +297,25 @@ ToolAction Toolbar::renderSketchTools() {
     if (ImGui::Button("Radial Pattern", ImVec2(-1, 28))) action = ToolAction::SketchRadialPattern;
     tip("Copy the selected sketch elements around an origin you specify.");
 
-    // Formal-constraint buttons only appear in "Constraint buttons" helper
-    // mode (Settings → Interface → Sketch helper). In default "Inferences"
-    // mode the constraints live exclusively in the sketch-viewport right-
-    // click menu so the panel stays uncluttered. Buttons are filtered by
-    // selection arity so the user only ever sees options that can apply.
-    if (m_sketchHelperMode == 1 &&
-        (m_selPoints > 0 || m_selLines > 0 ||
-         m_selCircles > 0 || m_selArcs > 0)) {
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Constraints");
-        ImGui::Separator();
-        if (m_selLines >= 1) {
-            if (ImGui::Button("Horizontal", ImVec2(-1, 24))) action = ToolAction::SketchConstrainHorizontal;
-            tip("Lock the selected line(s) horizontal.");
-            if (ImGui::Button("Vertical", ImVec2(-1, 24))) action = ToolAction::SketchConstrainVertical;
-            tip("Lock the selected line(s) vertical.");
-        }
-        if (m_selPoints >= 2) {
-            if (ImGui::Button("Coincident", ImVec2(-1, 24))) action = ToolAction::SketchConstrainCoincident;
-            tip("Make the selected points share the same position.");
-            if (ImGui::Button("Distance", ImVec2(-1, 24))) action = ToolAction::SketchDimDistance;
-            tip("Lock the distance between the points at its current value.");
-        }
-        if (m_selLines >= 2) {
-            if (ImGui::Button("Parallel", ImVec2(-1, 24))) action = ToolAction::SketchConstrainParallel;
-            tip("Lock the selected lines to stay parallel to the first one.");
-            if (ImGui::Button("Perpendicular", ImVec2(-1, 24))) action = ToolAction::SketchConstrainPerpendicular;
-            tip("Lock the selected lines perpendicular to the first one.");
-            if (ImGui::Button("Equal", ImVec2(-1, 24))) action = ToolAction::SketchConstrainEqual;
-            tip("Force the selected lines to share a common length.");
-            if (ImGui::Button("Angle", ImVec2(-1, 24))) action = ToolAction::SketchDimAngle;
-            tip("Lock the angle between the selected lines at its current value.");
-        }
-        if (m_selPoints >= 1) {
-            if (ImGui::Button("Fix Position", ImVec2(-1, 24))) action = ToolAction::SketchConstrainFixed;
-            tip("Pin the selected point(s) at their current position.");
-        }
-        int curves = m_selCircles + m_selArcs;
-        if (curves >= 1) {
-            if (ImGui::Button("Radius", ImVec2(-1, 24))) action = ToolAction::SketchDimRadius;
-            tip("Lock the radius of the selected circle(s)/arc(s) at its current value.");
-        }
-        if (curves >= 1 && m_selLines >= 1) {
-            if (ImGui::Button("Tangent", ImVec2(-1, 24))) action = ToolAction::SketchConstrainTangent;
-            tip("Make each selected curve tangent to each selected line.");
-        }
-        if (curves >= 2) {
-            if (ImGui::Button("Concentric", ImVec2(-1, 24))) action = ToolAction::SketchConstrainConcentric;
-            tip("Force the selected curves to share a centre with the first.");
-        }
+    // Drawing-inference level — a live Full → Reduced → Off toggle. Lets the
+    // user calm the ghost guides (and the hover-charged references) in a busy
+    // area without leaving the sketch. Constraints now live exclusively on the
+    // sketch-viewport right-click "Add Constraint" menu.
+    ImGui::Separator();
+    {
+        const char* lbl = m_inferenceLevel == 0 ? "Inferences: Full"
+                        : m_inferenceLevel == 1 ? "Inferences: Reduced"
+                                                : "Inferences: Off";
+        ImVec4 col = m_inferenceLevel == 0 ? ImVec4(0.20f, 0.45f, 0.65f, 1.0f)
+                   : m_inferenceLevel == 1 ? ImVec4(0.60f, 0.42f, 0.15f, 1.0f)
+                                           : ImVec4(0.34f, 0.34f, 0.34f, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Button, col);
+        if (ImGui::Button(lbl, ImVec2(-1, 26))) action = ToolAction::SketchCycleInference;
+        ImGui::PopStyleColor();
+        tip("How many drawing guides to show. Full = the classic guides PLUS "
+            "hover-to-charge references (dwell on a point to align from it). "
+            "Reduced = the classic guides only, no hover-charging. "
+            "Off = grid + endpoint only. Click to cycle.");
     }
 
     ImGui::Separator();

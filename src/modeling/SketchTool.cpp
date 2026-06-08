@@ -47,6 +47,9 @@ SketchToolMode SketchTool::getMode() const {
 void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
     if (!m_sketch) return;
     m_lastDownAddedToSel = addToSel;
+    // Placing a point ends this segment's charge — re-hover to charge again.
+    m_chargedPointId = -1;
+    m_hoverCandidateId = -1;
 
     // Trim picks by proximity to existing geometry; snapping the cursor first
     // would pull the click toward unrelated nearby points/edges and pick wrong.
@@ -446,10 +449,61 @@ glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
     return target;
 }
 
+void SketchTool::updateHoverCharge(double tNow, glm::vec2 cursor) {
+    // Only charge while actively placing a line at Full inference level.
+    if (!m_sketch || !m_isPlacing || m_mode != SketchToolMode::Line ||
+        m_inferenceLevel != InferenceLevel::Full) {
+        m_hoverCandidateId = -1;
+        m_chargedPointId = -1;
+        return;
+    }
+    // Nearest chargeable point within the hover band. The band is a touch wider
+    // than the endpoint-snap radius so you can charge a point by hovering near
+    // it without landing exactly on top of it.
+    const float band = std::max(0.4f, m_gridStep * 0.9f);
+    int   best = -1;
+    float bestD = band;
+    for (const auto& pt : m_sketch->getPoints()) {
+        if (pt.fromText) continue;
+        if (m_snapExcludePoints.count(pt.id)) continue;
+        float d = glm::length(cursor - pt.pos);
+        if (d < bestD) { bestD = d; best = pt.id; }
+    }
+    if (best < 0) {
+        // Not hovering any point — keep whatever is already charged (so the
+        // guide survives while you drag away to align against it).
+        m_hoverCandidateId = -1;
+        return;
+    }
+    // Dwell: the cursor must linger ~0.3 s on the same candidate (without
+    // wandering off it) before it charges.
+    const double dwell = 0.30;
+    const float  moveTol = std::max(0.3f, m_gridStep * 0.6f);
+    if (best == m_hoverCandidateId &&
+        glm::length(cursor - m_hoverProbePos) < moveTol) {
+        if (tNow - m_hoverProbeStart >= dwell) m_chargedPointId = best;
+    } else {
+        m_hoverCandidateId = best;
+        m_hoverProbeStart  = tNow;
+        m_hoverProbePos    = cursor;
+    }
+}
+
 glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // Fresh inference set every snap — the renderer treats this as "what's
     // active right now".
     m_activeInferences.clear();
+
+    // Inference-level gates (sketch toolbar Full/Reduced/Off):
+    //   Reduced == the classic inference set (everything below). Full adds the
+    //   hover-charged references on top. Off keeps only endpoint + grid.
+    //   allowSnaps       — midpoint / on-line snaps.
+    //   allowDirectional — perp/parallel-to-prev, angle, on-line-extension,
+    //                      tangent, axis-from-point. ON for both Full & Reduced.
+    //   allowCharge      — hover-to-charge references (Full only).
+    const bool allowSnaps       = (m_inferenceLevel != InferenceLevel::Off);
+    const bool allowDirectional = (m_inferenceLevel != InferenceLevel::Off);
+    const bool allowCharge      = (m_inferenceLevel == InferenceLevel::Full);
 
     // Point snap radius scales with grid step so it remains useful at 10 mm grids
     // and isn't overaggressive at 0.1 mm grids.
@@ -524,7 +578,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             const SketchPoint* p2 = m_sketch->getPoint(ln.endPointId);
             if (!p1 || !p2) continue;
             glm::vec2 mid = 0.5f * (p1->pos + p2->pos);
-            if (glm::length(pos - mid) < pointSnapThreshold) {
+            if (allowSnaps && glm::length(pos - mid) < pointSnapThreshold) {
                 m_activeInferences.push_back({InferenceGuide::Midpoint, mid, mid, ln.id});
                 return mid;
             }
@@ -532,7 +586,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // Face-reference line midpoints — same idea on the host face's edges.
         for (const auto& fl : m_sketch->getFaceReferences().lines) {
             glm::vec2 mid = 0.5f * (fl.first + fl.second);
-            if (glm::length(pos - mid) < pointSnapThreshold) {
+            if (allowSnaps && glm::length(pos - mid) < pointSnapThreshold) {
                 m_activeInferences.push_back({InferenceGuide::Midpoint, mid, mid, -1});
                 return mid;
             }
@@ -552,11 +606,11 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             float midA = startA + sweep * 0.5f;
             glm::vec2 mid = center->pos + glm::vec2(std::cos(midA), std::sin(midA))
                                             * static_cast<float>(a.radius);
-            if (glm::length(pos - mid) < pointSnapThreshold) return mid;
+            if (allowSnaps && glm::length(pos - mid) < pointSnapThreshold) return mid;
         }
         // Snap to host face centroid (if sketch was started on a face).
         glm::vec2 faceCenter;
-        if (m_sketch->getSourceFaceCentroid(faceCenter) &&
+        if (allowSnaps && m_sketch->getSourceFaceCentroid(faceCenter) &&
             glm::length(pos - faceCenter) < pointSnapThreshold) {
             return faceCenter;
         }
@@ -565,7 +619,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // existing line (excluding endpoints/midpoint, which are handled above).
         // Tighter threshold than endpoint snap so it doesn't drown out the
         // axis-from-point inferences below.
-        {
+        if (allowSnaps) {
             const float onLineThresh = pointSnapThreshold * 0.7f;
             const SketchLine* bestLn = nullptr;
             glm::vec2 bestProj{0.0f};
@@ -624,7 +678,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // new geometry with the direction of a diagonal line that doesn't
         // happen to have a point exactly where you want to draw. Renders as
         // a dashed guide from the original segment through the snapped cursor.
-        {
+        if (allowDirectional) {
             const float extThresh = pointSnapThreshold * 0.6f;
             const SketchLine* bestLn = nullptr;
             glm::vec2 bestProj{0.0f};
@@ -677,8 +731,11 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         glm::vec2 axisVPos{0.0f}, axisHPos{0.0f};
         int axisVRefId = -1, axisHRefId = -1;
         bool axisVFires = false, axisHFires = false;
-        float bestVDist = axisThresh;
-        float bestHDist = axisThresh;
+        // Axis-from-point only co-pilots the directional locks below, so it's
+        // gated with them: a negative seed threshold makes no candidate fire
+        // (dX/dY are ≥ 0) when directional inferences are off.
+        float bestVDist = allowDirectional ? axisThresh : -1.0f;
+        float bestHDist = allowDirectional ? axisThresh : -1.0f;
         // Includes the chain anchor itself — drawing a horizontal or vertical
         // line FROM the anchor is one of the most common cases, so the anchor's
         // axis must be a candidate, not a skipped one. Dragged points are
@@ -706,6 +763,52 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             }
         }
 
+        // Hover-charged reference (Full level): project guides anchored AT the
+        // point the user dwelled on — a vertical (x=ref.x), a horizontal
+        // (y=ref.y), and a perpendicular ray through ref for each line touching
+        // it. Lets you land a vertex "vertical from point A" / "perpendicular to
+        // line 1 through A", which the previous-segment perp/parallel can't
+        // express (it anchors at the current segment's start, not an arbitrary
+        // point). Deliberate (you hovered it), so it outranks perp-to-prev.
+        if (allowCharge && m_isPlacing && m_chargedPointId >= 0 &&
+            m_mode == SketchToolMode::Line) {
+            const SketchPoint* ref = m_sketch->getPoint(m_chargedPointId);
+            if (ref) {
+                const glm::vec2 R = ref->pos;
+                struct Cand { glm::vec2 dir; InferenceGuide::Kind kind; };
+                std::vector<Cand> cands;
+                cands.push_back({glm::vec2(0.0f, 1.0f), InferenceGuide::AxisVFromPoint});
+                cands.push_back({glm::vec2(1.0f, 0.0f), InferenceGuide::AxisHFromPoint});
+                for (const auto& ln : m_sketch->getLines()) {
+                    if (ln.fromText) continue;
+                    if (ln.startPointId != m_chargedPointId &&
+                        ln.endPointId   != m_chargedPointId) continue;
+                    const SketchPoint* p1 = m_sketch->getPoint(ln.startPointId);
+                    const SketchPoint* p2 = m_sketch->getPoint(ln.endPointId);
+                    if (!p1 || !p2) continue;
+                    glm::vec2 e = p2->pos - p1->pos;
+                    if (glm::length(e) < 1e-6f) continue;
+                    e = glm::normalize(e);
+                    cands.push_back({glm::vec2(-e.y, e.x), InferenceGuide::PerpToRef});
+                }
+                const float posCapRef = std::max(1.5f, m_gridStep * 1.5f);
+                float bestD = posCapRef;
+                glm::vec2 bestPos = pos;
+                InferenceGuide::Kind bestKind = InferenceGuide::PerpToRef;
+                bool fired = false;
+                for (const auto& c : cands) {
+                    float t = glm::dot(pos - R, c.dir);
+                    glm::vec2 proj = R + c.dir * t;
+                    float d = glm::length(proj - pos);
+                    if (d < bestD) { bestD = d; bestPos = proj; bestKind = c.kind; fired = true; }
+                }
+                if (fired) {
+                    m_activeInferences.push_back({bestKind, R, bestPos, m_chargedPointId});
+                    return rectifyNearAxis(bestPos);
+                }
+            }
+        }
+
         // Perpendicular / parallel to previous: when drawing a line chain and
         // we have a direction from the last committed segment, snap the
         // current direction to either perp or parallel when within ~5° of it.
@@ -713,7 +816,8 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         bool perpFires = false, parFires = false;
         glm::vec2 perpDir(0.0f), parDir(0.0f);
         glm::vec2 perpProj = pos, parProj = pos;
-        if (m_isPlacing && m_hasPrevLineDir && m_mode == SketchToolMode::Line) {
+        if (allowDirectional && m_isPlacing && m_hasPrevLineDir &&
+            m_mode == SketchToolMode::Line) {
             perpDir = glm::vec2(-m_prevLineDir.y, m_prevLineDir.x); // 90° rotate
             parDir  = m_prevLineDir;
             glm::vec2 v = pos - m_firstClick;
@@ -749,7 +853,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         bool tangentFires = false;
         glm::vec2 tangentDir(0.0f), tangentProj = pos;
         int tangentRefId = -1;
-        if (m_isPlacing && m_mode == SketchToolMode::Line) {
+        if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line) {
             glm::vec2 v = pos - m_firstClick;
             float len = glm::length(v);
             if (len > 0.5f) {
@@ -864,7 +968,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         // the angle and emit a grey guide so the user can see the lock.
         // Skipped when the perpendicular / parallel inferences already had a
         // chance — those are stronger semantic intents.
-        if (m_isPlacing && m_mode == SketchToolMode::Line) {
+        if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line) {
             glm::vec2 v = pos - m_firstClick;
             float len = glm::length(v);
             if (len > 0.5f) {
