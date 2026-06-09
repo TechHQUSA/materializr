@@ -7,6 +7,11 @@
 #include <TopoDS_Face.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
+#include <GProp_GProps.hxx>
+#include <BRepGProp.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <imgui.h>
@@ -70,6 +75,50 @@ bool FilletOp::execute(Document& doc) {
             return false;
         }
 
+        TopoDS_Shape candidate = fillet.Shape();
+
+        // OCCT's fillet API is permissive — IsDone() returns true even when
+        // the radius exceeds what the geometry can support, and the result
+        // is then a self-intersecting / overlapping mess instead of a clean
+        // refusal. Three cheap sanity checks reject those before the preview
+        // ever shows them:
+        //   • BRepCheck_Analyzer: per-shape topology check (catches some,
+        //     not all, of the garbled cases).
+        //   • Bounding box: a fillet must never GROW the bbox; if it did,
+        //     the result blew up past the input volume.
+        //   • Volume: must be > 0 (degenerate result) and ≤ input volume +
+        //     a small slop (a fillet shaves material, doesn't add).
+        // (Steve: filleting all 12 edges of a 20 mm cube at 15.8 mm produced
+        //  increasingly garbled output instead of failing.)
+        {
+            BRepCheck_Analyzer analyzer(candidate);
+            if (!analyzer.IsValid()) return false;
+
+            Bnd_Box bbIn, bbOut;
+            BRepBndLib::Add(m_previousShape, bbIn);
+            BRepBndLib::Add(candidate,       bbOut);
+            if (!bbIn.IsVoid() && !bbOut.IsVoid()) {
+                Standard_Real ix0, iy0, iz0, ix1, iy1, iz1;
+                Standard_Real ox0, oy0, oz0, ox1, oy1, oz1;
+                bbIn .Get(ix0, iy0, iz0, ix1, iy1, iz1);
+                bbOut.Get(ox0, oy0, oz0, ox1, oy1, oz1);
+                const double slop = 1.01; // 1% tolerance for fp noise
+                if (ox1 - ox0 > (ix1 - ix0) * slop ||
+                    oy1 - oy0 > (iy1 - iy0) * slop ||
+                    oz1 - oz0 > (iz1 - iz0) * slop) {
+                    return false;
+                }
+            }
+
+            GProp_GProps gpIn, gpOut;
+            BRepGProp::VolumeProperties(m_previousShape, gpIn);
+            BRepGProp::VolumeProperties(candidate,       gpOut);
+            if (gpOut.Mass() < 1e-6 ||
+                gpOut.Mass() > gpIn.Mass() * 1.01) {
+                return false;
+            }
+        }
+
         // Record the blend faces generated from each input edge so a later face
         // click can be traced back to this fillet for re-editing.
         m_generatedFaces.clear();
@@ -87,7 +136,7 @@ bool FilletOp::execute(Document& doc) {
 
         // Update the body with the filleted shape (kept on the op too, so
         // serializeParams can index the generated faces against the result).
-        m_resultShape = fillet.Shape();
+        m_resultShape = candidate;
         doc.updateBody(m_bodyId, m_resultShape);
         return true;
     } catch (...) {

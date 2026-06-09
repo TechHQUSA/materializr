@@ -3291,7 +3291,15 @@ void Application::renderViewport() {
                                     }
                                 }
                                 if (io.KeyCtrl) {
-                                    m_selection->addToSelection(entry);
+                                    // Toggle so a Ctrl+click on something
+                                    // already selected deselects just that
+                                    // one (matches the plane / axis paths
+                                    // above). Was addToSelection, which
+                                    // could only grow the set — making the
+                                    // user clear and re-pick to drop one
+                                    // item. (Steve: trackpad-mode multi-
+                                    // select had no way to drop a member.)
+                                    m_selection->toggleSelection(entry);
                                 } else {
                                     m_selection->select(entry);
                                 }
