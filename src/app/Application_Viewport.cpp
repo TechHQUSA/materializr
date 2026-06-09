@@ -19,6 +19,9 @@
 #include "viewport/SketchRenderer.h"
 #include "viewport/ViewCube.h"
 #include "viewport/Picker.h"
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include "viewport/Gizmo.h"
 #include "viewport/SelectionHighlight.h"
 #include "viewport/BoxSelect.h"
@@ -3199,48 +3202,108 @@ void Application::renderViewport() {
                             else            m_selection->select(entry);
                         } else if (result.hit) {
                             SelectionEntry entry;
-                            // If click is near an edge, select edge; otherwise face. The
-                            // 8 px threshold is clamped to ¼ of the face's on-screen size
-                            // so a small face (say 20 px wide) doesn't lose every interior
-                            // click to one of its own boundary edges (every interior pixel
-                            // is within 8 px of an edge when the face is itself only 16 px
-                            // across).
-                            float edgeThresh = std::min(8.0f, result.faceScreenSize * 0.25f);
-                            if (result.edgeScreenDist < edgeThresh && !result.nearestEdge.IsNull()) {
-                                entry.type = SelectionType::Edge;
-                                entry.bodyId = result.bodyId;
-                                entry.shape = result.nearestEdge;
+                            // Vertex pick takes priority over edge / face when the
+                            // cursor lands within ~8 px of a face corner AND is
+                            // closer to that corner than to the nearest edge.
+                            // Selection EXPANDS to every edge meeting at the
+                            // vertex, so a single click on a box corner picks all
+                            // three adjacent edges in one go — fillet/chamfer that
+                            // whole corner without re-picking. Threshold matches
+                            // the edge-vs-face one and is clamped to ¼ of the
+                            // face's on-screen size so tiny faces don't lose
+                            // every click to their own corner radius.
+                            // (Steve: "click a corner, highlight all immediate
+                            //  edges".)
+                            // Tighter than the edge threshold (8 px) and the
+                            // edge-distance comparison is dropped on purpose:
+                            // at a corner the picked face's incident edges
+                            // start AT the vertex, so their screen distance is
+                            // ~equal to the vertex's and the vertex would never
+                            // win otherwise. Giving the vertex its own 6 px
+                            // privileged window means "click within 6 px of a
+                            // corner = corner pick" and edge clicks have to
+                            // happen further from the endpoints.
+                            float vertexThresh = std::min(6.0f, result.faceScreenSize * 0.25f);
+                            bool vertexClickHandled = false;
+                            if (!result.nearestVertex.IsNull() &&
+                                result.vertexScreenDist < vertexThresh &&
+                                result.bodyId >= 0) {
+                                try {
+                                    const TopoDS_Shape& bodyShape =
+                                        m_document->getBody(result.bodyId);
+                                    TopTools_IndexedDataMapOfShapeListOfShape vMap;
+                                    TopExp::MapShapesAndAncestors(
+                                        bodyShape, TopAbs_VERTEX, TopAbs_EDGE, vMap);
+                                    if (vMap.Contains(result.nearestVertex)) {
+                                        const TopTools_ListOfShape& edges =
+                                            vMap.FindFromKey(result.nearestVertex);
+                                        if (!edges.IsEmpty()) {
+                                            if (!io.KeyCtrl) m_selection->clear();
+                                            for (const TopoDS_Shape& e : edges) {
+                                                SelectionEntry ee;
+                                                ee.type = SelectionType::Edge;
+                                                ee.bodyId = result.bodyId;
+                                                ee.shape = e;
+                                                m_selection->addToSelection(ee);
+                                            }
+                                            vertexClickHandled = true;
+                                        }
+                                    }
+                                } catch (...) {}
+                            }
+                            if (vertexClickHandled) {
+                                // Corner expansion already populated the selection;
+                                // skip the edge-vs-face fallback below. Reset
+                                // pick-cycle so the next click at the SAME spot
+                                // is a fresh pick rather than "give me the next
+                                // candidate at this position".
+                                ImVec2 mp2 = ImGui::GetMousePos();
+                                m_pickCyclePos = glm::vec2(mp2.x, mp2.y);
+                                m_pickCycleLast = -1;
                             } else {
-                                entry.type = SelectionType::Face;
-                                entry.bodyId = result.bodyId;
-                                entry.subShapeIndex = result.faceIndex;
-                                entry.shape = result.pickedShape;
-                                // Trace a clicked face back to the fillet/chamfer that
-                                // produced it, so the user can re-edit it after the fact.
-                                if (!entry.shape.IsNull()) {
-                                    int upTo = m_history->currentStep();
-                                    for (int s = 0; s <= upTo; ++s) {
-                                        const Operation* op = m_history->getStep(s);
-                                        if (op && op->isEnabled() && op->ownsFace(entry.shape)) {
-                                            ownerStep = s;
-                                            break;
+                                // If click is near an edge, select edge; otherwise face. The
+                                // 8 px threshold is clamped to ¼ of the face's on-screen size
+                                // so a small face (say 20 px wide) doesn't lose every interior
+                                // click to one of its own boundary edges (every interior pixel
+                                // is within 8 px of an edge when the face is itself only 16 px
+                                // across).
+                                float edgeThresh = std::min(8.0f, result.faceScreenSize * 0.25f);
+                                if (result.edgeScreenDist < edgeThresh && !result.nearestEdge.IsNull()) {
+                                    entry.type = SelectionType::Edge;
+                                    entry.bodyId = result.bodyId;
+                                    entry.shape = result.nearestEdge;
+                                } else {
+                                    entry.type = SelectionType::Face;
+                                    entry.bodyId = result.bodyId;
+                                    entry.subShapeIndex = result.faceIndex;
+                                    entry.shape = result.pickedShape;
+                                    // Trace a clicked face back to the fillet/chamfer that
+                                    // produced it, so the user can re-edit it after the fact.
+                                    if (!entry.shape.IsNull()) {
+                                        int upTo = m_history->currentStep();
+                                        for (int s = 0; s <= upTo; ++s) {
+                                            const Operation* op = m_history->getStep(s);
+                                            if (op && op->isEnabled() && op->ownsFace(entry.shape)) {
+                                                ownerStep = s;
+                                                break;
+                                            }
                                         }
                                     }
                                 }
+                                if (io.KeyCtrl) {
+                                    m_selection->addToSelection(entry);
+                                } else {
+                                    m_selection->select(entry);
+                                }
+                                // Click-cycling: a face was picked here; the
+                                // next click at the SAME spot offers the
+                                // covered sketch region instead (if any).
+                                {
+                                    ImVec2 mp2 = ImGui::GetMousePos();
+                                    m_pickCyclePos = glm::vec2(mp2.x, mp2.y);
+                                }
+                                m_pickCycleLast = 0; // face picked; same-spot → region
                             }
-                            if (io.KeyCtrl) {
-                                m_selection->addToSelection(entry);
-                            } else {
-                                m_selection->select(entry);
-                            }
-                            // Click-cycling: a face was picked here; the
-                            // next click at the SAME spot offers the
-                            // covered sketch region instead (if any).
-                            {
-                                ImVec2 mp2 = ImGui::GetMousePos();
-                                m_pickCyclePos = glm::vec2(mp2.x, mp2.y);
-                            }
-                            m_pickCycleLast = 0; // face picked; same-spot → region
                         } else {
                             // Empty-space click: begin a box-select drag instead of
                             // clearing immediately. The release handler below decides

@@ -24,6 +24,13 @@ struct PickResult {
     TopoDS_Shape pickedShape;    // the picked face
     TopoDS_Shape nearestEdge;    // closest edge to hit point (if any)
     float edgeScreenDist = 1e6f; // screen distance to nearest edge in pixels
+    // Closest vertex of the picked face to the cursor in screen pixels.
+    // The viewport input handler uses this to expand a corner click into a
+    // multi-edge selection (all edges meeting at that vertex), so the user
+    // can fillet/chamfer a whole corner in one click. Empty when nothing
+    // was hit.
+    TopoDS_Shape nearestVertex;
+    float vertexScreenDist = 1e6f;
     // Min(width, height) of the picked face's projected bbox in screen pixels.
     // The face-vs-edge classifier scales the edge-promotion threshold by this
     // so a small face on screen doesn't have every interior pixel "near" some

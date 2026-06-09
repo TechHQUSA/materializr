@@ -375,9 +375,13 @@ PickResult Picker::pick(float screenX, float screenY,
             // Project the face's vertices to screen space and take the
             // bbox's shorter side. Callers use this to clamp the edge-
             // promotion threshold so a small on-screen face doesn't lose
-            // every interior click to one of its own boundary edges.
+            // every interior click to one of its own boundary edges. The
+            // same loop also tracks the closest vertex to the cursor so a
+            // corner click can be expanded into a multi-edge selection
+            // upstream.
             float sMinX = 1e9f, sMinY = 1e9f, sMaxX = -1e9f, sMaxY = -1e9f;
             int sN = 0;
+            float bestVertexD2 = 1e18f;
             glm::mat4 svp = camera.getProjectionMatrix() * camera.getViewMatrix();
             for (TopExp_Explorer vex(faceShape, TopAbs_VERTEX); vex.More(); vex.Next()) {
                 gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vex.Current()));
@@ -388,6 +392,13 @@ PickResult Picker::pick(float screenX, float screenY,
                 sMinX = std::min(sMinX, sx); sMaxX = std::max(sMaxX, sx);
                 sMinY = std::min(sMinY, sy); sMaxY = std::max(sMaxY, sy);
                 ++sN;
+                float dx = sx - screenX, dy = sy - screenY;
+                float d2 = dx * dx + dy * dy;
+                if (d2 < bestVertexD2) {
+                    bestVertexD2 = d2;
+                    result.nearestVertex = vex.Current();
+                    result.vertexScreenDist = std::sqrt(d2);
+                }
             }
             if (sN > 0) {
                 result.faceScreenSize = std::min(sMaxX - sMinX, sMaxY - sMinY);
