@@ -348,6 +348,49 @@ void Sketch::removeElement(int id) {
         m_points.end());
 }
 
+int Sketch::pruneOrphanPoints() {
+    // Every point id still referenced by some geometry element.
+    std::unordered_set<int> used;
+    for (const auto& l : m_lines) { used.insert(l.startPointId); used.insert(l.endPointId); }
+    for (const auto& c : m_circles) used.insert(c.centerPointId);
+    for (const auto& a : m_arcs) {
+        used.insert(a.centerPointId); used.insert(a.startPointId); used.insert(a.endPointId);
+    }
+    for (const auto& s : m_splines)
+        for (int id : s.controlPointIds) used.insert(id);
+    for (const auto& g : m_polygons) {
+        used.insert(g.centerPointId);
+        for (int id : g.vertexPointIds) used.insert(id);
+    }
+
+    // Drop points referenced by nothing (a deleted line's stranded endpoints).
+    size_t before = m_points.size();
+    m_points.erase(
+        std::remove_if(m_points.begin(), m_points.end(),
+            [&](const SketchPoint& p) { return used.find(p.id) == used.end(); }),
+        m_points.end());
+    int pruned = static_cast<int>(before - m_points.size());
+
+    // Drop constraints whose referenced entity (a point or an element) no longer
+    // exists — deleting geometry would otherwise leave the solver chasing ghosts.
+    std::unordered_set<int> valid;
+    for (const auto& p : m_points)   valid.insert(p.id);
+    for (const auto& l : m_lines)    valid.insert(l.id);
+    for (const auto& c : m_circles)  valid.insert(c.id);
+    for (const auto& a : m_arcs)     valid.insert(a.id);
+    for (const auto& s : m_splines)  valid.insert(s.id);
+    for (const auto& g : m_polygons) valid.insert(g.id);
+    m_constraints.erase(
+        std::remove_if(m_constraints.begin(), m_constraints.end(),
+            [&](const Constraint& k) {
+                return (k.entityA >= 0 && valid.find(k.entityA) == valid.end()) ||
+                       (k.entityB >= 0 && valid.find(k.entityB) == valid.end());
+            }),
+        m_constraints.end());
+
+    return pruned;
+}
+
 void Sketch::clear() {
     m_points.clear();
     m_lines.clear();

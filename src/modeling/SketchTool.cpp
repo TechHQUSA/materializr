@@ -2256,6 +2256,9 @@ void SketchTool::handleTrimTool(glm::vec2 pos) {
     TrimAction a = planTrim(*m_sketch, pos, threshold);
     if (!a.valid()) return;
     applyTrim(*m_sketch, a);
+    // Trimming away a whole element (or an end segment) strands the original
+    // endpoints — sweep them up so no orphan vertices remain.
+    m_sketch->pruneOrphanPoints();
     m_trimHoverPoints.clear(); // stale after mutation; recomputed on next move
 }
 

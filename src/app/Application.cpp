@@ -1590,7 +1590,12 @@ void Application::handleShortcuts() {
             // Ctrl+Z then undoes committed elements as usual.
             if (m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing()) {
                 m_sketchTool->onCancel();
-            } else if (m_history->canUndo()) {
+            } else if (m_history->canUndo() &&
+                       // In sketch mode, NEVER undo past the sketch's own edits
+                       // into the host body — rolling the body back while the
+                       // sketch is live (and rendering against it) crashed.
+                       (!m_inSketchMode ||
+                        m_history->currentStep() > m_sketchEntryHistoryStep)) {
                 m_history->undo(*m_document);
                 // In sketch mode, the host face is the anchor for the whole
                 // sketch session — clearing the selection would drop its blue
@@ -1600,6 +1605,12 @@ void Application::handleShortcuts() {
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
+                } else if (m_activeSketch) {
+                    // Undoing a line restores the state to just its first-click
+                    // anchor (added before the line's history step) — a stray
+                    // point. Sweep any such orphan so undo leaves no dangling
+                    // vertex.
+                    m_activeSketch->pruneOrphanPoints();
                 }
                 m_meshesDirty = true;
             }
@@ -1938,6 +1949,10 @@ void Application::handleShortcuts() {
                 recordSketchMutation([&]{
                     for (int lid : lns) m_activeSketch->removeElement(lid);
                     for (int pid : pts) m_activeSketch->removeElement(pid);
+                    // Deleting a line leaves its two endpoints behind (they
+                    // weren't in the selection) — sweep up the now-unreferenced
+                    // points so no orphan vertices linger.
+                    m_activeSketch->pruneOrphanPoints();
                 });
                 m_sketchTool->clearElementSelection();
                 markDirty();
@@ -3439,12 +3454,18 @@ void Application::restoreSketchDraftNow() {
         materializr::clearSketchDraft();
         return;
     }
-    // Re-enter sketch mode on the draft's plane, then graft the geometry in.
+    // Re-enter sketch mode on the draft's plane (empty sketch; sets the undo
+    // boundary here), then graft the geometry in AS A RECORDED MUTATION so the
+    // restore is one undoable history step. Without this the restored geometry
+    // had no history behind it, so Ctrl+Z couldn't touch it (the per-stroke
+    // history from before the crash isn't in the draft — only the final shape).
     // (Face sketches re-bind their host face at Finish via ensureSketchSourceFace;
     // here we just restore the drawing on its plane so no work is lost.)
     enterSketchOnPlane(draft.getPlane());
-    *m_activeSketch = draft;                 // copy geometry + ids + constraints
-    m_activeSketch->setSourceBody(meta.sourceBodyId);
+    recordSketchMutation([&]{
+        *m_activeSketch = draft;             // copy geometry + ids + constraints
+        m_activeSketch->setSourceBody(meta.sourceBodyId);
+    });
     m_sketchSolver->setSketch(m_activeSketch.get());
     m_sketchTool->setSketch(m_activeSketch.get());
     alignCameraToActiveSketch();

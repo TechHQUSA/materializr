@@ -111,6 +111,12 @@ public:
 
     // Element removal
     void removeElement(int id);
+    // Remove points that no geometry references any more (e.g. a line's two
+    // endpoints after the line itself is deleted), plus any constraint left
+    // dangling by the removal. Returns the number of orphan points pruned.
+    // Call after deleting elements; removeElement deliberately does NOT prune
+    // (some callers remove a point by id directly).
+    int pruneOrphanPoints();
     void clear();
 
     // Convert closed profiles to OCCT wires for extrusion
