@@ -51,6 +51,9 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <gp_Cylinder.hxx>
@@ -77,6 +80,57 @@
 namespace materializr {
 
 // ─── Fillet / Chamfer interactive ───────────────────────────────────────────
+
+void Application::computeEdgeOpFaceDirs() {
+    // The two faces meeting at the first edge each get one chamfer setback.
+    // For the drag arrows we want a direction lying in each face, perpendicular
+    // to the edge, pointing away from the edge into the face. Approximate "into
+    // the face" as the perp-to-edge component of (face centroid − edge mid) —
+    // robust without surface-normal evaluation, and good enough for a handle.
+    m_edgeOpHasFaceDirs = false;
+    m_edgeOpCanTwoDist = false;
+    if (m_edgeOpEdges.empty() || m_edgeOpPreviousShape.IsNull()) return;
+    try {
+        std::vector<TopoDS_Edge> typedEdges;
+        for (const auto& e : m_edgeOpEdges) typedEdges.push_back(TopoDS::Edge(e));
+
+        // Distance-1 reference face must match ChamferOp::execute. For a single
+        // edge that's one of its two faces; for multiple edges it's the face
+        // they ALL share (a planar edge loop). No shared face → no two-distance.
+        TopoDS_Face faceA =
+            ChamferOp::sharedReferenceFace(m_edgeOpPreviousShape, typedEdges);
+        if (faceA.IsNull()) return;
+
+        // Face B = the other face adjacent to the first edge (the one that
+        // isn't the shared/A face).
+        TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+        TopExp::MapShapesAndAncestors(m_edgeOpPreviousShape, TopAbs_EDGE,
+                                      TopAbs_FACE, edgeFaceMap);
+        TopoDS_Edge e0 = typedEdges.front();
+        if (!edgeFaceMap.Contains(e0)) return;
+        TopoDS_Shape faceB;
+        for (const TopoDS_Shape& f : edgeFaceMap.FindFromKey(e0))
+            if (!f.IsSame(faceA)) { faceB = f; break; }
+        if (faceB.IsNull()) return;
+
+        auto inFaceDir = [&](const TopoDS_Shape& f) -> glm::vec3 {
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(f, props);
+            gp_Pnt cm = props.CentreOfMass();
+            glm::vec3 c(cm.X(), cm.Y(), cm.Z());
+            glm::vec3 d = c - m_edgeOpMid;
+            d -= glm::dot(d, m_edgeOpDir) * m_edgeOpDir; // perpendicular to edge
+            return (glm::length(d) > 1e-6f) ? glm::normalize(d) : m_edgeOpOutDir;
+        };
+        m_edgeOpFaceDirA = inFaceDir(faceA);
+        m_edgeOpFaceDirB = inFaceDir(faceB);
+        m_edgeOpHasFaceDirs = true;
+        m_edgeOpCanTwoDist = true;
+    } catch (...) {
+        m_edgeOpHasFaceDirs = false;
+        m_edgeOpCanTwoDist = false;
+    }
+}
 
 void Application::beginInteractiveEdgeOp(EdgeOpType type) {
     const auto& sel = m_selection->getSelection();
@@ -127,6 +181,15 @@ void Application::beginInteractiveEdgeOp(EdgeOpType type) {
         }
     } catch (...) {}
 
+    // Two-distance chamfer: default symmetric; the panel toggles it on. Only
+    // offered for a chamfer on a single edge for now.
+    m_edgeOpTwoDist = false;
+    m_edgeOpValue2 = 0.0f;
+    m_edgeOpGrab = -1;
+    std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2), "%.1f", m_edgeOpValue2);
+    if (type == EdgeOpType::Chamfer) computeEdgeOpFaceDirs();
+    else m_edgeOpHasFaceDirs = false;
+
     m_edgeOpEditingIndex = -1; // creating new
     updateInteractiveEdgeOp();
 }
@@ -158,6 +221,9 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
         m_edgeOpBodyId = chamferOp->getBodyId();
         for (const auto& e : chamferOp->getEdges()) m_edgeOpEdges.push_back(e);
         m_edgeOpValue = static_cast<float>(chamferOp->getDistance());
+        m_edgeOpTwoDist = chamferOp->isAsymmetric();
+        m_edgeOpValue2 = m_edgeOpTwoDist
+            ? static_cast<float>(chamferOp->getDistance2()) : m_edgeOpValue;
         m_edgeOpPreviousShape = chamferOp->getPreviousShape();
     }
     if (m_edgeOpBodyId < 0 || m_edgeOpEdges.empty() ||
@@ -166,6 +232,7 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
     m_edgeOpActive        = true;
     m_edgeOpEditingIndex  = historyIndex;
     m_edgeOpOrigValue     = m_edgeOpValue; // restored on cancel
+    m_edgeOpOrigValue2    = m_edgeOpValue2;
     std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
     m_edgeOpInputFocus    = true;
 
@@ -192,6 +259,11 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
         }
     } catch (...) {}
 
+    m_edgeOpGrab = -1;
+    std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2), "%.1f", m_edgeOpValue2);
+    if (m_edgeOpType == EdgeOpType::Chamfer) computeEdgeOpFaceDirs();
+    else m_edgeOpHasFaceDirs = false;
+
     // Clear the face selection so the gizmo / overlay rendering doesn't fight
     // a stale "Face Operations" panel while editing.
     m_selection->clear();
@@ -200,14 +272,17 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
 
 namespace {
 // Write the previewed radius/distance into the history op being re-edited.
-void setEdgeOpParam(const Operation* opRaw, bool isFillet, float v) {
+// v2 > 0 sets an asymmetric chamfer's second distance; v2 <= 0 = symmetric.
+void setEdgeOpParam(const Operation* opRaw, bool isFillet, float v, float v2 = -1.0f) {
     if (!opRaw) return;
     if (isFillet) {
         if (auto* op = const_cast<FilletOp*>(dynamic_cast<const FilletOp*>(opRaw)))
             op->setRadius(static_cast<double>(v));
     } else {
-        if (auto* op = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(opRaw)))
+        if (auto* op = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(opRaw))) {
             op->setDistance(static_cast<double>(v));
+            op->setDistance2(static_cast<double>(v2));
+        }
     }
 }
 } // namespace
@@ -224,7 +299,8 @@ void Application::updateInteractiveEdgeOp() {
         if (m_edgeOpValue < 0.01f) return; // don't preview "remove" mid-drag
         setEdgeOpParam(m_history->getStep(m_edgeOpEditingIndex),
                        m_edgeOpType == EdgeOpType::Fillet,
-                       m_edgeOpValue);
+                       m_edgeOpValue,
+                       m_edgeOpTwoDist ? m_edgeOpValue2 : -1.0f);
         m_history->editStep(m_edgeOpEditingIndex, *m_document);
         m_meshesDirty = true;
         return;
@@ -257,6 +333,7 @@ void Application::updateInteractiveEdgeOp() {
             for (const auto& e : m_edgeOpEdges) typedEdges.push_back(TopoDS::Edge(e));
             op->setEdges(typedEdges);
             op->setDistance(static_cast<double>(m_edgeOpValue));
+            if (m_edgeOpTwoDist) op->setDistance2(static_cast<double>(m_edgeOpValue2));
             if (op->execute(*m_document)) {
                 m_meshesDirty = true;
             } else {
@@ -284,7 +361,8 @@ void Application::commitInteractiveEdgeOp() {
         if (m_edgeOpEditingIndex >= 0) {
             setEdgeOpParam(m_history->getStep(m_edgeOpEditingIndex),
                            m_edgeOpType == EdgeOpType::Fillet,
-                           m_edgeOpOrigValue);
+                           m_edgeOpOrigValue,
+                           m_edgeOpTwoDist ? m_edgeOpOrigValue2 : -1.0f);
             m_history->editStep(m_edgeOpEditingIndex, *m_document);
         }
         m_edgeOpActive = false;
@@ -301,7 +379,8 @@ void Application::commitInteractiveEdgeOp() {
         // downstream ops (cuts, fillets stacked on this one, …) recompute too.
         setEdgeOpParam(m_history->getStep(m_edgeOpEditingIndex),
                        m_edgeOpType == EdgeOpType::Fillet,
-                       m_edgeOpValue);
+                       m_edgeOpValue,
+                       m_edgeOpTwoDist ? m_edgeOpValue2 : -1.0f);
         m_history->editStep(m_edgeOpEditingIndex, *m_document);
         std::fprintf(stdout, "%s edited to %.1f mm\n",
                      m_edgeOpType == EdgeOpType::Fillet ? "Fillet" : "Chamfer",
@@ -321,6 +400,7 @@ void Application::commitInteractiveEdgeOp() {
         for (const auto& e : m_edgeOpEdges) typedEdges.push_back(TopoDS::Edge(e));
         op->setEdges(typedEdges);
         op->setDistance(static_cast<double>(m_edgeOpValue));
+        if (m_edgeOpTwoDist) op->setDistance2(static_cast<double>(m_edgeOpValue2));
         m_history->pushOperation(std::move(op), *m_document);
     }
 
@@ -346,7 +426,8 @@ void Application::cancelInteractiveEdgeOp() {
         // downstream ops) returns.
         setEdgeOpParam(m_history->getStep(m_edgeOpEditingIndex),
                        m_edgeOpType == EdgeOpType::Fillet,
-                       m_edgeOpOrigValue);
+                       m_edgeOpOrigValue,
+                       m_edgeOpTwoDist ? m_edgeOpOrigValue2 : -1.0f);
         m_history->editStep(m_edgeOpEditingIndex, *m_document);
     } else if (m_edgeOpBodyId >= 0 && !m_edgeOpPreviousShape.IsNull()) {
         m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);

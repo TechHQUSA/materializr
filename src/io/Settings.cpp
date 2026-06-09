@@ -74,6 +74,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readFloat(kv, "sketchGridStep",      s.sketchGridStep);
     readInt (kv, "inferenceLevel",       s.inferenceLevel);
     readBool(kv, "showInferenceToolbarToggle", s.showInferenceToolbarToggle);
+    readInt (kv, "angleSnapDeg",         s.angleSnapDeg);
 }
 
 // Make sure the parent directory of `path` exists. Best-effort: a failure here
@@ -229,6 +230,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "inferenceLevel = "          << s.inferenceLevel      << "\n";
     ofs << "showInferenceToolbarToggle = "
         << (s.showInferenceToolbarToggle ? "true" : "false") << "\n";
+    ofs << "angleSnapDeg = "             << s.angleSnapDeg        << "\n";
 
     return ofs.good();
 }
@@ -266,7 +268,8 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"sketchGridStep\": "          << s.sketchGridStep        << ",\n";
     ofs << "  \"inferenceLevel\": "          << s.inferenceLevel        << ",\n";
     ofs << "  \"showInferenceToolbarToggle\": "
-        << b(s.showInferenceToolbarToggle) << "\n";
+        << b(s.showInferenceToolbarToggle) << ",\n";
+    ofs << "  \"angleSnapDeg\": "             << s.angleSnapDeg          << "\n";
     ofs << "}\n";
 
     return ofs.good();

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <iosfwd>
 #include <TopoDS_Shape.hxx>
 
 class Document;
@@ -10,6 +11,7 @@ class History;
 
 namespace materializr {
 class SketchEditOp;
+class Sketch;
 }
 
 namespace materializr {
@@ -68,6 +70,15 @@ public:
     // the caller falls back to a ReplayOp for that step).
     static std::unique_ptr<SketchEditOp> rehydrateSketchEditOp(
         const std::string& paramsBlob, Document& doc);
+
+    // Single-sketch body I/O in the project file's SKETCH_START/END line
+    // schema. Exposed so the draft-recovery sidecar (SketchRecovery) round-
+    // trips through the exact same format as the project file. writeSketchBody
+    // emits PLANE + all element blocks and a trailing SKETCH_END;
+    // parseSketchBody reads them back into `sk`, stopping at `endTok`.
+    static void writeSketchBody(std::ostream& os, const Sketch& sk);
+    static void parseSketchBody(std::istream& is, Sketch& sk,
+                                const char* endTok = "SKETCH_END");
 };
 
 } // namespace materializr

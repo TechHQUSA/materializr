@@ -204,6 +204,27 @@ void Application::renderSettings() {
                     }
 
                     ImGui::Spacing();
+                    {
+                        // Angle-snap increment for the line tool. Maps the combo
+                        // index to a degree value; 0 = off (free angles only).
+                        static const int kDegs[] = { 0, 5, 15, 30, 45, 90 };
+                        const char* degLabels[] = {
+                            "Off", "5°", "15°", "30°", "45°", "90°" };
+                        int curDeg = m_sketchTool ? m_sketchTool->getAngleSnapDeg() : 15;
+                        int idx = 2; // default 15°
+                        for (int i = 0; i < 6; ++i) if (kDegs[i] == curDeg) idx = i;
+                        if (ImGui::Combo("Angle snap", &idx, degLabels, 6)) {
+                            if (m_sketchTool) m_sketchTool->setAngleSnapDeg(kDegs[idx]);
+                            changed = true;
+                        }
+                        ImGui::SetItemTooltip(
+                            "While drawing a line, snap its direction to multiples "
+                            "of this angle from the start point. Lower = more "
+                            "snap rays (15° is the classic CAD default); higher "
+                            "= only the cardinal angles; Off = free angles.");
+                    }
+
+                    ImGui::Spacing();
                     if (ImGui::Checkbox("Show level toggle in sketch toolbar",
                                         &m_showInferenceToolbarToggle)) {
                         changed = true;

@@ -437,8 +437,8 @@ namespace {
 // loop that used to be inlined inside readSketch — extracted so SketchEditOp
 // can re-use it to embed full before/after sketch snapshots in the params
 // blob of each sketch-edit step.
-void parseSketchBody(std::istream& ifs, materializr::Sketch& sk,
-                     const char* endTok = "SKETCH_END") {
+void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
+                         const char* endTok = "SKETCH_END") {
     int maxId = 0;
     int maxConstraintId = 0;
     auto bump = [&](int id) { maxId = std::max(maxId, id); };
@@ -552,7 +552,7 @@ void readSketch(std::istream& ifs, const std::string& startLine, Document& doc) 
     }
 
     auto sk = std::make_shared<Sketch>();
-    parseSketchBody(ifs, *sk, "SKETCH_END");
+    parseSketchBodyImpl(ifs, *sk, "SKETCH_END");
     sk->setSourceBody(source);
     int newId = doc.addSketch(sk, name);
     doc.setSketchVisible(newId, visible != 0);
@@ -950,7 +950,7 @@ std::unique_ptr<SketchEditOp> ProjectIO::rehydrateSketchEditOp(
         if (label != "SKETCH_START") return false;
         iss >> idOut; // sketch id, visible / sourceBody on this line ignored
         auto sk = std::make_shared<Sketch>();
-        parseSketchBody(is, *sk, "SKETCH_END");
+        parseSketchBodyImpl(is, *sk, "SKETCH_END");
         out = std::move(sk);
         return true;
     };
@@ -965,6 +965,79 @@ std::unique_ptr<SketchEditOp> ProjectIO::rehydrateSketchEditOp(
     if (!live) return nullptr; // sketch id from blob isn't in this document
 
     return std::make_unique<SketchEditOp>(live, beforeSnap, afterSnap);
+}
+
+void ProjectIO::parseSketchBody(std::istream& is, Sketch& sk, const char* endTok) {
+    parseSketchBodyImpl(is, sk, endTok);
+}
+
+void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
+    // Mirrors the per-sketch block of ProjectIO::save (the schema
+    // parseSketchBody reads), minus SKETCH_START — callers supply their own
+    // header. Emits a trailing SKETCH_END as the parser's terminator.
+    const gp_Pln& pln = sk.getPlane();
+    gp_Pnt o = pln.Location();
+    gp_Dir z = pln.Axis().Direction();
+    gp_Dir x = pln.XAxis().Direction();
+    gp_Dir y = pln.YAxis().Direction();
+    os << "PLANE " << o.X() << " " << o.Y() << " " << o.Z()
+       << " " << z.X() << " " << z.Y() << " " << z.Z()
+       << " " << x.X() << " " << x.Y() << " " << x.Z()
+       << " " << y.X() << " " << y.Y() << " " << y.Z() << "\n";
+
+    const auto& pts = sk.getPoints();
+    os << "POINT_COUNT " << static_cast<int>(pts.size()) << "\n";
+    for (const auto& p : pts)
+        os << "P " << p.id << " " << p.pos.x << " " << p.pos.y << " "
+           << (p.isConstruction ? 1 : 0) << " " << (p.fromText ? 1 : 0) << "\n";
+
+    const auto& lns = sk.getLines();
+    os << "LINE_COUNT " << static_cast<int>(lns.size()) << "\n";
+    for (const auto& l : lns)
+        os << "L " << l.id << " " << l.startPointId << " " << l.endPointId << " "
+           << (l.isConstruction ? 1 : 0) << " " << (l.fromText ? 1 : 0) << "\n";
+
+    const auto& cs = sk.getCircles();
+    os << "CIRCLE_COUNT " << static_cast<int>(cs.size()) << "\n";
+    for (const auto& c : cs)
+        os << "C " << c.id << " " << c.centerPointId << " " << c.radius << " "
+           << (c.isConstruction ? 1 : 0) << "\n";
+
+    const auto& arcs = sk.getArcs();
+    os << "ARC_COUNT " << static_cast<int>(arcs.size()) << "\n";
+    for (const auto& a : arcs)
+        os << "A " << a.id << " " << a.centerPointId << " " << a.startPointId << " "
+           << a.endPointId << " " << a.radius << " " << (a.isConstruction ? 1 : 0) << "\n";
+
+    const auto& spl = sk.getSplines();
+    os << "SPLINE_COUNT " << static_cast<int>(spl.size()) << "\n";
+    for (const auto& s : spl) {
+        os << "S " << s.id << " " << (s.isConstruction ? 1 : 0) << " "
+           << static_cast<int>(s.controlPointIds.size());
+        for (int cp : s.controlPointIds) os << " " << cp;
+        os << "\n";
+    }
+
+    const auto& polys = sk.getPolygons();
+    os << "POLYGON_COUNT " << static_cast<int>(polys.size()) << "\n";
+    for (const auto& g : polys) {
+        os << "G " << g.id << " " << g.centerPointId << " " << g.radius << " "
+           << g.sides << " " << (g.isConstruction ? 1 : 0)
+           << " " << static_cast<int>(g.vertexPointIds.size());
+        for (int v : g.vertexPointIds) os << " " << v;
+        os << " " << static_cast<int>(g.lineIds.size());
+        for (int l : g.lineIds) os << " " << l;
+        os << "\n";
+    }
+
+    const auto& cns = sk.getConstraints();
+    os << "CONSTRAINT_COUNT " << static_cast<int>(cns.size()) << "\n";
+    for (const auto& c : cns)
+        os << "K " << c.id << " " << static_cast<int>(c.type) << " "
+           << c.entityA << " " << c.entityB << " "
+           << c.value << " " << c.valueY << "\n";
+
+    os << "SKETCH_END\n";
 }
 
 } // namespace materializr

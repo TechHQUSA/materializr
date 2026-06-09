@@ -155,6 +155,25 @@ public:
     void setInferenceLevel(InferenceLevel lvl) { m_inferenceLevel = lvl; }
     InferenceLevel getInferenceLevel() const { return m_inferenceLevel; }
 
+    // Increment (degrees) for the line angle-snap (0/15/30/45/90 …). The line
+    // tool snaps its direction to multiples of this from the segment anchor.
+    // 0 disables angle-snap entirely. Persisted via AppSettings.
+    void setAngleSnapDeg(int deg) { m_angleSnapDeg = deg < 0 ? 0 : deg; }
+    int  getAngleSnapDeg() const { return m_angleSnapDeg; }
+
+    // Rectangle / circle draw origin (sketch toolbar toggle). Rectangle:
+    // Corner = first click is one corner, drag to the opposite (default);
+    // Center = first click is the centre, drag to a corner. Circle:
+    // Center = first click is the centre, drag the radius (default);
+    // TwoPoint = the two clicks are opposite ends of the diameter (the rim
+    // passes through the first click — handy to align a circle to a corner).
+    enum class RectMode { Corner, Center };
+    enum class CircleMode { Center, TwoPoint };
+    void setRectMode(RectMode m) { m_rectMode = m; }
+    RectMode getRectMode() const { return m_rectMode; }
+    void setCircleMode(CircleMode m) { m_circleMode = m; }
+    CircleMode getCircleMode() const { return m_circleMode; }
+
     // Hover-to-charge references (Full level only). Call once per frame during
     // sketch placement with the current time and the sketch-space cursor. After
     // the cursor dwells ~0.3 s on an existing reference (sketch point, sketch
@@ -205,6 +224,9 @@ private:
     Sketch* m_sketch = nullptr;
     SketchSolver* m_solver = nullptr;
     InferenceLevel m_inferenceLevel = InferenceLevel::Full;
+    int m_angleSnapDeg = 15; // line angle-snap increment (0 = off)
+    RectMode   m_rectMode   = RectMode::Corner;
+    CircleMode m_circleMode = CircleMode::Center;
     // Hover-charge state (see updateHoverCharge). m_charged is the active
     // reference (Kind::None when nothing's charged); the m_hover* fields
     // track the in-progress dwell on a candidate before it commits.

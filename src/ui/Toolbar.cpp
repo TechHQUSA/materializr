@@ -258,14 +258,35 @@ ToolAction Toolbar::renderSketchTools() {
         return clicked;
     };
 
+    // Draw-origin toggle, rendered directly beneath whichever of Circle /
+    // Rectangle is active so it reads as part of that tool (not stranded at the
+    // bottom of the list).
+    auto drawOriginToggle = [&](bool isRect) {
+        const char* label = isRect
+            ? (m_rectMode == 0 ? "Draw from: Corner" : "Draw from: Center")
+            : (m_circleMode == 0 ? "Draw from: Center" : "Draw from: 2-Point");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.38f, 0.55f, 1.0f));
+        if (ImGui::Button(label, ImVec2(-1, 22)))
+            action = ToolAction::SketchToggleDrawOrigin;
+        ImGui::PopStyleColor();
+        tip(isRect
+            ? "Rectangle origin: Corner = click a corner, drag to the opposite; "
+              "Center = click the centre, drag to a corner. Click to toggle."
+            : "Circle origin: Center = click the centre, drag the radius; "
+              "2-Point = the two clicks are opposite ends of the diameter "
+              "(rim passes through the first click). Click to toggle.");
+    };
+
     if (skBtn("Select / Move", 1)) action = ToolAction::SelectSketch;
     tip("Pick sketch elements (points, lines, regions). Drag selection to move.");
     if (skBtn("Line",      2))     action = ToolAction::Line;
     tip("Draw straight line segments. Click to add vertices, Esc to finish.");
     if (skBtn("Circle",    3))     action = ToolAction::Circle;
     tip("Draw a circle: click centre, drag to radius.");
+    if (m_activeSketchMode == 3)   drawOriginToggle(false);
     if (skBtn("Rectangle", 4))     action = ToolAction::Rectangle;
     tip("Draw an axis-aligned rectangle: click one corner, drag to the opposite.");
+    if (m_activeSketchMode == 4)   drawOriginToggle(true);
     if (skBtn("Arc",       5))     action = ToolAction::Arc;
     tip("Three-point arc: click start, end, then a point on the curve.");
     if (skBtn("Spline",    6))     action = ToolAction::Spline;

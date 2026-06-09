@@ -991,6 +991,33 @@ void Application::renderViewport() {
                         IM_COL32(255, 200, 60, 255), 3.0f, 0, 1.5f);
                     dl->AddText(tp, IM_COL32(255, 200, 60, 255), dbuf);
                 }
+            } else if (m_edgeOpActive && m_edgeOpHasHandle &&
+                       m_edgeOpTwoDist && m_edgeOpHasFaceDirs) {
+                // Two-distance chamfer: one arrow per adjacent face, each
+                // labelled at its tip (A = amber = distance 1, B = blue =
+                // distance 2). The grabbed arrow is drawn thicker.
+                auto twoArrow = [&](glm::vec3 dir, float val, const char* tag,
+                                    ImU32 col, bool grabbed) {
+                    glm::vec3 tipW = m_edgeOpMid + dir * std::max(val, 0.0f);
+                    drawDim(m_edgeOpMid, tipW, nullptr, DimStyle::Bold);
+                    ImVec2 sp;
+                    if (!toImg(tipW, sp)) return;
+                    char b[40];
+                    std::snprintf(b, sizeof(b), "%s %.1f mm", tag, val);
+                    ImVec2 ts = ImGui::CalcTextSize(b);
+                    ImVec2 tp(sp.x + 10.0f, sp.y - ts.y * 0.5f);
+                    dl->AddRectFilled(ImVec2(tp.x - 5, tp.y - 3),
+                                      ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3),
+                                      IM_COL32(20, 20, 28, 235), 3.0f);
+                    dl->AddRect(ImVec2(tp.x - 5, tp.y - 3),
+                                ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3),
+                                col, 3.0f, 0, grabbed ? 2.5f : 1.5f);
+                    dl->AddText(tp, col, b);
+                };
+                twoArrow(m_edgeOpFaceDirA, m_edgeOpValue,  "A",
+                         IM_COL32(255, 200, 60, 255), m_edgeOpGrab == 0);
+                twoArrow(m_edgeOpFaceDirB, m_edgeOpValue2, "B",
+                         IM_COL32(120, 210, 255, 255), m_edgeOpGrab == 1);
             } else if (m_edgeOpActive && m_edgeOpHasHandle) {
                 // Arrow straight out of the edge (outward, perpendicular).
                 // Label is rendered separately at the cursor below — matches
@@ -2029,6 +2056,42 @@ void Application::renderViewport() {
                 if (std::abs(denom) > 1e-6f) {
                     float t = glm::dot(m_edgeOpMid - ro, camFwd) / denom;
                     glm::vec3 hit = ro + rd * t;
+                    if (m_edgeOpTwoDist && m_edgeOpHasFaceDirs) {
+                        // Two arrows: latch the one whose tip is nearest the
+                        // cursor at drag start, then drag along that face's dir.
+                        auto w2s = [&](glm::vec3 w, ImVec2& out) -> bool {
+                            glm::vec4 c = proj * view * glm::vec4(w, 1.0f);
+                            if (c.w <= 1e-6f) return false;
+                            out = ImVec2(wp.x + (c.x / c.w * 0.5f + 0.5f) * contentSize.x,
+                                         wp.y + (1.0f - (c.y / c.w * 0.5f + 0.5f)) * contentSize.y);
+                            return true;
+                        };
+                        if (m_edgeOpGrab < 0) {
+                            auto sd = [&](glm::vec3 dir, float v) -> float {
+                                glm::vec3 tip = m_edgeOpMid + dir * std::max(v, 0.6f);
+                                ImVec2 s;
+                                if (!w2s(tip, s)) return 1e18f;
+                                float dx = s.x - mp.x, dy = s.y - mp.y;
+                                return dx * dx + dy * dy;
+                            };
+                            m_edgeOpGrab =
+                                (sd(m_edgeOpFaceDirA, m_edgeOpValue) <=
+                                 sd(m_edgeOpFaceDirB, m_edgeOpValue2)) ? 0 : 1;
+                        }
+                        glm::vec3 dir = (m_edgeOpGrab == 0) ? m_edgeOpFaceDirA
+                                                            : m_edgeOpFaceDirB;
+                        float proj = glm::dot(hit - m_edgeOpMid, dir);
+                        float val = (proj <= 0.0f) ? 0.0f : std::max(0.1f, proj);
+                        val = std::round(val * 10.0f) / 10.0f;
+                        if (m_edgeOpGrab == 0) {
+                            m_edgeOpValue = val;
+                            std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", val);
+                        } else {
+                            m_edgeOpValue2 = val;
+                            std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2), "%.1f", val);
+                        }
+                        updateInteractiveEdgeOp();
+                    } else {
                     // Signed distance along the outward arrow: dragging away from the
                     // edge grows the value (≥0.1 mm); dragging back toward/through the
                     // edge returns to 0 (no change).
@@ -2041,7 +2104,11 @@ void Application::renderViewport() {
                     m_edgeOpValue = std::round(m_edgeOpValue * 10.0f) / 10.0f;
                     std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
                     updateInteractiveEdgeOp();
+                    }
                 }
+            } else if (m_edgeOpActive && m_edgeOpGrab >= 0 &&
+                       !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                m_edgeOpGrab = -1; // released — next drag re-picks an arrow
             }
 
             // Gizmo input + Face hover highlighting + picking (suppressed while an
@@ -4163,6 +4230,47 @@ void Application::renderViewport() {
         if (ImGui::SliderFloat("##eslider", &m_edgeOpValue, 0.1f, 20.0f, "%.1f mm")) {
             std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
             updateInteractiveEdgeOp();
+        }
+
+        // Asymmetric chamfer: a second setback along the other face. Offered
+        // for any chamfer whose edges share a common face (single edge always
+        // qualifies; a coplanar edge loop does too). Two arrows: A=amber, B=blue.
+        if (m_edgeOpType == EdgeOpType::Chamfer && m_edgeOpCanTwoDist) {
+            ImGui::Spacing();
+            if (ImGui::Checkbox("Two distances (A / B)", &m_edgeOpTwoDist)) {
+                if (m_edgeOpTwoDist && m_edgeOpValue2 < 0.1f) {
+                    m_edgeOpValue2 = std::max(0.1f, m_edgeOpValue); // seed B from A
+                    std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2),
+                                  "%.1f", m_edgeOpValue2);
+                }
+                m_edgeOpGrab = -1;
+                updateInteractiveEdgeOp();
+            }
+            if (m_edgeOpTwoDist) {
+                ImGui::TextColored(ImVec4(0.47f, 0.82f, 1.0f, 1.0f),
+                                   "Distance B (other face)");
+                if (ImGui::InputText("##val2", m_edgeOpInputBuf2,
+                                     sizeof(m_edgeOpInputBuf2),
+                                     ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    m_edgeOpValue2 = static_cast<float>(std::atof(m_edgeOpInputBuf2));
+                    updateInteractiveEdgeOp();
+                    commitInteractiveEdgeOp();
+                } else {
+                    float p2 = static_cast<float>(std::atof(m_edgeOpInputBuf2));
+                    if (std::abs(p2 - m_edgeOpValue2) > 0.01f && p2 > 0.01f) {
+                        m_edgeOpValue2 = p2;
+                        updateInteractiveEdgeOp();
+                    }
+                }
+                ImGui::SameLine();
+                ImGui::Text("mm");
+                if (ImGui::SliderFloat("##eslider2", &m_edgeOpValue2, 0.1f, 20.0f,
+                                       "%.1f mm")) {
+                    std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2),
+                                  "%.1f", m_edgeOpValue2);
+                    updateInteractiveEdgeOp();
+                }
+            }
         }
 
         ImGui::Spacing();

@@ -59,6 +59,7 @@
 #include "io/FileDialogs.h"
 #include "modeling/SvgImport.h"
 #include "io/ProjectIO.h"
+#include "io/SketchRecovery.h"
 #include "io/Settings.h"
 #include "core/EventBus.h"
 #include "core/Events.h"
@@ -925,6 +926,7 @@ AppSettings Application::currentSettings() const {
     s.inferenceLevel = m_sketchTool
         ? static_cast<int>(m_sketchTool->getInferenceLevel()) : 0;
     s.showInferenceToolbarToggle = m_showInferenceToolbarToggle;
+    s.angleSnapDeg = m_sketchTool ? m_sketchTool->getAngleSnapDeg() : 15;
     return s;
 }
 
@@ -964,6 +966,7 @@ void Application::applyAppSettings(const AppSettings& s) {
                : (s.inferenceLevel == 2) ? IL::Off
                                          : IL::Full;
         m_sketchTool->setInferenceLevel(lvl);
+        m_sketchTool->setAngleSnapDeg(s.angleSnapDeg);
     }
     // Mirror onto the toolbar so the in-sketch grid controls show the loaded
     // values right away rather than waiting for the first frame's sync.
@@ -1389,6 +1392,18 @@ void Application::handleToolAction(int action) {
                         : m_sketchTool->getInferenceLevel() == IL::Reduced ? IL::Off
                                                                            : IL::Full;
                 m_sketchTool->setInferenceLevel(next);
+            }
+            break;
+        case ToolAction::SketchToggleDrawOrigin:
+            if (m_sketchTool) {
+                using RM = SketchTool::RectMode;
+                using CM = SketchTool::CircleMode;
+                if (m_sketchTool->getMode() == SketchToolMode::Rectangle)
+                    m_sketchTool->setRectMode(
+                        m_sketchTool->getRectMode() == RM::Corner ? RM::Center : RM::Corner);
+                else if (m_sketchTool->getMode() == SketchToolMode::Circle)
+                    m_sketchTool->setCircleMode(
+                        m_sketchTool->getCircleMode() == CM::Center ? CM::TwoPoint : CM::Center);
             }
             break;
 
@@ -3360,6 +3375,12 @@ void Application::exitSketchMode() {
     m_activeSketchId = -1;
     m_meshesDirty = true; // refresh sketch rendering set
 
+    // The sketch is resolved (committed to the document or discarded), so the
+    // crash-recovery draft is no longer "unfinished" — drop it. A draft only
+    // survives to the next launch when the app exits WITHOUT reaching here.
+    materializr::clearSketchDraft();
+    m_lastDraftElemCount = -1;
+
     // Stay where the user is — don't yank them back to the pre-sketch camera.
     // Exiting sketch should feel like leaving ortho-snap mode: the area being
     // looked at remains framed, only the sketch grid disappears. Any orbit
@@ -3367,9 +3388,82 @@ void Application::exitSketchMode() {
     // horizon (handled in Camera::orbitLevel).
 }
 
+void Application::writeSketchDraftIfDue() {
+    // Periodically persist the in-progress sketch so a crash / kill doesn't lose
+    // it. Cheap (sketches are tiny); throttled to ~2 s and skipped when nothing
+    // changed since the last write.
+    if (!m_inSketchMode || !m_activeSketch) return;
+    int elems = m_activeSketch->elementCount();
+    if (elems == 0) return; // nothing worth recovering yet
+    double now = ImGui::GetTime();
+    if (elems == m_lastDraftElemCount && now - m_lastDraftWrite < 2.0) return;
+    if (now - m_lastDraftWrite < 0.75) return; // hard floor against thrashing
+    materializr::writeSketchDraft(*m_activeSketch,
+                                  m_activeSketch->getSourceBody(),
+                                  m_currentProjectPath);
+    m_lastDraftWrite = now;
+    m_lastDraftElemCount = elems;
+}
+
+void Application::renderSketchRecoveryPrompt() {
+    if (!m_pendingSketchRecovery) return;
+    ImGui::OpenPopup("Recover Sketch?");
+    ImVec2 c = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(c, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Recover Sketch?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted(
+            "An unfinished sketch from your last session was found.");
+        ImGui::TextDisabled(
+            "It wasn't committed before the app closed (a crash, or a restart).");
+        ImGui::Spacing();
+        if (ImGui::Button("Restore it", ImVec2(140, 0))) {
+            restoreSketchDraftNow();
+            m_pendingSketchRecovery = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+            materializr::clearSketchDraft();
+            m_pendingSketchRecovery = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void Application::restoreSketchDraftNow() {
+    Sketch draft;
+    materializr::SketchDraftMeta meta;
+    if (!materializr::readSketchDraft(draft, meta) || !meta.valid) {
+        materializr::clearSketchDraft();
+        return;
+    }
+    // Re-enter sketch mode on the draft's plane, then graft the geometry in.
+    // (Face sketches re-bind their host face at Finish via ensureSketchSourceFace;
+    // here we just restore the drawing on its plane so no work is lost.)
+    enterSketchOnPlane(draft.getPlane());
+    *m_activeSketch = draft;                 // copy geometry + ids + constraints
+    m_activeSketch->setSourceBody(meta.sourceBodyId);
+    m_sketchSolver->setSketch(m_activeSketch.get());
+    m_sketchTool->setSketch(m_activeSketch.get());
+    alignCameraToActiveSketch();
+    m_meshesDirty = true;
+    m_lastDraftElemCount = -1; // force a fresh draft write going forward
+    std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)\n",
+                 m_activeSketch->elementCount());
+}
+
 void Application::run() {
+    // A draft surviving from a previous session means it ended mid-sketch
+    // (crash / kill / quit while drawing) — offer to restore on first frame.
+    m_pendingSketchRecovery = materializr::hasSketchDraft();
+
     while (true) {
         m_window->pollEvents();
+
+        // Keep the in-progress sketch crash-recoverable.
+        writeSketchDraftIfDue();
 
         // The save-prompt's Don't Save / post-save-success path sets this flag
         // directly. Check it every frame so we exit without requiring the user
@@ -3405,6 +3499,12 @@ void Application::run() {
             // of a SketchTool.h dependency (matches setActiveSketchMode).
             m_toolbar->setInferenceLevel(m_inSketchMode && m_sketchTool
                 ? static_cast<int>(m_sketchTool->getInferenceLevel()) : 0);
+            // Mirror the live rect/circle draw-origin so the per-tool toggle
+            // button shows the current mode.
+            if (m_inSketchMode && m_sketchTool) {
+                m_toolbar->setRectMode(static_cast<int>(m_sketchTool->getRectMode()));
+                m_toolbar->setCircleMode(static_cast<int>(m_sketchTool->getCircleMode()));
+            }
             // Per-frame hide/show of the toolbar's inference cycle button.
             // Users who set the level once in Settings can declutter the
             // sketch toolbar; default is on (the live toggle is visible).
@@ -3622,6 +3722,7 @@ void Application::run() {
             renderTransientToast();
             FileDialogs::render();
             renderSavePrompt();
+            renderSketchRecoveryPrompt();
 
             handleShortcuts();
         }

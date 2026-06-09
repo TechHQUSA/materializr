@@ -316,6 +316,18 @@ private:
     int m_sketchEntryHistoryStep = -1;
     int m_activeSketchId = -1; // document id of the sketch being edited, or -1 if new
 
+    // In-progress-sketch crash/kill recovery (see io/SketchRecovery). While in
+    // sketch mode the active sketch is periodically written to a sidecar draft
+    // (it isn't in the saved project until Finish Sketch). On launch a surviving
+    // draft means last session ended mid-sketch; m_pendingSketchRecovery drives
+    // the restore prompt.
+    double m_lastDraftWrite = 0.0;       // ImGui time of last draft write
+    int    m_lastDraftElemCount = -1;    // element count at last write (skip no-ops)
+    bool   m_pendingSketchRecovery = false;
+    void writeSketchDraftIfDue();        // throttled per-frame draft write
+    void renderSketchRecoveryPrompt();   // startup "restore unfinished sketch?" modal
+    void restoreSketchDraftNow();        // re-enter sketch mode with the saved draft
+
     // Hovered sketch region (for highlight in viewport)
     int m_hoveredSketchId = -1;
     int m_hoveredRegionIndex = -1;
@@ -579,6 +591,19 @@ private:
     glm::vec3 m_edgeOpDir{1.0f, 0.0f, 0.0f};   // along the edge
     glm::vec3 m_edgeOpOutDir{0.0f, 0.0f, 1.0f}; // perpendicular, pointing out of the body
     bool m_edgeOpHasHandle = false;
+    // Two-distance (asymmetric) chamfer. When on, the op takes a second setback
+    // along the OTHER adjacent face, dragged via a second arrow. Chamfer-only,
+    // single-edge for now. m_edgeOpFaceDirA/B are the two in-face drag
+    // directions (A = ChamferOp's reference face = faces.First()). m_edgeOpGrab
+    // latches which arrow a drag owns: 0 = A (distance 1), 1 = B (distance 2).
+    bool  m_edgeOpTwoDist = false;
+    float m_edgeOpValue2 = 0.0f;
+    char  m_edgeOpInputBuf2[32] = "1.0";
+    glm::vec3 m_edgeOpFaceDirA{0.0f, 0.0f, 1.0f};
+    glm::vec3 m_edgeOpFaceDirB{0.0f, 1.0f, 0.0f};
+    bool  m_edgeOpHasFaceDirs = false;
+    bool  m_edgeOpCanTwoDist = false; // selection supports a consistent A/B chamfer
+    int   m_edgeOpGrab = -1; // -1 none, 0 = arrow A, 1 = arrow B (during a drag)
     // History index of the op being re-edited. -1 means "creating new" — the
     // commit path then pushes a fresh FilletOp / ChamferOp. >=0 means "editing
     // existing" — commit updates the op's parameter and calls editStep().
@@ -587,7 +612,13 @@ private:
     // confirm-at-zero "treat as cancel" path) restores it before replaying,
     // since the edit-mode live preview mutates the real op's parameter.
     float m_edgeOpOrigValue = 0.0f;
+    float m_edgeOpOrigValue2 = 0.0f; // second distance at edit-begin (cancel restore)
 
+    // Compute m_edgeOpFaceDirA/B — the two in-face drag directions for the
+    // first selected edge (A = the face ChamferOp uses for distance 1). Sets
+    // m_edgeOpHasFaceDirs. Requires m_edgeOpEdges + m_edgeOpPreviousShape +
+    // m_edgeOpMid/m_edgeOpDir to already be set.
+    void computeEdgeOpFaceDirs();
     void beginInteractiveEdgeOp(EdgeOpType type);
     // Re-edit the FilletOp or ChamferOp at the given history index. Pulls the
     // existing radius/distance + edges + body id from the op, snapshots its

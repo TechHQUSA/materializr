@@ -42,6 +42,31 @@ void ChamferOp::setDistance(double distance) {
     m_distance = distance;
 }
 
+TopoDS_Face ChamferOp::sharedReferenceFace(const TopoDS_Shape& body,
+                                           const std::vector<TopoDS_Edge>& edges) {
+    if (edges.empty() || body.IsNull()) return TopoDS_Face();
+    TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaceMap);
+    if (!edgeFaceMap.Contains(edges.front())) return TopoDS_Face();
+
+    // Candidates = faces adjacent to the first edge; intersect down with each
+    // subsequent edge's adjacent faces. Whatever survives borders every edge.
+    std::vector<TopoDS_Shape> cands;
+    for (const TopoDS_Shape& f : edgeFaceMap.FindFromKey(edges.front()))
+        cands.push_back(f);
+    for (size_t i = 1; i < edges.size(); ++i) {
+        if (!edgeFaceMap.Contains(edges[i])) return TopoDS_Face();
+        const TopTools_ListOfShape& fs = edgeFaceMap.FindFromKey(edges[i]);
+        std::vector<TopoDS_Shape> keep;
+        for (const auto& c : cands)
+            for (const TopoDS_Shape& f : fs)
+                if (f.IsSame(c)) { keep.push_back(c); break; }
+        cands.swap(keep);
+        if (cands.empty()) return TopoDS_Face(); // no common face for this set
+    }
+    return TopoDS::Face(cands.front());
+}
+
 bool ChamferOp::execute(Document& doc) {
     if (m_bodyId < 0 || m_edges.empty() || m_distance <= 0.0) {
         return false;
@@ -66,13 +91,26 @@ bool ChamferOp::execute(Document& doc) {
         // Create chamfer on the body shape
         BRepFilletAPI_MakeChamfer chamfer(m_previousShape);
 
+        // For an asymmetric chamfer across multiple edges, distance 1 must be
+        // measured along ONE consistent face (the loop's shared face) for every
+        // edge, or A/B would flip from edge to edge. sharedRef is that face when
+        // it exists (always, for a single edge); null = no common face, in which
+        // case we fall back to each edge's first face (symmetric is unaffected).
+        TopoDS_Face sharedRef;
+        if (m_distance2 > 0.0) sharedRef = sharedReferenceFace(m_previousShape, m_edges);
+
         for (const auto& edge : m_edges) {
             // Find a face adjacent to this edge
             if (edgeFaceMap.Contains(edge)) {
                 const TopTools_ListOfShape& faces = edgeFaceMap.FindFromKey(edge);
                 if (!faces.IsEmpty()) {
-                    const TopoDS_Face& face = TopoDS::Face(faces.First());
-                    chamfer.Add(m_distance, m_distance, edge, face);
+                    TopoDS_Face face = sharedRef.IsNull()
+                                           ? TopoDS::Face(faces.First())
+                                           : sharedRef;
+                    // d1 is measured along `face`; d2 along the other adjacent
+                    // face. Symmetric when m_distance2 <= 0.
+                    double d2 = (m_distance2 > 0.0) ? m_distance2 : m_distance;
+                    chamfer.Add(m_distance, d2, edge, face);
                 }
             }
         }
@@ -121,6 +159,10 @@ bool ChamferOp::undo(Document& doc) {
 }
 
 std::string ChamferOp::description() const {
+    if (m_distance2 > 0.0)
+        return "Chamfer D" + std::to_string(m_distance) + "/" +
+               std::to_string(m_distance2) + " on " +
+               std::to_string(m_edges.size()) + " edge(s)";
     return "Chamfer D" + std::to_string(m_distance) + " on " +
            std::to_string(m_edges.size()) + " edge(s)";
 }
@@ -130,6 +172,11 @@ void ChamferOp::renderProperties() {
     ImGui::Separator();
 
     ImGui::InputDouble("Distance", &m_distance, 0.1, 1.0, "%.3f");
+    bool asym = (m_distance2 > 0.0);
+    if (ImGui::Checkbox("Two distances", &asym))
+        m_distance2 = asym ? m_distance : -1.0;
+    if (m_distance2 > 0.0)
+        ImGui::InputDouble("Distance 2", &m_distance2, 0.1, 1.0, "%.3f");
 
     ImGui::Text("Edges: %d selected", static_cast<int>(m_edges.size()));
     ImGui::Text("Body ID: %d", m_bodyId);
@@ -149,6 +196,10 @@ std::string ChamferOp::serializeParams() const {
     char buf[96];
     std::snprintf(buf, sizeof(buf), "body=%d;distance=%.6f", m_bodyId, m_distance);
     blob += buf;
+    if (m_distance2 > 0.0) {
+        std::snprintf(buf, sizeof(buf), ";distance2=%.6f", m_distance2);
+        blob += buf;
+    }
     if (!m_previousShape.IsNull() && !m_edges.empty()) {
         std::vector<TopoDS_Shape> edges(m_edges.begin(), m_edges.end());
         std::string idx = SubShapeIndex::serialize(m_previousShape, edges,
@@ -175,6 +226,7 @@ bool ChamferOp::deserializeParams(const std::string& blob) {
         std::string key = blob.substr(pos, eq - pos);
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "distance") { m_distance = std::atof(val.c_str()); any = true; }
+        else if (key == "distance2"){ m_distance2 = std::atof(val.c_str()); any = true; }
         else if (key == "body")     { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "edges")    { m_edgeIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "gen")      { m_genFaceIndices = SubShapeIndex::parse(val); any = true; }

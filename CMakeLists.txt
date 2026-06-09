@@ -233,6 +233,7 @@ add_executable(materializr
     src/ui/UpdateChecker.cpp
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp
+    src/io/SketchRecovery.cpp
     src/io/Settings.cpp
     src/io/StepIO.cpp
     src/io/StlExport.cpp

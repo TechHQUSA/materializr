@@ -62,6 +62,9 @@ struct AppSettings {
     // button. Off lets users who set the level once in Settings declutter
     // the toolbar; on (default) keeps the per-session live toggle visible.
     bool showInferenceToolbarToggle = true;
+    // Line angle-snap increment in degrees (0 = off). The line tool snaps its
+    // direction to multiples of this from the segment anchor. Default 15.
+    int  angleSnapDeg = 15;
 };
 
 // Reads/writes AppSettings as a simple `key = value` text file. The reader is

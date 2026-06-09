@@ -337,9 +337,14 @@ bool SketchTool::applyDimension(float value) {
             // Popup asks for DIAMETER (matching the on-canvas "X.X mm dia"
             // readout). Convert to radius for the underlying circle.
             float radius = value * 0.5f;
-            glm::vec2 perimeter = m_firstClick + dir * radius;
+            // Center mode: the second point sits on the rim (radius away).
+            // TwoPoint mode: the typed value is the diameter, so the second
+            // click is a full diameter from the first along the cursor dir.
+            glm::vec2 second = (m_circleMode == CircleMode::TwoPoint)
+                                   ? m_firstClick + dir * value
+                                   : m_firstClick + dir * radius;
             size_t cBefore = m_sketch->getCircles().size();
-            handleCircleTool(perimeter);
+            handleCircleTool(second);
             // Typed diameter → Radius constraint on the new circle.
             if (m_sketch->getCircles().size() > cBefore) {
                 const auto& circ = m_sketch->getCircles().back();
@@ -370,15 +375,20 @@ bool SketchTool::applyDimension(float value) {
             // grows in the user's intended direction.
             float sx = (delta.x >= 0.0f) ? 1.0f : -1.0f;
             float sy = (delta.y >= 0.0f) ? 1.0f : -1.0f;
+            // In Center mode the typed value is the FULL side, but the cursor
+            // (and the second corner handed to handleRectangleTool, which
+            // mirrors it through the centre) is only half that from the centre.
+            const float half = (m_rectMode == RectMode::Center) ? 0.5f : 1.0f;
             if (m_rectDimStage == 0) {
                 m_rectDimH = value * sx;
                 m_rectDimStage = 1;
                 // Lock the preview's X to the typed horizontal while the user
                 // either drags for vertical or types the second value.
-                m_currentPos.x = m_firstClick.x + m_rectDimH;
+                m_currentPos.x = m_firstClick.x + m_rectDimH * half;
                 return true;
             } else {
-                glm::vec2 corner = m_firstClick + glm::vec2(m_rectDimH, value * sy);
+                glm::vec2 corner =
+                    m_firstClick + glm::vec2(m_rectDimH * half, value * sy * half);
                 handleRectangleTool(corner);
                 m_rectDimStage = 0;
                 m_rectDimH = 0.0f;
@@ -399,6 +409,14 @@ bool SketchTool::hasPreview() const {
 }
 
 glm::vec2 SketchTool::getPreviewStart() const {
+    // The renderer + dimension overlay read (start, end) as the circle's
+    // (centre, rim) and the rectangle's (corner, opposite corner). Return the
+    // EFFECTIVE start for the active draw mode so both visuals match what the
+    // click will actually create — no renderer changes needed.
+    if (m_mode == SketchToolMode::Rectangle && m_rectMode == RectMode::Center)
+        return 2.0f * m_firstClick - m_currentPos; // opposite corner
+    if (m_mode == SketchToolMode::Circle && m_circleMode == CircleMode::TwoPoint)
+        return 0.5f * (m_firstClick + m_currentPos); // diameter midpoint = centre
     return m_firstClick;
 }
 
@@ -439,10 +457,18 @@ glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
     auto grid = [&](float v) {
         return gridOn ? std::round(v / m_gridStep) * m_gridStep : v;
     };
-    if (nearAng(0.0f) || nearAng(PI) || nearAng(-PI)) {
+    // With grid on, only flatten genuinely sub-cell drift: if the segment ends
+    // a full grid row (or more) off the axis, that's a deliberate 1/X-slope
+    // line, not drift — leave it. Slightly over half a cell so the exact
+    // boundary still flattens onto the axis grid line. Grid off keeps the pure
+    // 4° rule. (Steve: a 1 mm rise over a long run must not snap to horizontal.)
+    const float crossCap = gridOn ? m_gridStep * 0.5f + 1e-3f : 1e30f;
+    if ((nearAng(0.0f) || nearAng(PI) || nearAng(-PI)) &&
+        std::abs(target.y - m_firstClick.y) < crossCap) {
         target.y = m_firstClick.y;       // exactly horizontal
         target.x = grid(target.x);
-    } else if (nearAng(PI * 0.5f) || nearAng(-PI * 0.5f)) {
+    } else if ((nearAng(PI * 0.5f) || nearAng(-PI * 0.5f)) &&
+               std::abs(target.x - m_firstClick.x) < crossCap) {
         target.x = m_firstClick.x;       // exactly vertical
         target.y = grid(target.y);
     }
@@ -1083,10 +1109,28 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         glm::vec2 from = (c.kind == InferenceGuide::OnLine) ? snapPos : c.visFrom;
         m_activeInferences.push_back({c.kind, from, snapPos, c.refId});
     };
+    // "Borrowed-direction" inferences copy their angle from an existing feature
+    // (a parallel/perp reference, a tangent, the line you're snapping ONTO).
+    // rectifyNearAxis must NOT flatten these to the axis: a Parallel guide off a
+    // line that's 3° below horizontal IS a 3° line by intent — flattening it to
+    // horizontal drew the orange line while the cyan "Parallel" guide still
+    // showed (a guide/result mismatch). Only the free-drag / pure-axis / angle-
+    // snap paths get rectified. (axis-from-point is already exact, so it's
+    // unaffected either way.)
+    auto isBorrowedDir = [](InferenceGuide::Kind k) {
+        return k == InferenceGuide::ParallelToPrev ||
+               k == InferenceGuide::PerpToPrev ||
+               k == InferenceGuide::PerpToRef ||
+               k == InferenceGuide::TangentToCircle ||
+               k == InferenceGuide::OnLine ||
+               k == InferenceGuide::OnLineExtension;
+    };
     if (bestI >= 0) {
         emitWithSnap(cands[bestI], bestIsect);
         emitWithSnap(cands[bestJ], bestIsect);
-        return rectifyNearAxis(bestIsect);
+        // A pair intersection is a deliberate composite of two guides — never
+        // flatten it; doing so would break BOTH relationships.
+        return bestIsect;
     }
 
     int bestK = -1;
@@ -1102,18 +1146,22 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         const auto& c = cands[bestK];
         glm::vec2 snapped = gridAlongLine(c.anchor, c.dir, c.isSegment, c.segLen, c.proj);
         emitWithSnap(c, snapped);
-        return rectifyNearAxis(snapped);
+        // Preserve a borrowed direction (parallel/perp/tangent/on-line) exactly;
+        // only flatten genuinely free near-axis results.
+        return isBorrowedDir(c.kind) ? snapped : rectifyNearAxis(snapped);
     }
 
     // Angle-snap fallback: cursor direction from anchor within ~3° of a
-    // 15° increment. Only fires when nothing above did — the perp /
-    // parallel inferences are stronger semantic intents.
-    if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line) {
+    // configurable degree increment (Settings). Only fires when nothing above
+    // did — the perp / parallel inferences are stronger semantic intents.
+    if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line &&
+        m_angleSnapDeg > 0) {
         glm::vec2 v = pos - m_firstClick;
         float len = glm::length(v);
         if (len > 0.5f) {
             float a = std::atan2(v.y, v.x);
-            const float step = 15.0f * static_cast<float>(M_PI) / 180.0f;
+            const float step =
+                static_cast<float>(m_angleSnapDeg) * static_cast<float>(M_PI) / 180.0f;
             float snappedA = std::round(a / step) * step;
             float angDelta = std::abs(a - snappedA);
             const float TWO_PI = 2.0f * static_cast<float>(M_PI);
@@ -1123,9 +1171,32 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             if (angDelta < angTol) {
                 glm::vec2 dir(std::cos(snappedA), std::sin(snappedA));
                 glm::vec2 snappedPos = m_firstClick + dir * len;
-                if (glm::length(snappedPos - pos) < posCap) {
-                    // Grid-along-line so the 15° ray's endpoint lands on
-                    // a lattice step instead of sub-grid drift.
+                float posOff = glm::length(snappedPos - pos);
+                // Capture window: with grid snap on, never wider than half a
+                // grid cell (slightly over, so the exact half-cell boundary
+                // still lands on the axis grid line). Otherwise a 1-cell rise
+                // over a long run sits inside the horizontal snap band and gets
+                // swallowed — "I can't rise 1mm and go over any amount."
+                // (Steve.) Grid off keeps the original mm-based cap.
+                const float angleCap =
+                    (m_snapToGridEnabled && m_gridStep > 0.0f)
+                        ? m_gridStep * 0.5f + 1e-3f : posCap;
+                if (posOff < angleCap) {
+                    // DIAG (sticky-angle report): cursor vs snapped angle, the
+                    // line length and the positional gate — so we can see why a
+                    // near-axis long line refuses an in-between angle.
+                    static float s_lastAngLog = -999.0f;
+                    float snDeg = snappedA * 180.0f / static_cast<float>(M_PI);
+                    if (std::abs(snDeg - s_lastAngLog) > 0.4f) {
+                        std::fprintf(stderr,
+                            "[Infer] angle-snap FIRED step=%d cursor=%.2f° "
+                            "snapped=%.2f° len=%.1fmm posOff=%.2f cap=%.2f\n",
+                            m_angleSnapDeg, a * 180.0f / static_cast<float>(M_PI),
+                            snDeg, len, posOff, angleCap);
+                        s_lastAngLog = snDeg;
+                    }
+                    // Grid-along-line so the ray's endpoint lands on a lattice
+                    // step instead of sub-grid drift.
                     snappedPos = gridAlongLine(m_firstClick, dir, false,
                                                 0.0f, snappedPos);
                     m_activeInferences.push_back(
@@ -1373,13 +1444,20 @@ void SketchTool::handleCircleTool(glm::vec2 pos) {
         m_isPlacing = true;
         m_clickCount = 1;
     } else {
-        // Second click: set radius point, create circle
-        float radius = glm::length(pos - m_firstClick);
+        // Second click. Center mode: first click is the centre, drag is the
+        // radius. TwoPoint mode: the two clicks are opposite ends of the
+        // diameter, so the centre is their midpoint and the rim passes through
+        // the first click.
+        glm::vec2 center = (m_circleMode == CircleMode::TwoPoint)
+                               ? 0.5f * (m_firstClick + pos) : m_firstClick;
+        float radius = (m_circleMode == CircleMode::TwoPoint)
+                           ? 0.5f * glm::length(pos - m_firstClick)
+                           : glm::length(pos - m_firstClick);
         if (radius > 1e-6f) {
             // Reuse the existing point at this position if there is one
             // (this is how concentric circles share a center).
-            int existing = findCoincidentPoint(m_firstClick, -1);
-            int centerId = (existing >= 0) ? existing : m_sketch->addPoint(m_firstClick);
+            int existing = findCoincidentPoint(center, -1);
+            int centerId = (existing >= 0) ? existing : m_sketch->addPoint(center);
             m_sketch->addCircle(centerId, static_cast<double>(radius));
         }
 
@@ -1395,10 +1473,14 @@ void SketchTool::handleRectangleTool(glm::vec2 pos) {
         m_isPlacing = true;
         m_clickCount = 1;
     } else {
-        // Second click: set opposite corner, create rectangle
-        if (std::abs(pos.x - m_firstClick.x) > 1e-6f &&
-            std::abs(pos.y - m_firstClick.y) > 1e-6f) {
-            m_sketch->addRectangle(m_firstClick, pos);
+        // Second click. Corner mode: first click + this click are opposite
+        // corners. Center mode: first click is the centre, so the opposite
+        // corner is mirrored through it.
+        glm::vec2 c1 = (m_rectMode == RectMode::Center)
+                           ? 2.0f * m_firstClick - pos : m_firstClick;
+        if (std::abs(pos.x - c1.x) > 1e-6f &&
+            std::abs(pos.y - c1.y) > 1e-6f) {
+            m_sketch->addRectangle(c1, pos);
         }
 
         m_isPlacing = false;

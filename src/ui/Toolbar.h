@@ -19,6 +19,8 @@ enum class ToolAction {
     SketchCopy, SketchMirror, SketchLinearPattern, SketchRadialPattern,
     // Cycle the drawing-inference level Full → Reduced → Off.
     SketchCycleInference,
+    // Toggle the active rect/circle draw origin (Corner↔Center / Center↔2-Point).
+    SketchToggleDrawOrigin,
     // 3D tools that still need the old dispatch path. (Face extrude is owned by
     // ExtrudePlugin's toolbar button; the inline interactive extrude is reached
     // from sketch-extrude and the viewport context menu, not via a ToolAction.)
@@ -88,6 +90,10 @@ public:
     // SketchTool::InferenceLevel (0=Full, 1=Reduced, 2=Off) to keep Toolbar
     // free of a SketchTool.h dependency.
     void setInferenceLevel(int lvl) { m_inferenceLevel = lvl; }
+    // Live rect/circle draw origin shown on the per-tool toggle. Ints mirror
+    // SketchTool::RectMode (0=Corner,1=Center) and CircleMode (0=Center,1=2-Point).
+    void setRectMode(int m) { m_rectMode = m; }
+    void setCircleMode(int m) { m_circleMode = m; }
     // Off hides the inference cycle button from the sketch toolbar so a user
     // who set the level once in Settings can declutter. Default on.
     void setShowInferenceToggle(bool b) { m_showInferenceToggle = b; }
@@ -121,6 +127,8 @@ private:
     int  m_sketchSolverState = -1; // -1=none, 0=Fully, 1=Under, 2=Over
     int  m_sketchSolverDof = 0;
     int  m_inferenceLevel = 0; // 0=Full, 1=Reduced, 2=Off (see setInferenceLevel)
+    int  m_rectMode = 0;       // 0=Corner, 1=Center (see setRectMode)
+    int  m_circleMode = 0;     // 0=Center, 1=2-Point (see setCircleMode)
     bool m_showInferenceToggle = true; // see setShowInferenceToggle
 
     ToolAction renderSketchTools();
