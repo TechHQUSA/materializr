@@ -70,10 +70,10 @@
 namespace materializr { namespace force_link { void linkAll(); } }
 
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
+#include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 
-#include <GLFW/glfw3.h>
+#include "app/Window.h"
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>
@@ -437,13 +437,17 @@ void Application::initImGui() {
         // If nothing loaded, ImGui will lazily fall back to its baked-in default.
     }
 
-    ImGui_ImplGlfw_InitForOpenGL(m_window->handle(), true);
+    ImGui_ImplSDL2_InitForOpenGL(m_window->handle(), m_window->glContext());
+#if defined(__ANDROID__)
+    ImGui_ImplOpenGL3_Init("#version 300 es");
+#else
     ImGui_ImplOpenGL3_Init("#version 330");
+#endif
 }
 
 void Application::shutdownImGui() {
     ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
+    ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 }
 
@@ -624,7 +628,7 @@ void Application::beginIop(materializr::InteractiveOpController& ctl) {
 
 void Application::beginFrame() {
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 }
 
@@ -640,7 +644,7 @@ void Application::renderSplashFrame(const char* status) {
     if (!m_window) return;
     m_window->pollEvents();
     int fbw = 0, fbh = 0;
-    glfwGetFramebufferSize(m_window->handle(), &fbw, &fbh);
+    m_window->framebufferSize(fbw, fbh);
     glViewport(0, 0, fbw, fbh);
     glClearColor(0.075f, 0.082f, 0.11f, 1.0f); // matches the app background
     glClear(GL_COLOR_BUFFER_BIT);
@@ -765,7 +769,7 @@ void Application::renderMenuBar() {
                 m_showSettings = true;
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Exit", "Alt+F4")) glfwSetWindowShouldClose(m_window->handle(), true);
+            if (ImGui::MenuItem("Exit", "Alt+F4")) m_window->requestClose(true);
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit")) {
@@ -1634,9 +1638,9 @@ void Application::handleToolAction(int action) {
 void Application::handleShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
 
-    // Undo/Redo — use GLFW directly so it works even when ImGui has text input focus
-    bool ctrlHeld = glfwGetKey(m_window->handle(), GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
-                    glfwGetKey(m_window->handle(), GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+    // Undo/Redo — poll the hardware Ctrl state directly so it works even when
+    // ImGui has text input focus. Always false on Android (no modifier keys).
+    bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
         if (!m_edgeOpActive && !m_extruding && !m_pushPullActive) {
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
@@ -2595,7 +2599,7 @@ void Application::requestClose() {
     if (!isDirty()) { m_confirmedClose = true; return; }
     m_showSavePrompt = true;
     m_closeAfterSave = false;
-    glfwSetWindowShouldClose(m_window->handle(), GLFW_FALSE);
+    m_window->requestClose(false);
 }
 
 void Application::renderSavePrompt() {

@@ -69,10 +69,8 @@
 namespace materializr { namespace force_link { void linkAll(); } }
 
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
+#include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
-
-#include <GLFW/glfw3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>

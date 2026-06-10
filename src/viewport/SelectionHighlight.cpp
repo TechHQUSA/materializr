@@ -108,7 +108,11 @@ bool SelectionHighlight::initialize() {
     m_locMVP = glGetUniformLocation(m_program, "u_mvp");
     m_locColor = glGetUniformLocation(m_program, "u_color");
 
-    // Second program with a geometry shader for thick lines.
+    // Second program with a geometry shader for thick lines. GL ES 3.0 has no
+    // geometry shaders, so on Android m_lineProgram stays 0 and drawThickLines()
+    // becomes a no-op — selected faces still highlight; thick edge outlines are
+    // skipped (TODO: emulate with an instanced-quad expansion in the touch pass).
+#if !defined(__ANDROID__)
     unsigned int lvert = 0, lgeom = 0, lfrag = 0;
     if (!compileShader(lvert, GL_VERTEX_SHADER, s_vertSrc)) return false;
     if (!compileShader(lgeom, GL_GEOMETRY_SHADER, s_lineGeomSrc)) {
@@ -136,6 +140,7 @@ bool SelectionHighlight::initialize() {
     m_locLineColor = glGetUniformLocation(m_lineProgram, "u_color");
     m_locViewport  = glGetUniformLocation(m_lineProgram, "u_viewport");
     m_locHalfWidth = glGetUniformLocation(m_lineProgram, "u_halfWidth");
+#endif
 
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);

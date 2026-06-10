@@ -1,92 +1,117 @@
 #include "app/Window.h"
 
-#include "gl_common.h"   // GLEW (Windows) must be included before GLFW
-#include <GLFW/glfw3.h>
-#include "app/IconData.h"
+#include "gl_common.h"   // GLEW (Windows) must be included before other GL users
+#include <SDL.h>
+#include <imgui_impl_sdl2.h>
 #include <stdexcept>
 #include <iostream>
+#include <string>
 
 namespace materializr {
-
-void Window::errorCallback(int error, const char* description) {
-    std::cerr << "GLFW Error (" << error << "): " << description << std::endl;
-}
 
 Window::Window(int width, int height, const std::string& title)
     : m_width(width), m_height(height) {
 
-    glfwSetErrorCallback(errorCallback);
-
-    if (!glfwInit()) {
-        throw std::runtime_error("Failed to initialize GLFW");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+        throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    // Request the right GL context per platform. Desktop: GL 3.3 Core. Android:
+    // GL ES 3.0 (same shader/feature subset Materializr uses).
+#if defined(__ANDROID__)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+#endif
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    // Tell the window manager who we are. Without these, GLFW reports
-    // WM_CLASS = "glfw" on X11 and app-id = "glfw" on Wayland, so taskbar
-    // extensions (Dash-to-Panel, the GNOME shell, etc.) can't match the
-    // running window to materializr.desktop and fall back to a generic icon.
-    // StartupWMClass=Materializr in the desktop file pairs with this.
-    glfwWindowHintString(GLFW_X11_CLASS_NAME,    "Materializr");
-    glfwWindowHintString(GLFW_X11_INSTANCE_NAME, "Materializr");
-    glfwWindowHintString(GLFW_WAYLAND_APP_ID,    "Materializr");
+    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
+#if defined(__ANDROID__)
+    // On a phone the app owns the whole screen; SDL reports the real size back.
+    flags |= SDL_WINDOW_FULLSCREEN;
+#else
+    flags |= SDL_WINDOW_RESIZABLE;
+#endif
 
-    m_window = glfwCreateWindow(m_width, m_height, title.c_str(), nullptr, nullptr);
+    m_window = SDL_CreateWindow(title.c_str(),
+                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                m_width, m_height, flags);
     if (!m_window) {
-        glfwTerminate();
-        throw std::runtime_error("Failed to create GLFW window");
+        SDL_Quit();
+        throw std::runtime_error(std::string("Failed to create SDL window: ") + SDL_GetError());
     }
 
-    // Window / taskbar icon from embedded pixels — this is what makes the
-    // Windows taskbar (and X11 docks) show the logo instead of the generic
-    // exe icon. Wayland ignores runtime icons (it uses the .desktop entry,
-    // which the AppImage already provides). The .rc-embedded .ico covers
-    // Explorer on Windows.
-    {
-        GLFWimage icons[2];
-        icons[0].width  = materializr_icon::kSize48;
-        icons[0].height = materializr_icon::kSize48;
-        icons[0].pixels = const_cast<unsigned char*>(materializr_icon::kPixels48);
-        icons[1].width  = materializr_icon::kSize32;
-        icons[1].height = materializr_icon::kSize32;
-        icons[1].pixels = const_cast<unsigned char*>(materializr_icon::kPixels32);
-        glfwSetWindowIcon(m_window, 2, icons);
+    m_glContext = SDL_GL_CreateContext(m_window);
+    if (!m_glContext) {
+        SDL_DestroyWindow(m_window);
+        SDL_Quit();
+        throw std::runtime_error(std::string("Failed to create GL context: ") + SDL_GetError());
     }
-
-    glfwMakeContextCurrent(m_window);
+    SDL_GL_MakeCurrent(m_window, static_cast<SDL_GLContext>(m_glContext));
 
 #ifdef _WIN32
-    // Load GL 3.3 core entry points (no-op on Linux, which uses Mesa prototypes).
+    // Load GL 3.3 core entry points (no-op on Linux/Android, which export them).
     glewExperimental = GL_TRUE;
     if (glewInit() != GLEW_OK) {
-        glfwTerminate();
         throw std::runtime_error("Failed to initialize GLEW (OpenGL loader)");
     }
 #endif
 
-    glfwSwapInterval(1); // Enable vsync
+    SDL_GL_SetSwapInterval(1); // vsync
+
+    // Reflect the actual created size (Android fullscreen overrides the request).
+    SDL_GetWindowSize(m_window, &m_width, &m_height);
 }
 
 Window::~Window() {
-    if (m_window) {
-        glfwDestroyWindow(m_window);
-    }
-    glfwTerminate();
-}
-
-bool Window::shouldClose() const {
-    return glfwWindowShouldClose(m_window);
+    if (m_glContext) SDL_GL_DeleteContext(static_cast<SDL_GLContext>(m_glContext));
+    if (m_window) SDL_DestroyWindow(m_window);
+    SDL_Quit();
 }
 
 void Window::swapBuffers() {
-    glfwSwapBuffers(m_window);
+    SDL_GL_SwapWindow(m_window);
 }
 
 void Window::pollEvents() {
-    glfwPollEvents();
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        // Feed every event to ImGui (handles mouse, touch->mouse, keyboard, text).
+        ImGui_ImplSDL2_ProcessEvent(&e);
+        switch (e.type) {
+            case SDL_QUIT:
+                m_shouldClose = true;
+                break;
+            case SDL_WINDOWEVENT:
+                if (e.window.event == SDL_WINDOWEVENT_CLOSE &&
+                    e.window.windowID == SDL_GetWindowID(m_window)) {
+                    m_shouldClose = true;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    SDL_GetWindowSize(m_window, &m_width, &m_height);
+}
+
+void Window::framebufferSize(int& w, int& h) const {
+    SDL_GL_GetDrawableSize(m_window, &w, &h);
+}
+
+bool Window::isCtrlDown() {
+#if defined(__ANDROID__)
+    return false; // no hardware modifier keys on touch; multi-select uses a toggle
+#else
+    const Uint8* state = SDL_GetKeyboardState(nullptr);
+    return state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL];
+#endif
 }
 
 } // namespace materializr

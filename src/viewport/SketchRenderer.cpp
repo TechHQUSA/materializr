@@ -104,7 +104,11 @@ void SketchRenderer::uploadAndDraw(const std::vector<float>& verts, GLenum mode,
     glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_DYNAMIC_DRAW);
 
     glLineWidth(lineWidth);
+#if !defined(__ANDROID__)
+    // GL ES has no glPointSize; point size must come from gl_PointSize in the
+    // vertex shader (TODO for the touch-UI pass). Points render at 1px for now.
     if (mode == GL_POINTS) glPointSize(6.0f);
+#endif
 
     glDrawArrays(mode, 0, static_cast<int>(verts.size() / 3));
 

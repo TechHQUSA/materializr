@@ -195,8 +195,12 @@ void EdgeRenderer::render(const glm::mat4& view, const glm::mat4& projection) {
 
     // Enable depth test but apply a slight bias so edges render on top of faces
     glEnable(GL_DEPTH_TEST);
+#if !defined(__ANDROID__)
+    // GL ES has no GL_POLYGON_OFFSET_LINE (only _FILL, which doesn't affect the
+    // GL_LINES draws below anyway). Edges rely on the depth test on Android.
     glEnable(GL_POLYGON_OFFSET_LINE);
     glPolygonOffset(-1.0f, -1.0f);
+#endif
 
     glLineWidth(1.0f);
 
@@ -213,7 +217,9 @@ void EdgeRenderer::render(const glm::mat4& view, const glm::mat4& projection) {
         glDrawArrays(GL_LINES, 0, mesh.vertexCount);
     }
 
+#if !defined(__ANDROID__)
     glDisable(GL_POLYGON_OFFSET_LINE);
+#endif
     glBindVertexArray(0);
     glUseProgram(0);
 }

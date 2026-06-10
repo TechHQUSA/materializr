@@ -103,9 +103,24 @@ ImageExportResult ImageExport::exportPNG(const std::string& filePath,
 
     // Read pixels from the texture
     std::vector<uint8_t> pixels(fboWidth * fboHeight * 4);
+#if defined(__ANDROID__)
+    // GL ES has no glGetTexImage. Attach the texture to a temporary read
+    // framebuffer and pull the pixels back with glReadPixels instead.
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevFbo);
+    GLuint tmpFbo = 0;
+    glGenFramebuffers(1, &tmpFbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, tmpFbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, fboTexture, 0);
+    glReadPixels(0, 0, fboWidth, fboHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+    glDeleteFramebuffers(1, &tmpFbo);
+#else
     glBindTexture(GL_TEXTURE_2D, fboTexture);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     glBindTexture(GL_TEXTURE_2D, 0);
+#endif
 
     // Determine format from file extension
     // Despite the method name, we write TGA or PPM since we have no PNG library

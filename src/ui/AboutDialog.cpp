@@ -84,7 +84,7 @@ void AboutDialog::render() {
 
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
-                           "Built with OpenCASCADE, Dear ImGui, GLFW, GLM, libcurl.");
+                           "Built with OpenCASCADE, Dear ImGui, SDL2, GLM, libcurl.");
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "License: MIT");
 
         ImGui::Spacing();
