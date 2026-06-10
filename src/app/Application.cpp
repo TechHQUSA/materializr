@@ -46,6 +46,7 @@
 #include "modeling/ReplayOp.h"
 #include "modeling/OperationFactory.h"
 #include "modeling/PushPullOp.h"
+#include "modeling/CombineSketchesOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
@@ -200,6 +201,8 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_itemsPanel->setDirtyCallback([this]() { markDirty(); });
     m_itemsPanel->setExportStlCallback([this](int bodyId) { exportBodyAsStl(bodyId); });
     m_itemsPanel->setEditSketchCallback([this](int sketchId) { editSketch(sketchId); });
+    m_itemsPanel->setCombineSketchesCallback(
+        [this](const std::vector<int>& ids) { combineSketches(ids); });
     m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
     m_statusBar->setDocument(m_document.get());
     m_statusBar->setSelectionManager(m_selection.get());
@@ -2666,6 +2669,49 @@ void Application::exportBodyAsStl(int bodyId) {
                              result.errorMessage.c_str());
             }
         });
+}
+
+void Application::combineSketches(const std::vector<int>& ids) {
+    if (ids.size() < 2 || !m_document) return;
+    auto target = m_document->getSketch(ids.front());
+    if (!target) return;
+
+    // Keep only the others that are COPLANAR with the target (parallel plane +
+    // lying on it). Combining non-coplanar sketches has no meaning.
+    const gp_Pln& tp = target->getPlane();
+    gp_Vec tN(tp.Axis().Direction());
+    gp_Pnt tO = tp.Location();
+    std::vector<int> coplanar;
+    for (size_t i = 1; i < ids.size(); ++i) {
+        auto sk = m_document->getSketch(ids[i]);
+        if (!sk) continue;
+        const gp_Pln& sp = sk->getPlane();
+        gp_Vec sN(sp.Axis().Direction());
+        if (std::abs(sN.Dot(tN)) < 0.999) continue;
+        gp_Vec d(sp.Location().X() - tO.X(), sp.Location().Y() - tO.Y(),
+                 sp.Location().Z() - tO.Z());
+        if (std::abs(d.Dot(tN)) > 0.05) continue;
+        coplanar.push_back(ids[i]);
+    }
+    if (coplanar.empty()) {
+        showToast("Combine needs sketches that share a plane.");
+        return;
+    }
+
+    auto op = std::make_unique<CombineSketchesOp>();
+    op->setTarget(ids.front(), *target);
+    for (int oid : coplanar) {
+        auto sk = m_document->getSketch(oid);
+        if (sk) op->addOther(oid, *sk, m_document->getSketchName(oid),
+                             m_document->isSketchVisible(oid));
+    }
+    if (m_history->pushOperation(std::move(op), *m_document)) {
+        m_selection->clear();
+        markDirty();
+        m_meshesDirty = true;
+        std::fprintf(stdout, "Combined %d sketch(es) into %d\n",
+                     static_cast<int>(coplanar.size()), ids.front());
+    }
 }
 
 void Application::enterSketchMode() {

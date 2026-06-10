@@ -29,6 +29,11 @@ public:
     // that sketch — the only way to re-enter a sketch that was created in
     // a previous session.
     void setEditSketchCallback(std::function<void(int)> cb) { m_editSketch = std::move(cb); }
+    // Called when the user picks "Combine sketches" — merges the selected
+    // coplanar sketches into the first. Routes to Application::combineSketches.
+    void setCombineSketchesCallback(std::function<void(const std::vector<int>&)> cb) {
+        m_combineSketches = std::move(cb);
+    }
     // Called when the user picks "Rotate About Axis…" from a construction
     // plane's right-click menu. Routes to Application, which opens the
     // rotate-plane-about-axis popup targeting the given plane id.
@@ -44,6 +49,7 @@ private:
     std::function<void()> m_markDirty;
     std::function<void(int)> m_exportStl;
     std::function<void(int)> m_editSketch;
+    std::function<void(const std::vector<int>&)> m_combineSketches;
     std::function<void(int)> m_rotatePlane;
     int m_renamingId = -1;
     char m_renameBuffer[128] = {};

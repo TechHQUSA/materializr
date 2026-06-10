@@ -292,6 +292,18 @@ bool ItemsPanel::render() {
                     if (ImGui::MenuItem("Edit Sketch")) {
                         if (m_editSketch) m_editSketch(id);
                     }
+                    // Fold every OTHER coplanar sketch into this one (the app
+                    // filters to the ones sharing this sketch's plane). Only
+                    // offered when there's more than one sketch to fold.
+                    if (sketchIds.size() > 1 &&
+                        ImGui::MenuItem("Combine coplanar into this")) {
+                        if (m_combineSketches) {
+                            std::vector<int> ids{ id };
+                            for (int other : sketchIds)
+                                if (other != id) ids.push_back(other);
+                            m_combineSketches(ids);
+                        }
+                    }
                     if (ImGui::MenuItem("Rename")) {
                         beginRename();
                     }

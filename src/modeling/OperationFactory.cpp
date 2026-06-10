@@ -5,6 +5,7 @@
 #include "ExtrudeOp.h"
 #include "PushPullOp.h"
 #include "MoveFaceOp.h"
+#include "CombineSketchesOp.h"
 #include "RevolveOp.h"
 #include "ConstructionPlaneOp.h"
 #include "ConstructionAxisOp.h"
@@ -36,6 +37,7 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     if (typeId == "extrude")  return std::make_unique<ExtrudeOp>();
     if (typeId == "pushpull") return std::make_unique<PushPullOp>();
     if (typeId == "moveface") return std::make_unique<MoveFaceOp>();
+    if (typeId == "combine_sketches") return std::make_unique<CombineSketchesOp>();
     if (typeId == "revolve")  return std::make_unique<RevolveOp>();
     if (typeId == "construction_plane") return std::make_unique<ConstructionPlaneOp>();
     if (typeId == "construction_axis")  return std::make_unique<ConstructionAxisOp>();
