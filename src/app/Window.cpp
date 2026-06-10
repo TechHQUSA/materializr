@@ -105,6 +105,21 @@ void Window::framebufferSize(int& w, int& h) const {
     SDL_GL_GetDrawableSize(m_window, &w, &h);
 }
 
+float Window::uiScale() const {
+#if defined(__ANDROID__)
+    // Scale the desktop-density UI up for a touch screen. Use the physical DPI
+    // against a 96-dpi desktop baseline (so a 240-dpi tablet -> 2.5x), clamped.
+    float ddpi = 240.0f, hdpi = 0.0f, vdpi = 0.0f;
+    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0.0f) ddpi = 240.0f;
+    float s = ddpi / 96.0f;
+    if (s < 1.5f) s = 1.5f;     // never smaller than 1.5x on a touch device
+    if (s > 3.0f) s = 3.0f;
+    return s;
+#else
+    return 1.0f;                 // desktop UI is already correctly sized
+#endif
+}
+
 bool Window::isCtrlDown() {
 #if defined(__ANDROID__)
     return false; // no hardware modifier keys on touch; multi-select uses a toggle

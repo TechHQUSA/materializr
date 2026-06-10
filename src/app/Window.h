@@ -31,6 +31,10 @@ public:
     // keyboard focus (used by the undo/redo shortcut). Always false on Android.
     static bool isCtrlDown();
 
+    // UI scale factor for HiDPI / touch. 1.0 on desktop; on Android it's derived
+    // from the display DPI so fonts and widgets are finger-sized on a tablet.
+    float uiScale() const;
+
     SDL_Window* handle() const { return m_window; }
     void* glContext() const { return m_glContext; }   // SDL_GLContext (opaque)
     int width() const { return m_width; }

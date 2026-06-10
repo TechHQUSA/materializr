@@ -420,6 +420,12 @@ void Application::initImGui() {
     style.Colors[ImGuiCol_TitleBg] = ImVec4(0.08f, 0.08f, 0.10f, 1.0f);
     style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.14f, 0.14f, 0.18f, 1.0f);
 
+    // HiDPI / touch scaling. 1.0 on desktop (no change); on a tablet this scales
+    // all padding/spacing/widget sizes so buttons are finger-sized. The font is
+    // loaded at the matching size below so text stays crisp (not just upscaled).
+    const float uiScale = m_window ? m_window->uiScale() : 1.0f;
+    if (uiScale != 1.0f) style.ScaleAllSizes(uiScale);  // scales padding/spacing/scrollbar/grab
+
     // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,
     // distinct 0/8/B/6, designed for engineering UIs. Resolved from a small
     // list of candidate paths so both AppImage and dev builds find it:
@@ -431,7 +437,7 @@ void Application::initImGui() {
     {
         std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
         if (!path.empty()) {
-            ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f);
+            ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f * uiScale);
             if (fnt) std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
         }
         // If nothing loaded, ImGui will lazily fall back to its baked-in default.

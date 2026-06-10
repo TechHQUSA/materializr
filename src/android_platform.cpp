@@ -12,6 +12,7 @@
 #include <vector>
 #include <system_error>
 #include <unistd.h>
+#include <pthread.h>
 
 namespace materializr {
 namespace {
@@ -19,6 +20,31 @@ namespace fs = std::filesystem;
 
 void logi(const std::string& m) {
     __android_log_print(ANDROID_LOG_INFO, "Materializr", "%s", m.c_str());
+}
+
+// SDL does not reliably forward stderr to logcat, and the app logs all its
+// diagnostics (shader errors, per-op traces) via fprintf(stderr). Pipe
+// stdout+stderr into logcat so they're visible with `adb logcat -s Materializr-io`.
+int g_logPipe[2];
+void* logPump(void*) {
+    char buf[1024];
+    ssize_t n;
+    while ((n = read(g_logPipe[0], buf, sizeof(buf) - 1)) > 0) {
+        if (buf[n - 1] == '\n') --n;
+        buf[n] = '\0';
+        __android_log_write(ANDROID_LOG_INFO, "Materializr-io", buf);
+    }
+    return nullptr;
+}
+void redirectStdioToLogcat() {
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+    if (pipe(g_logPipe) != 0) return;
+    dup2(g_logPipe[1], STDOUT_FILENO);
+    dup2(g_logPipe[1], STDERR_FILENO);
+    pthread_t t;
+    pthread_create(&t, nullptr, logPump, nullptr);
+    pthread_detach(t);
 }
 
 // Copy a file bundled in the APK's assets/ (read via SDL's asset-aware RWops)
@@ -45,6 +71,8 @@ bool extractAsset(const std::string& assetPath, const std::string& destPath) {
 } // namespace
 
 void androidInitRuntime() {
+    redirectStdioToLogcat();   // make fprintf(stderr) diagnostics visible in logcat
+
     const char* internalC = SDL_AndroidGetInternalStoragePath();
     const std::string internal = internalC ? internalC : ".";
 
