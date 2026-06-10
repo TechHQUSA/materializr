@@ -35,10 +35,22 @@ public:
     // Rotate: tilt axis direction (in the face plane) + angle (radians), pivoting
     // at the face centre.
     void setRotation(const gp_Dir& axisDir, double angleRad) {
-        m_rotAxis = axisDir; m_rotAngle = angleRad;
+        m_rotAxis = axisDir; m_rotAngle = angleRad; m_rotUseExplicit = false;
+    }
+    // Rotate: an explicit composed rotation (already about the pivot) — lets the
+    // UI stack tilts about both axes (5° right then 10° forward) into one op.
+    void setRotationExplicit(const gp_Trsf& t) {
+        m_rotExplicit = t; m_rotUseExplicit = true;
     }
     // Scale: uniform factor about the face centre.
-    void setScaleFactor(double f) { m_scaleFactor = f; }
+    void setScaleFactor(double f) { m_scaleFactor = f; m_scaleNonUniform = false; }
+    // Scale: NON-uniform — separate factors along two in-plane axes (about the
+    // centre). Built as a gp_GTrsf applied to the moving loops.
+    void setScaleNonUniform(const gp_Dir& axisA, const gp_Dir& axisB,
+                            double sA, double sB) {
+        m_scaleNonUniform = true;
+        m_scaleAxisA = axisA; m_scaleAxisB = axisB; m_scaleA = sA; m_scaleB = sB;
+    }
     // Sketches lying ON the moved face — they slide with it (translated by the
     // in-plane move vector) as part of the same atomic op.
     void setSketchIds(std::vector<int> ids) { m_sketchIds = std::move(ids); }
@@ -79,7 +91,12 @@ private:
     gp_Vec m_move{0.0, 0.0, 0.0};
     gp_Dir m_rotAxis{1.0, 0.0, 0.0};
     double m_rotAngle = 0.0;       // radians (Rotate)
+    gp_Trsf m_rotExplicit;         // composed rotation (Rotate, explicit mode)
+    bool m_rotUseExplicit = false;
     double m_scaleFactor = 1.0;    // uniform (Scale)
+    bool m_scaleNonUniform = false;
+    gp_Dir m_scaleAxisA{1.0, 0.0, 0.0}, m_scaleAxisB{0.0, 1.0, 0.0};
+    double m_scaleA = 1.0, m_scaleB = 1.0;
     std::vector<int> m_sketchIds; // sketches that ride along (translated by m_move)
     bool m_moveOuter = true;            // does the face outline slide?
     std::vector<bool> m_holeSlant;     // per-hole: top ring follows (slant)

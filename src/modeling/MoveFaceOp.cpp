@@ -9,6 +9,8 @@
 #include <cstring>
 
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
+#include <gp_GTrsf.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -34,8 +36,11 @@ bool MoveFaceOp::execute(Document& doc) {
     if (m_bodyId < 0 || m_face.IsNull()) return false;
     // Nothing-to-do guard, per kind.
     if (m_kind == Kind::Translate && m_move.Magnitude() < 1e-6) return false;
-    if (m_kind == Kind::Rotate    && std::abs(m_rotAngle) < 1e-6) return false;
-    if (m_kind == Kind::Scale     && std::abs(m_scaleFactor - 1.0) < 1e-6) return false;
+    if (m_kind == Kind::Rotate && !m_rotUseExplicit && std::abs(m_rotAngle) < 1e-6) return false;
+    if (m_kind == Kind::Scale && !m_scaleNonUniform &&
+        std::abs(m_scaleFactor - 1.0) < 1e-6) return false;
+    if (m_kind == Kind::Scale && m_scaleNonUniform &&
+        std::abs(m_scaleA - 1.0) < 1e-6 && std::abs(m_scaleB - 1.0) < 1e-6) return false;
 
     try {
         OCC_CATCH_SIGNALS // turn an OCCT kernel fault here into a catch below
@@ -66,16 +71,38 @@ bool MoveFaceOp::execute(Document& doc) {
         // sketch follow, undo) just applies this one gp_Trsf.
         gp_Vec V = m_move - N * m_move.Dot(N); // in-plane slide (Translate)
         gp_Trsf topT;
+        gp_GTrsf topGT;          // only used for non-uniform scale
+        bool useGT = false;
         switch (m_kind) {
             case Kind::Translate:
                 if (V.Magnitude() < 1e-6) return false;
                 topT.SetTranslation(V);
                 break;
             case Kind::Rotate:
-                topT.SetRotation(gp_Ax1(pivot, m_rotAxis), m_rotAngle);
+                if (m_rotUseExplicit) topT = m_rotExplicit;
+                else topT.SetRotation(gp_Ax1(pivot, m_rotAxis), m_rotAngle);
                 break;
             case Kind::Scale:
-                topT.SetScale(pivot, m_scaleFactor);
+                if (m_scaleNonUniform) {
+                    // M = sA·(A⊗A) + sB·(B⊗B) + 1·(N⊗N); T pins the pivot.
+                    double Av[3] = {m_scaleAxisA.X(), m_scaleAxisA.Y(), m_scaleAxisA.Z()};
+                    double Bv[3] = {m_scaleAxisB.X(), m_scaleAxisB.Y(), m_scaleAxisB.Z()};
+                    double Nv[3] = {N.X(), N.Y(), N.Z()};
+                    double Pv[3] = {pivot.X(), pivot.Y(), pivot.Z()};
+                    for (int i = 0; i < 3; ++i) {
+                        double t = Pv[i];
+                        for (int j = 0; j < 3; ++j) {
+                            double m = m_scaleA * Av[i] * Av[j] +
+                                       m_scaleB * Bv[i] * Bv[j] + Nv[i] * Nv[j];
+                            topGT.SetValue(i + 1, j + 1, m);
+                            t -= m * Pv[j];
+                        }
+                        topGT.SetValue(i + 1, 4, t);
+                    }
+                    useGT = true;
+                } else {
+                    topT.SetScale(pivot, m_scaleFactor);
+                }
                 break;
         }
 
@@ -90,7 +117,12 @@ bool MoveFaceOp::execute(Document& doc) {
         // convert, so it survives bodies the shear crashed on. Non-prism bodies
         // refuse here instead of crashing.
 
-        // Find the opposite parallel planar face (the prism's far cap).
+        // Find the opposite planar face (the prism's far cap) = the planar face
+        // FARTHEST along -N from the selected face. The normal need only be
+        // roughly opposite (dot < -0.3), NOT near-perfectly antiparallel: after
+        // a TILT the top is tilted while the base stays flat, so they're no
+        // longer parallel — a strict test made a second op on a tilted face
+        // refuse. The loose test still excludes the perpendicular side walls.
         TopoDS_Face baseFace;
         double bestDist = -1e300;
         for (TopExp_Explorer fx(m_previousShape, TopAbs_FACE); fx.More(); fx.Next()) {
@@ -102,7 +134,7 @@ bool MoveFaceOp::execute(Document& doc) {
             double uu1, uu2, vv1, vv2; fp.Bounds(uu1, uu2, vv1, vv2);
             gp_Pnt fc; gp_Vec fn; fp.Normal((uu1 + uu2) * 0.5, (vv1 + vv2) * 0.5, fc, fn);
             if (fn.Magnitude() < 1e-9) continue;
-            if (fn.Normalized().Dot(N) > -0.999) continue; // not antiparallel
+            if (fn.Normalized().Dot(N) > -0.3) continue; // not roughly opposite
             double dist = -(gp_Vec(fc.X(), fc.Y(), fc.Z()) - P0).Dot(N);
             if (dist > bestDist) { bestDist = dist; baseFace = f; }
         }
@@ -136,6 +168,8 @@ bool MoveFaceOp::execute(Document& doc) {
         if (topOuter.IsNull() || baseOuter.IsNull()) return false;
 
         auto moved = [&](const TopoDS_Wire& w) {
+            if (useGT)
+                return TopoDS::Wire(BRepBuilderAPI_GTransform(w, topGT, Standard_True).Shape());
             return TopoDS::Wire(BRepBuilderAPI_Transform(w, topT, Standard_True).Shape());
         };
         auto loftSolid = [](TopoDS_Wire a, TopoDS_Wire b, TopoDS_Shape& out) -> bool {

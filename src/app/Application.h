@@ -220,6 +220,9 @@ private:
     // op type is complete).
     void configureFaceOp(MoveFaceOp& op) const;
     bool faceXformNontrivial() const;
+    // Total tilt = the live ring drag composed onto the accumulated tilts.
+    glm::mat3 faceRotTotal() const;
+    void bakeFaceRotationDrag(); // fold a released ring drag into the accumulator
     void updateMoveFace();   // live shear preview against the snapshot
     void commitMoveFace();
     void cancelMoveFace();
@@ -242,11 +245,23 @@ private:
     glm::vec3 m_moveFacePivot{0.0f};  // face centroid (rotate/scale pivot)
     float m_moveFaceAngle = 0.0f;     // accumulated tilt (radians, Rotate)
     float m_moveFaceAngleBase = 0.0f; // tilt banked before the current drag
-    float m_moveFaceScale = 1.0f;     // accumulated factor (Scale)
+    float m_moveFaceScale = 1.0f;     // accumulated uniform factor (Scale)
     float m_moveFaceScaleBase = 1.0f;
+    // Non-uniform scale: separate factors along the two in-plane axes. When
+    // uniform (default), both track m_moveFaceScale.
+    bool  m_moveFaceScaleUniform = true;
+    float m_moveFaceScaleA = 1.0f, m_moveFaceScaleB = 1.0f;
+    float m_moveFaceScaleABase = 1.0f, m_moveFaceScaleBBase = 1.0f;
     glm::vec3 m_moveFaceRotAxis{1.0f, 0.0f, 0.0f}; // tilt axis latched this drag
+    float m_moveFaceRotStartAngle = 0.0f; // cursor angle in the ring plane at drag start
+    // Composed tilt from prior ring drags this session (about the fixed axes),
+    // so you can stack 5° about one then 10° about the other. The live tilt is
+    // rodrigues(rotAxis, angle) * accum; on each ring release the drag is baked
+    // into accum and the angle resets.
+    glm::mat3 m_moveFaceRotAccum{1.0f};
+    bool m_moveFaceRotHasAccum = false;
     float m_moveFaceHalfExtent = 1.0f; // face size, maps drag distance → angle/scale
-    bool  m_moveFaceRotSnap = false;   // snap tilt to 15° increments
+    bool  m_moveFaceRotSnap = true;    // snap tilt to whole degrees (default on)
     // DEFERRED REBUILD: the body rebuild is deferred to mouse-release, so the
     // drag only moves ghost SILHOUETTES of the face's loops. Loop 0 = outer
     // outline, 1..N = hole loops (same order as the op enumerates them). Each is

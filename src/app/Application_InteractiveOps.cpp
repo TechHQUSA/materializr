@@ -1501,7 +1501,11 @@ void Application::beginMoveFace(FaceXform kind) {
     m_moveFaceVec = glm::vec3(0.0f);
     m_moveFaceBase = glm::vec3(0.0f);
     m_moveFaceAngle = m_moveFaceAngleBase = 0.0f;
+    m_moveFaceRotAccum = glm::mat3(1.0f);
+    m_moveFaceRotHasAccum = false;
     m_moveFaceScale = m_moveFaceScaleBase = 1.0f;
+    m_moveFaceScaleA = m_moveFaceScaleABase = 1.0f;
+    m_moveFaceScaleB = m_moveFaceScaleBBase = 1.0f;
     m_moveFaceDragging = false;
 
     // Sort the selection: the first PLANAR face slides (the moving face); every
@@ -1701,6 +1705,34 @@ void Application::moveFaceSlideSketches(const glm::vec3& v) {
     }
 }
 
+namespace {
+// Rotation matrix (column-major glm) about a unit-ish axis by `angle` radians.
+glm::mat3 rodrigues(const glm::vec3& axisIn, float angle) {
+    glm::vec3 a = glm::normalize(axisIn);
+    float c = std::cos(angle), s = std::sin(angle), t = 1.0f - c;
+    float ax = a.x, ay = a.y, az = a.z;
+    return glm::mat3(
+        glm::vec3(c + ax*ax*t,      ay*ax*t + az*s,  az*ax*t - ay*s),   // col 0
+        glm::vec3(ax*ay*t - az*s,   c + ay*ay*t,     az*ay*t + ax*s),   // col 1
+        glm::vec3(ax*az*t + ay*s,   ay*az*t - ax*s,  c + az*az*t));     // col 2
+}
+} // namespace
+
+glm::mat3 Application::faceRotTotal() const {
+    return rodrigues(m_moveFaceRotAxis, m_moveFaceAngle) * m_moveFaceRotAccum;
+}
+
+// Bake the just-released ring drag into the accumulated tilt (so the next ring
+// drag stacks on top), then reset the live angle.
+void Application::bakeFaceRotationDrag() {
+    if (m_faceXformKind != FaceXform::Rotate || std::abs(m_moveFaceAngle) < 1e-5f)
+        return;
+    m_moveFaceRotAccum = rodrigues(m_moveFaceRotAxis, m_moveFaceAngle) * m_moveFaceRotAccum;
+    m_moveFaceRotHasAccum = true;
+    m_moveFaceAngle = 0.0f;
+    m_moveFaceAngleBase = 0.0f;
+}
+
 // Configure an op with the current gesture (Move / Rotate / Scale) + hole flags.
 void Application::configureFaceOp(MoveFaceOp& op) const {
     switch (m_faceXformKind) {
@@ -1708,14 +1740,29 @@ void Application::configureFaceOp(MoveFaceOp& op) const {
             op.setKind(MoveFaceOp::Kind::Translate);
             op.setMoveVector(gp_Vec(m_moveFaceVec.x, m_moveFaceVec.y, m_moveFaceVec.z));
             break;
-        case FaceXform::Rotate:
+        case FaceXform::Rotate: {
             op.setKind(MoveFaceOp::Kind::Rotate);
-            op.setRotation(gp_Dir(m_moveFaceRotAxis.x, m_moveFaceRotAxis.y, m_moveFaceRotAxis.z),
-                           m_moveFaceAngle);
+            // Composed rotation (live drag ∘ accumulated tilts) as a gp_Trsf
+            // about the pivot, so stacked tilts about both axes apply at once.
+            glm::mat3 R = faceRotTotal();
+            glm::vec3 Tt = m_moveFacePivot - R * m_moveFacePivot;
+            gp_Trsf trsf;
+            trsf.SetValues(R[0][0], R[1][0], R[2][0], Tt.x,
+                           R[0][1], R[1][1], R[2][1], Tt.y,
+                           R[0][2], R[1][2], R[2][2], Tt.z);
+            op.setRotationExplicit(trsf);
             break;
+        }
         case FaceXform::Scale:
             op.setKind(MoveFaceOp::Kind::Scale);
-            op.setScaleFactor(m_moveFaceScale);
+            if (m_moveFaceScaleUniform) {
+                op.setScaleFactor(m_moveFaceScale);
+            } else {
+                op.setScaleNonUniform(
+                    gp_Dir(m_moveFaceAxisA.x, m_moveFaceAxisA.y, m_moveFaceAxisA.z),
+                    gp_Dir(m_moveFaceAxisB.x, m_moveFaceAxisB.y, m_moveFaceAxisB.z),
+                    m_moveFaceScaleA, m_moveFaceScaleB);
+            }
             break;
     }
     op.setLoopMotion(m_moveFaceMoveOuter, m_moveFaceHoleSlant, m_moveFaceHoleVertical);
@@ -1724,8 +1771,13 @@ void Application::configureFaceOp(MoveFaceOp& op) const {
 bool Application::faceXformNontrivial() const {
     switch (m_faceXformKind) {
         case FaceXform::Translate: return glm::length(m_moveFaceVec) > 1e-4f;
-        case FaceXform::Rotate:    return std::abs(m_moveFaceAngle) > 1e-4f;
-        case FaceXform::Scale:     return std::abs(m_moveFaceScale - 1.0f) > 1e-4f;
+        case FaceXform::Rotate:    return std::abs(m_moveFaceAngle) > 1e-4f ||
+                                          m_moveFaceRotHasAccum;
+        case FaceXform::Scale:
+            return m_moveFaceScaleUniform
+                ? std::abs(m_moveFaceScale - 1.0f) > 1e-4f
+                : (std::abs(m_moveFaceScaleA - 1.0f) > 1e-4f ||
+                   std::abs(m_moveFaceScaleB - 1.0f) > 1e-4f);
     }
     return false;
 }
@@ -1760,16 +1812,49 @@ void Application::commitMoveFace() {
         m_document->updateBody(m_moveFaceBodyId, m_moveFacePreviousShape);
     moveFaceSlideSketches(glm::vec3(0.0f)); // restore sketches to snapshot
 
+    bool committed = false;
     if (faceXformNontrivial() && m_moveFaceBodyId >= 0 && !m_moveFaceFace.IsNull()) {
         auto op = std::make_unique<MoveFaceOp>();
         op->setBody(m_moveFaceBodyId);
         op->setFace(m_moveFaceFace);
         configureFaceOp(*op);
         op->setSketchIds(m_moveFaceSketchIds); // on-face sketches ride along
-        if (m_history->pushOperation(std::move(op), *m_document))
+        committed = m_history->pushOperation(std::move(op), *m_document);
+        if (committed)
             std::fprintf(stdout, "Face %s committed\n",
                          m_faceXformKind == FaceXform::Rotate ? "tilt"
                          : m_faceXformKind == FaceXform::Scale ? "scale" : "move");
+    }
+
+    // Re-select the moved face in the REBUILT body, so the highlight + the next
+    // op use live geometry. Without this the selection keeps the stale old-
+    // position face: the highlight lingers there, and a chained op lofts from
+    // that old wire (lands the body back where it started = "the op got undone").
+    if (committed && m_selection) {
+        glm::vec3 want = m_moveFacePivot; // where the face centre ends up
+        if (m_faceXformKind == FaceXform::Translate) want += m_moveFaceVec;
+        TopoDS_Shape nb = m_document->getBody(m_moveFaceBodyId);
+        TopoDS_Face best; double bestD = 1e300;
+        for (TopExp_Explorer fx(nb, TopAbs_FACE); fx.More(); fx.Next()) {
+            TopoDS_Face f = TopoDS::Face(fx.Current());
+            Handle(Geom_Surface) s = BRep_Tool::Surface(f);
+            if (s.IsNull() || !s->IsKind(STANDARD_TYPE(Geom_Plane))) continue;
+            try {
+                GProp_GProps gp; BRepGProp::SurfaceProperties(f, gp);
+                gp_Pnt c = gp.CentreOfMass();
+                double d = glm::length(glm::vec3(c.X(), c.Y(), c.Z()) - want);
+                if (d < bestD) { bestD = d; best = f; }
+            } catch (...) {}
+        }
+        if (!best.IsNull()) {
+            SelectionEntry entry;
+            entry.type = SelectionType::Face;
+            entry.bodyId = m_moveFaceBodyId;
+            entry.shape = best;
+            m_selection->select(entry);
+        } else {
+            m_selection->clear(); // fall back to clearing if we can't re-find it
+        }
     }
     m_moveFaceSketchIds.clear();
     m_moveFaceSketchPlanes0.clear();
