@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp_Face.hxx>
 #include <Bnd_Box.hxx>
@@ -100,6 +101,16 @@ bool MoveFaceOp::execute(Document& doc) {
                 gp_Pln pln = sk->getPlane();
                 pln.Transform(slide);
                 sk->setPlane(pln);
+                // The cached host face is used to build the sketch's regions —
+                // move it too (copy=true forces a fresh TShape so the region
+                // cache, keyed on it, invalidates), or its stale geometry
+                // highlights at the OLD position when the region is clicked.
+                TopoDS_Face sf = sk->getSourceFace();
+                if (!sf.IsNull()) {
+                    TopoDS_Shape mv = BRepBuilderAPI_Transform(sf, slide, Standard_True).Shape();
+                    if (!mv.IsNull() && mv.ShapeType() == TopAbs_FACE)
+                        sk->setSourceFace(TopoDS::Face(mv));
+                }
             }
         }
         return true;
@@ -120,6 +131,12 @@ bool MoveFaceOp::undo(Document& doc) {
                 gp_Pln pln = sk->getPlane();
                 pln.Transform(back);
                 sk->setPlane(pln);
+                TopoDS_Face sf = sk->getSourceFace();
+                if (!sf.IsNull()) {
+                    TopoDS_Shape mv = BRepBuilderAPI_Transform(sf, back, Standard_True).Shape();
+                    if (!mv.IsNull() && mv.ShapeType() == TopAbs_FACE)
+                        sk->setSourceFace(TopoDS::Face(mv));
+                }
             }
         }
         return true;

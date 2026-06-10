@@ -959,6 +959,17 @@ uint64_t Sketch::geometryHash() const {
     const void* tsh =
         m_sourceFace.IsNull() ? nullptr : m_sourceFace.TShape().get();
     mix(&tsh, sizeof tsh);
+    // Plane pose: the 2D geometry projects to 3D through the plane, so the
+    // cached 3D regions must rebuild when the sketch moves (e.g. Move Face
+    // translates the plane) even though the 2D ids are unchanged.
+    {
+        gp_Pnt o = m_plane.Location();
+        gp_Dir z = m_plane.Axis().Direction();
+        gp_Dir x = m_plane.XAxis().Direction();
+        double pv[9] = { o.X(), o.Y(), o.Z(), z.X(), z.Y(), z.Z(),
+                         x.X(), x.Y(), x.Z() };
+        mix(pv, sizeof pv);
+    }
     return h;
 }
 
