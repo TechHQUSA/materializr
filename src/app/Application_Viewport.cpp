@@ -2208,32 +2208,42 @@ void Application::renderViewport() {
                 m_moveFaceGrab = -1;
             }
 
-            // Ghost silhouette: the captured face outline translated by the
-            // current slide, drawn as a yellow loop. During a drag this is the
-            // ONLY thing that moves (the body rebuilds on release), so the user
-            // sees the target without paying the per-frame shear.
-            if (m_moveFaceActive && !m_moveFaceSilhouette.empty() &&
+            // Ghost silhouette: each face loop drawn as a yellow outline,
+            // translated by the current slide ONLY if that loop is flagged to
+            // move (outline = loop 0, holes = 1..N). During a drag this is the
+            // only thing that moves; the body rebuilds on release.
+            if (m_moveFaceActive && !m_moveFaceSilhouetteLoops.empty() &&
                 glm::length(m_moveFaceVec) > 1e-5f) {
                 ImVec2 wp = ImGui::GetItemRectMin();
                 ImDrawList* dl = ImGui::GetWindowDrawList();
-                const glm::vec3 off = m_moveFaceVec;
                 auto pr = [&](const glm::vec3& w, ImVec2& out) -> bool {
-                    glm::vec4 c = proj * view * glm::vec4(w + off, 1.0f);
+                    glm::vec4 c = proj * view * glm::vec4(w, 1.0f);
                     if (c.w <= 1e-6f) return false;
                     out = ImVec2(wp.x + (c.x / c.w * 0.5f + 0.5f) * contentSize.x,
                                  wp.y + (1.0f - (c.y / c.w * 0.5f + 0.5f)) * contentSize.y);
                     return true;
                 };
                 const ImU32 col = IM_COL32(255, 235, 64, 230);
-                ImVec2 prev, first; bool havePrev = false, haveFirst = false;
-                for (const auto& p : m_moveFaceSilhouette) {
-                    ImVec2 s;
-                    if (!pr(p, s)) { havePrev = false; continue; }
-                    if (!haveFirst) { first = s; haveFirst = true; }
-                    if (havePrev) dl->AddLine(prev, s, col, 2.0f);
-                    prev = s; havePrev = true;
+                for (size_t k = 0; k < m_moveFaceSilhouetteLoops.size(); ++k) {
+                    // These are the TOP rings. Outline moves with the face; a
+                    // hole's top ring moves only if that hole slants or is a
+                    // vertical tube (else it stays put, undrawn).
+                    bool moves = (k == 0)
+                        ? m_moveFaceMoveOuter
+                        : ((k - 1 < m_moveFaceHoleSlant.size() && m_moveFaceHoleSlant[k - 1]) ||
+                           (k - 1 < m_moveFaceHoleVertical.size() && m_moveFaceHoleVertical[k - 1]));
+                    if (!moves) continue; // a static loop stays at rest, undrawn
+                    glm::vec3 off = m_moveFaceVec;
+                    ImVec2 prev, first; bool havePrev = false, haveFirst = false;
+                    for (const auto& p : m_moveFaceSilhouetteLoops[k]) {
+                        ImVec2 s;
+                        if (!pr(p + off, s)) { havePrev = false; continue; }
+                        if (!haveFirst) { first = s; haveFirst = true; }
+                        if (havePrev) dl->AddLine(prev, s, col, 2.0f);
+                        prev = s; havePrev = true;
+                    }
+                    if (haveFirst && havePrev) dl->AddLine(prev, first, col, 2.0f);
                 }
-                if (haveFirst && havePrev) dl->AddLine(prev, first, col, 2.0f);
             }
 
             // Fillet/Chamfer claim: on left-down, if the cursor is within
@@ -4650,6 +4660,22 @@ void Application::renderViewport() {
         float mag = glm::length(m_moveFaceVec);
         ImGui::Text("(%.1f, %.1f, %.1f)  |%.1f|",
                     m_moveFaceVec.x, m_moveFaceVec.y, m_moveFaceVec.z, mag);
+
+        // Read-out of what the SELECTION will do (the selection IS the control
+        // now). A hole stays put unless you also pick its top edge (slants) or
+        // its wall (vertical tube).
+        if (!m_moveFaceHoleVertical.empty()) {
+            ImGui::Separator();
+            int nvert = 0, nslant = 0;
+            for (bool v : m_moveFaceHoleVertical) if (v) ++nvert;
+            for (bool s : m_moveFaceHoleSlant)    if (s) ++nslant;
+            int nstatic = static_cast<int>(m_moveFaceHoleVertical.size()) - nvert - nslant;
+            ImGui::TextWrapped("Holes: %d stay, %d slant, %d vertical.",
+                               nstatic, nslant, nvert);
+            ImGui::TextDisabled("Pick a hole's top edge to slant it, its wall to "
+                                "keep it a vertical tube.");
+        }
+
         ImGui::Spacing();
         if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) commitMoveFace();
         ImGui::SameLine();

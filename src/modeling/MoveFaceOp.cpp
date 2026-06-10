@@ -117,17 +117,29 @@ bool MoveFaceOp::execute(Document& doc) {
             return !out.IsNull();
         };
 
-        // Outer prism: base outer (reversed to match orientation) -> moved top.
+        // A wire's lofted end is the MOVED one only if that ring slides.
+        auto endFor = [&](const TopoDS_Wire& w, bool slides) {
+            return slides ? moved(w) : w;
+        };
+
+        // Outer prism: base outer (reversed to match orientation) -> top
+        // (moved iff the outline slides).
         TopoDS_Wire bO = baseOuter; bO.Reverse();
         TopoDS_Shape result;
-        if (!loftSolid(bO, moved(topOuter), result)) {
+        if (!loftSolid(bO, endFor(topOuter, m_moveOuter), result)) {
             std::fprintf(stderr, "[MoveFace] outer loft failed — refusing\n");
             return false;
         }
 
-        // Subtract a loft for each hole (match base hole to top hole by the
-        // in-plane distance between their centroids — holes run straight down).
-        for (const auto& tw : topInners) {
+        // Subtract a loft for each hole. Its TOP ring rides the face (moves when
+        // the outline moves) OR moves on its own when the hole is vertical; its
+        // BOTTOM ring moves only when the hole is vertical (a straight tube).
+        for (size_t hi = 0; hi < topInners.size(); ++hi) {
+            const TopoDS_Wire& tw = topInners[hi];
+            bool slant    = (hi < m_holeSlant.size())    && m_holeSlant[hi];
+            bool vertical = (hi < m_holeVertical.size()) && m_holeVertical[hi];
+            bool topSlides = slant || vertical; // hole stays put unless opted in
+            bool botSlides = vertical;
             gp_Pnt tc = centroid(tw);
             int best = -1; double bd = 1e300;
             for (size_t i = 0; i < baseInners.size(); ++i) {
@@ -139,7 +151,8 @@ bool MoveFaceOp::execute(Document& doc) {
             if (best < 0) continue;
             TopoDS_Wire bi = baseInners[best]; bi.Reverse();
             TopoDS_Shape holeSolid;
-            if (!loftSolid(bi, moved(tw), holeSolid)) continue;
+            if (!loftSolid(endFor(bi, botSlides), endFor(tw, topSlides), holeSolid))
+                continue;
             BRepAlgoAPI_Cut cut(result, holeSolid);
             if (cut.IsDone() && !cut.Shape().IsNull()) result = cut.Shape();
         }
@@ -157,9 +170,11 @@ bool MoveFaceOp::execute(Document& doc) {
 
         // Slide on-face sketches by the same in-plane move (translate their
         // plane), so they stay glued to the moved face instead of floating.
-        m_appliedMove = V;
+        // Only when the face OUTLINE moves — sketches ride the face, not a hole.
+        m_appliedMove = m_moveOuter ? V : gp_Vec(0, 0, 0);
         gp_Trsf slide;
-        slide.SetTranslation(V);
+        slide.SetTranslation(m_appliedMove);
+        if (m_moveOuter)
         for (int sid : m_sketchIds) {
             if (auto sk = doc.getSketch(sid)) {
                 gp_Pln pln = sk->getPlane();

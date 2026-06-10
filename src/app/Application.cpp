@@ -1445,6 +1445,17 @@ void Application::handleToolAction(int action) {
             break;
 
         case ToolAction::Move: {
+            // A selected face turns Move into Move Face — same verb to the user,
+            // the selection picks body-vs-face. Trigger whenever a face is in the
+            // selection (even if a hole edge / wall is the *primary* pick — those
+            // refine hole behavior), so the edge doesn't route us to body-move.
+            bool moveFaceSel = false;
+            for (const auto& e : m_selection->getSelection())
+                if (e.type == SelectionType::Face && !e.shape.IsNull()) { moveFaceSel = true; break; }
+            if (moveFaceSel) {
+                beginMoveFace();
+                break;
+            }
             // Bodies / standalone sketches / construction planes all get the
             // Move gizmo — the viewport gizmo-visibility block handles whichever
             // selection type is active. SketchRegion picks count as the parent
@@ -1482,6 +1493,12 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Rotate: {
+            // A selected face turns Rotate into Taper (angular change to a face
+            // == the body's rotate, to the user).
+            if (m_selection->primaryType() == SelectionType::Face) {
+                beginIop(m_taperCtl);
+                break;
+            }
             // Axis doesn't get Rotate — an infinite line has no meaningful
             // rotation handle. Rotate is body / sketch / plane only.
             const bool isPlane =
@@ -1508,6 +1525,11 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
+            // A selected face turns Scale into Scale Face.
+            if (m_selection->primaryType() == SelectionType::Face) {
+                beginIop(m_scaleFaceCtl);
+                break;
+            }
             // Scale-on-sketch is a no-op (the plane is 2D-infinite), so we
             // keep this body-only.
             if (!m_selection->hasSelectedBodies()) break;

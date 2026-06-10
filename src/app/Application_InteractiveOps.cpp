@@ -1501,12 +1501,27 @@ void Application::beginMoveFace() {
     m_moveFaceBase = glm::vec3(0.0f);
     m_moveFaceDragging = false;
 
-    // First selected face + its owning body.
+    // Sort the selection: the PLANAR face is the one that slides; CYLINDRICAL
+    // faces are hole walls picked to move as straight tubes; selected EDGES are
+    // hole top rings picked to slant. (Faces/edges, mapped to hole loops below.)
+    std::vector<TopoDS_Face> selectedCylinders;
+    std::vector<TopoDS_Edge> selectedEdges;
     for (const auto& e : m_selection->getSelection()) {
-        if (e.type == SelectionType::Face && !e.shape.IsNull()) {
-            m_moveFaceBodyId = e.bodyId;
-            m_moveFaceFace = TopoDS::Face(e.shape);
-            break;
+        if (e.shape.IsNull()) continue;
+        if (e.type == SelectionType::Face) {
+            TopoDS_Face f = TopoDS::Face(e.shape);
+            Handle(Geom_Surface) s = BRep_Tool::Surface(f);
+            if (!s.IsNull() && s->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                if (m_moveFaceFace.IsNull()) {
+                    m_moveFaceBodyId = e.bodyId;
+                    m_moveFaceFace = f;
+                }
+            } else if (!s.IsNull() &&
+                       s->IsKind(STANDARD_TYPE(Geom_CylindricalSurface))) {
+                selectedCylinders.push_back(f);
+            }
+        } else if (e.type == SelectionType::Edge) {
+            selectedEdges.push_back(TopoDS::Edge(e.shape));
         }
     }
     if (m_moveFaceBodyId < 0 || m_moveFaceFace.IsNull()) return;
@@ -1582,18 +1597,22 @@ void Application::beginMoveFace() {
         }
     }
 
-    // Outer-wire outline as a world-space polyline, for the drag-time ghost
-    // silhouette. The drag moves only this outline; the body rebuilds once on
-    // release (deferred — no per-frame shear).
-    m_moveFaceSilhouette.clear();
+    // Each loop of the face (outer outline first, then hole loops) captured as a
+    // world-space polyline for the drag-time ghost, plus a per-hole "vertical"
+    // flag (default false = slants). Loop order MUST match the op's enumeration
+    // (OuterWire, then TopExp wires) so flags + ghost line up.
+    m_moveFaceSilhouetteLoops.clear();
+    m_moveFaceHoleSlant.clear();
+    m_moveFaceHoleVertical.clear();
+    m_moveFaceMoveOuter = true; // a planar face is selected → the outline slides
     m_moveFacePendingRebuild = false;
+    std::vector<TopoDS_Wire> innerWires;
     try {
-        TopoDS_Wire ow = BRepTools::OuterWire(m_moveFaceFace);
-        if (!ow.IsNull()) {
-            // Walk edges in CONNECTED order (WireExplorer), respecting each
-            // edge's orientation — TopExp_Explorer returns them in arbitrary
-            // order, which made the silhouette polyline zig-zag into a bowtie.
-            for (BRepTools_WireExplorer we(ow); we.More(); we.Next()) {
+        // Walk edges in CONNECTED order (WireExplorer) so the polyline doesn't
+        // zig-zag into a bowtie the way TopExp_Explorer's arbitrary order did.
+        auto sampleWire = [](const TopoDS_Wire& w) {
+            std::vector<glm::vec3> pts;
+            for (BRepTools_WireExplorer we(w); we.More(); we.Next()) {
                 const TopoDS_Edge& e = we.Current();
                 BRepAdaptor_Curve crv(e);
                 double f = crv.FirstParameter(), l = crv.LastParameter();
@@ -1601,11 +1620,47 @@ void Application::beginMoveFace() {
                 const int Nseg = 12;
                 for (int i = 0; i < Nseg; ++i) {
                     gp_Pnt p = crv.Value(f + (l - f) * (double(i) / Nseg));
-                    m_moveFaceSilhouette.emplace_back(p.X(), p.Y(), p.Z());
+                    pts.emplace_back(p.X(), p.Y(), p.Z());
                 }
             }
+            return pts;
+        };
+        TopoDS_Wire outer = BRepTools::OuterWire(m_moveFaceFace);
+        if (!outer.IsNull())
+            m_moveFaceSilhouetteLoops.push_back(sampleWire(outer));
+        for (TopExp_Explorer wx(m_moveFaceFace, TopAbs_WIRE); wx.More(); wx.Next()) {
+            TopoDS_Wire w = TopoDS::Wire(wx.Current());
+            if (w.IsSame(outer)) continue;
+            m_moveFaceSilhouetteLoops.push_back(sampleWire(w));
+            m_moveFaceHoleSlant.push_back(false);    // stays put until opted in
+            m_moveFaceHoleVertical.push_back(false);
+            innerWires.push_back(w);
         }
-    } catch (...) { m_moveFaceSilhouette.clear(); }
+
+        // hole index whose inner wire contains the given edge, else -1.
+        auto holeOfEdge = [&](const TopoDS_Edge& edge) -> int {
+            for (size_t hi = 0; hi < innerWires.size(); ++hi)
+                for (TopExp_Explorer we(innerWires[hi], TopAbs_EDGE); we.More(); we.Next())
+                    if (edge.IsSame(we.Current())) return static_cast<int>(hi);
+            return -1;
+        };
+        // Cylinder wall picked → that hole moves as a straight tube (vertical).
+        for (const TopoDS_Face& cyl : selectedCylinders) {
+            for (TopExp_Explorer ce(cyl, TopAbs_EDGE); ce.More(); ce.Next()) {
+                int hi = holeOfEdge(TopoDS::Edge(ce.Current()));
+                if (hi >= 0) { m_moveFaceHoleVertical[hi] = true; break; }
+            }
+        }
+        // Hole top edge picked → that hole slants (top ring follows).
+        for (const TopoDS_Edge& edge : selectedEdges) {
+            int hi = holeOfEdge(edge);
+            if (hi >= 0) m_moveFaceHoleSlant[hi] = true;
+        }
+    } catch (...) {
+        m_moveFaceSilhouetteLoops.clear();
+        m_moveFaceHoleSlant.clear();
+        m_moveFaceHoleVertical.clear();
+    }
 
     m_moveFaceActive = true;
 }
@@ -1635,6 +1690,7 @@ void Application::updateMoveFace() {
         op->setBody(m_moveFaceBodyId);
         op->setFace(m_moveFaceFace);
         op->setMoveVector(gp_Vec(m_moveFaceVec.x, m_moveFaceVec.y, m_moveFaceVec.z));
+        op->setLoopMotion(m_moveFaceMoveOuter, m_moveFaceHoleSlant, m_moveFaceHoleVertical);
         // No sketch ids on the preview op — the sketches are slid separately
         // below so they restore-then-translate each frame instead of compounding.
         if (!op->execute(*m_document))
@@ -1660,6 +1716,7 @@ void Application::commitMoveFace() {
         op->setBody(m_moveFaceBodyId);
         op->setFace(m_moveFaceFace);
         op->setMoveVector(gp_Vec(m_moveFaceVec.x, m_moveFaceVec.y, m_moveFaceVec.z));
+        op->setLoopMotion(m_moveFaceMoveOuter, m_moveFaceHoleSlant, m_moveFaceHoleVertical);
         op->setSketchIds(m_moveFaceSketchIds); // on-face sketches ride along
         if (m_history->pushOperation(std::move(op), *m_document))
             std::fprintf(stdout, "Move Face committed (%.2f, %.2f, %.2f), %d sketch(es)\n",
@@ -1675,7 +1732,10 @@ void Application::commitMoveFace() {
     m_moveFaceVec = glm::vec3(0.0f);
     m_moveFaceBase = glm::vec3(0.0f);
     m_moveFaceDragging = false;
-    m_moveFaceSilhouette.clear();
+    m_moveFaceSilhouetteLoops.clear();
+    m_moveFaceHoleSlant.clear();
+    m_moveFaceHoleVertical.clear();
+    m_moveFaceMoveOuter = true;
     m_moveFacePendingRebuild = false;
     m_meshesDirty = true;
 }
@@ -1694,7 +1754,10 @@ void Application::cancelMoveFace() {
     m_moveFaceVec = glm::vec3(0.0f);
     m_moveFaceBase = glm::vec3(0.0f);
     m_moveFaceDragging = false;
-    m_moveFaceSilhouette.clear();
+    m_moveFaceSilhouetteLoops.clear();
+    m_moveFaceHoleSlant.clear();
+    m_moveFaceHoleVertical.clear();
+    m_moveFaceMoveOuter = true;
     m_moveFacePendingRebuild = false;
     m_meshesDirty = true;
 }

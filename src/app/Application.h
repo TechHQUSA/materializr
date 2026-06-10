@@ -227,12 +227,19 @@ private:
     glm::vec3 m_moveFaceAxisA{1.0f, 0.0f, 0.0f};
     glm::vec3 m_moveFaceAxisB{0.0f, 1.0f, 0.0f};
     int  m_moveFaceGrab = -1;
-    // DEFERRED REBUILD: the body shear is expensive (and fragile), so the drag
-    // only moves a ghost SILHOUETTE of the face outline; the real rebuild runs
-    // once on mouse-release. m_moveFaceSilhouette is the face's outer-wire
-    // polyline (world space, at rest), drawn translated by m_moveFaceVec.
-    std::vector<glm::vec3> m_moveFaceSilhouette;
+    // DEFERRED REBUILD: the body rebuild is deferred to mouse-release, so the
+    // drag only moves ghost SILHOUETTES of the face's loops. Loop 0 = outer
+    // outline, 1..N = hole loops (same order as the op enumerates them). Each is
+    // drawn translated by m_moveFaceVec only if that loop is flagged to move.
+    std::vector<std::vector<glm::vec3>> m_moveFaceSilhouetteLoops;
     bool m_moveFacePendingRebuild = false;
+    // Per-loop motion, derived from the SELECTION. moveOuter = a planar face is
+    // selected (outline slides, holes slant). holeVertical[i] = that hole's
+    // cylindrical face was Ctrl-selected → it moves as a straight tube. One per
+    // hole, in loop order (matches m_moveFaceSilhouetteLoops[1..]).
+    bool m_moveFaceMoveOuter = true;
+    std::vector<bool> m_moveFaceHoleSlant;     // top edge picked → top ring follows
+    std::vector<bool> m_moveFaceHoleVertical;  // cylinder wall picked → tube follows
     // Sketches sitting ON the moved face — they slide with it. Original planes
     // snapshotted so the live preview / cancel can restore them.
     std::vector<int>    m_moveFaceSketchIds;

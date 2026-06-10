@@ -26,6 +26,19 @@ public:
     // Sketches lying ON the moved face — they slide with it (translated by the
     // in-plane move vector) as part of the same atomic op.
     void setSketchIds(std::vector<int> ids) { m_sketchIds = std::move(ids); }
+    // Per-loop motion (three hole states, set by how much of the hole is
+    // selected). moveOuter = the face outline slides. Per hole i (face-wire
+    // order): holeSlant[i] = its TOP ring follows (top edge picked → slants),
+    // holeVertical[i] = BOTH rings follow (cylinder wall picked → straight tube).
+    // Neither = the hole stays put while the face moves around it. So:
+    //   top ring slides    ⟺ holeSlant[i] OR holeVertical[i]
+    //   bottom ring slides ⟺ holeVertical[i]
+    void setLoopMotion(bool moveOuter, std::vector<bool> holeSlant,
+                       std::vector<bool> holeVertical) {
+        m_moveOuter = moveOuter;
+        m_holeSlant = std::move(holeSlant);
+        m_holeVertical = std::move(holeVertical);
+    }
 
     int getBodyId() const { return m_bodyId; }
     gp_Vec getMoveVector() const { return m_move; }
@@ -48,6 +61,9 @@ private:
     TopoDS_Face m_face;
     gp_Vec m_move{0.0, 0.0, 0.0};
     std::vector<int> m_sketchIds; // sketches that ride along (translated by m_move)
+    bool m_moveOuter = true;            // does the face outline slide?
+    std::vector<bool> m_holeSlant;     // per-hole: top ring follows (slant)
+    std::vector<bool> m_holeVertical;  // per-hole: both rings follow (straight tube)
     gp_Vec m_appliedMove{0.0, 0.0, 0.0}; // in-plane move actually applied (for undo)
     TopoDS_Shape m_previousShape; // for undo
     TopoDS_Shape m_resultShape;
