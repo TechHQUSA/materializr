@@ -1524,39 +1524,20 @@ void Application::beginMoveFace() {
     try { m_moveFacePreviousShape = m_document->getBody(m_moveFaceBodyId); }
     catch (...) { return; }
 
-    // The shear (gp_GTrsf) forces OCCT to NURBS-convert the WHOLE body, and that
-    // conversion SEGFAULTS on freeform geometry — not just BSpline/Bezier
-    // SURFACES (threads), but also the BSpline PCURVES that booleans / chamfers
-    // leave behind on otherwise-analytic faces. The fault can't be caught on
-    // this OCCT build (longjmp error model), so refuse up front whenever the
-    // body carries any such geometry. Move Face then runs only where the shear
-    // is safe (clean analytic bodies — boxes, prisms, plain cylinders).
-    auto bodyIsShearSafe = [](const TopoDS_Shape& shape) -> bool {
-        for (TopExp_Explorer fx(shape, TopAbs_FACE); fx.More(); fx.Next()) {
-            TopoDS_Face f = TopoDS::Face(fx.Current());
-            Handle(Geom_Surface) s = BRep_Tool::Surface(f);
-            if (!s.IsNull() &&
-                (s->IsKind(STANDARD_TYPE(Geom_BSplineSurface)) ||
-                 s->IsKind(STANDARD_TYPE(Geom_BezierSurface))))
-                return false;
-            for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
-                Standard_Real f0, l0;
-                Handle(Geom2d_Curve) pc =
-                    BRep_Tool::CurveOnSurface(TopoDS::Edge(ex.Current()), f, f0, l0);
-                if (!pc.IsNull() &&
-                    (pc->IsKind(STANDARD_TYPE(Geom2d_BSplineCurve)) ||
-                     pc->IsKind(STANDARD_TYPE(Geom2d_BezierCurve))))
-                    return false;
-            }
+    // The loft rebuild needs the moved face to be a single closed loop — it
+    // can't carry inner (hole) loops yet, so refuse those up front with a clear
+    // message. (Everything else — freeform / boolean bodies that crashed the
+    // old shear — is now handled safely: the op lofts local wires and simply
+    // refuses on release if the body isn't a clean prism, no crash.)
+    {
+        int nwires = 0;
+        for (TopExp_Explorer wx(m_moveFaceFace, TopAbs_WIRE); wx.More(); wx.Next()) ++nwires;
+        if (nwires > 1) {
+            std::fprintf(stderr, "[MoveFace] declined: face has holes\n");
+            showToast("Move Face can't move a face with holes in it yet - "
+                      "moving holes is coming.");
+            return;
         }
-        return true;
-    };
-    if (!bodyIsShearSafe(m_moveFacePreviousShape)) {
-        std::fprintf(stderr, "[MoveFace] declined: body has freeform geometry "
-                             "(unsafe for the shear)\n");
-        showToast("Move Face only works on clean box-like bodies. This one has "
-                  "curved or boolean-cut faces the shear can't handle.");
-        return;
     }
 
     // Face plane (orientation-corrected outward normal + a point on it).

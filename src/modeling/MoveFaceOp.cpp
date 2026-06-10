@@ -8,16 +8,18 @@
 #include <cstdio>
 #include <cstring>
 
-#include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp_Face.hxx>
-#include <Bnd_Box.hxx>
-#include <BRepBndLib.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepTools.hxx>
+#include <Geom_Surface.hxx>
+#include <Geom_Plane.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopAbs.hxx>
 #include <TopoDS.hxx>
-#include <gp_GTrsf.hxx>
+#include <TopoDS_Wire.hxx>
 #include <gp_Pnt.hxx>
 #include <Standard_ErrorHandler.hxx>
 #include <Standard_Failure.hxx>
@@ -46,45 +48,68 @@ bool MoveFaceOp::execute(Document& doc) {
         gp_Vec V = m_move - N * m_move.Dot(N);
         if (V.Magnitude() < 1e-6) return false; // nothing to slide
 
-        // Body extent along N. The shear pins the far end (min) and shifts the
-        // selected face's plane (near max) by V, linear in between.
-        Bnd_Box bb;
-        BRepBndLib::Add(m_previousShape, bb);
-        if (bb.IsVoid()) return false;
-        double x1, y1, z1, x2, y2, z2;
-        bb.Get(x1, y1, z1, x2, y2, z2);
-        double minH = 1e300, maxH = -1e300;
-        for (int ix = 0; ix < 2; ++ix)
-            for (int iy = 0; iy < 2; ++iy)
-                for (int iz = 0; iz < 2; ++iz) {
-                    gp_Vec corner(ix ? x2 : x1, iy ? y2 : y1, iz ? z2 : z1);
-                    double h = (corner - P0).Dot(N);
-                    minH = std::min(minH, h);
-                    maxH = std::max(maxH, h);
-                }
-        double L = maxH - minH;
-        if (L < 1e-6) return false;
-
-        // shift(Q) = V * ((Q-P0)·N - minH) / L  — an affine map.
-        //   linear M = I + (1/L) V⊗N ;  translation T_i = V_i * (-(P0·N + minH)/L)
-        const double invL = 1.0 / L;
-        const double tConst = -invL * (P0.Dot(N) + minH);
-        const double Vc[3] = { V.X(), V.Y(), V.Z() };
-        const double Nc[3] = { N.X(), N.Y(), N.Z() };
-        gp_GTrsf gt;
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < 3; ++j)
-                gt.SetValue(i + 1, j + 1, (i == j ? 1.0 : 0.0) + invL * Vc[i] * Nc[j]);
-            gt.SetValue(i + 1, 4, Vc[i] * tConst);
+        // LOFT REBUILD (replaces the old whole-body gp_GTrsf shear, which made
+        // OCCT NURBS-convert the entire body and segfault on freeform/boolean
+        // geometry). A prism is bounded by the selected face and an OPPOSITE
+        // PARALLEL face; lofting a capped solid between that base wire and the
+        // MOVED top wire rebuilds the sheared prism with ruled walls — purely
+        // local geometry, no whole-body convert. Bodies that aren't a clean
+        // single-profile prism (no matching opposite face, or the face has
+        // holes) simply refuse here instead of crashing.
+        if (m_face.NbChildren() > 0) {
+            // OuterWire-only loft can't carry inner (hole) loops yet.
+            TopoDS_Wire ow = BRepTools::OuterWire(m_face);
+            int nwires = 0;
+            for (TopExp_Explorer wx(m_face, TopAbs_WIRE); wx.More(); wx.Next()) ++nwires;
+            if (nwires > 1) {
+                std::fprintf(stderr, "[MoveFace] refused: face has holes (not yet supported)\n");
+                return false;
+            }
         }
 
-        BRepBuilderAPI_GTransform xf(m_previousShape, gt, Standard_True);
-        if (!xf.IsDone()) return false;
-        TopoDS_Shape result = xf.Shape();
+        // Find the opposite parallel planar face (the prism's far cap).
+        TopoDS_Face baseFace;
+        double bestDist = -1e300;
+        for (TopExp_Explorer fx(m_previousShape, TopAbs_FACE); fx.More(); fx.Next()) {
+            TopoDS_Face f = TopoDS::Face(fx.Current());
+            if (f.IsSame(m_face)) continue;
+            Handle(Geom_Surface) s = BRep_Tool::Surface(f);
+            if (s.IsNull() || !s->IsKind(STANDARD_TYPE(Geom_Plane))) continue;
+            BRepGProp_Face fp(f);
+            double uu1, uu2, vv1, vv2; fp.Bounds(uu1, uu2, vv1, vv2);
+            gp_Pnt fc; gp_Vec fn; fp.Normal((uu1 + uu2) * 0.5, (vv1 + vv2) * 0.5, fc, fn);
+            if (fn.Magnitude() < 1e-9) continue;
+            if (fn.Normalized().Dot(N) > -0.999) continue; // not antiparallel
+            double dist = -(gp_Vec(fc.X(), fc.Y(), fc.Z()) - P0).Dot(N);
+            if (dist > bestDist) { bestDist = dist; baseFace = f; }
+        }
+        if (baseFace.IsNull()) {
+            std::fprintf(stderr, "[MoveFace] refused: no opposite face to loft from\n");
+            return false;
+        }
 
-        // Affine maps preserve topology, but validate anyway (degenerate input).
+        TopoDS_Wire wBase = BRepTools::OuterWire(baseFace);
+        TopoDS_Wire wTop  = BRepTools::OuterWire(m_face);
+        if (wBase.IsNull() || wTop.IsNull()) return false;
+
+        // Move the top wire by V; reverse the base wire so both run the same way
+        // viewed from +N (the two caps' outer wires are oppositely oriented).
+        gp_Trsf slideT; slideT.SetTranslation(V);
+        TopoDS_Wire wTopMoved =
+            TopoDS::Wire(BRepBuilderAPI_Transform(wTop, slideT, Standard_True).Shape());
+        wBase.Reverse();
+
+        BRepOffsetAPI_ThruSections loft(Standard_True /*solid*/, Standard_True /*ruled*/);
+        loft.AddWire(wBase);
+        loft.AddWire(wTopMoved);
+        loft.Build();
+        if (!loft.IsDone()) {
+            std::fprintf(stderr, "[MoveFace] loft failed — refusing\n");
+            return false;
+        }
+        TopoDS_Shape result = loft.Shape();
         if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
-            std::fprintf(stderr, "[MoveFace] sheared result invalid — refusing\n");
+            std::fprintf(stderr, "[MoveFace] lofted result invalid — refusing\n");
             return false;
         }
         int nsolids = 0;
