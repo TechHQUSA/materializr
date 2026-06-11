@@ -4521,16 +4521,29 @@ void Application::renderViewport() {
                 if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
             }
             if (placing) {
-                if (selectionContext) ImGui::SameLine();
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.60f, 0.32f, 0.97f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.72f, 0.42f, 1.0f));
-                bool finish = wideButton("Finish Shape");
-                bool fhov = ImGui::IsItemHovered();
-                ImGui::PopStyleColor(2);
-                if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
-                if (fhov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
+                // "Finish Shape" only applies to chaining tools (Line, Spline,
+                // Polygon), where it commits the points placed so far. Circle /
+                // Rectangle / Arc auto-complete on their final click, so a Finish
+                // there would just discard the in-progress shape — show only
+                // Cancel for those.
+                SketchToolMode mode = m_sketchTool->getMode();
+                bool chainTool = (mode == SketchToolMode::Line ||
+                                  mode == SketchToolMode::Spline ||
+                                  mode == SketchToolMode::Polygon);
+                bool prev = selectionContext;
+                if (chainTool) {
+                    if (prev) ImGui::SameLine();
+                    prev = true;
+                    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.60f, 0.32f, 0.97f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.72f, 0.42f, 1.0f));
+                    bool finish = wideButton("Finish Shape");
+                    bool fhov = ImGui::IsItemHovered();
+                    ImGui::PopStyleColor(2);
+                    if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
+                    if (fhov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
+                }
 
-                ImGui::SameLine();
+                if (prev) ImGui::SameLine();
                 ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.68f, 0.24f, 0.24f, 0.97f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.82f, 0.34f, 0.34f, 1.0f));
                 bool cancel = wideButton("Cancel Shape");
