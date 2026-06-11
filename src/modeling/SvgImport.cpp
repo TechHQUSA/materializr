@@ -4,8 +4,11 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
+#include <utility>
 
 #define NANOSVG_IMPLEMENTATION
 #include "../third_party/nanosvg.h"
@@ -212,6 +215,165 @@ void sampleCubic(std::vector<glm::vec2>& out, const float* p, float ref) {
     }
 }
 
+// ─── CSS class inlining ─────────────────────────────────────────────────────
+// Many SVGs (Illustrator "Internal CSS", Wikimedia, plenty of downloaded art)
+// keep fills/strokes in a <style> block keyed by class rather than as
+// presentation attributes:
+//   <style>.cls-1{fill:#000}</style> ... <path class="cls-1" d="…"/>
+// nanosvg's CSS support is thin, so those paths arrive with NO fill and get
+// dropped or left open. We resolve the simple rules (.class / #id / tag, the
+// common single-token selectors) and stamp the matching fill/stroke onto each
+// element as a presentation attribute — only where the element doesn't already
+// set it inline — before nanosvg parses. A text-level approximation of the CSS
+// cascade, enough for the "I grabbed this off the internet" case without a real
+// CSS engine.
+
+bool isRelevantCssProp(const std::string& p) {
+    static const char* keep[] = {
+        "fill", "stroke", "stroke-width", "fill-rule", "fill-opacity",
+        "stroke-opacity", "opacity", "stroke-linecap", "stroke-linejoin",
+        "stroke-miterlimit", "stroke-dasharray"};
+    for (auto k : keep) if (p == k) return true;
+    return false;
+}
+
+std::string cssTrim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+void inlineSvgCss(std::string& svg) {
+    // 1. Gather every <style> block's text.
+    std::string css;
+    size_t sp = 0;
+    while ((sp = svg.find("<style", sp)) != std::string::npos) {
+        size_t gt = svg.find('>', sp);
+        if (gt == std::string::npos) break;
+        size_t end = svg.find("</style>", gt);
+        if (end == std::string::npos) break;
+        css += svg.substr(gt + 1, end - (gt + 1));
+        css += "\n";
+        sp = end + 8;
+    }
+    if (css.empty()) return;
+    // Strip /* */ comments and CDATA wrappers.
+    for (size_t c; (c = css.find("/*")) != std::string::npos; ) {
+        size_t e = css.find("*/", c + 2);
+        if (e == std::string::npos) { css.erase(c); break; }
+        css.erase(c, e + 2 - c);
+    }
+    for (const char* tok : {"<![CDATA[", "]]>"})
+        for (size_t t; (t = css.find(tok)) != std::string::npos; )
+            css.erase(t, std::strlen(tok));
+
+    // 2. Parse "selectors { decls }" rules into class / id / tag buckets.
+    using Decls = std::vector<std::pair<std::string, std::string>>;
+    std::unordered_map<std::string, Decls> classR, idR, tagR;
+    for (size_t i = 0; i < css.size(); ) {
+        size_t brace = css.find('{', i);
+        if (brace == std::string::npos) break;
+        size_t close = css.find('}', brace);
+        if (close == std::string::npos) break;
+        std::string selectors = cssTrim(css.substr(i, brace - i));
+        std::string declBlock = css.substr(brace + 1, close - brace - 1);
+        i = close + 1;
+        Decls props;
+        for (size_t d = 0; d < declBlock.size(); ) {
+            size_t semi = declBlock.find(';', d);
+            std::string one = declBlock.substr(d,
+                (semi == std::string::npos ? declBlock.size() : semi) - d);
+            d = (semi == std::string::npos) ? declBlock.size() : semi + 1;
+            size_t colon = one.find(':');
+            if (colon == std::string::npos) continue;
+            std::string prop = cssTrim(one.substr(0, colon));
+            std::string val = cssTrim(one.substr(colon + 1));
+            size_t imp = val.find('!');
+            if (imp != std::string::npos) val = cssTrim(val.substr(0, imp));
+            if (!prop.empty() && !val.empty() && isRelevantCssProp(prop))
+                props.emplace_back(prop, val);
+        }
+        if (props.empty()) continue;
+        for (size_t s2 = 0; s2 < selectors.size(); ) {
+            size_t comma = selectors.find(',', s2);
+            std::string sel = cssTrim(selectors.substr(s2,
+                (comma == std::string::npos ? selectors.size() : comma) - s2));
+            s2 = (comma == std::string::npos) ? selectors.size() : comma + 1;
+            if (sel.empty()) continue;
+            if (sel.find_first_of(" >+~[:") != std::string::npos) continue; // simple only
+            Decls* bucket = (sel[0] == '.') ? &classR[sel.substr(1)]
+                          : (sel[0] == '#') ? &idR[sel.substr(1)]
+                                            : &tagR[sel];
+            for (auto& pv : props) bucket->push_back(pv);
+        }
+    }
+    if (classR.empty() && idR.empty() && tagR.empty()) return;
+
+    // 3. Walk elements, inject any missing presentation attributes.
+    std::string out;
+    out.reserve(svg.size() + 1024);
+    int injected = 0;
+    for (size_t k = 0; k < svg.size(); ) {
+        if (svg[k] != '<' || k + 1 >= svg.size() ||
+            svg[k + 1] == '/' || svg[k + 1] == '!' || svg[k + 1] == '?') {
+            out += svg[k++]; continue;
+        }
+        size_t gt = svg.find('>', k);
+        if (gt == std::string::npos) { out += svg.substr(k); break; }
+        std::string tagStr = svg.substr(k, gt - k + 1);
+        size_t ns = k + 1, ne = ns;
+        while (ne < gt && !std::isspace(static_cast<unsigned char>(svg[ne])) &&
+               svg[ne] != '/' && svg[ne] != '>') ne++;
+        std::string tag = svg.substr(ns, ne - ns);
+
+        Decls merged; // tag < class < id specificity (later overrides)
+        auto setp = [&](const std::string& p, const std::string& v) {
+            for (auto& e : merged) if (e.first == p) { e.second = v; return; }
+            merged.emplace_back(p, v);
+        };
+        auto it = tagR.find(tag);
+        if (it != tagR.end()) for (auto& pv : it->second) setp(pv.first, pv.second);
+        std::string clsVal, idVal, styleVal;
+        findAttr(tagStr, "class", 0, &clsVal);
+        findAttr(tagStr, "id", 0, &idVal);
+        findAttr(tagStr, "style", 0, &styleVal);
+        for (size_t t = 0; t < clsVal.size(); ) {
+            size_t spc = clsVal.find_first_of(" \t", t);
+            std::string tok = clsVal.substr(t,
+                (spc == std::string::npos ? clsVal.size() : spc) - t);
+            t = (spc == std::string::npos) ? clsVal.size() : spc + 1;
+            auto ci = classR.find(tok);
+            if (!tok.empty() && ci != classR.end())
+                for (auto& pv : ci->second) setp(pv.first, pv.second);
+        }
+        auto ii = idR.find(idVal);
+        if (!idVal.empty() && ii != idR.end())
+            for (auto& pv : ii->second) setp(pv.first, pv.second);
+
+        std::string inject;
+        for (auto& pv : merged) {
+            std::string dummy;
+            if (findAttr(tagStr, pv.first, 0, &dummy) != std::string::npos) continue;
+            if (!styleVal.empty() && styleVal.find(pv.first + ":") != std::string::npos) continue;
+            inject += " " + pv.first + "=\"" + pv.second + "\"";
+        }
+        if (!inject.empty()) {
+            out += svg.substr(k, ne - k); // "<tag"
+            out += inject;
+            out += svg.substr(ne, gt - ne + 1); // " …>"
+            ++injected;
+        } else {
+            out += tagStr;
+        }
+        k = gt + 1;
+    }
+    if (injected > 0) {
+        std::fprintf(stderr, "[SVG] inlined CSS onto %d element(s)\n", injected);
+        svg.swap(out);
+    }
+}
+
 } // namespace
 
 bool SvgImport::load(const std::string& path, SvgPaths& out) {
@@ -226,6 +388,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     std::ostringstream ss;
     ss << in.rdbuf();
     std::string text = ss.str();
+    inlineSvgCss(text);   // resolve <style> class fills → presentation attrs
     expandSvgUses(text);
     // nsvgParse mutates the buffer in place — give it a null-terminated copy.
     text.push_back('\0');
