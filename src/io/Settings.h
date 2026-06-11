@@ -8,8 +8,16 @@ namespace materializr {
 // key is missing or unreadable in the settings file.
 struct AppSettings {
     int  theme              = 0;    // 0 = Dark, 1 = Light
+#if defined(__ANDROID__)
+    // Touch-first default: trackpad mode (one-finger drag = orbit, two-finger
+    // pan/zoom). Just the first-run default — the Settings dialog can rebind to
+    // Middle/Right for an attached mouse or trackpad, and the choice persists.
+    int  orbitButton        = 0;    // ImGuiMouseButton: 0=Left, 1=Right, 2=Middle
+    int  panButton          = 0;
+#else
     int  orbitButton        = 2;    // ImGuiMouseButton: 0=Left, 1=Right, 2=Middle
     int  panButton          = 1;
+#endif
     bool levelOrbit         = true; // turntable (level) vs free trackball orbit
     // Uniform multiplier on camera input deltas (orbit / pan / zoom). 1.0 =
     // the hard-coded baseline; below 1 calms a touchy trackpad, above 1

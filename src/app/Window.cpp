@@ -261,12 +261,12 @@ float Window::uiScale() const {
 }
 
 bool Window::isCtrlDown() {
-#if defined(__ANDROID__)
-    return false; // no hardware modifier keys on touch; multi-select uses a toggle
-#else
+    // Poll the real keyboard on every platform. With no physical keyboard the
+    // state is simply all-zero, so this is false on a bare touch tablet (where
+    // multi-select uses the on-screen toggle instead); when an Android tablet has
+    // a keyboard attached, hardware Ctrl (undo/redo, additive select) just works.
     const Uint8* state = SDL_GetKeyboardState(nullptr);
     return state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL];
-#endif
 }
 
 } // namespace materializr

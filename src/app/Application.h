@@ -483,8 +483,13 @@ private:
 
     // Configurable camera mouse bindings (ImGuiMouseButton values: 0=Left,1=Right,
     // 2=Middle). Zoom is always the scroll wheel. Edited in File > Settings.
+#if defined(__ANDROID__)
+    int m_orbitButton = 0; // Left (trackpad default; rebindable in Settings)
+    int m_panButton = 0;   // Left
+#else
     int m_orbitButton = 2; // Middle
     int m_panButton = 1;   // Right
+#endif
     // Touch multi-select toggle: the finger stand-in for holding Ctrl. While on,
     // the viewport selection code runs as if Ctrl were held (taps add/toggle
     // instead of replacing). Driven by the on-screen button in the viewport.

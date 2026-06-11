@@ -983,15 +983,13 @@ AppSettings Application::currentSettings() const {
 // and the Settings-dialog "staged" copies so an import takes effect at once.
 void Application::applyAppSettings(const AppSettings& s) {
     m_themeManager->setTheme(s.theme == 1 ? Theme::Light : Theme::Dark);
+    // Camera button bindings are honoured on every platform. Android defaults to
+    // trackpad mode (AppSettings sets orbit/pan = Left there) so one-finger touch
+    // orbits out of the box, but an attached mouse/trackpad can be rebound via the
+    // Settings dialog and the choice persists — touch pan/zoom stays on two-finger
+    // gestures regardless, and sketch-mode drawing still overrides orbit.
     m_orbitButton = s.orbitButton;
     m_panButton = s.panButton;
-#if defined(__ANDROID__)
-    // Touch has no middle/right button, so force trackpad mode: a one-finger
-    // drag orbits (left button), tap selects. Pan and zoom come from two-finger
-    // gestures (see the camera-nav block). Overrides any persisted binding.
-    m_orbitButton = 0;
-    m_panButton = 0;
-#endif
     m_settingsOrbitButton = s.orbitButton;
     m_settingsPanButton = s.panButton;
     m_viewport->getCamera().setLevelOrbit(s.levelOrbit);
