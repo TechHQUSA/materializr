@@ -172,8 +172,13 @@ int SelectionManager::findEntry(const SelectionEntry& entry) const {
         // any future selection type that doesn't carry a sub-shape index — so
         // also disambiguate by shape identity when both shapes are present.
         // Otherwise Ctrl+clicking a second edge on the same body would look
-        // "already selected" and silently get dropped.
-        if (!e.shape.IsNull() && !entry.shape.IsNull() &&
+        // "already selected" and silently get dropped. (Plane/Axis also lean on
+        // this, since findEntry doesn't compare planeId/axisId.)
+        // EXCEPT a whole Body, which is uniquely keyed by bodyId: a remesh can
+        // replace its stored shape, so an IsSame test there would wrongly read
+        // the same body as new and stack duplicate copies in the selection.
+        if (entry.type != SelectionType::Body &&
+            !e.shape.IsNull() && !entry.shape.IsNull() &&
             !e.shape.IsSame(entry.shape)) {
             continue;
         }
