@@ -3506,7 +3506,15 @@ void Application::renderViewport() {
                     // Axis / plane hits don't have a body to escalate to, so
                     // the double-click falls through to the single-click
                     // handler below (which builds the right Selection entry).
-                    if (clickSelectionAllowed && !regionConsumedClick &&
+                    bool allowDoubleClickBody = true;
+#if defined(__ANDROID__)
+                    // On touch, a long-press right after a tap reads as a
+                    // double-click and would select the whole body unintentionally.
+                    // Body selection on touch goes through the long-press menu's
+                    // Body branch instead, so disable double-tap-to-body here.
+                    allowDoubleClickBody = false;
+#endif
+                    if (allowDoubleClickBody && clickSelectionAllowed && !regionConsumedClick &&
                         ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
                         result.hit && result.bodyId >= 0) {
                         SelectionEntry entry;
@@ -4656,37 +4664,78 @@ void Application::renderViewport() {
         m_contextMenuPending = false;
     }
     if (ImGui::BeginPopup("FaceContextMenu")) {
-        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Face Options");
+        // Two branches — Face and Body — so the user picks which the actions
+        // apply to (the touch long-press can't distinguish a single-click face
+        // pick from a double-click body pick the way a mouse does). Each branch
+        // first selects its entity, then lists its specific actions; body-level
+        // actions that aren't face-specific are dual-listed under both.
+        ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "Object");
         ImGui::Separator();
 
-        if (ImGui::MenuItem("Sketch on this Face")) {
-            // Select the face, then enter sketch mode (enterSketchMode reads the selection)
-            SelectionEntry entry;
-            entry.type = SelectionType::Face;
-            entry.bodyId = m_contextMenuBodyId;
-            entry.shape = m_contextMenuFace;
-            m_selection->select(entry);
-            enterSketchMode();
-            m_contextMenuFace.Nullify();
+        const int bid = m_contextMenuBodyId;
+
+        // Shared body-level actions — they operate on the whole body the face
+        // belongs to, so they appear under both the Face and Body branches.
+        auto sharedBodyOps = [&]() {
+            if (ImGui::MenuItem("Isolate")) {
+                for (int o : m_document->getAllBodyIds())
+                    m_document->setBodyVisible(o, o == bid);
+                markDirty();
+                m_contextMenuFace.Nullify();
+            }
+            if (ImGui::MenuItem("Hide Others")) {
+                for (int o : m_document->getAllBodyIds())
+                    if (o != bid) m_document->setBodyVisible(o, false);
+                markDirty();
+                m_contextMenuFace.Nullify();
+            }
+            if (ImGui::MenuItem("Export Body to STL…")) {
+                // Per-body STL dump — file-menu Export STL writes every visible
+                // body to one file; this pulls a single part out on its own.
+                exportBodyAsStl(bid);
+                m_contextMenuFace.Nullify();
+            }
+        };
+
+        if (ImGui::BeginMenu("Face")) {
+            if (ImGui::MenuItem("Select Face")) {
+                SelectionEntry entry;
+                entry.type = SelectionType::Face;
+                entry.bodyId = bid;
+                entry.shape = m_contextMenuFace;
+                m_selection->select(entry);
+                m_contextMenuFace.Nullify();
+            }
+            if (ImGui::MenuItem("Sketch on this Face")) {
+                // Select the face, then enter sketch mode (enterSketchMode reads the selection)
+                SelectionEntry entry;
+                entry.type = SelectionType::Face;
+                entry.bodyId = bid;
+                entry.shape = m_contextMenuFace;
+                m_selection->select(entry);
+                enterSketchMode();
+                m_contextMenuFace.Nullify();
+            }
+            if (ImGui::MenuItem("Extrude Face")) {
+                beginInteractiveExtrude(m_contextMenuFace, ExtrudeMode::NewBody, -1);
+                m_contextMenuFace.Nullify();
+            }
+            ImGui::Separator();
+            sharedBodyOps();
+            ImGui::EndMenu();
         }
-        if (ImGui::MenuItem("Extrude Face")) {
-            beginInteractiveExtrude(m_contextMenuFace, ExtrudeMode::NewBody, -1);
-            m_contextMenuFace.Nullify();
-        }
-        if (ImGui::MenuItem("Select Body")) {
-            SelectionEntry entry;
-            entry.type = SelectionType::Body;
-            entry.bodyId = m_contextMenuBodyId;
-            try { entry.shape = m_document->getBody(m_contextMenuBodyId); } catch (...) {}
-            m_selection->select(entry);
-            m_contextMenuFace.Nullify();
-        }
-        if (ImGui::MenuItem("Export Body to STL…")) {
-            // Per-body STL dump — file-menu Export STL writes every visible
-            // body to one file; this lets users pull a single part out of a
-            // multi-body project without juggling visibility.
-            exportBodyAsStl(m_contextMenuBodyId);
-            m_contextMenuFace.Nullify();
+        if (ImGui::BeginMenu("Body")) {
+            if (ImGui::MenuItem("Select Body")) {
+                SelectionEntry entry;
+                entry.type = SelectionType::Body;
+                entry.bodyId = bid;
+                try { entry.shape = m_document->getBody(bid); } catch (...) {}
+                m_selection->select(entry);
+                m_contextMenuFace.Nullify();
+            }
+            ImGui::Separator();
+            sharedBodyOps();
+            ImGui::EndMenu();
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Cancel")) {
