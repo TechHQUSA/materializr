@@ -1972,12 +1972,20 @@ void Application::renderViewport() {
             // it's engaged.
             if (m_window && m_window->isTouchHoldSelect()) gizmoOwnsDrag = true;
 #endif
-            if (!gizmoOwnsDrag && ImGui::IsMouseDragging(m_orbitButton)) {
+            // Camera-drag suppression for the one-finger orbit only. In sketch
+            // mode on Android a one-finger drag drives the sketch rubber-band
+            // preview (touch has no hover), so don't orbit. Two-finger pan/zoom
+            // still works — it's gated on gizmoOwnsDrag, not this local.
+            bool suppressCamDrag = gizmoOwnsDrag;
+#if defined(__ANDROID__)
+            if (m_inSketchMode) suppressCamDrag = true;
+#endif
+            if (!suppressCamDrag && ImGui::IsMouseDragging(m_orbitButton)) {
                 ImVec2 delta = io.MouseDelta;
                 if (io.KeyShift) cam.pan(delta.x, delta.y);
                 else cam.orbit(delta.x, delta.y);
             }
-            if (!gizmoOwnsDrag && m_panButton != m_orbitButton &&
+            if (!suppressCamDrag && m_panButton != m_orbitButton &&
                 ImGui::IsMouseDragging(m_panButton)) {
                 cam.pan(io.MouseDelta.x, io.MouseDelta.y);
             }
@@ -4462,30 +4470,60 @@ void Application::renderViewport() {
     // changes save immediately.
     renderSnapWidget();
 
-    // Multi-select toggle in the bottom-left of the viewport — the touch
-    // stand-in for holding Ctrl. While on, taps add to / toggle the current
-    // selection instead of replacing it (see the CtrlForce guard above).
+    // Context action bar along the bottom of the viewport. Touch stand-ins for
+    // actions desktop reaches via modifier keys / hover; each button shows only
+    // when it applies to the current mode/tool. Add more here as needed.
+#if defined(__ANDROID__)
     {
         ImVec2 vpMin = ImGui::GetWindowPos();
         ImVec2 vpSize = ImGui::GetWindowSize();
-        const char* label = m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off";
-        ImVec2 ts = ImGui::CalcTextSize("Multi-Select: Off");
-        float pad = ImGui::GetStyle().FramePadding.x;
-        ImGui::SetCursorScreenPos(ImVec2(vpMin.x + 8.0f,
-                                         vpMin.y + vpSize.y - ImGui::GetFrameHeight() - 8.0f));
-        if (m_multiSelectToggle) {
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
+        const float pad = ImGui::GetStyle().FramePadding.x;
+        const float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float x = vpMin.x + 8.0f;
+        const float y = vpMin.y + vpSize.y - ImGui::GetFrameHeight() - 8.0f;
+
+        // Lay out one button left-to-right; returns whether it was clicked.
+        auto barButton = [&](const char* label) -> bool {
+            ImVec2 ts = ImGui::CalcTextSize(label);
+            float w = ts.x + pad * 2.0f;
+            ImGui::SetCursorScreenPos(ImVec2(x, y));
+            bool clicked = ImGui::Button(label, ImVec2(w, 0.0f));
+            x += w + spacing;
+            return clicked;
+        };
+
+        // Multi-select toggle — relevant whenever a tap selects geometry:
+        // outside sketch mode, or inside it only with the Select/Move tool.
+        bool selectionContext = !m_inSketchMode ||
+            (m_sketchTool && m_sketchTool->getMode() == SketchToolMode::Select);
+        if (selectionContext) {
+            int pops = 0;
+            if (m_multiSelectToggle) {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
+                pops = 3;
+            }
+            if (barButton(m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off"))
+                m_multiSelectToggle = !m_multiSelectToggle;
+            bool hov = ImGui::IsItemHovered();
+            if (pops) ImGui::PopStyleColor(pops);
+            if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
         }
-        if (ImGui::Button(label, ImVec2(ts.x + pad * 2.0f, 0.0f))) {
-            m_multiSelectToggle = !m_multiSelectToggle;
-        }
-        if (m_multiSelectToggle) ImGui::PopStyleColor(3);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
+
+        // Finish Shape — while a sketch placement is in progress, commit the
+        // points placed so far (touch stand-in for Enter / double-click).
+        if (m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing()) {
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.60f, 0.32f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.72f, 0.42f, 1.0f));
+            bool clicked = barButton("Finish Shape");
+            bool hov = ImGui::IsItemHovered();
+            ImGui::PopStyleColor(2);
+            if (clicked) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
+            if (hov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
         }
     }
+#endif // __ANDROID__
 
     // Right-click face context menu
     if (m_contextMenuPending) {
