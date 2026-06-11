@@ -1992,10 +1992,20 @@ void Application::renderViewport() {
             // works — it's gated on gizmoOwnsDrag, not this local.
             bool suppressCamDrag = gizmoOwnsDrag;
             if (materializr::touchMode()) {
-                // In sketch mode a one-finger drag previews the rubber-band instead
-                // of orbiting — unless Move (navigation lock) is on, where it orbits.
-                if (m_inSketchMode && !m_moveModeToggle) suppressCamDrag = true;
-                // Move mode never draws: a one-finger drag orbits even in sketch.
+                // A one-finger drag drives the ACTIVE TOOL, not the camera (touch
+                // has no hover, and the move gizmo already grabs its own axes via
+                // gizmoOwnsDrag). In sketch mode that's the rubber-band; during an
+                // interactive op it's the op's arrow/handle (push/pull, extrude,
+                // edge fillet/chamfer, move/scale face) — otherwise a finger drag
+                // orbited the view and the arrow's `!camDragging` gate never fired,
+                // so push/pull "didn't work" and the slider bled into an orbit.
+                // Two-finger still pans/zooms; Move (nav lock) forces orbit.
+                const bool toolWantsDrag =
+                    m_inSketchMode || m_pushPullActive || m_extruding ||
+                    m_edgeOpActive || m_moveFaceActive || m_scaleFaceCtl.active() ||
+                    m_resizeCylActive || anyIopActive();
+                if (toolWantsDrag && !m_moveModeToggle) suppressCamDrag = true;
+                // Move mode never drives a tool: a one-finger drag orbits instead.
                 if (m_moveModeToggle) suppressCamDrag = gizmoOwnsDrag;
             }
             if (!suppressCamDrag && ImGui::IsMouseDragging(m_orbitButton)) {
@@ -2222,6 +2232,10 @@ void Application::renderViewport() {
                     sfc.setDragAxis(-1);
             }
 
+            // Drag the arrow: one-finger drag in the viewport (touch — orbit is
+            // suppressed above while push/pull is active) or a mouse left-drag.
+            // Gated by the enclosing viewport-hovered block, so dragging the
+            // distance slider (a separate overlay) doesn't reach here.
             if (m_pushPullActive && m_pushPullHasArrow && !camDragging &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
@@ -2238,8 +2252,13 @@ void Application::renderViewport() {
             // button held. Suppressed in non-trackpad mode (mouse users get
             // the traditional click+drag above). Clicks consumed by ImGui
             // widgets don't count — WantCaptureMouse is the signal.
+            // Sticky is a DESKTOP-trackpad model (move the cursor with no button
+            // held). On touch there's no hover-move, and a tap would toggle it on
+            // then the drag would feed BOTH it and the direct-drag above (double
+            // distance) — so it's touch-disabled; the one-finger drag handles it.
             const bool trackpadInput = (m_orbitButton == ImGuiMouseButton_Left &&
-                                         m_panButton  == ImGuiMouseButton_Left);
+                                         m_panButton  == ImGuiMouseButton_Left) &&
+                                        !materializr::touchMode();
             if (m_pushPullActive && m_pushPullHasArrow && trackpadInput &&
                 ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
                 !io.WantCaptureMouse) {
