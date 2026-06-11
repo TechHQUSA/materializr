@@ -59,10 +59,16 @@ public:
     bool lastLeftReleaseWasGesture() const { return m_leftReleaseWasGesture; }
 
     // True once a one-finger press has been held stationary past the hold
-    // threshold (and remains true until lift). The viewport uses this to start a
-    // box/drag-select instead of orbiting — the touch equivalent of the desktop
-    // empty-space left-drag, which trackpad mode otherwise reserves for orbit.
-    bool isTouchHoldSelect() const { return m_holdSelect; }
+    // threshold AND then dragged. The viewport uses this to start a box/drag-
+    // select instead of orbiting — the touch equivalent of the desktop empty-
+    // space left-drag, which trackpad mode otherwise reserves for orbit. A hold
+    // that never drags is a long-press (context menu) instead, not a box-select.
+    bool isTouchHoldSelect() const { return m_holdSelect && m_movedBeyondHold; }
+
+    // Long-press progress for an on-screen feedback ring, 0 when not pressing.
+    // Writes the press point (pixels) and returns 0..1 toward the hold threshold
+    // (1.0 once armed and still held). Drawn by the app each frame on Android.
+    float holdProgress(float& x, float& y) const;
 
 private:
     SDL_Window* m_window = nullptr;
@@ -89,8 +95,16 @@ private:
     bool  m_textInputActive = false;      // soft keyboard currently raised
     bool  m_leftReleaseWasGesture = false; // last left-up was a 2-finger takeover
 
+    // Synthetic right-click queued by a long-press (touch context menu). Played
+    // back over two frames (button down, then up) at the held point so ImGui's
+    // right-click popups (Items/History tree items, viewport face/sketch menus)
+    // open without a physical mouse. 0 = idle, 1 = press pending, 2 = release.
+    int   m_rightClickPhase = 0;
+    float m_rightClickX = 0.0f, m_rightClickY = 0.0f;
+
     void handleFingerEvent(unsigned type, std::int64_t id, float nx, float ny);
     void updateHoldSelect();              // per-frame hold check (Android)
+    void pumpSyntheticRightClick();       // play back a queued long-press click
 };
 
 } // namespace materializr

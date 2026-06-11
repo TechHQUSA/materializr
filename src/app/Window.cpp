@@ -119,7 +119,8 @@ void Window::pollEvents() {
         }
     }
 #if defined(__ANDROID__)
-    updateHoldSelect();   // a stationary one-finger press becomes a select-drag
+    updateHoldSelect();          // arm the long-press (box-select on drag / menu on lift)
+    pumpSyntheticRightClick();   // play back a queued long-press context-menu click
 #endif
     SDL_GetWindowSize(m_window, &m_width, &m_height);
 }
@@ -189,7 +190,9 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             m_downX = m_fingers[0].x; m_downY = m_fingers[0].y;
             m_movedBeyondHold = false;
             m_holdSelect = false;
-        } else if (type == SDL_FINGERMOTION && !m_holdSelect) {
+        } else if (type == SDL_FINGERMOTION) {
+            // Track movement even after the hold arms: a hold that then drags is
+            // a box-select; a hold that never moves is a long-press (menu).
             const float dx = m_fingers[0].x - m_downX, dy = m_fingers[0].y - m_downY;
             if (dx * dx + dy * dy > 25.0f * 25.0f) m_movedBeyondHold = true; // a drag
         }
@@ -198,6 +201,14 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
 
     // count == 0: everything lifted — release and reset.
     if (m_leftDown) { io.AddMouseButtonEvent(0, false); m_leftDown = false; }
+    // A one-finger press that armed the hold but never dragged is a long-press:
+    // queue a synthetic right-click at the held point so the context menu opens,
+    // and mark the left-up as a gesture so it doesn't also place a sketch point.
+    if (m_holdSelect && !m_movedBeyondHold && !m_suppressLeft) {
+        m_rightClickX = m_downX; m_rightClickY = m_downY;
+        m_rightClickPhase = 1;
+        m_leftReleaseWasGesture = true;
+    }
     m_twoFinger = false;
     m_suppressLeft = false;
     m_holdSelect = false;
@@ -207,7 +218,34 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
 void Window::updateHoldSelect() {
     if (m_holdSelect) return;
     if (m_fingers.size() != 1 || m_movedBeyondHold || m_suppressLeft || m_twoFinger) return;
-    if (SDL_GetTicks() - m_downTicks > 350u) m_holdSelect = true;  // hold engaged
+    if (SDL_GetTicks() - m_downTicks > 450u) m_holdSelect = true;  // long-press armed
+}
+
+void Window::pumpSyntheticRightClick() {
+    if (m_rightClickPhase == 0) return;
+    ImGuiIO& io = ImGui::GetIO();
+    // Present it as a real mouse so popups open without touch hover-delay; the
+    // finger has already lifted, so we keep re-asserting the held position.
+    io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+    io.AddMousePosEvent(m_rightClickX, m_rightClickY);
+    if (m_rightClickPhase == 1) {
+        io.AddMouseButtonEvent(1, true);   // right button down
+        m_rightClickPhase = 2;
+    } else {
+        io.AddMouseButtonEvent(1, false);  // ...and up next frame → a right-click
+        m_rightClickPhase = 0;
+    }
+}
+
+float Window::holdProgress(float& x, float& y) const {
+    if (m_fingers.size() != 1 || m_movedBeyondHold || m_suppressLeft || m_twoFinger)
+        return 0.0f;
+    x = m_downX; y = m_downY;
+    if (m_holdSelect) return 1.0f;                 // armed: ring full while held
+    std::uint32_t held = SDL_GetTicks() - m_downTicks;
+    if (held < 120u) return 0.0f;                  // ignore brief taps
+    float t = static_cast<float>(held) / 450.0f;
+    return t > 1.0f ? 1.0f : t;
 }
 #else
 void Window::handleFingerEvent(unsigned, std::int64_t, float, float) {}

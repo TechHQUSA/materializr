@@ -656,6 +656,27 @@ void Application::beginFrame() {
 }
 
 void Application::endFrame() {
+#if defined(__ANDROID__)
+    // Long-press feedback ring: a circle that fills as a stationary one-finger
+    // press approaches the context-menu threshold, so the gesture is discoverable
+    // and the user knows when to lift. Drawn over everything via the foreground
+    // list; vanishes the moment the press moves (it became a drag) or lifts.
+    if (m_window) {
+        float hx = 0.0f, hy = 0.0f;
+        float hp = m_window->holdProgress(hx, hy);
+        if (hp > 0.0f) {
+            float s = m_window->uiScale();
+            float r = 16.0f * s;
+            auto* dl = ImGui::GetForegroundDrawList();
+            dl->AddCircle(ImVec2(hx, hy), r, IM_COL32(255, 255, 255, 60), 0, 2.0f * s);
+            const float a0 = -1.5707963f;                 // start at 12 o'clock
+            dl->PathArcTo(ImVec2(hx, hy), r, a0, a0 + hp * 6.2831853f, 48);
+            dl->PathStroke(IM_COL32(120, 180, 255, 235), 0, 3.0f * s);
+            if (hp >= 1.0f)
+                dl->AddCircleFilled(ImVec2(hx, hy), 4.0f * s, IM_COL32(120, 180, 255, 235));
+        }
+    }
+#endif
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     // Raise/dismiss the Android soft keyboard to match the focused text field.
