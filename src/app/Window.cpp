@@ -118,6 +118,9 @@ void Window::pollEvents() {
                 break;
         }
     }
+#if defined(__ANDROID__)
+    updateHoldSelect();   // a stationary one-finger press becomes a select-drag
+#endif
     SDL_GetWindowSize(m_window, &m_width, &m_height);
 }
 
@@ -152,6 +155,8 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             if (m_leftDown) { io.AddMouseButtonEvent(0, false); m_leftDown = false; }
             m_twoFinger = true;
             m_suppressLeft = true;
+            m_holdSelect = false;          // a two-finger gesture cancels hold-select
+            m_movedBeyondHold = false;
             m_lastCentroidX = cx; m_lastCentroidY = cy;
             m_lastPinchDist = dist;
         } else {
@@ -173,6 +178,13 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         if (type == SDL_FINGERDOWN && !m_leftDown) {
             io.AddMouseButtonEvent(0, true);
             m_leftDown = true;
+            m_downTicks = SDL_GetTicks();   // begin press-and-hold tracking
+            m_downX = m_fingers[0].x; m_downY = m_fingers[0].y;
+            m_movedBeyondHold = false;
+            m_holdSelect = false;
+        } else if (type == SDL_FINGERMOTION && !m_holdSelect) {
+            const float dx = m_fingers[0].x - m_downX, dy = m_fingers[0].y - m_downY;
+            if (dx * dx + dy * dy > 25.0f * 25.0f) m_movedBeyondHold = true; // a drag
         }
         return;
     }
@@ -181,6 +193,14 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
     if (m_leftDown) { io.AddMouseButtonEvent(0, false); m_leftDown = false; }
     m_twoFinger = false;
     m_suppressLeft = false;
+    m_holdSelect = false;
+    m_movedBeyondHold = false;
+}
+
+void Window::updateHoldSelect() {
+    if (m_holdSelect) return;
+    if (m_fingers.size() != 1 || m_movedBeyondHold || m_suppressLeft || m_twoFinger) return;
+    if (SDL_GetTicks() - m_downTicks > 350u) m_holdSelect = true;  // hold engaged
 }
 #else
 void Window::handleFingerEvent(unsigned, std::int64_t, float, float) {}

@@ -1956,6 +1956,12 @@ void Application::renderViewport() {
                                  m_scaleFaceCtl.dragAxis() >= 0 ||
                                  m_edgeOpDragging ||
                                  m_pushPullSticky;
+#if defined(__ANDROID__)
+            // A one-finger press-and-hold drives box-select, not orbit/pan — so
+            // suppress the camera drag (and the two-finger consume below) while
+            // it's engaged.
+            if (m_window && m_window->isTouchHoldSelect()) gizmoOwnsDrag = true;
+#endif
             if (!gizmoOwnsDrag && ImGui::IsMouseDragging(m_orbitButton)) {
                 ImVec2 delta = io.MouseDelta;
                 if (io.KeyShift) cam.pan(delta.x, delta.y);
@@ -3630,6 +3636,19 @@ void Application::renderViewport() {
                         // close that editor when clicking anything else.
                         m_historyPanel->setEditingStep(ownerStep);
                     }
+
+#if defined(__ANDROID__)
+                    // Touch press-and-hold begins a box-select at the held point
+                    // (trackpad mode reserves left-drag for orbit, so the desktop
+                    // empty-space path never fires on Android).
+                    if (m_window && m_window->isTouchHoldSelect() && m_boxSelect &&
+                        !m_boxSelect->isActive() && !m_inSketchMode && !m_extruding &&
+                        !m_pushPullActive && !m_edgeOpActive && !m_gizmoDragging) {
+                        ImVec2 mp = ImGui::GetMousePos();
+                        ImVec2 wp = ImGui::GetItemRectMin();
+                        m_boxSelect->begin(glm::vec2(mp.x - wp.x, mp.y - wp.y));
+                    }
+#endif
 
                     // Box-select drag + release. Update while LEFT is held; on
                     // release, intersect bodies' screen-space bboxes with the

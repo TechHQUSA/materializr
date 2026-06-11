@@ -48,6 +48,12 @@ public:
     bool consumeTouchPan(float& dx, float& dy);   // centroid movement, pixels
     bool consumeTouchZoom(float& dz);             // pinch delta, wheel-equivalent
 
+    // True once a one-finger press has been held stationary past the hold
+    // threshold (and remains true until lift). The viewport uses this to start a
+    // box/drag-select instead of orbiting — the touch equivalent of the desktop
+    // empty-space left-drag, which trackpad mode otherwise reserves for orbit.
+    bool isTouchHoldSelect() const { return m_holdSelect; }
+
 private:
     SDL_Window* m_window = nullptr;
     void* m_glContext = nullptr;
@@ -65,7 +71,14 @@ private:
     float m_lastCentroidX = 0.0f, m_lastCentroidY = 0.0f;
     float m_panAccX = 0.0f, m_panAccY = 0.0f, m_zoomAcc = 0.0f;
 
+    // One-finger press-and-hold tracking (-> box/drag-select).
+    std::uint32_t m_downTicks = 0;        // SDL_GetTicks at single-finger down
+    float m_downX = 0.0f, m_downY = 0.0f; // where it went down
+    bool  m_movedBeyondHold = false;      // moved too far -> it's a drag, not a hold
+    bool  m_holdSelect = false;           // hold threshold passed; select-drag mode
+
     void handleFingerEvent(unsigned type, std::int64_t id, float nx, float ny);
+    void updateHoldSelect();              // per-frame hold check (Android)
 };
 
 } // namespace materializr
