@@ -2880,6 +2880,19 @@ void Application::enterSketchOnPlane(const gp_Pln& plane) {
 }
 
 void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
+    // Sketching needs a FLAT face. A curved face (cylinder / sphere / fillet)
+    // has no single plane — we'd otherwise drop the sketch onto a tangent plane
+    // at an arbitrary point on the curve, which isn't useful and a construction
+    // plane (Add Plane…) covers properly. Refuse with guidance.
+    {
+        Handle(Geom_Surface) s = BRep_Tool::Surface(face);
+        if (s.IsNull() || !s->IsKind(STANDARD_TYPE(Geom_Plane))) {
+            showToast("Can't sketch on a curved face \xE2\x80\x94 use Add "
+                      "Plane\xE2\x80\xA6 to place a construction plane.");
+            return;
+        }
+    }
+
     m_activeSketch = std::make_shared<Sketch>();
     m_sketchSolver = std::make_unique<SketchSolver>();
     m_activeSketchId = -1;
