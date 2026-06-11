@@ -173,18 +173,9 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         // A finger left over from a two-finger gesture is ignored (no jump-orbit)
         // until the user fully lifts off.
         if (m_suppressLeft) { m_twoFinger = false; return; }
-        if (m_moveMode) {
-            // Navigation lock: the one finger orbits the camera and never feeds
-            // the left button, so it can't draw or select.
-            if (type == SDL_FINGERDOWN) {
-                m_movePrevX = m_fingers[0].x; m_movePrevY = m_fingers[0].y;
-            } else if (type == SDL_FINGERMOTION) {
-                m_orbitAccX += m_fingers[0].x - m_movePrevX;
-                m_orbitAccY += m_fingers[0].y - m_movePrevY;
-                m_movePrevX = m_fingers[0].x; m_movePrevY = m_fingers[0].y;
-            }
-            return;
-        }
+        // Note: the left button is always fed (even in Move mode) so on-screen
+        // buttons stay clickable; Move mode is enforced at the viewport level
+        // (it gates drawing/selection there, not the raw input here).
         io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
         io.AddMousePosEvent(m_fingers[0].x, m_fingers[0].y);
         if (type == SDL_FINGERDOWN && !m_leftDown) {
@@ -229,13 +220,6 @@ bool Window::consumeTouchZoom(float& dz) {
     if (m_zoomAcc == 0.0f) return false;
     dz = m_zoomAcc;
     m_zoomAcc = 0.0f;
-    return true;
-}
-
-bool Window::consumeTouchOrbit(float& dx, float& dy) {
-    if (m_orbitAccX == 0.0f && m_orbitAccY == 0.0f) return false;
-    dx = m_orbitAccX; dy = m_orbitAccY;
-    m_orbitAccX = m_orbitAccY = 0.0f;
     return true;
 }
 

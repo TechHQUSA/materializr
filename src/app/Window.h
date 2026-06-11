@@ -53,12 +53,6 @@ public:
     bool consumeTouchPan(float& dx, float& dy);   // centroid movement, pixels
     bool consumeTouchZoom(float& dz);             // pinch delta, wheel-equivalent
 
-    // "Move" (navigation lock). While on, a one-finger drag orbits the camera
-    // and never feeds the left mouse button — so taps/drags can't draw or select
-    // (e.g. while panning/zooming a sketch). Two-finger pan/zoom is unaffected.
-    void setMoveMode(bool on) { m_moveMode = on; }
-    bool consumeTouchOrbit(float& dx, float& dy); // one-finger drag delta, pixels
-
     // True once a one-finger press has been held stationary past the hold
     // threshold (and remains true until lift). The viewport uses this to start a
     // box/drag-select instead of orbiting — the touch equivalent of the desktop
@@ -88,11 +82,6 @@ private:
     bool  m_movedBeyondHold = false;      // moved too far -> it's a drag, not a hold
     bool  m_holdSelect = false;           // hold threshold passed; select-drag mode
     bool  m_textInputActive = false;      // soft keyboard currently raised
-
-    // "Move" navigation-lock state: one-finger drag becomes a camera orbit.
-    bool  m_moveMode = false;
-    float m_orbitAccX = 0.0f, m_orbitAccY = 0.0f;
-    float m_movePrevX = 0.0f, m_movePrevY = 0.0f;
 
     void handleFingerEvent(unsigned type, std::int64_t id, float nx, float ny);
     void updateHoldSelect();              // per-frame hold check (Android)

@@ -3619,7 +3619,6 @@ void Application::run() {
     m_pendingSketchRecovery = materializr::hasSketchDraft();
 
     while (true) {
-        m_window->setMoveMode(m_moveModeToggle);  // touch nav-lock affects event handling
         m_window->pollEvents();
 
         // Keep the in-progress sketch crash-recoverable.

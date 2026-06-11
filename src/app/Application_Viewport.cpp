@@ -1978,7 +1978,11 @@ void Application::renderViewport() {
             // still works — it's gated on gizmoOwnsDrag, not this local.
             bool suppressCamDrag = gizmoOwnsDrag;
 #if defined(__ANDROID__)
-            if (m_inSketchMode) suppressCamDrag = true;
+            // In sketch mode a one-finger drag previews the rubber-band instead
+            // of orbiting — unless Move (navigation lock) is on, where it orbits.
+            if (m_inSketchMode && !m_moveModeToggle) suppressCamDrag = true;
+            // Move mode never draws: a one-finger drag orbits even in sketch.
+            if (m_moveModeToggle) suppressCamDrag = gizmoOwnsDrag;
 #endif
             if (!suppressCamDrag && ImGui::IsMouseDragging(m_orbitButton)) {
                 ImVec2 delta = io.MouseDelta;
@@ -2007,11 +2011,6 @@ void Application::renderViewport() {
                 // wheel tick. Deadzoned to keep a pure pan from zooming.
                 if (m_window->consumeTouchZoom(tdz)) {
                     if (std::fabs(tdz) > 1.5f) cam.zoom(tdz * 0.006f);
-                }
-                // "Move" navigation lock: one-finger drag orbits (no draw/select).
-                float tox = 0.0f, toy = 0.0f;
-                if (m_window->consumeTouchOrbit(tox, toy)) {
-                    cam.orbit(tox, toy);
                 }
             }
 #endif
@@ -3331,7 +3330,8 @@ void Application::renderViewport() {
                     const bool clickSelectionAllowed =
                         !m_pushPullActive && !m_extruding &&
                         !m_patternActive && !m_resizeCylActive &&
-                        !m_threadActive;
+                        !m_threadActive &&
+                        !m_moveModeToggle;   // Move (nav lock): taps don't select
                     bool regionConsumedClick = false;
                     if (clickSelectionAllowed && regionHit.regionIndex >= 0 &&
                         ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -4340,7 +4340,7 @@ void Application::renderViewport() {
                     // clicking the same point twice".)
                     recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
                 } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                           !m_dimEditingClickedThisFrame) {
+                           !m_dimEditingClickedThisFrame && !m_moveModeToggle) {
                     // m_dimEditingClickedThisFrame is set when a click landed
                     // on a dimension-label hit-rect this frame; swallow the
                     // click here so it doesn't ALSO place a sketch point at
@@ -4475,94 +4475,96 @@ void Application::renderViewport() {
     // changes save immediately.
     renderSnapWidget();
 
-    // Context action bar along the bottom of the viewport. Touch stand-ins for
-    // actions desktop reaches via modifier keys / hover; each button shows only
-    // when it applies to the current mode/tool. Add more here as needed.
+    // Context action bars overlaid on the viewport (Android). Each is a SEPARATE
+    // window so a tap on — or a few px around — a button is captured by ImGui and
+    // can't fall through to the canvas and drop a stray vertex. The window
+    // padding is that surrounding hit-target margin.
 #if defined(__ANDROID__)
     {
-        ImVec2 vpMin = ImGui::GetWindowPos();
-        ImVec2 vpSize = ImGui::GetWindowSize();
+        const ImVec2 vpMin = ImGui::GetWindowPos();
+        const ImVec2 vpSize = ImGui::GetWindowSize();
         const float pad = ImGui::GetStyle().FramePadding.x;
-        const float spacing = ImGui::GetStyle().ItemSpacing.x * 1.5f;
-        // Big touch targets: tall + extra-wide so a near-miss hits the button
-        // rather than the viewport underneath (which would drop a stray vertex).
-        const float btnH = ImGui::GetFrameHeight() * 1.7f;
-        float x = vpMin.x + 8.0f;
-        const float y = vpMin.y + vpSize.y - btnH - 8.0f;
-
-        // Lay out one button left-to-right; returns whether it was clicked.
-        auto barButton = [&](const char* label) -> bool {
-            ImVec2 ts = ImGui::CalcTextSize(label);
-            float w = ts.x + pad * 5.0f;
-            ImGui::SetCursorScreenPos(ImVec2(x, y));
-            bool clicked = ImGui::Button(label, ImVec2(w, btnH));
-            x += w + spacing;
-            return clicked;
+        const float btnH = ImGui::GetFrameHeight() * 1.7f;   // tall touch targets
+        const ImGuiWindowFlags overlayFlags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+            ImGuiWindowFlags_NoNavInputs | ImGuiWindowFlags_NoNavFocus;
+        auto wideButton = [&](const char* label) -> bool {
+            return ImGui::Button(label, ImVec2(ImGui::CalcTextSize(label).x + pad * 5.0f, btnH));
         };
 
-        // Multi-select toggle — relevant whenever a tap selects geometry:
-        // outside sketch mode, or inside it only with the Select/Move tool.
+        // Bottom-left: selection / sketch-shape actions.
         bool selectionContext = !m_inSketchMode ||
             (m_sketchTool && m_sketchTool->getMode() == SketchToolMode::Select);
-        if (selectionContext) {
-            int pops = 0;
-            if (m_multiSelectToggle) {
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
-                pops = 3;
+        bool placing = m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing();
+        if (selectionContext || placing) {
+            ImGui::SetNextWindowPos(ImVec2(vpMin.x + 6.0f, vpMin.y + vpSize.y - 6.0f),
+                                    ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+            ImGui::SetNextWindowBgAlpha(0.35f);
+            ImGui::Begin("##ViewportBarLeft", nullptr, overlayFlags);
+
+            if (selectionContext) {
+                int pops = 0;
+                if (m_multiSelectToggle) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
+                    pops = 3;
+                }
+                if (wideButton(m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off"))
+                    m_multiSelectToggle = !m_multiSelectToggle;
+                bool hov = ImGui::IsItemHovered();
+                if (pops) ImGui::PopStyleColor(pops);
+                if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
             }
-            if (barButton(m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off"))
-                m_multiSelectToggle = !m_multiSelectToggle;
+            if (placing) {
+                if (selectionContext) ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.60f, 0.32f, 0.97f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.72f, 0.42f, 1.0f));
+                bool finish = wideButton("Finish Shape");
+                bool fhov = ImGui::IsItemHovered();
+                ImGui::PopStyleColor(2);
+                if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
+                if (fhov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
+
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.68f, 0.24f, 0.24f, 0.97f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.82f, 0.34f, 0.34f, 1.0f));
+                bool cancel = wideButton("Cancel Shape");
+                bool chov = ImGui::IsItemHovered();
+                ImGui::PopStyleColor(2);
+                if (cancel) recordSketchMutation([&]{ m_sketchTool->onCancel(); });
+                if (chov) ImGui::SetTooltip("Discard the in-progress shape (no commit / undo needed)");
+            }
+            ImGui::End();
+            ImGui::PopStyleVar();
+        }
+
+        // Bottom-right: persistent Move (navigation lock). While on, a one-finger
+        // drag orbits and taps don't draw/select, so pan/zoom can't inadvertently
+        // start a drawing. UI buttons stay clickable (input still reaches ImGui).
+        {
+            ImGui::SetNextWindowPos(ImVec2(vpMin.x + vpSize.x - 6.0f, vpMin.y + vpSize.y - 6.0f),
+                                    ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+            ImGui::SetNextWindowBgAlpha(0.35f);
+            ImGui::Begin("##ViewportBarRight", nullptr, overlayFlags);
+            if (m_moveModeToggle) {
+                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.85f, 0.55f, 0.15f, 0.97f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.65f, 0.25f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.75f, 0.48f, 0.12f, 1.0f));
+            }
+            bool clicked = wideButton(m_moveModeToggle ? "Move: On" : "Move: Off");
             bool hov = ImGui::IsItemHovered();
-            if (pops) ImGui::PopStyleColor(pops);
-            if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
+            if (m_moveModeToggle) ImGui::PopStyleColor(3);
+            if (clicked) m_moveModeToggle = !m_moveModeToggle;
+            if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
+            ImGui::End();
+            ImGui::PopStyleVar();
         }
-
-        // While a sketch placement is in progress: Finish (commit the points
-        // placed so far) and Cancel (discard the in-progress shape) — touch
-        // stand-ins for Enter / double-click and Escape, which a finger can't do.
-        if (m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing()) {
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.60f, 0.32f, 0.97f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.72f, 0.42f, 1.0f));
-            bool finish = barButton("Finish Shape");
-            bool fhov = ImGui::IsItemHovered();
-            ImGui::PopStyleColor(2);
-            if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
-            if (fhov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
-
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.68f, 0.24f, 0.24f, 0.97f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.82f, 0.34f, 0.34f, 1.0f));
-            bool cancel = barButton("Cancel Shape");
-            bool chov = ImGui::IsItemHovered();
-            ImGui::PopStyleColor(2);
-            if (cancel) recordSketchMutation([&]{ m_sketchTool->onCancel(); });
-            if (chov) ImGui::SetTooltip("Discard the in-progress shape (no commit / undo needed)");
-        }
-    }
-
-    // Persistent "Move" navigation lock, bottom-right. While on, a one-finger
-    // drag orbits and taps don't draw/select, so panning/zooming (especially in
-    // a sketch) can't inadvertently start a drawing.
-    {
-        ImVec2 vpMin = ImGui::GetWindowPos();
-        ImVec2 vpSize = ImGui::GetWindowSize();
-        const float pad = ImGui::GetStyle().FramePadding.x;
-        const float btnH = ImGui::GetFrameHeight() * 1.7f;
-        const char* label = m_moveModeToggle ? "Move: On" : "Move: Off";
-        float w = ImGui::CalcTextSize("Move: Off").x + pad * 5.0f;
-        ImGui::SetCursorScreenPos(ImVec2(vpMin.x + vpSize.x - w - 8.0f,
-                                         vpMin.y + vpSize.y - btnH - 8.0f));
-        if (m_moveModeToggle) {
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.85f, 0.55f, 0.15f, 0.97f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.65f, 0.25f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.75f, 0.48f, 0.12f, 1.0f));
-        }
-        bool clicked = ImGui::Button(label, ImVec2(w, btnH));
-        bool hov = ImGui::IsItemHovered();
-        if (m_moveModeToggle) ImGui::PopStyleColor(3);
-        if (clicked) m_moveModeToggle = !m_moveModeToggle;
-        if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
     }
 #endif // __ANDROID__
 
