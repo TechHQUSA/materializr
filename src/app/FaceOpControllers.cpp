@@ -454,8 +454,8 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
 
     if (!previewOk()) {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
-                           "Projection failed - the sketch must land\n"
-                           "fully inside this face.");
+                           "Projection failed - the selected region(s) couldn't\n"
+                           "be applied (off the face, or too thin/degenerate).");
     }
 }
 
