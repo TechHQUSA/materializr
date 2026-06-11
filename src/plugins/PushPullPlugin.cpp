@@ -1,4 +1,5 @@
 #include "ui_scale.h"
+#include "../touch_mode.h"
 #include "../plugin/PluginMacro.h"
 #include "../plugin/PluginContext.h"
 #include "../plugin/InteractiveTool.h"
@@ -133,9 +134,9 @@ public:
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) { commit(ctx); }
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) { commit(ctx); }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0))) { cancel(ctx); }
+        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) { cancel(ctx); }
 
         ImGui::End();
     }

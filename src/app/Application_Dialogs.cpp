@@ -789,10 +789,10 @@ void Application::renderResizeCylindricalPanel() {
 
     ImGui::Spacing();
     ImGui::BeginDisabled(m_resizeCylPreviewFailed);
-    if (ImGui::Button("Confirm (Enter)", ImVec2(115, 0))) commitResizeCylindrical();
+    if (ImGui::Button(materializr::btnConfirm(), ImVec2(115, 0))) commitResizeCylindrical();
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel (Esc)",    ImVec2(115, 0))) cancelResizeCylindrical();
+    if (ImGui::Button(materializr::btnCancel(),    ImVec2(115, 0))) cancelResizeCylindrical();
 
     ImGui::End();
 }
@@ -2929,13 +2929,13 @@ void Application::renderPrimitivePopup() {
 
     ImGui::Spacing();
     if (!ok) ImGui::BeginDisabled();
-    if (ImGui::Button("Create (Enter)", ImVec2(110, 0)) ||
+    if (ImGui::Button(materializr::btnCreate(), ImVec2(110, 0)) ||
         (ok && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
         commitPrimitivePopup();
     }
     if (!ok) ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0)) ||
+    if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         cancelPrimitivePopup();
     }

@@ -3563,21 +3563,12 @@ void Application::renderViewport() {
                     } else if (clickSelectionAllowed && !regionConsumedClick &&
                                ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
-                        // Multi-Select on touch gathers whole BODIES: with the
-                        // toggle on, a tap adds/removes the body it hits. Touch has
-                        // no double-tap-to-body (it clashed with the long-press),
-                        // and bodies — not faces — are the usual multi-select
-                        // target. Toggle off / desktop mode → falls through to
-                        // normal face/edge picking; a tap that misses a body still
-                        // branches to axis/plane below.
-                        if (materializr::touchMode() && m_multiSelectToggle &&
-                            result.hit && result.bodyId >= 0) {
-                            SelectionEntry entry;
-                            entry.type = SelectionType::Body;
-                            entry.bodyId = result.bodyId;
-                            try { entry.shape = m_document->getBody(result.bodyId); } catch (...) {}
-                            m_selection->toggleSelection(entry);
-                        } else if (result.hit && result.axisId >= 0) {
+                        // Multi-Select forces io.KeyCtrl for this viewport scope, so
+                        // the normal pick below adds/toggles the SUB-SHAPE you tap —
+                        // edges (the common fillet/chamfer target), faces, vertices —
+                        // additively. Whole-body multi-select is via the long-press
+                        // menu's Body branch (also additive while Multi-Select is on).
+                        if (result.hit && result.axisId >= 0) {
                             // Construction-axis hit — own selection path,
                             // skip body/face/edge branching.
                             SelectionEntry entry;
@@ -4923,11 +4914,11 @@ void Application::renderViewport() {
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
             commitInteractiveExtrude();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
             cancelInteractiveExtrude();
         }
 
@@ -5014,11 +5005,11 @@ void Application::renderViewport() {
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
             commitPushPull();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
             cancelPushPull();
         }
 
@@ -5115,11 +5106,11 @@ void Application::renderViewport() {
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
             commitInteractiveEdgeOp();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0))) {
+        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
             cancelInteractiveEdgeOp();
         }
 
@@ -5223,9 +5214,9 @@ void Application::renderViewport() {
         }
 
         ImGui::Spacing();
-        if (ImGui::Button("Confirm (Enter)", ImVec2(110, 0))) commitMoveFace();
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) commitMoveFace();
         ImGui::SameLine();
-        if (ImGui::Button("Cancel (Esc)", ImVec2(110, 0))) cancelMoveFace();
+        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) cancelMoveFace();
         ImGui::End();
     }
 

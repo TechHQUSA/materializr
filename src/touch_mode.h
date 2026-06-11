@@ -30,4 +30,11 @@ inline bool& touchModeRef() {
 inline bool touchMode() { return touchModeRef(); }
 inline void setTouchMode(bool on) { touchModeRef() = on; }
 
+// Commit/cancel/create button labels. In touch mode drop the keyboard hint —
+// there are no Enter/Esc keys, and "(Enter)" just eats space and confuses. So
+// "Confirm (Enter)" -> "Confirm", "Cancel (Esc)" -> "Cancel", etc.
+inline const char* btnConfirm() { return touchMode() ? "Confirm" : "Confirm (Enter)"; }
+inline const char* btnCancel()  { return touchMode() ? "Cancel"  : "Cancel (Esc)"; }
+inline const char* btnCreate()  { return touchMode() ? "Create"  : "Create (Enter)"; }
+
 } // namespace materializr

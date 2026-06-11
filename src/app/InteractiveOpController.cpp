@@ -1,4 +1,5 @@
 #include "InteractiveOpController.h"
+#include "touch_mode.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
@@ -132,10 +133,10 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
     bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
     bool esc   = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
     bool doCommit = m_commitRequested || enter ||
-                    ImGui::Button("Confirm (Enter)", ImVec2(120, 0));
+                    ImGui::Button(materializr::btnConfirm(), ImVec2(120, 0));
     if (!doCommit) ImGui::SameLine();
     bool doCancel = !doCommit &&
-                    (esc || ImGui::Button("Cancel (Esc)", ImVec2(120, 0)));
+                    (esc || ImGui::Button(materializr::btnCancel(), ImVec2(120, 0)));
     ImGui::End();
 
     if (doCommit) commit(ctx);
