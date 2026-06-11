@@ -3537,6 +3537,22 @@ void Application::renderViewport() {
                     } else if (clickSelectionAllowed && !regionConsumedClick &&
                                ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
+#if defined(__ANDROID__)
+                        // Multi-Select on touch gathers whole BODIES: with the
+                        // toggle on, a tap adds/removes the body it hits. Touch has
+                        // no double-tap-to-body (it clashed with the long-press),
+                        // and bodies — not faces — are the usual multi-select
+                        // target. Toggle off → falls through to normal face/edge
+                        // picking; a tap that misses a body still branches to
+                        // axis/plane below.
+                        if (m_multiSelectToggle && result.hit && result.bodyId >= 0) {
+                            SelectionEntry entry;
+                            entry.type = SelectionType::Body;
+                            entry.bodyId = result.bodyId;
+                            try { entry.shape = m_document->getBody(result.bodyId); } catch (...) {}
+                            m_selection->toggleSelection(entry);
+                        } else
+#endif
                         if (result.hit && result.axisId >= 0) {
                             // Construction-axis hit — own selection path,
                             // skip body/face/edge branching.
@@ -4636,7 +4652,10 @@ void Application::renderViewport() {
         // Bottom-right: persistent Move (navigation lock). While on, a one-finger
         // drag orbits and taps don't draw/select, so pan/zoom can't inadvertently
         // start a drawing. UI buttons stay clickable (input still reaches ImGui).
-        {
+        // Only shown while editing a sketch — outside one there's no drawing to
+        // start by accident (taps just select, a drag already orbits), so the
+        // lock is redundant; force it off there so it can't linger invisibly.
+        if (m_inSketchMode) {
             ImGui::SetNextWindowPos(ImVec2(vpMin.x + vpSize.x - 6.0f, vpMin.y + vpSize.y - 6.0f),
                                     ImGuiCond_Always, ImVec2(1.0f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
@@ -4654,6 +4673,8 @@ void Application::renderViewport() {
             if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
             ImGui::End();
             ImGui::PopStyleVar();
+        } else {
+            m_moveModeToggle = false;
         }
     }
 #endif // __ANDROID__
@@ -4697,13 +4718,18 @@ void Application::renderViewport() {
             }
         };
 
+        // With Multi-Select on, the menu's Select actions ADD to the current
+        // selection instead of replacing it, so you can gather several
+        // faces/bodies via long-press too.
+        const bool addToSel = m_multiSelectToggle;
         if (ImGui::BeginMenu("Face")) {
             if (ImGui::MenuItem("Select Face")) {
                 SelectionEntry entry;
                 entry.type = SelectionType::Face;
                 entry.bodyId = bid;
                 entry.shape = m_contextMenuFace;
-                m_selection->select(entry);
+                if (addToSel) m_selection->addToSelection(entry);
+                else          m_selection->select(entry);
                 m_contextMenuFace.Nullify();
             }
             if (ImGui::MenuItem("Sketch on this Face")) {
@@ -4730,7 +4756,8 @@ void Application::renderViewport() {
                 entry.type = SelectionType::Body;
                 entry.bodyId = bid;
                 try { entry.shape = m_document->getBody(bid); } catch (...) {}
-                m_selection->select(entry);
+                if (addToSel) m_selection->addToSelection(entry);
+                else          m_selection->select(entry);
                 m_contextMenuFace.Nullify();
             }
             ImGui::Separator();

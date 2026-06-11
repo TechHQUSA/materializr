@@ -995,6 +995,29 @@ void Application::renderInteractionsPanel() {
         ImGui::SameLine(120.0f);
         ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f), "%s", keys);
     };
+#if defined(__ANDROID__)
+    // Touch gesture reference. The mouse/keyboard legend below is nonsense on a
+    // bare tablet ("Scroll wheel", "Ctrl+Click", "W/E/R"), so show the actual
+    // finger gestures. These match trackpad mode (the Android default); with a
+    // mouse/keyboard attached the desktop bindings in Settings apply instead.
+    ImGui::SeparatorText("Camera");
+    row("Orbit", "One-finger drag");
+    row("Pan", "Two-finger drag");
+    row("Zoom", "Pinch");
+    row("Reset view", "View ▸ Reset Camera");
+    ImGui::SeparatorText("Select");
+    row("Select face", "Tap");
+    row("Context menu", "Long-press");
+    row("Select body", "Long-press ▸ Body");
+    row("Add to selection", "Multi-Select toggle");
+    ImGui::SeparatorText("Sketch");
+    row("Draw", "Tap, or press-drag");
+    row("Finish / Cancel", "On-screen buttons");
+    row("Dimension", "Type value (keyboard)");
+    ImGui::SeparatorText("General");
+    row("Move (nav lock)", "Bottom-right toggle");
+    row("Undo / Redo", "On-screen buttons");
+#else
     char orbitKeys[32], panKeys[32];
     std::snprintf(orbitKeys, sizeof(orbitKeys), "%s-drag", mouseButtonName(m_orbitButton));
     std::snprintf(panKeys, sizeof(panKeys), "%s-drag", mouseButtonName(m_panButton));
@@ -1016,6 +1039,7 @@ void Application::renderInteractionsPanel() {
     row("Dimension", "Type value + Enter");
     ImGui::SeparatorText("General");
     row("Undo / Redo", "Ctrl+Z / Ctrl+Y");
+#endif
     ImGui::End();
 }
 
