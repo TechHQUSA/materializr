@@ -308,8 +308,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     ImGui::TextDisabled("Projects the sketch onto this face along the\n"
                         "sketch's normal, then cuts in or raises out.");
     ImGui::TextWrapped("Click the sketch elements you want projected — click "
-                       "each to add or remove. Click empty space to project "
-                       "the whole sketch.");
+                       "each to add or remove. Use Select all / Clear below.");
 
     // Live region scoping: clicking sketch regions in the viewport while this
     // panel is open narrows the projection to just those (each click toggles —
@@ -392,13 +391,56 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
         ctx.selection.clear();
         changed = true;
     }
+    // Smart guess: auto-nesting of a dense logo is imperfect, so cycle the
+    // selection through loops-only / islands-only / all. One press usually
+    // lands close to what you want (loops-only = letters, counters hollow);
+    // fix the stragglers by clicking. An "island" is a region whose interior
+    // sits inside another region's solid (a counter that should be a hole).
+    if (ImGui::SmallButton("Cycle loops/islands")) {
+        if (auto sk = ctx.doc.getSketch(m_sketchIds[m_sketchPick])) {
+            auto regions = sk->buildRegions();
+            const int sid = m_sketchIds[m_sketchPick];
+            std::vector<bool> island(regions.size(), false);
+            for (size_t i = 0; i < regions.size(); ++i)
+                for (size_t j = 0; j < regions.size(); ++j)
+                    if (i != j && sk->isPointInRegion(
+                                      regions[j], regions[i].representativePoint)) {
+                        island[i] = true;
+                        break;
+                    }
+            m_cycleMode = (m_cycleMode + 1) % 3; // press 1=loops, 2=islands, 3=all
+            ctx.selection.clear();
+            for (size_t i = 0; i < regions.size(); ++i) {
+                const bool want = m_cycleMode == 0 ||
+                                  (m_cycleMode == 1 && !island[i]) ||
+                                  (m_cycleMode == 2 && island[i]);
+                if (!want) continue;
+                SelectionEntry e;
+                e.type = SelectionType::SketchRegion;
+                e.sketchId = sid;
+                e.subShapeIndex = static_cast<int>(i);
+                ctx.selection.toggleSelection(e);
+            }
+            changed = true;
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%s)", m_cycleMode == 0 ? "all"
+                              : m_cycleMode == 1 ? "loops" : "islands");
     if (!m_regionFilter.empty()) {
         ImGui::TextDisabled("%d region(s) selected - click any to add or\n"
-                            "remove. Empty space projects everything.",
+                            "remove. Use Clear to reset.",
                             static_cast<int>(m_regionFilter.size()));
     } else {
         ImGui::TextDisabled("All regions. Click elements to project only\n"
                             "those (click each to add or remove).");
+    }
+
+    if (!wantsLivePreview(ctx)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+                           "%d regions - live preview is off here.\n"
+                           "Confirm to apply (may take a moment).",
+                           effectiveRegionCount(ctx));
     }
 
     if (ImGui::RadioButton("Engrave", &m_mode, 0)) changed = true;
@@ -421,6 +463,18 @@ void ProjectSketchController::onCleanup() {
     m_face.Nullify();
     m_sketchIds.clear();
     m_regionFilter.clear();
+}
+
+int ProjectSketchController::effectiveRegionCount(const IopContext& ctx) const {
+    if (m_sketchIds.empty()) return 0;
+    if (!m_regionFilter.empty()) return static_cast<int>(m_regionFilter.size());
+    if (auto sk = ctx.doc.getSketch(m_sketchIds[m_sketchPick]))
+        return static_cast<int>(sk->buildRegions().size());
+    return 0;
+}
+
+bool ProjectSketchController::wantsLivePreview(const IopContext& ctx) const {
+    return effectiveRegionCount(ctx) <= kPreviewRegionCap;
 }
 
 // ─── Scale Face ──────────────────────────────────────────────────────────────
