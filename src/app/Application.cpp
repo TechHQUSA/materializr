@@ -434,6 +434,14 @@ void Application::initImGui() {
     // loaded at the matching size below so text stays crisp (not just upscaled).
     const float uiScale = m_window ? m_window->uiScale() : 1.0f;
     if (uiScale != 1.0f) style.ScaleAllSizes(uiScale);  // scales padding/spacing/scrollbar/grab
+#if defined(__ANDROID__)
+    // Touch has no hover; a tooltip can only appear while a finger is held on a
+    // widget. Drop the stationary gate (a fingertip is already stationary) and
+    // shorten the delays so a brief press-and-hold reveals it.
+    style.HoverStationaryDelay = 0.0f;
+    style.HoverDelayShort = 0.15f;
+    style.HoverDelayNormal = 0.30f;
+#endif
 
     // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,
     // distinct 0/8/B/6, designed for engineering UIs. Resolved from a small
