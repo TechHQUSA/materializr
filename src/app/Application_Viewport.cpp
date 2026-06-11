@@ -3291,11 +3291,13 @@ void Application::renderViewport() {
                         entry.type = SelectionType::SketchRegion;
                         entry.sketchId = regionHit.sketchId;
                         entry.subShapeIndex = regionHit.regionIndex;
-                        if (io.KeyCtrl) {
+                        if (io.KeyCtrl || m_projectSketchCtl.active()) {
                             // Toggle: Ctrl+clicking an already-selected
                             // region deselects it — fixing a bad pick in a
                             // multi-region selection shouldn't mean starting
-                            // the whole selection over.
+                            // the whole selection over. During Project Sketch
+                            // every click toggles, so building up the set of
+                            // regions to project needs no modifier held.
                             m_selection->toggleSelection(entry);
                         } else {
                             m_selection->select(entry);

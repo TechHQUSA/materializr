@@ -6,6 +6,7 @@
 #include "../modeling/TaperOp.h"
 #include "../modeling/ScaleFaceOp.h"
 #include "../modeling/ProjectSketchOp.h"
+#include "../modeling/Sketch.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -306,12 +307,15 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
                                         bool& changed) {
     ImGui::TextDisabled("Projects the sketch onto this face along the\n"
                         "sketch's normal, then cuts in or raises out.");
+    ImGui::TextWrapped("Click the sketch elements you want projected — click "
+                       "each to add or remove. Click empty space to project "
+                       "the whole sketch.");
 
-    // Live region scoping: clicking sketch regions in the viewport while
-    // this panel is open narrows the projection to just those (Ctrl+click
-    // adds more); clicking empty space goes back to the whole sketch. A
-    // clicked region also drives the sketch choice, so picking "the
-    // relevant sketch" is literally clicking it.
+    // Live region scoping: clicking sketch regions in the viewport while this
+    // panel is open narrows the projection to just those (each click toggles —
+    // no modifier needed while this step is active); clicking empty space goes
+    // back to the whole sketch. A clicked region also drives the sketch choice,
+    // so picking "the relevant sketch" is literally clicking it.
     {
         int selSketch = -1;
         std::vector<int> live;
@@ -359,12 +363,42 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
         }
         ImGui::EndCombo();
     }
+    // Select all → then click the few you DON'T want to drop them (easier than
+    // hand-picking every letter of a long inscription). Clear → back to none.
+    if (ImGui::SmallButton("Select all")) {
+        if (auto sk = ctx.doc.getSketch(m_sketchIds[m_sketchPick])) {
+            const int sid = m_sketchIds[m_sketchPick];
+            const int n = static_cast<int>(sk->buildRegions().size());
+            for (int i = 0; i < n; ++i) {
+                bool already = false;
+                for (const auto& s : ctx.selection.getSelection())
+                    if (s.type == SelectionType::SketchRegion &&
+                        s.sketchId == sid && s.subShapeIndex == i) {
+                        already = true;
+                        break;
+                    }
+                if (already) continue;
+                SelectionEntry e;
+                e.type = SelectionType::SketchRegion;
+                e.sketchId = sid;
+                e.subShapeIndex = i;
+                ctx.selection.toggleSelection(e); // adds (absent after the check)
+            }
+            changed = true;
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear")) {
+        ctx.selection.clear();
+        changed = true;
+    }
     if (!m_regionFilter.empty()) {
-        ImGui::TextDisabled("%d region(s) - click empty space for all.",
+        ImGui::TextDisabled("%d region(s) selected - click any to add or\n"
+                            "remove. Empty space projects everything.",
                             static_cast<int>(m_regionFilter.size()));
     } else {
-        ImGui::TextDisabled("All regions. Click regions in the viewport\n"
-                            "to project only those (Ctrl+click adds).");
+        ImGui::TextDisabled("All regions. Click elements to project only\n"
+                            "those (click each to add or remove).");
     }
 
     if (ImGui::RadioButton("Engrave", &m_mode, 0)) changed = true;
