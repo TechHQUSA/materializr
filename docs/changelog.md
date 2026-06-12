@@ -3,6 +3,45 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [0.9.9.1] — 2026-06-12
+
+Touch sketching polish from tablet dogfooding. Everything here gates on touch
+mode or the inference level, so desktop behaviour is unchanged — except the two
+fixes noted as cross-platform.
+
+### Fixed
+
+- **Crash when tapping Undo repeatedly while a sketch was open.** Only the
+  Ctrl+Z path guarded against undoing past sketch entry into the host body; the
+  menu / History-panel / command paths did not, so on touch (where you tap a
+  button) it could roll the body back under the live sketch and abort. A history
+  undo-floor now blocks every undo path at the sketch-entry step and greys the
+  buttons out there. *(All platforms.)*
+
+### Added
+
+- **Press-drag-release sketching on touch.** The line tool drops its first
+  vertex on press, rubber-bands the segment as you drag (with a live length
+  readout), and commits on release — then chains. The arc tool follows the same
+  flow for its first two points (press-drag the chord), then a tap sets the
+  bulge. Tap-to-place still works as a fallback.
+- **Arc chord hint.** While drawing an arc's chord, a curved hint arcs over it
+  so it reads as an arc-in-progress rather than a plain line. *(All platforms.)*
+- **Chain controls** on the touch context bar: **Finish / Back / Cancel** for
+  line and spline chains — Back drops the last segment/point, Cancel scraps the
+  whole chain.
+- **"Max" inference tier.** Everything Full does, plus wider snap/alignment
+  catch ranges tuned for fingertips. Full and below are identical on every
+  device, so mouse/keyboard users are never over-snapped. Defaults on for touch.
+- **Sketch line width** setting (Settings ▸ Display, 1–6 px) so sketch geometry
+  reads over the grid; vertex markers scale with it and now render on Android
+  (the GL ES point-size path was missing).
+
+### Changed
+
+- **Touch tooltips time out** after 15 s of no interaction, so a tip left
+  hanging by a finger-lift clears itself.
+
 ## [0.9.9] — 2026-06-12
 
 ### Added
