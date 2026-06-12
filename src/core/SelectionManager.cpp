@@ -1,6 +1,7 @@
 #include "SelectionManager.h"
 #include "EventBus.h"
 #include "Events.h"
+#include "../touch_mode.h"
 #include <algorithm>
 
 void SelectionManager::publishChanged() {
@@ -26,9 +27,6 @@ void SelectionManager::addToSelection(const SelectionEntry& entry) {
     // A Body selection subsumes any Face / Edge / Vertex from the same
     // body — otherwise the user ends up with stale face highlights stuck
     // to the wireframe after a Ctrl+double-click promotes face to body.
-    // Conversely, picking a Face / Edge / Vertex while the whole body
-    // is already in the selection just refines the focus, so we drop
-    // the Body in favour of the sub-shape.
     if (entry.type == SelectionType::Body && entry.bodyId >= 0) {
         m_selection.erase(
             std::remove_if(m_selection.begin(), m_selection.end(),
@@ -39,10 +37,17 @@ void SelectionManager::addToSelection(const SelectionEntry& entry) {
                             e.type == SelectionType::Vertex);
                 }),
             m_selection.end());
-    } else if ((entry.type == SelectionType::Face ||
+    } else if (materializr::touchMode() &&
+               (entry.type == SelectionType::Face ||
                 entry.type == SelectionType::Edge ||
                 entry.type == SelectionType::Vertex) &&
                entry.bodyId >= 0) {
+        // Touch only: picking a Face / Edge / Vertex while the whole body is
+        // already selected drops the Body in favour of the sub-shape, so a tap
+        // gives one unambiguous target to push/pull/fillet. With a mouse the
+        // desktop/upstream model keeps both — a body and its sub-shapes coexist
+        // in the selection (so an Android device with a mouse/keyboard attached,
+        // running with touch mode off, behaves like the desktop).
         m_selection.erase(
             std::remove_if(m_selection.begin(), m_selection.end(),
                 [&](const SelectionEntry& e) {

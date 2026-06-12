@@ -243,6 +243,14 @@ void Window::pumpSyntheticRightClick() {
     }
 }
 
+#else
+void Window::handleFingerEvent(unsigned, std::int64_t, float, float) {}
+#endif
+
+// Defined on every platform: the runtime touch-mode hold ring (Application::
+// endFrame) calls it even on desktop (a desktop touchscreen can enable touch
+// mode). With no finger events fed (m_fingers stays empty off Android), it just
+// returns 0 there.
 float Window::holdProgress(float& x, float& y) const {
     if (m_fingers.size() != 1 || m_movedBeyondHold || m_suppressLeft || m_twoFinger ||
         !m_touchOverViewport)
@@ -254,9 +262,6 @@ float Window::holdProgress(float& x, float& y) const {
     float t = static_cast<float>(held) / 450.0f;
     return t > 1.0f ? 1.0f : t;
 }
-#else
-void Window::handleFingerEvent(unsigned, std::int64_t, float, float) {}
-#endif
 
 bool Window::consumeTouchPan(float& dx, float& dy) {
     if (m_panAccX == 0.0f && m_panAccY == 0.0f) return false;

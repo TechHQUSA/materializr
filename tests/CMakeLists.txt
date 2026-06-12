@@ -38,6 +38,7 @@ target_include_directories(materializr_core SYSTEM PUBLIC
 
 target_link_libraries(materializr_core PUBLIC
     imgui_lib
+    glm::glm
     TKernel
     TKMath
     TKG3d
