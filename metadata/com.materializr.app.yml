@@ -1,0 +1,72 @@
+# F-Droid build metadata for Materializr (Android).
+#
+# This is a reference copy of the recipe to submit to fdroiddata
+# (https://gitlab.com/fdroid/fdroiddata) — F-Droid keeps the canonical file
+# there, not in the app repo. Kept here so the build steps live with the source.
+#
+# The unusual part is the native stack: there is NO committed binary. A prebuild
+# step (android/scripts/setup-deps.sh) fetches + SHA-256-verifies the SDL2,
+# FreeType and OpenCASCADE source, cross-compiles FreeType (static) and
+# OpenCASCADE 7.8.1 (shared) for arm64-v8a with the NDK, and stages the .so set
+# into app/src/main/jniLibs. Everything builds from source — F-Droid-clean.
+
+Categories:
+  - Graphics
+License: GPL-3.0-or-later
+AuthorName: Steve Bushwa
+SourceCode: https://github.com/materializr-cad/materializr
+IssueTracker: https://github.com/materializr-cad/materializr/issues
+Changelog: https://github.com/materializr-cad/materializr/blob/HEAD/docs/changelog.md
+
+AutoName: Materializr
+Summary: Parametric 3D CAD
+Description: |-
+    Materializr is an open-source parametric 3D CAD application: sketch on a
+    plane, extrude/revolve/loft into solids, fillet and chamfer, boolean
+    operations, and a parametric history you can edit and replay. It imports and
+    exports STEP, STL, IGES and glTF.
+
+    The geometry kernel is OpenCASCADE; the UI is Dear ImGui on SDL2. On Android
+    the interface is touch-capable, with a runtime "touch mode" that adapts
+    gestures and hit targets. It is designed for tablets and larger screens —
+    on a phone the panels and toolbars are cramped.
+
+    File open/save use the system document picker (Storage Access Framework);
+    export can share to other apps or save to a chosen folder. No broad storage
+    permission is requested.
+
+RepoType: git
+Repo: https://github.com/materializr-cad/materializr.git
+
+Builds:
+  - versionName: 0.9.9.1
+    versionCode: 4
+    commit: v0.9.9.1
+    subdir: android/app
+    # The buildserver provides cmake/curl, but install them defensively.
+    sudo:
+      - apt-get update || true
+      - apt-get install -y cmake curl
+    # NDK 26.3.11579264 = r26d (the version android/app/build.gradle pins via
+    # ndkVersion). setup-deps.sh + the gradle externalNativeBuild both use it.
+    ndk: r26d
+    gradle:
+      - yes
+    # Cross-compile FreeType + OpenCASCADE 7.8.1 (arm64) from verified source and
+    # stage the .so set + OCCT resource files. ~30 min; see the de-risk note below
+    # for wall-clock and peak RAM. $$NDK$$ is the path F-Droid installs r26d to.
+    prebuild:
+      - JOBS=4 ANDROID_NDK="$$NDK$$" MATERIALIZR_WORK="$$BUILD$$/.materializr-deps" ../scripts/setup-deps.sh
+    # build.gradle leaves the release unsigned when no keystore.properties exists
+    # (the F-Droid case), so F-Droid signs it with its own key — nothing to do here.
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 0.9.9.1
+CurrentVersionCode: 4
+
+# --- De-risk notes (fill from the clean-container timing run) ---------------
+# OCCT cross-compile in a clean debian:bookworm + r26d at -j4:
+#   wall-clock: <TBD>   peak RAM: <TBD>
+# If peak RAM exceeds the F-Droid buildserver budget, drop JOBS or trim OCCT
+# BUILD_MODULE_* toolkits to only those the app links.

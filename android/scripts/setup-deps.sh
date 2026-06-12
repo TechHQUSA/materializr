@@ -19,10 +19,16 @@ SDL_VER="2.30.9"
 FT_VER="2.13.3"
 OCCT_TAG="V7_8_1"
 
-ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
-NDK="${ANDROID_NDK:-$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)}"
+ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+# NDK location — accept the various env vars different setups use (F-Droid sets
+# ANDROID_NDK_HOME / ANDROID_NDK_ROOT; CI may set ANDROID_NDK), else the newest
+# NDK under the SDK. Any NDK with the r26 CMake toolchain works.
+NDK="${ANDROID_NDK:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -1)}}}"
 TOOLCHAIN="$NDK/build/cmake/android.toolchain.cmake"
-CMAKE_BIN="$(command -v cmake || echo "$ANDROID_HOME/cmake/3.22.1/bin/cmake")"
+# Prefer whatever cmake is on PATH (F-Droid's buildserver / a distro package);
+# fall back to the SDK's bundled cmake. Version isn't pinned — 3.22+ is fine.
+CMAKE_BIN="$(command -v cmake || ls "$ANDROID_HOME"/cmake/*/bin/cmake 2>/dev/null | sort -V | tail -1)"
+[ -n "$CMAKE_BIN" ] || CMAKE_BIN="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"      # materializr repo root
 WORK="${MATERIALIZR_WORK:-$HOME/Android}"        # downloads + build trees
