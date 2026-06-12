@@ -521,6 +521,10 @@ private:
     // block alive while a left press-drag that began over the viewport is in
     // flight so onMouseMove keeps following the finger. Cleared on button-up.
     bool m_viewportInputLatch = false;
+    // Touch: a menu-bar toggle that force-raises the system soft keyboard (some
+    // Android builds don't reliably auto-raise it on field focus). OR'd with
+    // io.WantTextInput; typed text still flows into whatever field is focused.
+    bool m_softKeyboardForced = false;
     bool m_showSettings = false;
     int m_settingsOrbitButton = 2; // staged value in the Settings dialog
     int m_settingsPanButton = 1;

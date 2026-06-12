@@ -710,7 +710,7 @@ void Application::endFrame() {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     // Raise/dismiss the Android soft keyboard to match the focused text field.
-    if (m_window) m_window->updateTextInput(ImGui::GetIO().WantTextInput);
+    if (m_window) m_window->updateTextInput(ImGui::GetIO().WantTextInput || m_softKeyboardForced);
 }
 
 void Application::renderSplashFrame(const char* status) {
@@ -981,6 +981,18 @@ void Application::renderMenuBar() {
             ImGui::Separator();
             if (ImGui::MenuItem("About Materializr...")) m_aboutDialog->setVisible(true);
             ImGui::EndMenu();
+        }
+        // Touch: soft-keyboard toggle, right-aligned. Forces the system keyboard
+        // up so you can type into the focused field (rename, save, dimensions);
+        // tap again to dismiss. Check mark shows when it's forced on.
+        if (materializr::touchMode()) {
+            const char* kb = "Keyboard";
+            float btnW = ImGui::CalcTextSize(kb).x + ImGui::GetFrameHeight() +
+                         ImGui::GetStyle().ItemSpacing.x * 2.0f;
+            float x = ImGui::GetWindowWidth() - btnW;
+            if (x > ImGui::GetCursorPosX()) ImGui::SameLine(x);
+            if (ImGui::MenuItem(kb, nullptr, m_softKeyboardForced))
+                m_softKeyboardForced = !m_softKeyboardForced;
         }
         ImGui::EndMainMenuBar();
     }
