@@ -45,13 +45,14 @@ Window::Window(int width, int height, const std::string& title)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
-#if defined(__ANDROID__)
-    // On a phone the app owns the whole screen; SDL reports the real size back.
-    flags |= SDL_WINDOW_FULLSCREEN;
-#else
-    flags |= SDL_WINDOW_RESIZABLE;
-#endif
+    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN
+                 | SDL_WINDOW_RESIZABLE;
+    // Deliberately NOT SDL_WINDOW_FULLSCREEN on Android: SDL turns that into the
+    // window-level FLAG_FULLSCREEN, which Lenovo/Samsung "desktop / PC mode" reads
+    // as "maximize me and hide the taskbar" (normal apps like Chrome never set
+    // it). The bare-tablet edge-to-edge look comes from MaterializrActivity's
+    // immersive system-UI flags instead — those hide the bars without that flag,
+    // so in a desktop dock the app stays a normal window with the taskbar intact.
 
     m_window = SDL_CreateWindow(title.c_str(),
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,

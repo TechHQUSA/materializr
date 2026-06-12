@@ -1003,7 +1003,9 @@ void Application::renderMenuBar() {
         }
         // Touch: soft-keyboard toggle, right-aligned. Forces the system keyboard
         // up so you can type into the focused field (rename, save, dimensions);
-        // tap again to dismiss. Check mark shows when it's forced on.
+        // tap again to dismiss. Check mark shows when it's forced on. (Window mode
+        // — immersive vs. windowed in a desktop dock — is automatic; see
+        // MaterializrActivity, so there's no toggle here.)
         if (materializr::touchMode()) {
             const char* kb = "Keyboard";
             float btnW = ImGui::CalcTextSize(kb).x + ImGui::GetFrameHeight() +
