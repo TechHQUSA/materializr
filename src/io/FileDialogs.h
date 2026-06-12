@@ -26,6 +26,15 @@ public:
     // Call every frame from the main loop to render the active dialog
     static void render();
 
+#if defined(__ANDROID__)
+    // Android export: pop a Share / Save-to-device sheet. writeFn(path) writes
+    // the file to a temp path (returns success); Share hands it to the system
+    // share sheet, Save copies it to a SAF destination. Desktop keeps saveFile.
+    static void androidExportShareOrSave(const std::string& suggestedName,
+                                         const std::string& mime,
+                                         std::function<bool(const std::string&)> writeFn);
+#endif
+
     // Is a dialog currently open?
     static bool isOpen();
 
