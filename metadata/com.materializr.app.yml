@@ -18,13 +18,13 @@ Builds:
     subdir: android/app
     sudo:
       - apt-get update || true
-      - apt-get install -y cmake curl
+      - apt-get install -y build-essential cmake curl
     gradle:
       - yes
     prebuild: JOBS=4 ANDROID_NDK="$$NDK$$" ../scripts/setup-deps.sh
     ndk: r26d
 
-AutoUpdateMode: Version v%v
+AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 1.0.0
 CurrentVersionCode: 5
