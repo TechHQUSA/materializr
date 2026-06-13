@@ -372,6 +372,28 @@ bool FileDialogs::isOpen() {
 #endif
 }
 
+// Unified export. The platform split lives here so callers (the IO plugins)
+// stay #if-free — see the header note about REGISTER_PLUGIN stringification.
+void FileDialogs::exportFile(const std::string& title,
+                             const std::string& defaultName,
+                             const std::string& mime,
+                             const std::vector<FileFilter>& filters,
+                             std::function<bool(const std::string&)> writeFn) {
+#if defined(__ANDROID__)
+    (void)title; (void)filters;
+    androidExportShareOrSave(defaultName, mime, std::move(writeFn));
+#else
+    (void)mime;
+    // Desktop: a Save dialog whose callback writes the chosen path. Empty path
+    // means the user cancelled, so we skip the write.
+    saveFile(title, defaultName, filters,
+             [writeFn = std::move(writeFn)](const std::string& path) {
+                 if (path.empty() || !writeFn) return;
+                 writeFn(path);
+             });
+#endif
+}
+
 #if defined(__ANDROID__)
 void FileDialogs::androidExportShareOrSave(const std::string& suggestedName,
                                            const std::string& mime,

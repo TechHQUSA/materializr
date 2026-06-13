@@ -26,6 +26,19 @@ public:
     // Call every frame from the main loop to render the active dialog
     static void render();
 
+    // Unified export entry point. `writeFn(path)` writes the file to `path`
+    // and returns success. On desktop this drives a Save dialog (filters apply,
+    // `mime` ignored); on Android it pops a Share / Save-to-device sheet
+    // (`title`/`filters` ignored, `mime` used). Keeping the platform branch
+    // here lets plugins call one function with no #if — important because the
+    // REGISTER_PLUGIN macro stringifies its argument, and a preprocessor
+    // directive inside a macro argument is ill-formed under MSVC.
+    static void exportFile(const std::string& title,
+                           const std::string& defaultName,
+                           const std::string& mime,
+                           const std::vector<FileFilter>& filters,
+                           std::function<bool(const std::string&)> writeFn);
+
 #if defined(__ANDROID__)
     // Android export: pop a Share / Save-to-device sheet. writeFn(path) writes
     // the file to a temp path (returns success); Share hands it to the system

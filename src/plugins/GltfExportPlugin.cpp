@@ -8,20 +8,12 @@ REGISTER_PLUGIN(GltfExport, [](materializr::PluginContext& ctx) {
     ctx.registerIOFormat({"glTF", {"glb", "gltf"}, false, true,
         nullptr,
         [](materializr::PluginContext& ctx, const std::string&) {
-#if defined(__ANDROID__)
-            materializr::FileDialogs::androidExportShareOrSave("export.glb",
+            materializr::FileDialogs::exportFile("Export glTF", "export.glb",
                 "application/octet-stream",
+                {{"glTF Binary", "*.glb"}, {"glTF", "*.gltf"}},
                 [&ctx](const std::string& path) {
                     return materializr::GltfExport::exportFile(path, ctx.document()).success;
                 });
-#else
-            materializr::FileDialogs::saveFile("Export glTF", "export.glb",
-                {{"glTF Binary", "*.glb"}, {"glTF", "*.gltf"}},
-                [&ctx](const std::string& path) {
-                    if (path.empty()) return;
-                    materializr::GltfExport::exportFile(path, ctx.document());
-                });
-#endif
             return true;
         }});
 })
