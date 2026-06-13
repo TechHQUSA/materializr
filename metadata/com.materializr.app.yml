@@ -39,9 +39,9 @@ RepoType: git
 Repo: https://github.com/materializr-cad/materializr.git
 
 Builds:
-  - versionName: 0.9.9.1
-    versionCode: 4
-    commit: v0.9.9.1
+  - versionName: 1.0.0
+    versionCode: 5
+    commit: v1.0.0
     subdir: android/app
     # The buildserver provides cmake/curl, but install them defensively.
     sudo:
@@ -62,8 +62,8 @@ Builds:
 
 AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
-CurrentVersion: 0.9.9.1
-CurrentVersionCode: 4
+CurrentVersion: 1.0.0
+CurrentVersionCode: 5
 
 # --- De-risk notes (clean-container timing run, 2026-06-12) ------------------
 # OCCT 7.8.1 cross-compile in a clean debian:bookworm-slim + NDK r26d at -j4:

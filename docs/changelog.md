@@ -3,6 +3,36 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.0.0] — 2026-06-12
+
+First public 1.0 release: cross-platform (Linux desktop + Android), with a
+built-in tutorial and a round of tablet dogfooding fixes. Android ships as a
+release-signed arm64 APK; Linux as an AppImage.
+
+### Added
+
+- **Getting Started tutorial.** A skippable, step-by-step onboarding overlay
+  (Help → Getting Started) that explains the basics and shows both mouse and
+  touch controls, highlighting whichever the current device uses. Built as its
+  own plugin on two new generic plugin hooks (per-frame overlay rendering and
+  menu-item contributions).
+- **Touch ergonomics.** Drag-to-scroll panels, per-side collapse tabs to fold
+  the Tools / Items columns away on small screens (desktop: View → Hide Panels
+  / F9), a larger finger-friendly navigation cube, and a "designed for tablets"
+  notice on very small screens.
+- **Storage Access Framework** on Android: system document picker for open /
+  save, and a Share / Save-to-device sheet for STL / STEP / IGES / glTF export.
+  No broad-storage permission requested.
+
+### Fixed
+
+- Edges could be selected *through* curved faces (cylinders, fillets, spheres):
+  the occlusion test now uses the face normal at the actual click point.
+- Sketch dimension input (line, and the rectangle's height step) clipped its
+  text; the box is now a fixed size and stays on-screen.
+- Push/Pull (and other face-op) click-drag now works on desktop with a
+  left-orbit / trackpad binding, not just on touch.
+
 ## [0.9.9.1] — 2026-06-12
 
 Touch sketching polish from tablet dogfooding. Everything here gates on touch

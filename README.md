@@ -3,10 +3,13 @@
 **Open-source parametric 3D CAD for makers** — constraint sketches, solid
 modeling, threads, SVG & text engraving, STL/STEP export.
 
-> **📱 Android port (experimental):** this branch builds Materializr for Android
-> (arm64-v8a), reusing the entire geometry codebase via an SDL2 + OpenGL ES 3.0
-> backend and cross-compiled OpenCASCADE. See [`android/README.md`](android/README.md)
-> to build and sideload. The desktop builds below are unaffected.
+> **📱 Now on Android (1.0.0+):** Materializr runs on Android (arm64-v8a),
+> reusing the entire geometry codebase via an SDL2 + OpenGL ES 3.0 backend and
+> cross-compiled OpenCASCADE, with a runtime *touch mode* that adapts gestures
+> and hit targets. **Designed for tablets** — a phone screen will be cramped.
+> Grab the APK from the [latest release](https://github.com/materializr-cad/materializr/releases/latest),
+> or see [`android/README.md`](android/README.md) to build it yourself.
+> F-Droid and Google Play are on the way.
 
 ![Materializr modeling a coffee mug with filleted rim, handle, and embossed logo wrapped around the cylindrical face](docs/hero-mug.png)
 
@@ -19,6 +22,7 @@ modeling, threads, SVG & text engraving, STL/STEP export.
 | Linux (x86_64 / aarch64) | `Materializr-*.AppImage` | `chmod +x` it and run — no install |
 | Windows | `Materializr-Setup.exe` | run the installer |
 | Windows (portable) | `Materializr-windows-x64.zip` | unzip anywhere, run `materializr.exe` |
+| Android (arm64-v8a) | `Materializr-*-arm64-v8a.apk` | sideload (enable "install unknown apps"); tablets recommended |
 
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
 ![CMake](https://img.shields.io/badge/CMake-3.20%2B-blue)
