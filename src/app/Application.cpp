@@ -1009,6 +1009,10 @@ void Application::renderMenuBar() {
                 m_showUpdatePopup = true;
                 m_updateChecked = false; // run the network call when the popup opens
             }
+            // Plugin-contributed Help items (e.g. the Tutorial's "Getting
+            // Started"). Lets a plugin add a launcher without Application
+            // knowing about it. See renderPluginMenuItems.
+            renderPluginMenuItems("Help");
             ImGui::Separator();
             if (ImGui::MenuItem("About Materializr...")) m_aboutDialog->setVisible(true);
             ImGui::EndMenu();
@@ -1061,6 +1065,27 @@ void Application::renderSmallScreenWarning() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
+    }
+}
+
+void Application::renderPluginMenuItems(const char* menuName) {
+    // Render every plugin MenuContribution whose path is "<menuName> > Label"
+    // as a MenuItem in the current menu. Keeps the contribution type generic
+    // (a plugin says where it wants to live) without Application hardcoding it.
+    auto trim = [](std::string s) {
+        size_t a = s.find_first_not_of(" \t");
+        size_t b = s.find_last_not_of(" \t");
+        return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
+    };
+    for (auto& m : PluginRegistry::instance().menuContributions()) {
+        auto gt = m.path.find('>');
+        if (gt == std::string::npos) continue;
+        if (trim(m.path.substr(0, gt)) != menuName) continue;
+        std::string label = trim(m.path.substr(gt + 1));
+        const bool enabled = !m.enabled || m.enabled(*m_pluginContext);
+        const char* sc = m.shortcut.empty() ? nullptr : m.shortcut.c_str();
+        if (ImGui::MenuItem(label.c_str(), sc, false, enabled) && m.action)
+            m.action(*m_pluginContext);
     }
 }
 
@@ -4246,6 +4271,13 @@ void Application::run() {
             // Touch edge tabs to collapse/restore each side column (drawn on top
             // of the panels, and still visible when a side is collapsed).
             renderPanelCollapseHandles();
+
+            // Plugin overlays — free-floating per-frame ImGui windows (e.g. the
+            // Tutorial). Drawn after the panels so they float on top; non-modal,
+            // so they never block the panels or the viewport.
+            for (auto& ov : PluginRegistry::instance().overlayContributions()) {
+                if (ov.render) ov.render(*m_pluginContext);
+            }
             m_statusBar->setSketchMode(m_inSketchMode);
             // Project name = the save file's basename (no extension), or
             // "New project" when unsaved.

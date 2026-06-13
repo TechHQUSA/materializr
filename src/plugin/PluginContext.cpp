@@ -56,6 +56,10 @@ void PluginContext::registerPropertySection(PropertyContribution contrib) {
     PluginRegistry::instance().propertyContributions().push_back(std::move(contrib));
 }
 
+void PluginContext::registerOverlay(OverlayContribution contrib) {
+    PluginRegistry::instance().overlayContributions().push_back(std::move(contrib));
+}
+
 void PluginContext::_bind(Document* doc, History* hist, SelectionManager* sel,
                           EventBus* bus, Camera* cam, bool* meshesDirtyFlag,
                           const bool* sketchModeFlag) {

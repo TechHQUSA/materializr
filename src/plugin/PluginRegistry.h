@@ -30,6 +30,7 @@ public:
     std::vector<IOFormatContribution>& ioFormats();
     std::vector<RenderPassContribution>& renderPasses();
     std::vector<PropertyContribution>& propertyContributions();
+    std::vector<OverlayContribution>& overlayContributions();
 
     void activateTool(std::unique_ptr<InteractiveTool> tool, PluginContext& ctx);
     InteractiveTool* activeTool();
@@ -49,6 +50,7 @@ private:
     std::vector<IOFormatContribution> m_ioFormats;
     std::vector<RenderPassContribution> m_renderPasses;
     std::vector<PropertyContribution> m_properties;
+    std::vector<OverlayContribution> m_overlays;
     std::unique_ptr<InteractiveTool> m_activeTool;
 };
 

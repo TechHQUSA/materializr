@@ -45,6 +45,7 @@ public:
     void registerIOFormat(IOFormatContribution contrib);
     void registerRenderPass(RenderPassContribution contrib);
     void registerPropertySection(PropertyContribution contrib);
+    void registerOverlay(OverlayContribution contrib);
 
     void _bind(Document* doc, History* hist, SelectionManager* sel,
                EventBus* bus, Camera* cam, bool* meshesDirtyFlag,

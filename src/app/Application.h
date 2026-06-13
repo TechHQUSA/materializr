@@ -586,6 +586,7 @@ private:
     // One-time notice on phone-sized screens (the UI is built for tablets+).
     void renderSmallScreenWarning();
     void renderPanelCollapseHandles();   // touch-mode edge tabs to hide/show each side
+    void renderPluginMenuItems(const char* menuName);  // plugin MenuContributions for a menu
 
     // Touch tooltip-timeout state (see beginFrame): blank a parked pointer after
     // 15 s so a stuck tooltip clears.

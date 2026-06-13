@@ -29,6 +29,7 @@ void PluginRegistry::initAll(PluginContext& ctx) {
     m_ioFormats.clear();
     m_renderPasses.clear();
     m_properties.clear();
+    m_overlays.clear();
 
     for (auto& plugin : m_plugins) {
         if (plugin.init) {
@@ -45,6 +46,8 @@ void PluginRegistry::initAll(PluginContext& ctx) {
     std::sort(m_renderPasses.begin(), m_renderPasses.end(),
         [](const auto& a, const auto& b) { return a.priority < b.priority; });
     std::sort(m_properties.begin(), m_properties.end(),
+        [](const auto& a, const auto& b) { return a.priority < b.priority; });
+    std::sort(m_overlays.begin(), m_overlays.end(),
         [](const auto& a, const auto& b) { return a.priority < b.priority; });
 
     for (auto& rp : m_renderPasses) {
@@ -69,6 +72,7 @@ std::vector<MenuContribution>& PluginRegistry::menuContributions() { return m_me
 std::vector<IOFormatContribution>& PluginRegistry::ioFormats() { return m_ioFormats; }
 std::vector<RenderPassContribution>& PluginRegistry::renderPasses() { return m_renderPasses; }
 std::vector<PropertyContribution>& PluginRegistry::propertyContributions() { return m_properties; }
+std::vector<OverlayContribution>& PluginRegistry::overlayContributions() { return m_overlays; }
 
 void PluginRegistry::activateTool(std::unique_ptr<InteractiveTool> tool, PluginContext& ctx) {
     if (m_activeTool) {

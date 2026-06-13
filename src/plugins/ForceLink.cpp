@@ -34,6 +34,9 @@ void forceLink_Loft();
 void forceLink_SvgImport();
 void forceLink_Primitives();
 
+// Phase 5 plugins
+void forceLink_Tutorial();
+
 void linkAll() {
     // Phase 1
     forceLink_CoreCommands();
@@ -65,6 +68,8 @@ void linkAll() {
     forceLink_Loft();
     forceLink_SvgImport();
     forceLink_Primitives();
+    // Phase 5
+    forceLink_Tutorial();
 }
 
 }} // namespace materializr::force_link

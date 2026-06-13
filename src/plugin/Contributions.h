@@ -72,4 +72,15 @@ struct PropertyContribution {
     std::function<bool(PluginContext&)> render;
 };
 
+// A free-floating, per-frame ImGui overlay. The host calls `render` every frame
+// (after the docked panels, so it draws on top) inside the ImGui frame — the
+// plugin is free to Begin/End its own window(s). Unlike an InteractiveTool this
+// is non-modal: it doesn't capture input or get cancelled when a tool starts, so
+// it suits persistent, optional UI like a tutorial/onboarding panel.
+struct OverlayContribution {
+    std::string name;
+    int priority = 100;
+    std::function<void(PluginContext&)> render;
+};
+
 } // namespace materializr

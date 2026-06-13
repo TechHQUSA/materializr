@@ -172,6 +172,7 @@ add_executable(materializr
     src/plugins/LoftPlugin.cpp
     src/plugins/SvgImportPlugin.cpp
     src/plugins/PrimitivesPlugin.cpp
+    src/plugins/TutorialPlugin.cpp
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp
