@@ -14,7 +14,7 @@ Repo: https://github.com/materializr-cad/materializr.git
 Builds:
   - versionName: 1.0.0
     versionCode: 5
-    commit: 4af969f1af63e7500b06cf7e86ec5275aebd5984
+    commit: be0e2260e0f396f0cad33a39b720080c4b7ea2f7
     subdir: android/app
     sudo:
       - apt-get update
