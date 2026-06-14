@@ -3,6 +3,21 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.0.1] — 2026-06-14
+
+Bugfix release. Android-focused: STEP import could crash the app instantly on
+some files. Desktop behaviour is unchanged apart from a hardened importer.
+
+### Fixed
+
+- **STEP import crash on Android.** OpenCASCADE's shape-healing resource loader
+  closes a file descriptor in a way Android's fd-sanitizer treats as fatal,
+  aborting the process the moment a STEP file was opened. The sanitizer is now
+  downgraded to warn-only at startup, so imports complete normally. (Desktop has
+  no fd-sanitizer and was never affected.)
+- STEP import now catches OpenCASCADE exceptions and reports a graceful error
+  instead of letting a malformed or unusually complex file take down the app.
+
 ## [1.0.0] — 2026-06-12
 
 First public 1.0 release: cross-platform (Linux desktop + Android), with a
