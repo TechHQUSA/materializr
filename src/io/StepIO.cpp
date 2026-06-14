@@ -17,6 +17,7 @@
 #include <gp_Dir.hxx>
 #include <Interface_Static.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Standard_Failure.hxx>
 
 #include <cmath>
 
@@ -29,6 +30,11 @@ namespace materializr {
 ImportResult StepIO::import(const std::string& filePath, Document& doc) {
     ImportResult result;
 
+    // OCCT can throw Standard_Failure on malformed or unusually complex STEP
+    // geometry (during TransferRoots / shape handling). Catch it so a bad import
+    // surfaces as a graceful error instead of an uncaught exception that aborts
+    // the whole process — which on Android shows up as an instant crash.
+    try {
     STEPControl_Reader reader;
     IFSelect_ReturnStatus status = reader.ReadFile(filePath.c_str());
 
@@ -128,6 +134,17 @@ ImportResult StepIO::import(const std::string& filePath, Document& doc) {
 
     result.success = true;
     result.bodiesImported = importCount;
+    return result;
+    } catch (const Standard_Failure& e) {
+        result.success = false;
+        result.errorMessage = std::string("STEP import failed: ") + e.GetMessageString();
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.errorMessage = std::string("STEP import failed: ") + e.what();
+    } catch (...) {
+        result.success = false;
+        result.errorMessage = "STEP import failed: unrecognized error";
+    }
     return result;
 }
 
