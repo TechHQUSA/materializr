@@ -829,6 +829,21 @@ double Application::extrudeOpDistance() const {
 void Application::beginInteractiveExtrude(const TopoDS_Shape& profile,
                                           ExtrudeMode mode, int targetBody,
                                           int sourceSketchId) {
+    // Extrude sweeps a profile along its normal — only meaningful for a FLAT
+    // profile. A single curved body face (cylinder / sphere / fillet) has no
+    // single normal, so extruding it produced garbage geometry; refuse with
+    // guidance instead (mirrors Sketch-on-Face). Checked before cancelActiveIops
+    // so a bad attempt doesn't disturb any in-progress op. Sketch profiles are
+    // planar by construction; wire / compound profiles aren't a single face and
+    // skip this check.
+    if (profile.ShapeType() == TopAbs_FACE) {
+        Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(profile));
+        if (s.IsNull() || !s->IsKind(STANDARD_TYPE(Geom_Plane))) {
+            showToast("Can't extrude a curved face \xE2\x80\x94 extrude works on "
+                      "flat faces only.");
+            return;
+        }
+    }
     cancelActiveIops();
     // Subtract/Union into a threaded body would boolean against the
     // thread's thousands of faces every preview frame — refuse up front
