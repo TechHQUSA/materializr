@@ -2604,6 +2604,11 @@ void Application::saveProject() {
                     if (m_postSaveAction == PostSaveAction::CloseProject) {
                         doCloseProject();
                         m_postSaveAction = PostSaveAction::None;
+                    } else if (m_postSaveAction == PostSaveAction::OpenProject) {
+                        auto act = std::move(m_pendingOpenAction);
+                        m_pendingOpenAction = nullptr;
+                        m_postSaveAction = PostSaveAction::None;
+                        if (act) act();
                     } else {
                         m_confirmedClose = true;
                     }
@@ -2635,6 +2640,11 @@ void Application::saveProjectQuick() {
             if (m_postSaveAction == PostSaveAction::CloseProject) {
                 doCloseProject();
                 m_postSaveAction = PostSaveAction::None;
+            } else if (m_postSaveAction == PostSaveAction::OpenProject) {
+                auto act = std::move(m_pendingOpenAction);
+                m_pendingOpenAction = nullptr;
+                m_postSaveAction = PostSaveAction::None;
+                if (act) act();
             } else {
                 m_confirmedClose = true;
             }
@@ -2864,6 +2874,11 @@ bool Application::loadProjectAt(const std::string& path) {
     m_currentProjectPath = path;
     markSaved();
     m_meshesDirty = true;
+    // Home view = the ViewCube Home button: default isometric orientation AND
+    // zoom-to-fit the loaded geometry (computed from the OCCT body bounds, which
+    // are ready now). Plain Camera::reset() only sets a fixed (5,5,5) eye that
+    // ignores the model's size/position, leaving it zoomed-in or off-screen.
+    handleViewCubeAction(static_cast<int>(ViewCubeAction::FrontTopRight));
 
     // m_sourceFace (the TopoDS_Face the sketch was drawn on) isn't part of
     // the project file — only the plane and sourceBodyId are. Re-derive it
@@ -2910,48 +2925,64 @@ void Application::removeRecentProject(const std::string& ref) {
     if (changed) saveAppSettings();
 }
 
+void Application::guardedOpen(std::function<void()> doOpen) {
+    if (!isDirty()) { doOpen(); return; }
+    // Unsaved changes: defer the open until the save prompt resolves so we never
+    // silently discard work (this also closes the same gap on the Open dialog).
+    m_pendingOpenAction = std::move(doOpen);
+    m_postSaveAction = PostSaveAction::OpenProject;
+    m_showSavePrompt = true;
+}
+
 void Application::openRecentProject(const AppSettings::RecentProject& r) {
     // Copy first: addRecentProject/removeRecentProject mutate m_recentProjects,
     // which may be the vector backing the reference `r`.
     const std::string ref  = r.ref;
     const std::string name = r.name;
+    guardedOpen([this, ref, name]() {
 #if defined(__ANDROID__)
-    // ref is a persisted SAF content:// URI — resolve to a temp file, no picker.
-    std::string tmp = materializr::androidOpenUri(ref);
-    if (tmp.empty()) {
-        showToast("Couldn't open \"" + name + "\" - access may have been revoked.");
-        removeRecentProject(ref);
-        return;
-    }
-    if (loadProjectAt(tmp)) addRecentProject(ref, name);  // bump to front
-    else { showToast("Failed to open \"" + name + "\"."); removeRecentProject(ref); }
+        // ref is a persisted SAF content:// URI — resolve to a temp file, no picker.
+        std::string tmp = materializr::androidOpenUri(ref);
+        if (tmp.empty()) {
+            showToast("Couldn't open \"" + name + "\" - access may have been revoked.");
+            removeRecentProject(ref);
+            return;
+        }
+        if (loadProjectAt(tmp)) addRecentProject(ref, name);  // bump to front
+        else { showToast("Failed to open \"" + name + "\"."); removeRecentProject(ref); }
 #else
-    if (loadProjectAt(ref)) addRecentProject(ref, name);  // bump to front
-    else {
-        showToast("Couldn't open \"" + name + "\" - the file may have moved or been deleted.");
-        removeRecentProject(ref);
-    }
+        if (loadProjectAt(ref)) addRecentProject(ref, name);  // bump to front
+        else {
+            showToast("Couldn't open \"" + name + "\" - the file may have moved or been deleted.");
+            removeRecentProject(ref);
+        }
 #endif
+    });
 }
 
 void Application::loadProject() {
     FileDialogs::openFile("Open Project",
         {{"Materializr Project", "*.materializr"}, {"All Files", "*"}},
         [this](const std::string& path) {
-            if (path.empty() || !loadProjectAt(path)) return;
-            // Record in Open Recent with a *persistable* ref: the SAF content://
-            // URI on Android (the `path` is a throwaway temp there), the real
-            // path on desktop.
-            std::string ref, name;
+            if (path.empty()) return;
+            // Guard unsaved changes (the picked path is captured for after the
+            // save prompt resolves), then load + record in Open Recent.
+            guardedOpen([this, path]() {
+                if (!loadProjectAt(path)) return;
+                // Record with a *persistable* ref: the SAF content:// URI on
+                // Android (the `path` is a throwaway temp there), the real path
+                // on desktop.
+                std::string ref, name;
 #if defined(__ANDROID__)
-            ref  = materializr::androidLastDocUri();
-            name = materializr::androidLastDocName();
-            if (ref.empty()) ref = path; // fallback (non-persistable provider)
+                ref  = materializr::androidLastDocUri();
+                name = materializr::androidLastDocName();
+                if (ref.empty()) ref = path; // fallback (non-persistable provider)
 #else
-            ref = path;
+                ref = path;
 #endif
-            if (name.empty()) name = std::filesystem::path(path).filename().string();
-            addRecentProject(ref, name);
+                if (name.empty()) name = std::filesystem::path(path).filename().string();
+                addRecentProject(ref, name);
+            });
         });
 }
 
@@ -2982,6 +3013,8 @@ void Application::doCloseProject() {
     m_savedAtHistoryStep = -1;
     m_unsavedNonHistoryChanges = false;
     m_meshesDirty = true;
+    // Home view (empty scene → sensible default at origin), same as ViewCube Home.
+    handleViewCubeAction(static_cast<int>(ViewCubeAction::FrontTopRight));
     // Persist: lastProjectPath now empty → no auto-open on next launch.
     saveAppSettings();
 }
@@ -3016,10 +3049,16 @@ void Application::renderSavePrompt() {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        const bool closingProject = (m_postSaveAction == PostSaveAction::CloseProject);
-        ImGui::Text(closingProject
-                    ? "You have unsaved changes. Save before closing the project?"
-                    : "You have unsaved changes. Save before exiting?");
+        const char* prompt;
+        switch (m_postSaveAction) {
+            case PostSaveAction::CloseProject:
+                prompt = "You have unsaved changes. Save before closing the project?"; break;
+            case PostSaveAction::OpenProject:
+                prompt = "You have unsaved changes. Save before opening another project?"; break;
+            default:
+                prompt = "You have unsaved changes. Save before exiting?"; break;
+        }
+        ImGui::Text("%s", prompt);
         ImGui::Separator();
         if (ImGui::Button("Save", ImVec2(100, 0))) {
             m_closeAfterSave = true;
@@ -3028,9 +3067,14 @@ void Application::renderSavePrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button("Don't Save", ImVec2(100, 0))) {
-            if (closingProject) {
+            if (m_postSaveAction == PostSaveAction::CloseProject) {
                 doCloseProject();
                 m_postSaveAction = PostSaveAction::None;
+            } else if (m_postSaveAction == PostSaveAction::OpenProject) {
+                auto act = std::move(m_pendingOpenAction);
+                m_pendingOpenAction = nullptr;
+                m_postSaveAction = PostSaveAction::None;
+                if (act) act();
             } else {
                 m_confirmedClose = true;
             }
@@ -3039,6 +3083,7 @@ void Application::renderSavePrompt() {
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(100, 0))) {
             m_closeAfterSave = false;
+            m_pendingOpenAction = nullptr;
             m_postSaveAction = PostSaveAction::None;
             ImGui::CloseCurrentPopup();
         }
