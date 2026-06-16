@@ -82,8 +82,15 @@ void androidInitRuntime() {
     // (2) Fonts: chdir here and extract the TTFs so resolveBundledFont()'s
     //     cwd-relative "assets/fonts/<name>" candidate resolves.
     if (chdir(internal.c_str()) != 0) logi("chdir to internal storage failed");
+    // MUST list every font the Text-tool picker offers (kFontFiles in
+    // Application_Dialogs.cpp) — SDL's asset RWops can't enumerate a directory,
+    // so any font missing here is bundled in the APK but never extracted and
+    // shows "font file not found".
     const char* fonts[] = {
-        "JetBrainsMono-Regular.ttf", "DejaVuSans.ttf", "DejaVuSerif.ttf"
+        "JetBrainsMono-Regular.ttf", "DejaVuSans.ttf", "DejaVuSerif.ttf",
+        "LiberationSerif-Regular.ttf", "LiberationSans-Regular.ttf",
+        "Ubuntu-Regular.ttf", "ComicNeue-Regular.ttf",
+        "BlackOpsOne-Regular.ttf", "Anton-Regular.ttf", "Pacifico-Regular.ttf"
     };
     for (const char* f : fonts) {
         extractAsset(std::string("fonts/") + f, internal + "/assets/fonts/" + f);

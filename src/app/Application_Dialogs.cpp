@@ -2702,13 +2702,29 @@ void Application::renderTextToolPanel() {
         // system-font scan.
         static const char* kFontNames[] = {"Mono (JetBrains)",
                                            "Sans (DejaVu)",
-                                           "Serif (DejaVu)"};
+                                           "Serif (DejaVu)",
+                                           "Times (Liberation)",
+                                           "Arial (Liberation)",
+                                           "Ubuntu",
+                                           "Comic (Neue)",
+                                           "Stencil (Black Ops)",
+                                           "Impact (Anton)",
+                                           "Script (Pacifico)"};
         static const char* kFontFiles[] = {"JetBrainsMono-Regular.ttf",
                                            "DejaVuSans.ttf",
-                                           "DejaVuSerif.ttf"};
+                                           "DejaVuSerif.ttf",
+                                           "LiberationSerif-Regular.ttf",
+                                           "LiberationSans-Regular.ttf",
+                                           "Ubuntu-Regular.ttf",
+                                           "ComicNeue-Regular.ttf",
+                                           "BlackOpsOne-Regular.ttf",
+                                           "Anton-Regular.ttf",
+                                           "Pacifico-Regular.ttf"};
+        static_assert(IM_ARRAYSIZE(kFontNames) == IM_ARRAYSIZE(kFontFiles),
+                      "font name/file lists must stay in lockstep");
         static int fontIdx = 0;
         ImGui::SetNextItemWidth(220.0f);
-        if (ImGui::Combo("Font", &fontIdx, kFontNames, 3)) {
+        if (ImGui::Combo("Font", &fontIdx, kFontNames, IM_ARRAYSIZE(kFontNames))) {
             std::string p = resolveBundledFont(kFontFiles[fontIdx]);
             if (p.empty()) {
                 std::fprintf(stderr, "[Text] bundled font missing: %s\n",
