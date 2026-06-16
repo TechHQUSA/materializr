@@ -20,15 +20,25 @@ void doBooleanOp(materializr::PluginContext& ctx, BooleanMode mode) {
         }
     }
     if (distinctBodies.size() >= 2) {
-        auto op = std::make_unique<BooleanOp>();
-        op->setTargetBodyId(distinctBodies[0]);
-        op->setToolBodyId(distinctBodies[1]);
-        op->setMode(mode);
-        if (ctx.history().pushOperation(std::move(op), ctx.document())) {
+        // Fold EVERY selected body into the first, not just the first two:
+        // union/intersect combine them all; subtract cuts all the rest out of
+        // the first. Each step is a BooleanOp (target = the surviving first
+        // body, tool = the next); the tool body is consumed each time, so the
+        // first id stays the running result.
+        bool allOk = true;
+        for (size_t i = 1; i < distinctBodies.size() && allOk; ++i) {
+            auto op = std::make_unique<BooleanOp>();
+            op->setTargetBodyId(distinctBodies[0]);
+            op->setToolBodyId(distinctBodies[i]);
+            op->setMode(mode);
+            allOk = ctx.history().pushOperation(std::move(op), ctx.document());
+        }
+        if (allOk) {
             ctx.markMeshesDirty();
             ctx.selection().clear();
         } else {
-            std::fprintf(stderr, "Boolean operation failed\n");
+            std::fprintf(stderr, "Boolean operation failed (combined %zu bodies)\n",
+                         distinctBodies.size());
         }
     }
 }
