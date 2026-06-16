@@ -3116,8 +3116,12 @@ void Application::importStepFile() {
 void Application::exportStepFile() {
     FileDialogs::saveFile("Export STEP", "export.step",
         {{"STEP Files", "*.step *.stp"}},
-        [this](const std::string& path) {
+        [this](std::string path) {
             if (path.empty()) return;
+            // Keep a STEP extension — accept either .step or .stp; append
+            // .step only when the typed name has neither.
+            std::string ext = std::filesystem::path(path).extension().string();
+            if (ext != ".step" && ext != ".stp") path += ".step";
             auto result = StepIO::exportFile(path, *m_document);
             if (result.success) std::fprintf(stdout, "Exported to %s\n", path.c_str());
             else std::fprintf(stderr, "Export failed: %s\n", result.errorMessage.c_str());
@@ -3160,8 +3164,13 @@ void Application::exportBodyAsStl(int bodyId) {
 #else
     FileDialogs::saveFile("Export Body to STL", defaultFile,
         {{"STL Files", "*.stl"}},
-        [shape](const std::string& path) {
+        [shape](std::string path) {
             if (path.empty()) return;
+            // Keep the .stl extension — pfd/zenity don't force it, so a typed
+            // name with no extension saved a valid but extensionless file
+            // (mirrors the .materializr project-save enforcement).
+            if (std::filesystem::path(path).extension() != ".stl")
+                path += ".stl";
             auto result = StlExport::exportShape(path, shape);
             if (result.success) {
                 std::fprintf(stdout, "Exported %d triangles to %s\n",

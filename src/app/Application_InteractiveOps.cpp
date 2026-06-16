@@ -1321,6 +1321,13 @@ void Application::beginPushPull() {
                 if (hasAxis) {
                     dir = gp_Vec(axis);
                     if (dir.Dot(n) < 0) dir.Reverse();
+                } else if (tgt0.sourceBodyId >= 0) {
+                    // Mirror PushPullOp::execute: correct a genuinely-inverted
+                    // planar normal so the live arrow agrees with the executed
+                    // direction (bug #5). Untouched for curved/axis faces and
+                    // for every reading that isn't an unambiguous inverted pair.
+                    dir = correctedOutwardNormal(
+                        m_document->getBody(tgt0.sourceBodyId), c, dir);
                 }
                 m_pushPullNormal = glm::normalize(glm::vec3(dir.X(), dir.Y(), dir.Z()));
                 m_pushPullOrigin = glm::vec3(c.X(), c.Y(), c.Z());

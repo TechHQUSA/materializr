@@ -26,6 +26,36 @@
 #include <cmath>
 #include <unordered_set>
 
+gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid,
+                              const gp_Pnt& center, const gp_Vec& normal) {
+    if (solid.IsNull() || normal.Magnitude() < 1e-10) return normal;
+    try {
+        // Probe distance scaled to the body so a fixed absolute ε can't
+        // overshoot a thin feature (the misfire that broke a prior classifier
+        // fix). Floor/ceiling keep it sane across unit scales.
+        double eps = 0.05;
+        Bnd_Box box;
+        BRepBndLib::Add(solid, box);
+        if (!box.IsVoid()) {
+            double xmin, ymin, zmin, xmax, ymax, zmax;
+            box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+            double diag = gp_Vec(xmax - xmin, ymax - ymin, zmax - zmin).Magnitude();
+            eps = std::min(0.05, std::max(1e-4, diag * 5e-4));
+        }
+        gp_Vec u = normal.Normalized();
+        BRepClass3d_SolidClassifier cPlus (solid, center.Translated(u *  eps), 1e-7);
+        BRepClass3d_SolidClassifier cMinus(solid, center.Translated(u * -eps), 1e-7);
+        // Unambiguous inverted pair: +normal lands INSIDE material, −normal
+        // OUTSIDE. Only then is the trusted normal genuinely backwards.
+        if (cPlus.State() == TopAbs_IN && cMinus.State() == TopAbs_OUT) {
+            gp_Vec flipped = normal;
+            flipped.Reverse();
+            return flipped;
+        }
+    } catch (...) {}
+    return normal; // correct pair / ambiguous / ON / throw → trust BRepGProp
+}
+
 PushPullOp::PushPullOp() = default;
 
 void PushPullOp::setTargets(std::vector<Target> targets) {
@@ -146,6 +176,14 @@ bool PushPullOp::execute(Document& doc) {
                     gp_Vec axisVec(axis);
                     if (axisVec.Dot(faceNormal) < 0) axisVec.Reverse();
                     faceNormal = axisVec.Normalized();
+                } else if (tgt.sourceBodyId >= 0) {
+                    // Planar face: correct a genuinely-inverted orientation
+                    // (bug #5 — BRepGProp_Face::Normal pointed INTO the solid)
+                    // via the unambiguous antipodal classifier test. Pockets,
+                    // cavity walls and thin bodies don't produce that reading,
+                    // so they're left exactly as the war story requires.
+                    faceNormal = correctedOutwardNormal(
+                        doc.getBody(tgt.sourceBodyId), center, faceNormal);
                 }
             }
         } catch (...) {}

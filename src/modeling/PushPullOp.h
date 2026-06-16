@@ -3,8 +3,21 @@
 #include "../core/Document.h"
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Vec.hxx>
+#include <gp_Pnt.hxx>
 #include <vector>
 #include <string>
+
+// Flip `normal` to point OUT of `solid`, but ONLY when the solid classifier
+// gives an UNAMBIGUOUS antipodal verdict on a planar face: a point ε along
+// +normal is INSIDE the solid while a point ε along −normal is OUTSIDE. That
+// is the genuine "orientation inverted, normal points into material" case
+// (bug #5). Any other reading — the correct OUT/IN pair, both IN, both OUT,
+// ON, a thin-body overshoot, or a classifier throw — returns `normal`
+// UNCHANGED, so the cases the PushPullOp war story protects (pockets, cavity
+// walls, thin bodies, curved/axis faces) are provably untouched.
+gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid,
+                              const gp_Pnt& center, const gp_Vec& normal);
 
 class PushPullOp : public Operation {
 public:

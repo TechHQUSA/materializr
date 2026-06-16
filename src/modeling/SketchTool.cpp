@@ -587,6 +587,61 @@ void SketchTool::updateHoverCharge(double tNow, glm::vec2 cursor) {
     }
 }
 
+// Full-inference curve snap (Steve's idea): instead of landing on the bare
+// nearest point of a circle/arc, land where the curve crosses a grid LINE, so
+// the snap is BOTH on-curve AND grid-aligned. The grid line is chosen by the
+// local tangent so the crossing is well-defined:
+//   • point near top/bottom (radius ~vertical, tangent ~horizontal) → nearest
+//     VERTICAL grid line (x snapped to grid, y solved on the curve)
+//   • point near the sides (radius ~horizontal, tangent ~vertical)  → nearest
+//     HORIZONTAL grid line
+//   • ~45° (radius diagonal) → whichever of the two crossings is nearer the
+//     cursor, so the 45° point on a circle stays snappable.
+// Returns false if no crossing lands within `band` of the cursor.
+static bool snapCurveToGrid(glm::vec2 center, float radius, glm::vec2 pos,
+                            float gridStep, float band, glm::vec2& out) {
+    if (radius < 1e-6f || gridStep <= 0.0f) return false;
+    glm::vec2 v = pos - center;
+    float dist = glm::length(v);
+    if (dist < 1e-6f) return false;
+    glm::vec2 rdir = v / dist; // radius dir at nearest perimeter point
+
+    auto vCross = [&](glm::vec2& res) -> bool {       // nearest vertical grid line
+        float gx = std::round(pos.x / gridStep) * gridStep;
+        float dx = gx - center.x;
+        if (std::abs(dx) > radius) return false;
+        float dy = std::sqrt(radius * radius - dx * dx);
+        res = glm::vec2(gx, center.y + (pos.y >= center.y ? dy : -dy));
+        return true;
+    };
+    auto hCross = [&](glm::vec2& res) -> bool {       // nearest horizontal grid line
+        float gy = std::round(pos.y / gridStep) * gridStep;
+        float dy = gy - center.y;
+        if (std::abs(dy) > radius) return false;
+        float dx = std::sqrt(radius * radius - dy * dy);
+        res = glm::vec2(center.x + (pos.x >= center.x ? dx : -dx), gy);
+        return true;
+    };
+
+    const float diagEps = 0.18f; // |rdir.x|≈|rdir.y| ⇒ ~45° (±7° band)
+    glm::vec2 cand;
+    bool ok = false;
+    if (std::abs(rdir.y) - std::abs(rdir.x) > diagEps) {
+        ok = vCross(cand);                            // tangent ~horizontal
+    } else if (std::abs(rdir.x) - std::abs(rdir.y) > diagEps) {
+        ok = hCross(cand);                            // tangent ~vertical
+    } else {                                          // ~45°: nearer crossing
+        glm::vec2 a, b;
+        bool oa = vCross(a), ob = hCross(b);
+        if (oa && ob) { cand = (glm::length(a - pos) <= glm::length(b - pos)) ? a : b; ok = true; }
+        else if (oa) { cand = a; ok = true; }
+        else if (ob) { cand = b; ok = true; }
+    }
+    if (!ok || glm::length(cand - pos) > band) return false;
+    out = cand;
+    return true;
+}
+
 glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // Fresh inference set every snap — the renderer treats this as "what's
     // active right now".
@@ -621,6 +676,19 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         r.x = std::round(pos.x / m_gridStep) * m_gridStep;
         r.y = std::round(pos.y / m_gridStep) * m_gridStep;
         return r;
+    }
+
+    // Nearest grid point distance, used so the circle/arc PERIMETER snaps
+    // below only win when they sit closer to the cursor than the grid does
+    // (grid-snap on). Endpoints still win outright — only the continuous
+    // curve competes. (Steve: a rectangle corner dragged near a big circle
+    // was snapping to the circle's edge instead of the grid intersection.)
+    const bool gridActive = m_snapToGridEnabled && m_gridStep > 0.0f;
+    float gridDist = 0.0f;
+    if (gridActive) {
+        glm::vec2 gp(std::round(pos.x / m_gridStep) * m_gridStep,
+                     std::round(pos.y / m_gridStep) * m_gridStep);
+        gridDist = glm::length(pos - gp);
     }
 
     // ─── PHASE 1: Hard point snaps (each early-returns) ──────────────────────
@@ -658,6 +726,21 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         if (dist < 1e-6f) continue;
         float r = static_cast<float>(c.radius);
         if (std::abs(dist - r) < curveSnapThreshold) {
+            // Off: curve perimeter never snaps (endpoint + grid only).
+            if (m_inferenceLevel == InferenceLevel::Off) continue;
+            // Full / Max: land where the curve crosses a grid line (on-curve
+            // AND grid-aligned). Falls through to the plain perimeter point if
+            // no grid crossing sits near the cursor.
+            if ((m_inferenceLevel == InferenceLevel::Full ||
+                 m_inferenceLevel == InferenceLevel::Max) && gridActive) {
+                glm::vec2 gc;
+                if (snapCurveToGrid(center->pos, r, pos, m_gridStep,
+                                    std::max(curveSnapThreshold, m_gridStep * 0.6f), gc))
+                    return gc;
+            }
+            // Reduced (and Full/Max fallback): grid wins ties — only land on the
+            // bare perimeter when it's genuinely closer than the nearest grid pt.
+            if (gridActive && std::abs(dist - r) >= gridDist) continue;
             return center->pos + (v / dist) * r;
         }
     }
@@ -670,6 +753,15 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         if (dist < 1e-6f) continue;
         float r = static_cast<float>(a.radius);
         if (std::abs(dist - r) < curveSnapThreshold) {
+            if (m_inferenceLevel == InferenceLevel::Off) continue;
+            if ((m_inferenceLevel == InferenceLevel::Full ||
+                 m_inferenceLevel == InferenceLevel::Max) && gridActive) {
+                glm::vec2 gc;
+                if (snapCurveToGrid(center->pos, r, pos, m_gridStep,
+                                    std::max(curveSnapThreshold, m_gridStep * 0.6f), gc))
+                    return gc;
+            }
+            if (gridActive && std::abs(dist - r) >= gridDist) continue;
             return center->pos + (v / dist) * r;
         }
     }
