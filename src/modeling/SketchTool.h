@@ -116,7 +116,15 @@ public:
     void setTextPreviewBox(glm::vec2 mn, glm::vec2 mx) {
         m_textPrevMin = mn; m_textPrevMax = mx; m_textPrevValid = true;
     }
-    void clearTextPreviewBox() { m_textPrevValid = false; }
+    void clearTextPreviewBox() { m_textPrevValid = false; m_textPrevLoops.clear(); }
+    // Actual glyph contours (anchor-relative, unrotated mm — same space as the
+    // box) for a LIVE preview of the letters. Pushed alongside the box.
+    void setTextPreviewLoops(std::vector<std::vector<glm::vec2>> loops) {
+        m_textPrevLoops = std::move(loops);
+    }
+    const std::vector<std::vector<glm::vec2>>& getTextPreviewLoops() const {
+        return m_textPrevLoops;
+    }
     // SVG placement (shares the Text tool's placement frame: same angle,
     // same cursor preview box, same fromText suppression on the result).
     void setSvgPaths(SvgPaths svg) { m_svgPaths = std::move(svg); }
@@ -125,8 +133,10 @@ public:
     void setSvgWidth(float w) { m_svgWidth = (w < 0.1f) ? 0.1f : w; }
     // Backspace while the Text/SVG tool is active yanks the whole last
     // stamp — a misplaced 550-line logo is not undoable element-by-element.
-    bool hasLastStamp() const { return !m_lastStampIds.empty(); }
+    bool hasLastStamp() const { return !m_stampStack.empty(); }
     void undoLastStamp();
+    // Commit a Text/SVG stamp at the current anchor (touch "Place" button).
+    void commitStamp();
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter the vertical (and commits). Stage 0 =
     // expecting H, 1 = expecting V. Read by the UI to swap the popup label.
@@ -337,14 +347,18 @@ private:
     bool  m_textPrevValid = false;
     glm::vec2 m_textPrevMin{0.0f};
     glm::vec2 m_textPrevMax{0.0f};
+    std::vector<std::vector<glm::vec2>> m_textPrevLoops; // live glyph preview
 
     // SVG placement state (see SvgImport.h)
     SvgPaths m_svgPaths;
     float m_svgWidth = 50.0f; // target artwork width, mm
 
-    // Element ids of the most recent Text/SVG stamp (lines first, then
-    // points, so removal order never orphans references).
-    std::vector<int> m_lastStampIds;
+    // One entry per Text/SVG stamp (newest last), each holding that stamp's
+    // element ids (lines first, then points, so removal order never orphans
+    // references). A STACK — not a single slot — so undoLastStamp can walk back
+    // through every stamp to the original, not just the most recent one.
+    // Cleared on setMode so each tool session starts fresh.
+    std::vector<std::vector<int>> m_stampStack;
     void recordStamp(size_t pointsBefore, size_t linesBefore);
 
     // Rectangle's typed-value placement is two-stage: first Enter sets the

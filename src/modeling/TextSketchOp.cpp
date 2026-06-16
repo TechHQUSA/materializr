@@ -174,4 +174,27 @@ bool TextSketch::measure(const std::string& text,
     return true;
 }
 
+bool TextSketch::outline(const std::string& text, const std::string& fontPath,
+                         float heightMm,
+                         std::vector<std::vector<glm::vec2>>& loops) {
+    loops.clear();
+    TopoDS_Shape shape;
+    float scale = 1.0f;
+    double em = 64.0;
+    if (!buildGlyphShape(text, fontPath, heightMm, shape, scale, em))
+        return false;
+    const double deflection = em * 0.002; // match generate()'s chord error
+    for (TopExp_Explorer fx(shape, TopAbs_FACE); fx.More(); fx.Next()) {
+        const TopoDS_Face& f = TopoDS::Face(fx.Current());
+        for (TopExp_Explorer wx(f, TopAbs_WIRE); wx.More(); wx.Next()) {
+            std::vector<glm::vec2> pts =
+                sampleWire(TopoDS::Wire(wx.Current()), deflection);
+            if (pts.size() < 3) continue;
+            for (glm::vec2& p : pts) p *= scale; // local, unrotated (measure() space)
+            loops.push_back(std::move(pts));
+        }
+    }
+    return !loops.empty();
+}
+
 } // namespace materializr

@@ -40,6 +40,7 @@ void SketchTool::setMode(SketchToolMode mode) {
     m_isDragging = false;
     m_dragPointId = -1;
     m_splinePoints.clear();
+    m_stampStack.clear(); // stamp-undo history is per tool session
     m_hasPrevLineDir = false;
     m_activeInferences.clear();
     m_rectDimStage = 0;
@@ -69,6 +70,16 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
     }
 
     if (m_mode == SketchToolMode::None) return;
+
+    // Touch stamp-placement flow: a finger has no hover, so a tap/drag POSITIONS
+    // the preview anchor (the Move toggle frees the camera; two-finger still
+    // pans/zooms) and the dialog's "Place" button commits. Desktop keeps its
+    // hover→click-to-stamp flow untouched.
+    if (touchMode() &&
+        (m_mode == SketchToolMode::Text || m_mode == SketchToolMode::Svg)) {
+        m_currentPos = snapped; // move the anchor; don't stamp yet
+        return;
+    }
 
     switch (m_mode) {
         case SketchToolMode::Select:
@@ -2377,13 +2388,20 @@ void SketchTool::handlePolygonTool(glm::vec2 pos) {
 }
 
 void SketchTool::handleTextTool(glm::vec2 pos) {
-    // Single click places the text with the popup's current settings; the
-    // click point is the baseline-left anchor. The tool stays active, so
-    // several labels can be stamped in a row.
+    // The click/anchor is the box CENTER (matches the preview + the SVG tool),
+    // so shift the baseline-left origin generate() expects by the rotated centre
+    // of the measured text box. The tool stays active, so several labels can be
+    // stamped in a row.
+    const glm::vec2 center = (m_textPrevMin + m_textPrevMax) * 0.5f;
+    const float ang = glm::radians(static_cast<float>(m_textAngle));
+    const float ca = std::cos(ang), sa = std::sin(ang);
+    const glm::vec2 rc(center.x * ca - center.y * sa,
+                       center.x * sa + center.y * ca);
+    const glm::vec2 anchorPos = pos - rc;
     size_t p0 = m_sketch->getPoints().size();
     size_t l0 = m_sketch->getLines().size();
     int loops = TextSketch::generate(m_sketch, m_textString, m_textFontPath,
-                                     pos, m_textHeight,
+                                     anchorPos, m_textHeight,
                                      static_cast<float>(m_textAngle));
     if (loops <= 0) {
         std::fprintf(stderr, "[Text] nothing placed (font='%s')\n",
@@ -2405,21 +2423,30 @@ void SketchTool::handleSvgTool(glm::vec2 pos) {
 }
 
 void SketchTool::recordStamp(size_t pointsBefore, size_t linesBefore) {
-    m_lastStampIds.clear();
+    std::vector<int> ids;
     const auto& lns = m_sketch->getLines();
     const auto& pts = m_sketch->getPoints();
-    for (size_t i = linesBefore; i < lns.size(); ++i)
-        m_lastStampIds.push_back(lns[i].id);
-    for (size_t i = pointsBefore; i < pts.size(); ++i)
-        m_lastStampIds.push_back(pts[i].id);
+    for (size_t i = linesBefore; i < lns.size(); ++i) ids.push_back(lns[i].id);
+    for (size_t i = pointsBefore; i < pts.size(); ++i) ids.push_back(pts[i].id);
+    if (!ids.empty()) m_stampStack.push_back(std::move(ids)); // push, don't overwrite
+}
+
+void SketchTool::commitStamp() {
+    if (!m_sketch) return;
+    // Stamp at the positioned anchor (m_currentPos). Driven by the touch "Place"
+    // button; desktop stamps directly on click via onMouseDown.
+    if (m_mode == SketchToolMode::Text)     handleTextTool(m_currentPos);
+    else if (m_mode == SketchToolMode::Svg) handleSvgTool(m_currentPos);
 }
 
 void SketchTool::undoLastStamp() {
-    if (!m_sketch || m_lastStampIds.empty()) return;
-    for (int id : m_lastStampIds) m_sketch->removeElement(id);
-    std::fprintf(stderr, "[Stamp] removed last placement (%zu elements)\n",
-                 m_lastStampIds.size());
-    m_lastStampIds.clear();
+    if (!m_sketch || m_stampStack.empty()) return;
+    // Pop ONE stamp off the top — repeated calls walk back to the original.
+    const std::vector<int>& ids = m_stampStack.back();
+    for (int id : ids) m_sketch->removeElement(id);
+    std::fprintf(stderr, "[Stamp] removed last placement (%zu elements, %zu stamp(s) left)\n",
+                 ids.size(), m_stampStack.size() - 1);
+    m_stampStack.pop_back();
 }
 
 } // namespace materializr

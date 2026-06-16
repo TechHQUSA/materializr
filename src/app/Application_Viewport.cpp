@@ -1514,10 +1514,14 @@ void Application::renderViewport() {
                     const glm::vec2 anchor = m_sketchTool->getCurrentPos();
                     const glm::vec2 mn = m_sketchTool->getTextPreviewMin();
                     const glm::vec2 mx = m_sketchTool->getTextPreviewMax();
+                    // Anchor at the box CENTER (not baseline-left), matching the
+                    // SVG tool and the stamp in handleTextTool.
+                    const glm::vec2 center = (mn + mx) * 0.5f;
                     const float a = glm::radians(
                         static_cast<float>(m_sketchTool->getTextAngle()));
                     const float ca = std::cos(a), sa2 = std::sin(a);
                     auto rot = [&](glm::vec2 p) {
+                        p -= center;
                         return anchor + glm::vec2(p.x * ca - p.y * sa2,
                                                   p.x * sa2 + p.y * ca);
                     };
@@ -1553,6 +1557,20 @@ void Application::renderViewport() {
                         if (toImg(sk2w(rot({mn.x, 0.0f})), b0) &&
                             toImg(sk2w(rot({mx.x, 0.0f})), b1))
                             dl->AddLine(b0, b1, boxCol, 2.0f);
+                        // Live glyph preview: the actual letter contours, so the
+                        // user sees WHAT will land, not just where. (Text only —
+                        // empty for SVG, which keeps the box.)
+                        const auto& gloops = m_sketchTool->getTextPreviewLoops();
+                        const ImU32 glyphCol = IM_COL32(150, 230, 255, 235);
+                        for (const auto& gl : gloops) {
+                            const size_t n = gl.size();
+                            for (size_t i = 0; i < n; ++i) {
+                                ImVec2 pa, pb;
+                                if (toImg(sk2w(rot(gl[i])), pa) &&
+                                    toImg(sk2w(rot(gl[(i + 1) % n])), pb))
+                                    dl->AddLine(pa, pb, glyphCol, 1.3f);
+                            }
+                        }
                     }
                 }
 

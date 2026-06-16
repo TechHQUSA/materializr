@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <string>
+#include <vector>
 
 namespace materializr {
 
@@ -32,6 +33,14 @@ public:
     // missing or the text renders to nothing.
     static bool measure(const std::string& text, const std::string& fontPath,
                         float heightMm, glm::vec2& bbMin, glm::vec2& bbMax);
+
+    // Glyph contours relative to the baseline-left anchor, UNROTATED, in mm —
+    // the SAME coordinate space as measure()'s bbox. Each entry is one closed
+    // contour (polyline). Drives a live preview of the actual letters before
+    // placement. False when the font is missing / text renders to nothing.
+    static bool outline(const std::string& text, const std::string& fontPath,
+                        float heightMm,
+                        std::vector<std::vector<glm::vec2>>& loops);
 };
 
 } // namespace materializr

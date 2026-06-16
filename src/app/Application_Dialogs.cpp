@@ -2720,8 +2720,14 @@ void Application::renderTextToolPanel() {
         float h = m_sketchTool->getTextHeight();
         ImGui::SetNextItemWidth(220.0f);
         if (ImGui::SliderFloat("Height (mm)", &h, 1.0f, 50.0f, "%.1f",
-                               ImGuiSliderFlags_Logarithmic))
+                               ImGuiSliderFlags_Logarithmic)) {
+            // Snap the height to the sketch grid increment when snap-to-grid is
+            // on, so text sizes land on the same lattice as everything else.
+            if (m_snapToGrid && m_sketchGridStep > 0.0f)
+                h = std::round(h / m_sketchGridStep) * m_sketchGridStep;
+            if (h < 1.0f) h = 1.0f; // keep within the slider's lower bound
             m_sketchTool->setTextHeight(h);
+        }
 
         // 90° steps about the click anchor. The default is seeded from the
         // camera so text usually starts upright; these fix the rest.
@@ -2748,6 +2754,12 @@ void Application::renderTextToolPanel() {
                                         m_sketchTool->getTextHeight(),
                                         mn, mx)) {
                     m_sketchTool->setTextPreviewBox(mn, mx);
+                    // Also capture the actual glyph contours for a live preview.
+                    std::vector<std::vector<glm::vec2>> loops;
+                    TextSketch::outline(m_sketchTool->getTextString(),
+                                        m_sketchTool->getTextFontPath(),
+                                        m_sketchTool->getTextHeight(), loops);
+                    m_sketchTool->setTextPreviewLoops(std::move(loops));
                 } else {
                     m_sketchTool->clearTextPreviewBox();
                 }
@@ -2755,9 +2767,23 @@ void Application::renderTextToolPanel() {
             }
         }
 
-        ImGui::TextDisabled("Click in the sketch to place.");
-        if (m_sketchTool->hasLastStamp())
-            ImGui::TextDisabled("Backspace removes the last placement.");
+        if (materializr::touchMode()) {
+            // Touch has no hover: drag in the sketch to slide the preview anchor
+            // (the Move toggle frees the camera; two-finger still pans/zooms),
+            // then commit with Place. Remove-last walks back through stamps.
+            ImGui::TextDisabled("Drag in the sketch to position.");
+            if (ImGui::Button("Place Here"))
+                recordSketchMutation([&]{ m_sketchTool->commitStamp(); });
+            if (m_sketchTool->hasLastStamp()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Remove Last Placement"))
+                    recordSketchMutation([&]{ m_sketchTool->undoLastStamp(); });
+            }
+        } else {
+            ImGui::TextDisabled("Click in the sketch to place.");
+            if (m_sketchTool->hasLastStamp())
+                ImGui::TextDisabled("Backspace removes the last placement.");
+        }
         if (m_sketchTool->getTextFontPath().empty()) {
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
                                "Font file not found - cannot place text.");
@@ -2812,9 +2838,23 @@ void Application::renderSvgToolPanel() {
             }
         }
 
-        ImGui::TextDisabled("Click in the sketch to place.");
-        if (m_sketchTool->hasLastStamp())
-            ImGui::TextDisabled("Backspace removes the last placement.");
+        if (materializr::touchMode()) {
+            // Touch has no hover: drag in the sketch to slide the preview anchor
+            // (the Move toggle frees the camera; two-finger still pans/zooms),
+            // then commit with Place. Remove-last walks back through stamps.
+            ImGui::TextDisabled("Drag in the sketch to position.");
+            if (ImGui::Button("Place Here"))
+                recordSketchMutation([&]{ m_sketchTool->commitStamp(); });
+            if (m_sketchTool->hasLastStamp()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Remove Last Placement"))
+                    recordSketchMutation([&]{ m_sketchTool->undoLastStamp(); });
+            }
+        } else {
+            ImGui::TextDisabled("Click in the sketch to place.");
+            if (m_sketchTool->hasLastStamp())
+                ImGui::TextDisabled("Backspace removes the last placement.");
+        }
     }
     ImGui::End();
     if (!open) m_sketchTool->setMode(SketchToolMode::Select);
