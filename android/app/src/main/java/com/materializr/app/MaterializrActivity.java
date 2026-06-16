@@ -1,6 +1,7 @@
 package com.materializr.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.net.Uri;
@@ -8,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -128,6 +130,30 @@ public class MaterializrActivity extends SDLActivity {
         if (!sResultReady) return null;
         sResultReady = false;
         return sResultValue;
+    }
+
+    // Raise the soft keyboard directly. SDL_StartTextInput only shows the IME
+    // when SDL_GetFocusWindow() is non-null, which it isn't in our immersive
+    // surface — so SDL never calls this. Driving showTextInput (inherited from
+    // SDLActivity) ourselves sets up SDL's text-routing DummyEdit and the
+    // SHOW_FORCED patch raises the keyboard. Typed text still flows to SDL/ImGui.
+    public static void nativeShowKeyboard() {
+        try { showTextInput(0, 0, 1, 1); } catch (Exception ignored) {}
+    }
+
+    // Dismiss the soft keyboard (best-effort; paired with SDL_StopTextInput).
+    public static void nativeHideKeyboard() {
+        final MaterializrActivity a = sInstance;
+        if (a == null) return;
+        a.runOnUiThread(() -> {
+            try {
+                InputMethodManager imm = (InputMethodManager)
+                        a.getSystemService(Context.INPUT_METHOD_SERVICE);
+                View v = a.getWindow().getDecorView();
+                if (imm != null && v != null)
+                    imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+            } catch (Exception ignored) {}
+        });
     }
 
     // Persisted-document URI accessors for the Open Recent list.

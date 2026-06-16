@@ -93,6 +93,17 @@ std::string callStaticStringArg(const char* method, const std::string& a) {
     return out;
 }
 
+// Call a no-arg static void method. No-op on any failure.
+void callStaticVoidNoArg(const char* method) {
+    JNIEnv* env; jobject act; jclass cls;
+    if (!jniActivity(env, act, cls)) return;
+    jmethodID mid = env->GetStaticMethodID(cls, method, "()V");
+    if (mid) env->CallStaticVoidMethod(cls, mid);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(act);
+}
+
 } // namespace
 
 bool androidStartOpenDocument(const std::string& mimeCsv) {
@@ -151,6 +162,9 @@ std::string androidLastDocName() { return callStaticStringNoArg("nativeLastDocNa
 std::string androidOpenUri(const std::string& uri) {
     return callStaticStringArg("nativeOpenUri", uri);
 }
+
+void androidShowTextInput() { callStaticVoidNoArg("nativeShowKeyboard"); }
+void androidHideTextInput() { callStaticVoidNoArg("nativeHideKeyboard"); }
 
 } // namespace materializr
 

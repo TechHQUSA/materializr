@@ -2,6 +2,7 @@
 
 #include "gl_common.h"   // GLEW (Windows) must be included before other GL users
 #include "touch_mode.h"
+#include "android_files.h" // androidShow/HideTextInput (no-ops on desktop)
 #include <SDL.h>
 #include <imgui_impl_sdl2.h>
 #include <stdexcept>
@@ -332,10 +333,15 @@ bool Window::consumeTouchZoom(float& dz) {
 void Window::updateTextInput(bool wantTextInput) {
 #if defined(__ANDROID__)
     if (wantTextInput && !m_textInputActive) {
-        SDL_StartTextInput();          // raises the soft keyboard
+        SDL_StartTextInput();              // enables SDL_TEXTINPUT events
+        // SDL's own keyboard-raise is gated on SDL_GetFocusWindow() != NULL,
+        // which is NULL in our immersive surface, so it no-ops. Raise the IME
+        // ourselves via SDLActivity (text still routes through SDL → ImGui).
+        androidShowTextInput();
         m_textInputActive = true;
     } else if (!wantTextInput && m_textInputActive) {
-        SDL_StopTextInput();           // dismisses it
+        SDL_StopTextInput();
+        androidHideTextInput();
         m_textInputActive = false;
     }
 #else

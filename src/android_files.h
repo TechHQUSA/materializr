@@ -38,6 +38,13 @@ std::string androidLastDocUri();
 std::string androidLastDocName();
 std::string androidOpenUri(const std::string& uri);
 
+// Raise / dismiss the system soft keyboard directly via SDLActivity, bypassing
+// SDL_StartTextInput's SDL_GetFocusWindow()==NULL gate (which is null in our
+// immersive-fullscreen surface, so SDL silently never raises the IME). Routes
+// text through SDL's normal DummyEdit, so typing still reaches ImGui.
+void androidShowTextInput();
+void androidHideTextInput();
+
 #else  // desktop: no-ops (the calls live behind #if __ANDROID__ anyway)
 
 inline bool androidStartOpenDocument(const std::string&) { return false; }
@@ -48,6 +55,8 @@ inline void androidShareFile(const std::string&, const std::string&) {}
 inline std::string androidLastDocUri() { return {}; }
 inline std::string androidLastDocName() { return {}; }
 inline std::string androidOpenUri(const std::string&) { return {}; }
+inline void androidShowTextInput() {}
+inline void androidHideTextInput() {}
 
 #endif
 
