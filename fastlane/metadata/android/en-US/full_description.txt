@@ -1,4 +1,4 @@
-Materializr is an open-source parametric 3D CAD application: sketch on a plane, extrude/revolve/loft into solids, fillet and chamfer, boolean operations, and a parametric history you can edit and replay. It imports and exports STEP, STL, IGES and glTF.
+Materializr is an open-source parametric 3D CAD application: sketch on a plane, extrude/revolve/loft into solids, fillet and chamfer, boolean operations, and a parametric history you can edit and replay. It imports STEP and IGES, and exports STEP, STL, IGES and glTF.
 
 The geometry kernel is OpenCASCADE; the UI is Dear ImGui on SDL2. On Android the interface is touch-capable, with a runtime "touch mode" that adapts gestures and hit targets. It is designed for tablets and larger screens — on a phone the panels and toolbars are cramped.
 
