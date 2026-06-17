@@ -34,6 +34,11 @@ public:
     // that sketch — the only way to re-enter a sketch that was created in
     // a previous session.
     void setEditSketchCallback(std::function<void(int)> cb) { m_editSketch = std::move(cb); }
+    // Called when the user picks "Export as SVG…" from a sketch's right-click
+    // menu. Routes to Application::exportSketchAsSvg (1:1-mm polyline SVG for
+    // laser / 2.5D CNC). Sketch-only by design — a File-menu export would also
+    // catch non-planar geometry, which SVG can't represent.
+    void setExportSketchSvgCallback(std::function<void(int)> cb) { m_exportSketchSvg = std::move(cb); }
     // Called when the user picks "Combine sketches" — merges the selected
     // coplanar sketches into the first. Routes to Application::combineSketches.
     void setCombineSketchesCallback(std::function<void(const std::vector<int>&)> cb) {
@@ -54,6 +59,7 @@ private:
     std::function<void()> m_markDirty;
     std::function<void(int)> m_exportStl;
     std::function<void(int)> m_editSketch;
+    std::function<void(int)> m_exportSketchSvg;
     std::function<void(const std::vector<int>&)> m_combineSketches;
     std::function<void(int)> m_rotatePlane;
     int m_renamingId = -1;

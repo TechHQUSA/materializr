@@ -79,6 +79,7 @@ inline void resetFpuForOcct() {
 #include "modeling/ResizeCylindricalOp.h"
 #include "io/StepIO.h"
 #include "io/StlExport.h"
+#include "io/SvgExport.h"
 #include "io/FileDialogs.h"
 #include "modeling/SvgImport.h"
 #include "io/ProjectIO.h"
@@ -241,6 +242,7 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_itemsPanel->setDirtyCallback([this]() { markDirty(); });
     m_itemsPanel->setExportStlCallback([this](int bodyId) { exportBodyAsStl(bodyId); });
     m_itemsPanel->setEditSketchCallback([this](int sketchId) { editSketch(sketchId); });
+    m_itemsPanel->setExportSketchSvgCallback([this](int sketchId) { exportSketchAsSvg(sketchId); });
     m_itemsPanel->setCombineSketchesCallback(
         [this](const std::vector<int>& ids) { combineSketches(ids); });
     m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
@@ -3177,6 +3179,53 @@ void Application::exportBodyAsStl(int bodyId) {
                              result.triangleCount, path.c_str());
             } else {
                 std::fprintf(stderr, "STL export failed: %s\n",
+                             result.errorMessage.c_str());
+            }
+        });
+#endif
+}
+
+void Application::exportSketchAsSvg(int sketchId) {
+    if (!m_document || sketchId < 0) return;
+    auto sketch = m_document->getSketch(sketchId);
+    if (!sketch) return;
+
+    // Safe default filename from the sketch name (strip characters the OS rejects).
+    std::string name = m_document->getSketchName(sketchId);
+    if (name.empty()) name = "sketch-" + std::to_string(sketchId);
+    for (char& ch : name) {
+        if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' ||
+            ch == '"' || ch == '<' || ch == '>' || ch == '|') ch = '_';
+    }
+    std::string defaultFile = name + ".svg";
+
+    // Capture the shared_ptr so the (async) dialog callback can't dangle.
+    auto sk = sketch;
+
+#if defined(__ANDROID__)
+    FileDialogs::androidExportShareOrSave(defaultFile, "image/svg+xml",
+        [sk](const std::string& path) {
+            auto result = materializr::SvgExport::exportSketch(path, *sk);
+            if (result.success)
+                std::fprintf(stdout, "Exported %d curve(s) to %s\n",
+                             result.curveCount, path.c_str());
+            else
+                std::fprintf(stderr, "SVG export failed: %s\n", result.errorMessage.c_str());
+            return result.success;
+        });
+#else
+    FileDialogs::saveFile("Export Sketch to SVG", defaultFile,
+        {{"SVG Files", "*.svg"}},
+        [sk](std::string path) {
+            if (path.empty()) return;
+            // Keep the .svg extension — the picker doesn't force it.
+            if (std::filesystem::path(path).extension() != ".svg") path += ".svg";
+            auto result = materializr::SvgExport::exportSketch(path, *sk);
+            if (result.success) {
+                std::fprintf(stdout, "Exported %d curve(s) to %s\n",
+                             result.curveCount, path.c_str());
+            } else {
+                std::fprintf(stderr, "SVG export failed: %s\n",
                              result.errorMessage.c_str());
             }
         });

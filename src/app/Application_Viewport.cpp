@@ -4001,13 +4001,24 @@ void Application::renderViewport() {
                             // Items-panel plane context menu so the normal can be
                             // adjusted right on the plane in the viewport.
                             m_contextMenuPlaneId = result.planeId;
+                            m_contextMenuSketchId = -1;
                             m_contextMenuFace.Nullify();
                             m_contextMenuPending = true;
-                        } else if (result.hit && !result.pickedShape.IsNull()) {
-                            m_contextMenuBodyId = result.bodyId;
-                            m_contextMenuFace = result.pickedShape;
+                        } else {
+                            // Unified object menu — any of face / body / sketch
+                            // in the clicked area gets its own submenu (touch
+                            // can't disambiguate the pick, so we offer all).
+                            if (result.hit && !result.pickedShape.IsNull()) {
+                                m_contextMenuBodyId = result.bodyId;
+                                m_contextMenuFace = result.pickedShape;
+                            } else {
+                                m_contextMenuBodyId = -1;
+                                m_contextMenuFace.Nullify();
+                            }
+                            m_contextMenuSketchId = m_hoveredSketchId; // -1 if none
                             m_contextMenuPlaneId = -1;
-                            m_contextMenuPending = true;
+                            if (!m_contextMenuFace.IsNull() || m_contextMenuSketchId >= 0)
+                                m_contextMenuPending = true;
                         }
                     }
                 }
@@ -4912,7 +4923,7 @@ void Application::renderViewport() {
             }
         };
 
-        if (ImGui::BeginMenu("Face")) {
+        if (!m_contextMenuFace.IsNull() && ImGui::BeginMenu("Face")) {
             if (ImGui::MenuItem("Select Face")) {
                 SelectionEntry entry;
                 entry.type = SelectionType::Face;
@@ -4945,7 +4956,7 @@ void Application::renderViewport() {
             sharedBodyOps();
             ImGui::EndMenu();
         }
-        if (ImGui::BeginMenu("Body")) {
+        if (bid >= 0 && ImGui::BeginMenu("Body")) {
             if (ImGui::MenuItem("Select Body")) {
                 SelectionEntry entry;
                 entry.type = SelectionType::Body;
@@ -4966,9 +4977,51 @@ void Application::renderViewport() {
             sharedBodyOps();
             ImGui::EndMenu();
         }
+        // Sketch submenu — shown when a committed sketch is in the clicked area
+        // (possibly alongside a Face/Body, e.g. a sketch lying on a face). The
+        // transform actions select the sketch first so the gizmo targets it.
+        if (m_contextMenuSketchId >= 0 && ImGui::BeginMenu("Sketch")) {
+            const int sid = m_contextMenuSketchId;
+            auto selectThisSketch = [&]() {
+                if (!m_selection) return;
+                m_selection->clear();
+                SelectionEntry e;
+                e.type = SelectionType::Sketch;
+                e.sketchId = sid;
+                m_selection->addToSelection(e);
+            };
+            if (ImGui::MenuItem("Edit Sketch")) {
+                editSketch(sid);
+                m_contextMenuSketchId = -1;
+            }
+            if (ImGui::MenuItem("Export as SVG…")) {
+                exportSketchAsSvg(sid);
+                m_contextMenuSketchId = -1;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Move")) {
+                selectThisSketch();
+                handleToolAction(static_cast<int>(ToolAction::Move));
+                m_contextMenuSketchId = -1;
+            }
+            if (ImGui::MenuItem("Rotate")) {
+                selectThisSketch();
+                handleToolAction(static_cast<int>(ToolAction::Rotate));
+                m_contextMenuSketchId = -1;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Delete")) {
+                if (m_document) m_document->removeSketch(sid);
+                if (m_selection) m_selection->clear();
+                markDirty();
+                m_contextMenuSketchId = -1;
+            }
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Cancel")) {
             m_contextMenuFace.Nullify();
+            m_contextMenuSketchId = -1;
         }
         ImGui::EndPopup();
     }

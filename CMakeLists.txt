@@ -257,6 +257,7 @@ add_executable(materializr
     src/io/Settings.cpp
     src/io/StepIO.cpp
     src/io/StlExport.cpp
+    src/io/SvgExport.cpp
     src/io/IgesIO.cpp
     src/io/ImageExport.cpp
     src/io/GltfExport.cpp

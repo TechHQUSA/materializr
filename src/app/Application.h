@@ -146,6 +146,7 @@ private:
     // multi-body project without juggling visibility for the file-menu
     // "Export STL" (which writes every visible body to one file).
     void exportBodyAsStl(int bodyId);
+    void exportSketchAsSvg(int sketchId);
     // Zoom-fit the camera onto the selection (or all visible bodies when
     // nothing is selected). Bound to F and View > Frame Selection — the menu
     // item is the touch path.
@@ -1299,6 +1300,7 @@ private:
     int m_contextMenuBodyId = -1;
     TopoDS_Shape m_contextMenuFace;
     int m_contextMenuPlaneId = -1; // >=0 → the pending context menu is for a plane
+    int m_contextMenuSketchId = -1; // >=0 → the pending context menu is for a sketch
     bool m_contextMenuPending = false;
 
     // Project file + dirty tracking

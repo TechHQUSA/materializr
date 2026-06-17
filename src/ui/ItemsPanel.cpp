@@ -302,6 +302,9 @@ bool ItemsPanel::render() {
                     if (ImGui::MenuItem("Edit Sketch")) {
                         if (m_editSketch) m_editSketch(id);
                     }
+                    if (ImGui::MenuItem("Export as SVG…")) {
+                        if (m_exportSketchSvg) m_exportSketchSvg(id);
+                    }
                     // Fold every OTHER coplanar sketch into this one (the app
                     // filters to the ones sharing this sketch's plane). Only
                     // offered when there's more than one sketch to fold.
