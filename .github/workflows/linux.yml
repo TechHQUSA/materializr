@@ -60,10 +60,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Materializr-linux-${{ matrix.arch }}
-          path: dist/Materializr-${{ matrix.arch }}.AppImage
+          path: |
+            dist/Materializr-${{ matrix.arch }}.AppImage
+            dist/Materializr-${{ matrix.arch }}.AppImage.zsync
 
+      # The .zsync MUST ship beside the AppImage on the release: AppImageUpdate /
+      # Gear Lever read the embedded gh-releases-zsync info, then fetch this
+      # control file from the latest release to delta-update.
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Materializr-${{ matrix.arch }}.AppImage
+          files: |
+            dist/Materializr-${{ matrix.arch }}.AppImage
+            dist/Materializr-${{ matrix.arch }}.AppImage.zsync

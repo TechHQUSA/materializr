@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     file patchelf wget fuse libfuse2 \
     imagemagick \
+    zsync \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -96,12 +97,19 @@ RUN printf '#!/bin/bash\nHERE="$(dirname "$(readlink -f "$0")")"\nexport APPIMAG
     > /AppDir/AppRun \
     && chmod +x /AppDir/AppRun
 
-# Build the AppImage (--appimage-extract-and-run avoids FUSE requirement inside Docker)
+# Build the AppImage (--appimage-extract-and-run avoids FUSE requirement inside Docker).
+# -u embeds gh-releases-zsync update info AND emits a .zsync control file alongside
+# the AppImage, so AppImageUpdate / Gear Lever can do delta auto-updates from the
+# GitHub "latest" release. cd /output so the generated .zsync lands beside it.
 RUN mkdir -p /output \
     && ARCH=$(uname -m) \
-    && appimagetool --appimage-extract-and-run /AppDir /output/Materializr-${ARCH}.AppImage
+    && cd /output \
+    && appimagetool --appimage-extract-and-run \
+        -u "gh-releases-zsync|materializr-cad|materializr|latest|Materializr-*${ARCH}.AppImage.zsync" \
+        /AppDir Materializr-${ARCH}.AppImage
 
 # ─── Export stage ────────────────────────────────────────────────────────────
 
 FROM scratch AS export
 COPY --from=builder /output/*.AppImage /
+COPY --from=builder /output/*.zsync /
