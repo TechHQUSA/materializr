@@ -207,8 +207,19 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             // vertical-dominant drag scrolls the window the finger is over, like
             // a mobile list. Horizontal drags fall through untouched so sliders
             // still work. The canvas keeps its one-finger orbit.
+            // Don't let drag-to-scroll hijack a dock-splitter RESIZE: while a
+            // splitter is grabbed ImGui shows a resize cursor, so a vertical drag
+            // there is a panel resize, not a list scroll. Without this, dragging a
+            // panel border past ~25px got reclassified as a scroll and the button
+            // was released, dropping the resize (worse on small screens).
+            const ImGuiMouseCursor curCursor = ImGui::GetMouseCursor();
+            const bool onSplitter =
+                curCursor == ImGuiMouseCursor_ResizeNS ||
+                curCursor == ImGuiMouseCursor_ResizeEW ||
+                curCursor == ImGuiMouseCursor_ResizeNESW ||
+                curCursor == ImGuiMouseCursor_ResizeNWSE;
             bool justLatched = false;
-            if (materializr::touchMode() && !m_touchOnCanvas && !m_panelScroll &&
+            if (materializr::touchMode() && !m_touchOnCanvas && !m_panelScroll && !onSplitter &&
                 (dx * dx + dy * dy) > 25.0f * 25.0f && std::fabs(dy) > std::fabs(dx)) {
                 // Switch press -> scroll: release the left button so the row the
                 // finger started on isn't selected/activated by the flick.
