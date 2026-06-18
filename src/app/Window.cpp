@@ -198,6 +198,7 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             m_movedBeyondHold = false;
             m_holdSelect = false;
             m_panelScroll = false;
+            m_scrollArmed = false;
             m_lastScrollY = m_fingers[0].y;
         } else if (type == SDL_FINGERMOTION) {
             // Track movement even after the hold arms: a hold that then drags is
@@ -223,10 +224,18 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             // cursor, so onSplitter misses it) — also a real drag, not a scroll.
             ImGuiContext* g = ImGui::GetCurrentContext();
             const bool movingWindow = g && g->MovingWindow != nullptr;
-            bool justLatched = false;
-            if (materializr::touchMode() && !m_touchOnCanvas && !m_panelScroll &&
+            const bool wantScroll =
+                materializr::touchMode() && !m_touchOnCanvas && !m_panelScroll &&
                 !onSplitter && !movingWindow &&
-                (dx * dx + dy * dy) > 25.0f * 25.0f && std::fabs(dy) > std::fabs(dx)) {
+                (dx * dx + dy * dy) > 25.0f * 25.0f && std::fabs(dy) > std::fabs(dx);
+            bool justLatched = false;
+            // Arm on the first frame past the threshold, commit on the next — that
+            // one frame lets ImGui set MovingWindow for a straight-down tab/title
+            // drag (input is read a frame ahead of ImGui), so the move wins over
+            // the scroll instead of being stolen.
+            if (wantScroll && !m_scrollArmed) {
+                m_scrollArmed = true;
+            } else if (wantScroll && m_scrollArmed) {
                 // Switch press -> scroll: release the left button so the row the
                 // finger started on isn't selected/activated by the flick.
                 if (m_leftDown) {

@@ -111,6 +111,8 @@ private:
     // drag converts the press into mobile-style flick scrolling of the hovered
     // window; a horizontal drag is left to widgets (sliders) untouched.
     bool  m_panelScroll = false;          // this gesture became a panel scroll
+    bool  m_scrollArmed = false;          // crossed the scroll threshold once; commit next frame
+                                          // (gives ImGui a frame to claim a tab/window drag first)
     float m_lastScrollY = 0.0f;           // finger Y at the last scroll step
 
     // Synthetic right-click queued by a long-press (touch context menu). Played
