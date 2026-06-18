@@ -1069,6 +1069,13 @@ void Application::renderInteractionsPanel() {
     row("Select face", "Click");
     row("Select body", "Double-click");
     row("Add to selection", "Ctrl+Click");
+    {
+        // In trackpad / left-camera mode a plain drag orbits, so box-select is
+        // Alt+Drag; with the default bindings Left is free, so it's a plain drag.
+        const bool leftIsCamera = (m_orbitButton == ImGuiMouseButton_Left ||
+                                   m_panButton  == ImGuiMouseButton_Left);
+        row("Box-select", leftIsCamera ? "Alt+Drag" : "Drag empty space");
+    }
     row("Delete selected", "Del");
     ImGui::SeparatorText("Transform (body)");
     row("Move / Rotate / Scale", "W / E / R");

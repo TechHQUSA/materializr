@@ -2077,6 +2077,13 @@ void Application::renderViewport() {
                 // below fires and camDragging turns the sketch input off, so it
                 // pans without also drawing.
                 if (toolWantsDrag && leftIsCamera && !io.KeyShift) suppressCamDrag = true;
+                // Alt+Left-drag is reserved for box-select when left IS the camera
+                // (trackpad / left-orbit mode) — Alt is otherwise unused, and Shift
+                // is already pan. Don't let it orbit; the box-select code below
+                // claims the drag. Only in the bare 3D view (no sketch/op running).
+                if (leftIsCamera && io.KeyAlt && !m_inSketchMode && !m_extruding &&
+                    !m_pushPullActive && !m_edgeOpActive && !m_gizmoDragging)
+                    suppressCamDrag = true;
             }
             if (!suppressCamDrag && ImGui::IsMouseDragging(m_orbitButton)) {
                 ImVec2 delta = io.MouseDelta;
@@ -3793,8 +3800,11 @@ void Application::renderViewport() {
                             bool boxEligible = !m_inSketchMode && !m_extruding &&
                                 !m_pushPullActive && !m_edgeOpActive && !m_gizmoDragging &&
                                 !projecting &&
-                                m_orbitButton != ImGuiMouseButton_Left &&
-                                m_panButton  != ImGuiMouseButton_Left;
+                                // Normally box-select needs Left free of the camera;
+                                // in trackpad / left-camera mode, Alt+Left frees it.
+                                ((m_orbitButton != ImGuiMouseButton_Left &&
+                                  m_panButton  != ImGuiMouseButton_Left) ||
+                                 io.KeyAlt);
                             if (boxEligible && m_boxSelect) {
                                 ImVec2 mp = ImGui::GetMousePos();
                                 ImVec2 wp = ImGui::GetItemRectMin();
