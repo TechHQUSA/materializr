@@ -480,6 +480,14 @@ void Application::initImGui() {
         style.HoverStationaryDelay = 0.0f;
         style.HoverDelayShort = 0.15f;
         style.HoverDelayNormal = 0.30f;
+        // Fatten resize hit targets for fingers. The dock splitter the panels
+        // resize against is only a couple px wide (even ×uiScale), so grabbing
+        // it on a touchscreen is a near-miss; widen it and add a general touch
+        // hit-padding so window borders / grips are reachable too. (Kept modest
+        // — TouchExtraPadding grows ALL reactive boxes, so overgrowing it makes
+        // overlapping widgets fight for the touch.)
+        style.DockingSeparatorSize = 12.0f;
+        style.TouchExtraPadding = ImVec2(8.0f, 8.0f);
     }
 
     // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,

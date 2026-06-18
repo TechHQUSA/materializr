@@ -1068,6 +1068,7 @@ void Application::renderInteractionsPanel() {
     ImGui::SeparatorText("Select");
     row("Select face", "Click");
     row("Select body", "Double-click");
+    row("Select behind", "Slow double-click");
     row("Add to selection", "Ctrl+Click");
     {
         // In trackpad / left-camera mode a plain drag orbits, so box-select is
