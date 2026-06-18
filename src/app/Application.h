@@ -966,6 +966,11 @@ private:
     // bodies sit on both sides of their source sketch plane.
     glm::vec2 m_pickCyclePos{-1000.0f, -1000.0f};
     double m_pickCycleTick = 0.0; // ImGui time of the last pick at m_pickCyclePos
+    // Touch: after a double-tap escalates to the body, ImGui's queued 2nd-tap
+    // click can land a few frames LATER and revert to the face. Ignore face-select
+    // clicks until this time (set ~0.5s out on escalation; bounded so a genuine
+    // later tap isn't swallowed).
+    double m_suppressFaceClickUntil = 0.0;
     int m_pickCycleLast = -1; // -1 none, 0 face, 1 region
 
     // Resolve the pull direction + neutral-plane point from the current

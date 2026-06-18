@@ -1951,37 +1951,6 @@ void Application::renderViewport() {
             // drag-to-scroll: a vertical drag over any panel scrolls it, but
             // over the 3D canvas the one-finger drag stays an orbit.
             if (m_window) m_window->setTouchOnCanvas(viewportHovered);
-            // Touch double-tap = desktop double-click: escalate the tapped face to
-            // its whole body. Fires on the second quick tap's RELEASE (a tap-then-
-            // long-press can't trigger it), and reuses the face the taps already
-            // selected — no re-pick. Honors the double-click-time setting.
-            if (m_window && m_window->consumeDoubleTap() && m_selection && !m_inSketchMode) {
-                // Escalate the MOST-RECENTLY tapped face (no break → last one wins)
-                // to its body. With Multi-Select on, ADD it so double-tapping
-                // several bodies accumulates them (mirrors Ctrl+double-click on
-                // desktop); otherwise replace the selection.
-                int bid = -1;
-                for (const auto& e : m_selection->getSelection())
-                    if (e.type == SelectionType::Face && e.bodyId >= 0) bid = e.bodyId;
-                if (bid >= 0) {
-                    SelectionEntry b;
-                    b.type = SelectionType::Body;
-                    b.bodyId = bid;
-                    try { b.shape = m_document->getBody(bid); } catch (...) {}
-                    if (m_multiSelectToggle) {
-                        // Replace this body's faces/edges with the body itself —
-                        // leave other selected items intact, no stray faces.
-                        std::vector<SelectionEntry> drop;
-                        for (const auto& e : m_selection->getSelection())
-                            if (e.bodyId == bid && e.type != SelectionType::Body)
-                                drop.push_back(e);
-                        for (const auto& e : drop) m_selection->removeFromSelection(e);
-                        m_selection->addToSelection(b);
-                    } else {
-                        m_selection->select(b);
-                    }
-                }
-            }
         }
         if (viewportHovered) {
             ImGuiIO& io = ImGui::GetIO();
@@ -3671,19 +3640,50 @@ void Application::renderViewport() {
                     // Body selection on touch goes through the long-press menu's
                     // Body branch (and Multi-Select tap) instead, so disable
                     // double-tap-to-body in touch mode.
-                    bool allowDoubleClickBody = !materializr::touchMode();
-                    if (allowDoubleClickBody && clickSelectionAllowed && !regionConsumedClick &&
-                        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
-                        result.hit && result.bodyId >= 0) {
+                    // Body escalation: desktop double-CLICK, or touch double-TAP
+                    // (consumeDoubleTap, fired on the 2nd quick release). Running it
+                    // as the IF branch means the single-select else-if below is
+                    // SKIPPED on the escalation frame — so the body can't be reverted
+                    // back to a face even when a quick tap's down+up share one frame.
+                    const bool touchDbl =
+                        materializr::touchMode() && m_window && m_window->consumeDoubleTap();
+                    const bool bodyEscalate = touchDbl ||
+                        (!materializr::touchMode() &&
+                         ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+                    if (clickSelectionAllowed && !regionConsumedClick && bodyEscalate) {
+                        // Touch: ImGui's 2nd-tap click can arrive a few frames after
+                        // this escalation (its mouse queue lags Window's raw finger
+                        // events); ignore face-select clicks briefly so it can't
+                        // revert the body back to a face.
+                        if (touchDbl) m_suppressFaceClickUntil = ImGui::GetTime() + 0.5;
+                        // Desktop uses the freshly-picked body; touch escalates the
+                        // face the taps already selected (robust to a stale pick on
+                        // the lift frame).
+                        int dbid = -1;
+                        if (touchDbl) {
+                            for (const auto& e : m_selection->getSelection())
+                                if (e.type == SelectionType::Face && e.bodyId >= 0) dbid = e.bodyId;
+                        } else if (result.hit) {
+                            dbid = result.bodyId;
+                        }
+                      if (dbid >= 0) {
                         SelectionEntry entry;
                         entry.type = SelectionType::Body;
-                        entry.bodyId = result.bodyId;
-                        try { entry.shape = m_document->getBody(result.bodyId); } catch (...) {}
+                        entry.bodyId = dbid;
+                        try { entry.shape = m_document->getBody(dbid); } catch (...) {}
                         if (io.KeyCtrl) {
+                            // Replace this body's faces/edges with the body itself —
+                            // keep other selected items, no stray faces.
+                            std::vector<SelectionEntry> drop;
+                            for (const auto& e : m_selection->getSelection())
+                                if (e.bodyId == dbid && e.type != SelectionType::Body)
+                                    drop.push_back(e);
+                            for (const auto& e : drop) m_selection->removeFromSelection(e);
                             m_selection->addToSelection(entry);
                         } else {
                             m_selection->select(entry);
                         }
+                      }
                         // A double-click is a deliberate "select the whole
                         // body". Its FIRST click already ran the face branch
                         // and left the cycle state at face (m_pickCycleLast=0)
@@ -3693,7 +3693,9 @@ void Application::renderViewport() {
                         // click never selected it, but it looked clickable).
                         m_pickCycleLast = -1;
                     } else if (clickSelectionAllowed && !regionConsumedClick &&
-                               ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                               ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                               !(materializr::touchMode() &&
+                                 ImGui::GetTime() < m_suppressFaceClickUntil)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
                         // Multi-Select forces io.KeyCtrl for this viewport scope, so
                         // the normal pick below adds/toggles the SUB-SHAPE you tap —
