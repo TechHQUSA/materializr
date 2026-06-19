@@ -5,11 +5,19 @@
 #include <BRepGProp_Face.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
-#include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepLib.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <TopTools_MapOfShape.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
+#include <TopoDS_Wire.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <Geom_Surface.hxx>
 #include <Geom_Plane.hxx>
 #include <TopExp.hxx>
@@ -58,103 +66,102 @@ bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
     TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
 
-    // The seed wall borders, along its edges: the hole's openings (planar CAP
-    // faces, perpendicular to the bore), and — for a polygon hole — the ADJACENT
-    // WALLS (planar, parallel to the bore). Collect every planar neighbour with
-    // the shared edge, its normal, and whether that edge is on the neighbour's
-    // inner wire (an open mouth) or outer wire (a wall edge, or a pocket floor).
-    struct Nbr {
-        TopoDS_Face face; TopoDS_Edge rim; gp_Vec n; bool rimInner; TopoDS_Wire opening;
-    };
-    std::vector<Nbr> nbrs;
-    for (TopExp_Explorer ex(seedWall, TopAbs_EDGE); ex.More(); ex.Next()) {
-        const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
-        if (!edgeFaces.Contains(e)) continue;
-        const TopTools_ListOfShape& fl = edgeFaces.FindFromKey(e);
-        for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next()) {
-            TopoDS_Face f = TopoDS::Face(it.Value());
-            if (f.IsSame(seedWall) || !isPlanar(f)) continue;
-            Nbr nb; nb.face = f; nb.rim = e; nb.n = faceNormal(f);
-            TopoDS_Wire outer = BRepTools::OuterWire(f);
-            nb.rimInner = !wireHasEdge(outer, e);
-            if (nb.rimInner) {
-                for (TopoDS_Iterator wi(f); wi.More(); wi.Next()) {
-                    if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
-                    TopoDS_Wire w = TopoDS::Wire(wi.Value());
-                    if (w.IsSame(outer)) continue;
-                    if (wireHasEdge(w, e)) { nb.opening = w; break; }
+    // Gather the hole's ACTUAL interior faces (walls, cones, counterbore steps —
+    // any segment), and the two outer MOUTHS the bore opens through. This is
+    // section-agnostic AND profile-agnostic: it reconstructs the exact void by
+    // its real faces, so a countersink (cone+shank) or a counterbore (two
+    // cylinders + a step annulus) rebuilds correctly, not just a constant prism.
+    //
+    // BFS from the clicked wall. For each face's edge, the adjacent face is a
+    // MOUTH if it's planar and the edge lies on one of its INNER wires (the bore
+    // pierces it → that inner wire is the opening). Otherwise it's another
+    // interior face of the hole (another wall, a cone, or a step — whose own
+    // outer boundary the edge sits on) → keep walking. A pocket floor would also
+    // be gathered as an interior face, leaving only ONE mouth, which we reject.
+    std::vector<TopoDS_Face> walls;
+    TopTools_MapOfShape inSet;
+    std::vector<std::pair<TopoDS_Face, TopoDS_Wire>> mouths; // (cap face, opening loop)
+    TopTools_MapOfShape mouthSeen;
+
+    std::vector<TopoDS_Face> stack;
+    stack.push_back(seedWall);
+    inSet.Add(seedWall);
+    walls.push_back(seedWall);
+    while (!stack.empty()) {
+        TopoDS_Face W = stack.back(); stack.pop_back();
+        for (TopExp_Explorer ex(W, TopAbs_EDGE); ex.More(); ex.Next()) {
+            const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+            if (!edgeFaces.Contains(e)) continue;
+            const TopTools_ListOfShape& fl = edgeFaces.FindFromKey(e);
+            for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next()) {
+                TopoDS_Face f = TopoDS::Face(it.Value());
+                if (f.IsSame(W) || inSet.Contains(f)) continue;
+                // Mouth? planar + the edge is on one of f's inner wires.
+                TopoDS_Wire opening;
+                if (isPlanar(f)) {
+                    TopoDS_Wire outer = BRepTools::OuterWire(f);
+                    if (!wireHasEdge(outer, e)) {
+                        for (TopoDS_Iterator wi(f); wi.More(); wi.Next()) {
+                            if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
+                            TopoDS_Wire w = TopoDS::Wire(wi.Value());
+                            if (w.IsSame(outer)) continue;
+                            if (wireHasEdge(w, e)) { opening = w; break; }
+                        }
+                    }
+                }
+                if (!opening.IsNull()) {
+                    if (!mouthSeen.Contains(f)) {
+                        mouthSeen.Add(f);
+                        mouths.emplace_back(f, opening);
+                    }
+                } else {
+                    inSet.Add(f);
+                    walls.push_back(f);
+                    stack.push_back(f);
                 }
             }
-            nbrs.push_back(nb);
-            break; // one neighbour per seed edge
         }
     }
 
-    // An open mouth = a planar neighbour the bore opens THROUGH (rim is an inner
-    // loop). Its normal IS the bore axis. Adjacent walls (rim on their outer
-    // wire) have normals PERPENDICULAR to the axis — they're not caps.
-    const Nbr* entry = nullptr;
-    for (const auto& nb : nbrs)
-        if (nb.rimInner && !nb.opening.IsNull()) { entry = &nb; break; }
-    if (!entry) {
-        std::fprintf(stderr, "[MoveHole] no open mouth on the wall (not a through-hole?)\n");
+    // A through-hole opens at exactly two mouths. One mouth (+ a gathered floor)
+    // = a pocket; zero or >2 = unrecognized. Either way, refuse (for now).
+    if (mouths.size() != 2) {
+        isPocket = true; // "recognized but unsupported profile" → caller toasts
+        std::fprintf(stderr, "[MoveHole] refused: %zu mouths (need 2 for a "
+                     "through-hole; pocket/blind/odd)\n", mouths.size());
         return false;
     }
-    gp_Vec N = entry->n;
-    if (N.Magnitude() < 1e-9) return false;
+    entryNormal = faceNormal(mouths[0].first);
+    if (entryNormal.Magnitude() < 1e-9) return false;
 
-    // Only a SIMPLE straight through-hole (one constant cross-section) is
-    // supported. Along the bore axis there must be a second, OPPOSITE open mouth
-    // (the exit) and no other cap. Refuse otherwise, because the straight
-    // extrude-the-opening void can't represent:
-    //   • a floor on the axis  → pocket (blind hole), or
-    //   • a step on the axis   → counterbored / stepped hole, or
-    //   • no opposite mouth     → countersunk (cone+shank) / blind hole.
-    // m_wasPocket signals "recognized but unsupported profile" to the caller.
-    bool hasExit = false, hasFloorOrStep = false;
-    for (const auto& nb : nbrs) {
-        if (std::abs(nb.n.Dot(N)) <= 0.99) continue;       // adjacent wall, skip
-        if (!nb.rimInner) { hasFloorOrStep = true; continue; } // floor / step cap
-        if (nb.n.Dot(N) < -0.99) hasExit = true;            // opposite open mouth
+    // Sew the interior faces + a cap over each mouth opening into a closed shell,
+    // then a solid — the exact hole void, whatever its axial profile. Caps reuse
+    // the mouths' real inner-wire edges, so they sew to the walls seamlessly.
+    BRepBuilderAPI_Sewing sew(1e-6);
+    for (const auto& w : walls) sew.Add(w);
+    for (const auto& m : mouths) {
+        BRepBuilderAPI_MakeFace mf(m.second, Standard_True /*only plane*/);
+        if (!mf.IsDone()) {
+            std::fprintf(stderr, "[MoveHole] could not cap a mouth\n");
+            return false;
+        }
+        sew.Add(mf.Face());
     }
-    if (hasFloorOrStep || !hasExit) {
-        isPocket = true;
-        std::fprintf(stderr, "[MoveHole] refused: not a simple through-hole "
-                     "(pocket / countersunk / counterbored / stepped)\n");
-        return false;
-    }
+    sew.Perform();
+    TopoDS_Shape sewn = sew.SewedShape();
+    if (sewn.IsNull()) { std::fprintf(stderr, "[MoveHole] sewing failed\n"); return false; }
 
-    // Depth = the seed wall's extent along N (a prismatic hole's wall spans
-    // exactly the hole depth). Robust for round/square/polygon alike.
-    double lo = 1e300, hi = -1e300;
-    for (TopExp_Explorer vx(seedWall, TopAbs_VERTEX); vx.More(); vx.Next()) {
-        gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vx.Current()));
-        double d = gp_Vec(p.XYZ()).Dot(N);
-        lo = std::min(lo, d); hi = std::max(hi, d);
-    }
-    double depth = hi - lo;
-    if (depth < 1e-6) {
-        std::fprintf(stderr, "[MoveHole] degenerate hole depth\n");
+    TopExp_Explorer shx(sewn, TopAbs_SHELL);
+    if (!shx.More()) { std::fprintf(stderr, "[MoveHole] no closed shell\n"); return false; }
+    BRepBuilderAPI_MakeSolid ms(TopoDS::Shell(shx.Current()));
+    if (!ms.IsDone()) { std::fprintf(stderr, "[MoveHole] make solid failed\n"); return false; }
+    TopoDS_Solid solid = ms.Solid();
+    BRepLib::OrientClosedSolid(solid); // normalize so it's a positive-volume void
+    if (!BRepCheck_Analyzer(solid).IsValid()) {
+        std::fprintf(stderr, "[MoveHole] void solid invalid\n");
         return false;
     }
-
-    // Build the opening face and extrude it INTO the body (−N) by EXACTLY the
-    // hole depth, so the void's far cap lands on the exit face. No overshoot:
-    // an overshoot would stick out past the slab and the fill-fuse would leave
-    // nubs (it adds the union, not just the overlap).
-    BRepBuilderAPI_MakeFace mf(entry->opening, Standard_True /*only plane*/);
-    if (!mf.IsDone()) {
-        std::fprintf(stderr, "[MoveHole] could not face the opening loop\n");
-        return false;
-    }
-    BRepPrimAPI_MakePrism prism(mf.Face(), N * (-depth));
-    prism.Build();
-    if (!prism.IsDone() || prism.Shape().IsNull()) {
-        std::fprintf(stderr, "[MoveHole] prism build failed\n");
-        return false;
-    }
-    voidOut = prism.Shape();
-    entryNormal = N;
+    voidOut = solid;
     return true;
 }
 

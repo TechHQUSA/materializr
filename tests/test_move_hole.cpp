@@ -54,6 +54,18 @@ TopoDS_Face findCylWall(const TopoDS_Shape& s) {
     return TopoDS_Face();
 }
 
+// The cylindrical wall whose radius matches (for picking a specific step).
+TopoDS_Face findCylByRadius(const TopoDS_Shape& s, double r) {
+    for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+        TopoDS_Face f = TopoDS::Face(ex.Current());
+        Handle(Geom_Surface) surf = BRep_Tool::Surface(f);
+        Handle(Geom_CylindricalSurface) cs =
+            Handle(Geom_CylindricalSurface)::DownCast(surf);
+        if (!cs.IsNull() && std::abs(cs->Cylinder().Radius() - r) < 1e-6) return f;
+    }
+    return TopoDS_Face();
+}
+
 // The interior wall of a prismatic (square) hole: a vertical planar face whose
 // centroid in XY is closest to the hole centre (outer box walls sit far away).
 TopoDS_Face findInteriorWall(const TopoDS_Shape& s, double cx, double cy) {
@@ -155,7 +167,7 @@ TEST(MoveHole, PocketIsRefused) {
     EXPECT_TRUE(op.wasPocket());
 }
 
-TEST(MoveHole, CountersunkHoleIsRefused) {
+TEST(MoveHole, CountersunkHoleRelocates) {
     // 20×20×10 box: a Ø2 shank through, widening to a Ø6 countersink cone at top.
     TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
     TopoDS_Shape shank = BRepPrimAPI_MakeCylinder(
@@ -166,13 +178,51 @@ TEST(MoveHole, CountersunkHoleIsRefused) {
 
     Document doc;
     int id = doc.addBody(part, "part");
+    double v0 = volume(part);
     TopoDS_Face wall = findCylWall(doc.getBody(id)); // the shank cylinder
     ASSERT_FALSE(wall.IsNull());
 
     MoveHoleOp op;
     op.setBody(id);
     op.setSeedWall(wall);
-    op.setMoveVector(gp_Vec(6, 0, 0));
-    EXPECT_FALSE(op.execute(doc)) << "countersunk hole has a varying profile - refuse";
-    EXPECT_TRUE(op.wasPocket()) << "flagged as an unsupported hole profile";
+    op.setMoveVector(gp_Vec(6, 0, 0));      // → centred (11,5)
+    ASSERT_TRUE(op.execute(doc)) << "countersink (cone+shank) should now move";
+    EXPECT_FALSE(op.wasPocket());
+
+    TopoDS_Shape moved = doc.getBody(id);
+    EXPECT_NEAR(volume(moved), v0, 1e-6) << "whole countersink relocated, same size";
+    EXPECT_TRUE(isSolidAt(moved, 5,5,2))   << "old shank filled";
+    EXPECT_TRUE(isSolidAt(moved, 5,5,9))   << "old countersink filled";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,2)) << "new shank is void";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,9)) << "new countersink is void";
+}
+
+TEST(MoveHole, CounterboreHoleRelocates) {
+    // 20×20×10 box: Ø2 shank through, opening to a Ø6 counterbore recess at top
+    // (a flat step between the two diameters).
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
+    TopoDS_Shape shank = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,-1), gp_Dir(0,0,1)), 1.0, 12.0).Shape(); // through
+    TopoDS_Shape recess = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,7), gp_Dir(0,0,1)), 3.0, 4.0).Shape();    // z=7..11 recess
+    TopoDS_Shape part = BRepAlgoAPI_Cut(BRepAlgoAPI_Cut(box, shank).Shape(), recess).Shape();
+
+    Document doc;
+    int id = doc.addBody(part, "part");
+    double v0 = volume(part);
+    TopoDS_Face wall = findCylByRadius(doc.getBody(id), 3.0); // the visible recess wall
+    ASSERT_FALSE(wall.IsNull());
+
+    MoveHoleOp op;
+    op.setBody(id);
+    op.setSeedWall(wall);
+    op.setMoveVector(gp_Vec(6, 0, 0));      // → centred (11,5)
+    ASSERT_TRUE(op.execute(doc)) << "counterbore (two diameters + step) should move";
+
+    TopoDS_Shape moved = doc.getBody(id);
+    EXPECT_NEAR(volume(moved), v0, 1e-6);
+    EXPECT_TRUE(isSolidAt(moved, 5,5,3))    << "old shank filled";
+    EXPECT_TRUE(isSolidAt(moved, 5,5,8.5))  << "old recess filled";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,3))  << "new shank is void";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,8.5))<< "new recess is void";
 }
