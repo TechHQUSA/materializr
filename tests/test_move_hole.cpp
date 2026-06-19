@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
@@ -152,4 +153,26 @@ TEST(MoveHole, PocketIsRefused) {
     op.setMoveVector(gp_Vec(6, 0, 0));
     EXPECT_FALSE(op.execute(doc)) << "pocket move must be refused (v1)";
     EXPECT_TRUE(op.wasPocket());
+}
+
+TEST(MoveHole, CountersunkHoleIsRefused) {
+    // 20×20×10 box: a Ø2 shank through, widening to a Ø6 countersink cone at top.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
+    TopoDS_Shape shank = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,-1), gp_Dir(0,0,1)), 1.0, 10.0).Shape(); // z=-1..9
+    TopoDS_Shape cone = BRepPrimAPI_MakeCone(
+        gp_Ax2(gp_Pnt(5,5,8), gp_Dir(0,0,1)), 1.0, 3.0, 2.0).Shape(); // z8 r1 → z10 r3
+    TopoDS_Shape part = BRepAlgoAPI_Cut(BRepAlgoAPI_Cut(box, shank).Shape(), cone).Shape();
+
+    Document doc;
+    int id = doc.addBody(part, "part");
+    TopoDS_Face wall = findCylWall(doc.getBody(id)); // the shank cylinder
+    ASSERT_FALSE(wall.IsNull());
+
+    MoveHoleOp op;
+    op.setBody(id);
+    op.setSeedWall(wall);
+    op.setMoveVector(gp_Vec(6, 0, 0));
+    EXPECT_FALSE(op.execute(doc)) << "countersunk hole has a varying profile - refuse";
+    EXPECT_TRUE(op.wasPocket()) << "flagged as an unsupported hole profile";
 }

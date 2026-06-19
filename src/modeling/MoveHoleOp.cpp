@@ -103,14 +103,24 @@ bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall
     gp_Vec N = entry->n;
     if (N.Magnitude() < 1e-9) return false;
 
-    // Pocket = a cap on the bore axis whose rim is its OUTER wire (a floor that
-    // closes the bore), as opposed to a second open mouth. Adjacent walls
-    // (normal ⊥ axis) are excluded by the parallel test.
+    // Only a SIMPLE straight through-hole (one constant cross-section) is
+    // supported. Along the bore axis there must be a second, OPPOSITE open mouth
+    // (the exit) and no other cap. Refuse otherwise, because the straight
+    // extrude-the-opening void can't represent:
+    //   • a floor on the axis  → pocket (blind hole), or
+    //   • a step on the axis   → counterbored / stepped hole, or
+    //   • no opposite mouth     → countersunk (cone+shank) / blind hole.
+    // m_wasPocket signals "recognized but unsupported profile" to the caller.
+    bool hasExit = false, hasFloorOrStep = false;
     for (const auto& nb : nbrs) {
-        if (!nb.rimInner && std::abs(nb.n.Dot(N)) > 0.99) { isPocket = true; break; }
+        if (std::abs(nb.n.Dot(N)) <= 0.99) continue;       // adjacent wall, skip
+        if (!nb.rimInner) { hasFloorOrStep = true; continue; } // floor / step cap
+        if (nb.n.Dot(N) < -0.99) hasExit = true;            // opposite open mouth
     }
-    if (isPocket) {
-        std::fprintf(stderr, "[MoveHole] refused: selection is a pocket (blind hole)\n");
+    if (hasFloorOrStep || !hasExit) {
+        isPocket = true;
+        std::fprintf(stderr, "[MoveHole] refused: not a simple through-hole "
+                     "(pocket / countersunk / counterbored / stepped)\n");
         return false;
     }
 

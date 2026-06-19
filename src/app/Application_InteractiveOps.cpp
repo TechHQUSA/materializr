@@ -1663,8 +1663,8 @@ void Application::beginMoveFace(FaceXform kind) {
                 return;
             }
             if (pocket) {
-                showToast("Moving a pocket isn't supported yet \xE2\x80\x94 only "
-                          "through-holes.");
+                showToast("Only simple through-holes can be moved for now "
+                          "\xE2\x80\x94 not pockets, countersunk, or stepped holes.");
                 return;
             }
         }
