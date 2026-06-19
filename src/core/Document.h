@@ -117,6 +117,11 @@ public:
 
     // Sketch management
     int addSketch(std::shared_ptr<materializr::Sketch> sketch, const std::string& name = "");
+    // Insert/replace a sketch under a SPECIFIC id (mirrors putBody). Used by
+    // project load to preserve saved sketch ids so SketchEditOps — and extrude/
+    // push-pull ops — that reference a sketch by id rebind correctly on reload.
+    void putSketch(int id, std::shared_ptr<materializr::Sketch> sketch,
+                   const std::string& name = "");
     void removeSketch(int id);
     std::shared_ptr<materializr::Sketch> getSketch(int id) const;
     std::string getSketchName(int id) const;

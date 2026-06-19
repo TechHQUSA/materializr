@@ -554,9 +554,12 @@ void readSketch(std::istream& ifs, const std::string& startLine, Document& doc) 
     auto sk = std::make_shared<Sketch>();
     parseSketchBodyImpl(ifs, *sk, "SKETCH_END");
     sk->setSourceBody(source);
-    int newId = doc.addSketch(sk, name);
+    // Preserve the saved sketch id so SketchEditOps (and extrude/push-pull ops)
+    // that reference a sketch BY id rebind correctly on reload. Legacy files
+    // without a valid id (sid <= 0) fall back to a fresh assignment.
+    int newId = (sid > 0) ? (doc.putSketch(sid, sk, name), sid)
+                          : doc.addSketch(sk, name);
     doc.setSketchVisible(newId, visible != 0);
-    (void)sid; // sid is the original-file id; document assigns a fresh id on add
 }
 
 } // namespace
