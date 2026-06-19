@@ -93,3 +93,8 @@ add_test(NAME test_reload_edit COMMAND test_reload_edit)
 add_executable(test_move_hole test_move_hole.cpp)
 target_link_libraries(test_move_hole PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_move_hole COMMAND test_move_hole)
+
+# test_pushpull_normal — outward-normal correction on holed/annular faces
+add_executable(test_pushpull_normal test_pushpull_normal.cpp)
+target_link_libraries(test_pushpull_normal PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_pushpull_normal COMMAND test_pushpull_normal)

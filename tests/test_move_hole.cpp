@@ -118,6 +118,44 @@ TEST(MoveHole, RoundThroughHoleRelocatesAndConservesVolume) {
         << "no ghost face/edge left where the hole was (unified)";
 }
 
+// The face the hole pierces must keep its OUTWARD orientation after the move —
+// otherwise push/pull on that face reads inverted (BRepGProp_Face::Normal honors
+// the face's orientation flag). Regression guard for "push/pull goes the wrong
+// way on the top face after a hole move".
+TEST(MoveHole, PiercedFacePreservesOutwardOrientation) {
+    auto topNormalZ = [](const TopoDS_Shape& s) -> double {
+        // The planar face at z≈10 (the top): return its oriented normal's Z.
+        for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+            TopoDS_Face f = TopoDS::Face(ex.Current());
+            Handle(Geom_Surface) surf = BRep_Tool::Surface(f);
+            if (surf.IsNull() || !surf->IsKind(STANDARD_TYPE(Geom_Plane))) continue;
+            BRepGProp_Face gf(f);
+            double u1,u2,v1,v2; gf.Bounds(u1,u2,v1,v2);
+            gp_Pnt p; gp_Vec n; gf.Normal(0.5*(u1+u2),0.5*(v1+v2),p,n);
+            if (std::abs(n.Z()) > 0.9 && p.Z() > 9.9) return n.Z(); // top face
+        }
+        return 0.0;
+    };
+
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
+    TopoDS_Shape cyl = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,-1), gp_Dir(0,0,1)), 2.0, 12.0).Shape();
+    TopoDS_Shape part = BRepAlgoAPI_Cut(box, cyl).Shape();
+
+    Document doc;
+    int id = doc.addBody(part, "part");
+    double before = topNormalZ(doc.getBody(id));
+    ASSERT_GT(before, 0.5) << "top face starts outward (+Z)";
+
+    TopoDS_Face wall = findCylWall(doc.getBody(id));
+    MoveHoleOp op; op.setBody(id); op.setSeedWall(wall); op.setMoveVector(gp_Vec(6,0,0));
+    ASSERT_TRUE(op.execute(doc));
+
+    double after = topNormalZ(doc.getBody(id));
+    EXPECT_GT(after, 0.5) << "top face must stay outward (+Z) after the move "
+                             "- else push/pull inverts on it";
+}
+
 TEST(MoveHole, SquareThroughHoleRelocates) {
     // 20×20×10 box with a 4×4 square hole through Z, centred at (6,6).
     TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();

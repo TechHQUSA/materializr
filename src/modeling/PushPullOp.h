@@ -16,7 +16,14 @@
 // ON, a thin-body overshoot, or a classifier throw — returns `normal`
 // UNCHANGED, so the cases the PushPullOp war story protects (pockets, cavity
 // walls, thin bodies, curved/axis faces) are provably untouched.
-gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid,
+//
+// `face` is the planar face being probed: the classifier samples a point that
+// genuinely lies on its MATERIAL, because a holed/annular face's parametric
+// centre can fall inside a hole — there both ±ε probes read OUTSIDE, the verdict
+// is "ambiguous", and a reversed face would be left inverted (push/pull then
+// runs backwards on it). `center` is used as the probe point when it's on the
+// material, else a sampled interior point is used.
+gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid, const TopoDS_Face& face,
                               const gp_Pnt& center, const gp_Vec& normal);
 
 class PushPullOp : public Operation {

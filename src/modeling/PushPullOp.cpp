@@ -15,6 +15,10 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
+#include <BRepTools.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <gp_Pnt2d.hxx>
 #include <Bnd_Box.hxx>
 #include <BRep_Tool.hxx>
 #include <Geom_CylindricalSurface.hxx>
@@ -29,7 +33,39 @@
 #include <cmath>
 #include <unordered_set>
 
-gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid,
+// A point that genuinely lies on the face's MATERIAL. Returns `center` when it's
+// already inside the trimmed face; otherwise samples a UV grid (rejecting points
+// in holes via the face classifier) — so a holed/annular face whose parametric
+// centre falls in a hole still yields a usable probe point. False if none found.
+static bool faceMaterialPoint(const TopoDS_Face& face, const gp_Pnt& center,
+                              gp_Pnt& out) {
+    if (face.IsNull()) return false;
+    Handle(Geom_Surface) s = BRep_Tool::Surface(face);
+    if (s.IsNull()) return false;
+    double u1, u2, v1, v2;
+    BRepTools::UVBounds(face, u1, u2, v1, v2);
+    BRepTopAdaptor_FClass2d cls(face, 1e-7);
+    // Prefer the supplied centre if it projects onto material.
+    GeomAPI_ProjectPointOnSurf proj(center, s, u1, u2, v1, v2);
+    if (proj.NbPoints() > 0) {
+        double pu, pv; proj.LowerDistanceParameters(pu, pv);
+        if (proj.LowerDistance() < 1e-6 &&
+            cls.Perform(gp_Pnt2d(pu, pv)) == TopAbs_IN) { out = center; return true; }
+    }
+    const int N = 9;
+    for (int i = 1; i < N; ++i)
+        for (int j = 1; j < N; ++j) {
+            double u = u1 + (u2 - u1) * i / N;
+            double v = v1 + (v2 - v1) * j / N;
+            if (cls.Perform(gp_Pnt2d(u, v)) == TopAbs_IN) {
+                out = s->Value(u, v);
+                return true;
+            }
+        }
+    return false;
+}
+
+gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid, const TopoDS_Face& face,
                               const gp_Pnt& center, const gp_Vec& normal) {
     if (solid.IsNull() || normal.Magnitude() < 1e-10) return normal;
     try {
@@ -45,9 +81,14 @@ gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid,
             double diag = gp_Vec(xmax - xmin, ymax - ymin, zmax - zmin).Magnitude();
             eps = std::min(0.05, std::max(1e-4, diag * 5e-4));
         }
+        // Probe from a point ON the face material — NOT the parametric centre,
+        // which for a holed/annular face lands in a hole and makes both ±ε
+        // probes read OUTSIDE (ambiguous → a reversed face stays inverted).
+        gp_Pnt probe = center;
+        faceMaterialPoint(face, center, probe);
         gp_Vec u = normal.Normalized();
-        BRepClass3d_SolidClassifier cPlus (solid, center.Translated(u *  eps), 1e-7);
-        BRepClass3d_SolidClassifier cMinus(solid, center.Translated(u * -eps), 1e-7);
+        BRepClass3d_SolidClassifier cPlus (solid, probe.Translated(u *  eps), 1e-7);
+        BRepClass3d_SolidClassifier cMinus(solid, probe.Translated(u * -eps), 1e-7);
         // Unambiguous inverted pair: +normal lands INSIDE material, −normal
         // OUTSIDE. Only then is the trusted normal genuinely backwards.
         if (cPlus.State() == TopAbs_IN && cMinus.State() == TopAbs_OUT) {
@@ -226,7 +267,7 @@ bool PushPullOp::execute(Document& doc) {
                     // cavity walls and thin bodies don't produce that reading,
                     // so they're left exactly as the war story requires.
                     faceNormal = correctedOutwardNormal(
-                        doc.getBody(tgt.sourceBodyId), center, faceNormal);
+                        doc.getBody(tgt.sourceBodyId), tgt.profile, center, faceNormal);
                 }
             }
         } catch (...) {}

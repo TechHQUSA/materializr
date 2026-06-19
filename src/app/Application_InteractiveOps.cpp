@@ -1363,7 +1363,7 @@ void Application::beginPushPull() {
                     // direction (bug #5). Untouched for curved/axis faces and
                     // for every reading that isn't an unambiguous inverted pair.
                     dir = correctedOutwardNormal(
-                        m_document->getBody(tgt0.sourceBodyId), c, dir);
+                        m_document->getBody(tgt0.sourceBodyId), f, c, dir);
                 }
                 m_pushPullNormal = glm::normalize(glm::vec3(dir.X(), dir.Y(), dir.Z()));
                 m_pushPullOrigin = glm::vec3(c.X(), c.Y(), c.Z());
