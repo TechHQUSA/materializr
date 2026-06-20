@@ -32,3 +32,6 @@ dist/
 # User project files (test artifacts, user data)
 *.materializr
 build-desktop/
+
+# Abandoned Play Store packaging (aab + store graphics) — kept locally, not published
+packaging/playstore/
