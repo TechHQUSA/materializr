@@ -57,97 +57,109 @@ gp_Vec faceNormal(const TopoDS_Face& f) {
 
 } // namespace
 
-bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall,
+bool MoveHoleOp::buildVoid(const TopoDS_Shape& body,
+                           const std::vector<TopoDS_Face>& selectedWalls,
                            TopoDS_Shape& voidOut, gp_Vec& entryNormal,
                            bool& isPocket, TopoDS_Wire* entryOpening) {
     isPocket = false;
-    if (body.IsNull() || seedWall.IsNull()) return false;
+    if (body.IsNull() || selectedWalls.empty()) return false;
 
     TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
     TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
 
-    // Gather the hole's ACTUAL interior faces (walls, cones, counterbore steps —
-    // any segment), and the two outer MOUTHS the bore opens through. This is
-    // section-agnostic AND profile-agnostic: it reconstructs the exact void by
-    // its real faces, so a countersink (cone+shank) or a counterbore (two
-    // cylinders + a step annulus) rebuilds correctly, not just a constant prism.
-    //
-    // BFS from the clicked wall. For each face's edge, the adjacent face is a
-    // MOUTH if it's planar and the edge lies on one of its INNER wires (the bore
-    // pierces it → that inner wire is the opening). Otherwise it's another
-    // interior face of the hole (another wall, a cone, or a step — whose own
-    // outer boundary the edge sits on) → keep walking. A pocket floor would also
-    // be gathered as an interior face, leaving only ONE mouth, which we reject.
-    std::vector<TopoDS_Face> walls;
-    TopTools_MapOfShape inSet;
-    std::vector<std::pair<TopoDS_Face, TopoDS_Wire>> mouths; // (cap face, opening loop)
-    TopTools_MapOfShape mouthSeen;
+    // Does edge e touch a face in `set` other than `self`?
+    auto edgeTouchesSet = [&](const TopoDS_Edge& e, const TopTools_MapOfShape& set,
+                              const TopoDS_Face& self) {
+        if (!edgeFaces.Contains(e)) return false;
+        const TopTools_ListOfShape& fl = edgeFaces.FindFromKey(e);
+        for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next()) {
+            TopoDS_Face f = TopoDS::Face(it.Value());
+            if (!f.IsSame(self) && set.Contains(f)) return true;
+        }
+        return false;
+    };
+    auto wireBordersSet = [&](const TopoDS_Wire& W, const TopTools_MapOfShape& set,
+                              const TopoDS_Face& self) {
+        for (TopExp_Explorer we(W, TopAbs_EDGE); we.More(); we.Next())
+            if (edgeTouchesSet(TopoDS::Edge(we.Current()), set, self)) return true;
+        return false;
+    };
 
-    std::vector<TopoDS_Face> stack;
-    stack.push_back(seedWall);
-    inSet.Add(seedWall);
-    walls.push_back(seedWall);
-    while (!stack.empty()) {
-        TopoDS_Face W = stack.back(); stack.pop_back();
-        for (TopExp_Explorer ex(W, TopAbs_EDGE); ex.More(); ex.Next()) {
-            const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
-            if (!edgeFaces.Contains(e)) continue;
-            const TopTools_ListOfShape& fl = edgeFaces.FindFromKey(e);
-            for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next()) {
-                TopoDS_Face f = TopoDS::Face(it.Value());
-                if (f.IsSame(W) || inSet.Contains(f)) continue;
-                // Mouth? planar + the edge is on one of f's inner wires.
-                TopoDS_Wire opening;
-                if (isPlanar(f)) {
-                    TopoDS_Wire outer = BRepTools::OuterWire(f);
-                    if (!wireHasEdge(outer, e)) {
-                        for (TopoDS_Iterator wi(f); wi.More(); wi.Next()) {
-                            if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
-                            TopoDS_Wire w = TopoDS::Wire(wi.Value());
-                            if (w.IsSame(outer)) continue;
-                            if (wireHasEdge(w, e)) { opening = w; break; }
-                        }
-                    }
+    // SELECTION-DRIVEN void: bounded by exactly the SELECTED walls, plus any
+    // CONNECTOR face fully wedged between them (a counterbore's step annulus when
+    // BOTH its cylinders are selected). So one segment selected → that segment
+    // moves; all segments selected → the whole stepped hole moves; a simple hole
+    // (one wall) → the whole hole.
+    TopTools_MapOfShape wallSet;
+    for (const auto& w : selectedWalls) wallSet.Add(w);
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (TopExp_Explorer fx(body, TopAbs_FACE); fx.More(); fx.Next()) {
+            TopoDS_Face F = TopoDS::Face(fx.Current());
+            if (wallSet.Contains(F)) continue;
+            bool anyWire = false, allShared = true;
+            for (TopoDS_Iterator wi(F); wi.More(); wi.Next()) {
+                if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
+                anyWire = true;
+                if (!wireBordersSet(TopoDS::Wire(wi.Value()), wallSet, F)) {
+                    allShared = false; break;
                 }
-                if (!opening.IsNull()) {
-                    if (!mouthSeen.Contains(f)) {
-                        mouthSeen.Add(f);
-                        mouths.emplace_back(f, opening);
-                    }
-                } else {
-                    inSet.Add(f);
-                    walls.push_back(f);
-                    stack.push_back(f);
+            }
+            if (anyWire && allShared) { wallSet.Add(F); changed = true; }
+        }
+    }
+
+    // Sew the wall faces, then cap every interface where the wall set meets the
+    // rest of the body. A planar boundary face met along its OUTER wire (a step
+    // annulus, a pocket floor) is used AS-IS so any hole through it (the shank)
+    // is preserved; a bore opening (an outer face's INNER wire) or a non-planar
+    // junction gets a synthesized planar cap over the interface loop.
+    BRepBuilderAPI_Sewing sew(1e-6);
+    for (TopExp_Explorer fx(body, TopAbs_FACE); fx.More(); fx.Next()) {
+        TopoDS_Face F = TopoDS::Face(fx.Current());
+        if (wallSet.Contains(F)) sew.Add(F);
+    }
+
+    int mouthCount = 0;
+    bool haveEntry = false;
+    for (TopExp_Explorer fx(body, TopAbs_FACE); fx.More(); fx.Next()) {
+        TopoDS_Face F = TopoDS::Face(fx.Current());
+        if (wallSet.Contains(F)) continue;
+        TopoDS_Wire outer = isPlanar(F) ? BRepTools::OuterWire(F) : TopoDS_Wire();
+        // Real boundary face: planar, and its OUTER wire borders the wall set.
+        if (!outer.IsNull() && wireBordersSet(outer, wallSet, F)) {
+            sew.Add(F);
+            continue;
+        }
+        // Otherwise cap each bordering (inner / non-planar) interface loop.
+        for (TopoDS_Iterator wi(F); wi.More(); wi.Next()) {
+            if (wi.Value().ShapeType() != TopAbs_WIRE) continue;
+            TopoDS_Wire W = TopoDS::Wire(wi.Value());
+            if (!wireBordersSet(W, wallSet, F)) continue;
+            BRepBuilderAPI_MakeFace mf(W, Standard_True /*only plane*/);
+            if (!mf.IsDone()) {
+                std::fprintf(stderr, "[MoveHole] cap face failed\n");
+                return false;
+            }
+            sew.Add(mf.Face());
+            if (isPlanar(F)) {          // an opening through an outer face = a mouth
+                ++mouthCount;
+                if (!haveEntry) {
+                    entryNormal = faceNormal(F);
+                    if (entryOpening) *entryOpening = W;
+                    haveEntry = true;
                 }
             }
         }
     }
 
-    // A through-hole opens at exactly two mouths. One mouth (+ a gathered floor)
-    // = a pocket; zero or >2 = unrecognized. Either way, refuse (for now).
-    if (mouths.size() != 2) {
-        isPocket = true; // "recognized but unsupported profile" → caller toasts
-        std::fprintf(stderr, "[MoveHole] refused: %zu mouths (need 2 for a "
-                     "through-hole; pocket/blind/odd)\n", mouths.size());
+    if (mouthCount < 1 || !haveEntry || entryNormal.Magnitude() < 1e-9) {
+        isPocket = true; // no opening to the outside → can't form a movable void
+        std::fprintf(stderr, "[MoveHole] refused: no open mouth in selection\n");
         return false;
     }
-    entryNormal = faceNormal(mouths[0].first);
-    if (entryNormal.Magnitude() < 1e-9) return false;
-    if (entryOpening) *entryOpening = mouths[0].second; // the hole's top rim
 
-    // Sew the interior faces + a cap over each mouth opening into a closed shell,
-    // then a solid — the exact hole void, whatever its axial profile. Caps reuse
-    // the mouths' real inner-wire edges, so they sew to the walls seamlessly.
-    BRepBuilderAPI_Sewing sew(1e-6);
-    for (const auto& w : walls) sew.Add(w);
-    for (const auto& m : mouths) {
-        BRepBuilderAPI_MakeFace mf(m.second, Standard_True /*only plane*/);
-        if (!mf.IsDone()) {
-            std::fprintf(stderr, "[MoveHole] could not cap a mouth\n");
-            return false;
-        }
-        sew.Add(mf.Face());
-    }
     sew.Perform();
     TopoDS_Shape sewn = sew.SewedShape();
     if (sewn.IsNull()) { std::fprintf(stderr, "[MoveHole] sewing failed\n"); return false; }
@@ -169,13 +181,13 @@ bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall
 bool MoveHoleOp::execute(Document& doc) {
     m_wasPocket = false;
     TopoDS_Shape body = doc.getBody(m_bodyId);
-    if (body.IsNull() || m_seedWall.IsNull()) return false;
+    if (body.IsNull() || m_seedWalls.empty()) return false;
     m_previousShape = body;
 
     TopoDS_Shape voidSolid;
     gp_Vec entryNormal;
-    if (!buildVoid(body, m_seedWall, voidSolid, entryNormal, m_wasPocket))
-        return false; // pocket or unrecognized → caller toasts
+    if (!buildVoid(body, m_seedWalls, voidSolid, entryNormal, m_wasPocket))
+        return false; // unrecognized selection → caller toasts
 
     // Project the requested move onto the entry plane (a hole slides ACROSS its
     // face, never along the bore — that would just deepen/shorten it).

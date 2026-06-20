@@ -184,7 +184,7 @@ TEST(MoveHole, SquareThroughHoleRelocates) {
     EXPECT_EQ(countFaces(moved), f0) << "no ghost face/edge left behind";
 }
 
-TEST(MoveHole, PocketIsRefused) {
+TEST(MoveHole, PocketRelocates) {
     // 20×20×10 box with a BLIND Ø4 pocket from the top (z=10) down to z=4.
     TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
     TopoDS_Shape cyl = BRepPrimAPI_MakeCylinder(
@@ -201,8 +201,12 @@ TEST(MoveHole, PocketIsRefused) {
     op.setBody(id);
     op.setSeedWall(wall);
     op.setMoveVector(gp_Vec(6, 0, 0));
-    EXPECT_FALSE(op.execute(doc)) << "pocket move must be refused (v1)";
-    EXPECT_TRUE(op.wasPocket());
+    // Selection-driven model treats a pocket as a single movable segment.
+    ASSERT_TRUE(op.execute(doc)) << "pocket now moves as one segment";
+    TopoDS_Shape moved = doc.getBody(id);
+    EXPECT_TRUE(isSolidAt(moved, 5,5,7))   << "old pocket filled";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,7)) << "new pocket is void";
+    EXPECT_TRUE(isSolidAt(moved, 5,5,2))   << "below the blind floor stays solid";
 }
 
 TEST(MoveHole, CountersunkHoleRelocates) {
@@ -248,14 +252,16 @@ TEST(MoveHole, CounterboreHoleRelocates) {
     Document doc;
     int id = doc.addBody(part, "part");
     double v0 = volume(part);
-    TopoDS_Face wall = findCylByRadius(doc.getBody(id), 3.0); // the visible recess wall
-    ASSERT_FALSE(wall.IsNull());
+    TopoDS_Face recessW = findCylByRadius(doc.getBody(id), 3.0);
+    TopoDS_Face shankW  = findCylByRadius(doc.getBody(id), 1.0);
+    ASSERT_FALSE(recessW.IsNull()); ASSERT_FALSE(shankW.IsNull());
 
+    // Whole stepped hole = select BOTH segments' walls.
     MoveHoleOp op;
     op.setBody(id);
-    op.setSeedWall(wall);
+    op.setSeedWalls({recessW, shankW});
     op.setMoveVector(gp_Vec(6, 0, 0));      // → centred (11,5)
-    ASSERT_TRUE(op.execute(doc)) << "counterbore (two diameters + step) should move";
+    ASSERT_TRUE(op.execute(doc)) << "whole counterbore (both walls) should move";
 
     TopoDS_Shape moved = doc.getBody(id);
     EXPECT_NEAR(volume(moved), v0, 1e-6);
@@ -263,4 +269,33 @@ TEST(MoveHole, CounterboreHoleRelocates) {
     EXPECT_TRUE(isSolidAt(moved, 5,5,8.5))  << "old recess filled";
     EXPECT_FALSE(isSolidAt(moved, 11,5,3))  << "new shank is void";
     EXPECT_FALSE(isSolidAt(moved, 11,5,8.5))<< "new recess is void";
+}
+
+TEST(MoveHole, CounterboreShankSegmentMovesAlone) {
+    // Same counterbore; selecting ONLY the shank moves just the shank, leaving
+    // the recess where it was (the selection-driven point).
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 10).Shape();
+    TopoDS_Shape shank = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,-1), gp_Dir(0,0,1)), 1.0, 12.0).Shape();
+    TopoDS_Shape recess = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(5,5,7), gp_Dir(0,0,1)), 3.0, 4.0).Shape();
+    TopoDS_Shape part = BRepAlgoAPI_Cut(BRepAlgoAPI_Cut(box, shank).Shape(), recess).Shape();
+
+    Document doc;
+    int id = doc.addBody(part, "part");
+    double v0 = volume(part);
+    TopoDS_Face shankW = findCylByRadius(doc.getBody(id), 1.0);
+    ASSERT_FALSE(shankW.IsNull());
+
+    MoveHoleOp op;
+    op.setBody(id);
+    op.setSeedWall(shankW);                 // shank segment only
+    op.setMoveVector(gp_Vec(6, 0, 0));
+    ASSERT_TRUE(op.execute(doc)) << "shank-only segment should move";
+
+    TopoDS_Shape moved = doc.getBody(id);
+    EXPECT_NEAR(volume(moved), v0, 1e-6) << "shank same size, relocated";
+    EXPECT_TRUE(isSolidAt(moved, 5,5,2))   << "old shank (below recess) filled";
+    EXPECT_FALSE(isSolidAt(moved, 11,5,2)) << "new shank is void";
+    EXPECT_FALSE(isSolidAt(moved, 5,5,9))  << "recess stayed put (still void)";
 }

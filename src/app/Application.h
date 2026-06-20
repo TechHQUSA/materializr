@@ -288,7 +288,7 @@ private:
     // MoveHoleOp (slide a through-hole across its face) instead of a face shear.
     // Set when the Move selection is a recognizable hole wall (see beginMoveFace).
     bool m_moveHoleMode = false;
-    TopoDS_Face m_moveHoleWall;              // the clicked hole-wall seed face
+    std::vector<TopoDS_Face> m_moveHoleWalls; // the selected hole-wall face(s)
     int  m_moveFaceBodyId = -1;
     TopoDS_Face  m_moveFaceFace;
     TopoDS_Shape m_moveFacePreviousShape;    // snapshot for preview / restore

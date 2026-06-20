@@ -23,9 +23,12 @@ public:
     ~MoveHoleOp() override = default;
 
     void setBody(int bodyId) { m_bodyId = bodyId; }
-    // A wall face of the hole the user clicked (one cylindrical face for a round
-    // hole, one of the flats for a square/polygon hole — the rest are gathered).
-    void setSeedWall(const TopoDS_Face& wall) { m_seedWall = wall; }
+    // The selected wall face(s). The void is built from exactly these (plus any
+    // connector face wedged between them), so selecting ONE segment of a stepped
+    // hole moves just that segment, while selecting ALL its segments moves the
+    // whole hole. A simple hole has one wall → the whole hole moves.
+    void setSeedWalls(std::vector<TopoDS_Face> walls) { m_seedWalls = std::move(walls); }
+    void setSeedWall(const TopoDS_Face& wall) { m_seedWalls = {wall}; }
     void setMoveVector(const gp_Vec& v) { m_move = v; }
 
     int getBodyId() const { return m_bodyId; }
@@ -48,15 +51,17 @@ public:
     // returns false) when it's a blind pocket. `entryNormal` is the outward
     // normal of the face the hole opens through (the plane the move slides in).
     // Static so the interactive layer can validate/preview a selection cheaply.
-    // `entryOpening` (optional) receives the entry mouth's loop — the hole's top
-    // rim — for the interactive move highlight.
-    static bool buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall,
+    // `entryOpening` (optional) receives an entry mouth's loop — a hole rim —
+    // for the interactive move highlight. `isPocket` here means "couldn't form a
+    // movable void from the selection" (no opening to the outside).
+    static bool buildVoid(const TopoDS_Shape& body,
+                          const std::vector<TopoDS_Face>& selectedWalls,
                           TopoDS_Shape& voidOut, gp_Vec& entryNormal,
                           bool& isPocket, TopoDS_Wire* entryOpening = nullptr);
 
 private:
     int m_bodyId = -1;
-    TopoDS_Face m_seedWall;
+    std::vector<TopoDS_Face> m_seedWalls;
     gp_Vec m_move{0.0, 0.0, 0.0};
     bool m_wasPocket = false;
     TopoDS_Shape m_previousShape; // for undo
