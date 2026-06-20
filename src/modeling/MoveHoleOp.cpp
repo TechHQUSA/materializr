@@ -59,7 +59,7 @@ gp_Vec faceNormal(const TopoDS_Face& f) {
 
 bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall,
                            TopoDS_Shape& voidOut, gp_Vec& entryNormal,
-                           bool& isPocket) {
+                           bool& isPocket, TopoDS_Wire* entryOpening) {
     isPocket = false;
     if (body.IsNull() || seedWall.IsNull()) return false;
 
@@ -133,6 +133,7 @@ bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall
     }
     entryNormal = faceNormal(mouths[0].first);
     if (entryNormal.Magnitude() < 1e-9) return false;
+    if (entryOpening) *entryOpening = mouths[0].second; // the hole's top rim
 
     // Sew the interior faces + a cap over each mouth opening into a closed shell,
     // then a solid — the exact hole void, whatever its axial profile. Caps reuse

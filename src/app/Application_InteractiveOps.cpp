@@ -1639,7 +1639,8 @@ void Application::beginMoveFace(FaceXform kind) {
             if (body.IsNull()) continue;
             TopoDS_Face wall = TopoDS::Face(e.shape);
             TopoDS_Shape voidSolid; gp_Vec entryN; bool pocket = false;
-            if (MoveHoleOp::buildVoid(body, wall, voidSolid, entryN, pocket)) {
+            TopoDS_Wire rim;
+            if (MoveHoleOp::buildVoid(body, wall, voidSolid, entryN, pocket, &rim)) {
                 // Gizmo set-up at the hole: plane = entry face, translate only.
                 m_moveHoleMode = true;
                 m_moveHoleWall = wall;
@@ -1659,6 +1660,29 @@ void Application::beginMoveFace(FaceXform kind) {
                 m_moveFaceAxisB = glm::normalize(glm::cross(N, m_moveFaceAxisA));
                 m_moveFaceGrab = -1;
                 m_moveFaceHalfExtent = 1.0f;
+                // Move highlight: the hole's top rim, sampled as a world-space
+                // polyline in loop[0] so the existing yellow-silhouette renderer
+                // draws it following the drag (m_moveFaceMoveOuter → loop[0]
+                // translates by the move vector). No hole sub-loops.
+                m_moveFaceSilhouetteLoops.clear();
+                m_moveFaceHoleSlant.clear();
+                m_moveFaceHoleVertical.clear();
+                m_moveFaceMoveOuter = true;
+                m_moveFacePendingRebuild = false;
+                if (!rim.IsNull()) {
+                    std::vector<glm::vec3> pts;
+                    for (BRepTools_WireExplorer we(rim); we.More(); we.Next()) {
+                        BRepAdaptor_Curve crv(we.Current());
+                        double f = crv.FirstParameter(), l = crv.LastParameter();
+                        if (we.Current().Orientation() == TopAbs_REVERSED) std::swap(f, l);
+                        const int Nseg = 16;
+                        for (int i = 0; i < Nseg; ++i) {
+                            gp_Pnt p = crv.Value(f + (l - f) * (double(i) / Nseg));
+                            pts.emplace_back(p.X(), p.Y(), p.Z());
+                        }
+                    }
+                    if (!pts.empty()) m_moveFaceSilhouetteLoops.push_back(pts);
+                }
                 m_moveFaceActive = true;
                 return;
             }

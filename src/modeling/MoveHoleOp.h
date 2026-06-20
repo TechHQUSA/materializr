@@ -3,6 +3,7 @@
 #include "../core/Document.h"
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Wire.hxx>
 #include <gp_Vec.hxx>
 #include <vector>
 #include <string>
@@ -47,9 +48,11 @@ public:
     // returns false) when it's a blind pocket. `entryNormal` is the outward
     // normal of the face the hole opens through (the plane the move slides in).
     // Static so the interactive layer can validate/preview a selection cheaply.
+    // `entryOpening` (optional) receives the entry mouth's loop — the hole's top
+    // rim — for the interactive move highlight.
     static bool buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall,
                           TopoDS_Shape& voidOut, gp_Vec& entryNormal,
-                          bool& isPocket);
+                          bool& isPocket, TopoDS_Wire* entryOpening = nullptr);
 
 private:
     int m_bodyId = -1;
