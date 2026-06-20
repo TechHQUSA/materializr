@@ -146,6 +146,18 @@ void Application::renderViewport() {
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+        // Viewport background tracks the UI theme: a soft light gradient in light
+        // mode, the dark gradient otherwise. (The grid switches to a dark-on-light
+        // line palette below so it stays readable on the light background.)
+        const bool lightBg = m_themeManager &&
+                             m_themeManager->getTheme() == Theme::Light;
+        if (lightBg) {
+            m_backgroundRenderer->setTopColor(glm::vec3(0.92f, 0.93f, 0.96f));
+            m_backgroundRenderer->setBottomColor(glm::vec3(0.78f, 0.80f, 0.85f));
+        } else {
+            m_backgroundRenderer->setTopColor(glm::vec3(0.22f, 0.22f, 0.28f));
+            m_backgroundRenderer->setBottomColor(glm::vec3(0.12f, 0.12f, 0.15f));
+        }
         m_backgroundRenderer->render();
         glEnable(GL_DEPTH_TEST);
 
@@ -256,7 +268,8 @@ void Application::renderViewport() {
                            gp, std::max(m_sketchGridStep, 0.01f),
                            minorAlpha, m_sketchGridOpacity /*globalAlpha*/,
                            sketching ? 1.0f : 0.0f /*sketchGrid: uniform single tier*/,
-                           sketching ? 0.0005f : -0.0005f /*depthBias*/);
+                           sketching ? 0.0005f : -0.0005f /*depthBias*/,
+                           lightBg ? 1.0f : 0.0f /*lightBg palette*/);
         };
         // Plugin-registered render passes (e.g. ConstructionPlanePlugin's
         // plane quads) draw between the grid/background and the body/edge

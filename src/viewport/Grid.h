@@ -46,11 +46,14 @@ public:
     /// lets a coplanar body face occlude it (the ground grid under a body). The
     /// grid never writes depth, so it blends over geometry rather than punching
     /// through it.
+    /// `lightBg` (0/1): 1 switches the grid to a dark-on-light line palette for
+    /// the light-theme viewport (lines stay readable against a light background).
     void render(const glm::mat4& view, const glm::mat4& projection,
                 const glm::vec3& fadeCenter, float fadeDistance,
                 const Plane& plane, float minorStep,
                 float minorAlpha = 1.0f, float globalAlpha = 0.55f,
-                float sketchGrid = 0.0f, float depthBias = 0.0005f);
+                float sketchGrid = 0.0f, float depthBias = 0.0005f,
+                float lightBg = 0.0f);
 
 private:
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
@@ -73,6 +76,7 @@ private:
     int m_locGlobalAlpha = -1;
     int m_locSketchGrid = -1;
     int m_locDepthBias = -1;
+    int m_locLightBg = -1;
 };
 
 } // namespace materializr

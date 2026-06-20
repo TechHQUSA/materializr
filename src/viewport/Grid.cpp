@@ -59,6 +59,7 @@ uniform float u_sketchGrid;    // 1 = sketch grid: one uniform tier (no plaid)
 uniform float u_depthBias;     // signed depth nudge: + toward camera (draw the
                                // grid ON a coplanar face, e.g. the sketch face),
                                // - away (let a coplanar body face occlude it)
+uniform float u_lightBg;       // 1 = light viewport: use dark-on-light line palette
 
 out vec4 fragColor;
 
@@ -115,6 +116,16 @@ void main() {
     // The finest (1×) tier, drawn with the anti-moiré pristine-grid coverage.
     float covMinor = gridCoverage(uv * u_scale, 1.3);
 
+    // Line palettes. On the dark viewport the lines are light and coarser tiers
+    // get BRIGHTER (more prominent); on the light viewport they flip to dark, and
+    // coarser tiers get DARKER, so the grid reads the same way against either
+    // background instead of washing out.
+    bool lightBg   = u_lightBg > 0.5;
+    vec3 sketchCol = lightBg ? vec3(0.34, 0.36, 0.42) : vec3(0.72, 0.75, 0.82);
+    vec3 minorCol  = lightBg ? vec3(0.60, 0.62, 0.68) : vec3(0.34, 0.34, 0.38);
+    vec3 majorCol  = lightBg ? vec3(0.38, 0.40, 0.47) : vec3(0.85, 0.87, 0.95);
+    vec3 megaCol   = lightBg ? vec3(0.18, 0.20, 0.27) : vec3(1.00, 1.00, 1.00);
+
     vec3  rgb;
     float a;
     if (u_sketchGrid > 0.5) {
@@ -123,20 +134,20 @@ void main() {
         // crossing finer ones, and the whole sheet dims as ONE layer under the
         // opacity slider. The pristine-grid coverage greys it out evenly when it
         // gets dense instead of moiréing; the slider is the brightness control.
-        rgb = vec3(0.72, 0.75, 0.82);
+        rgb = sketchCol;
         a   = covMinor * u_minorAlpha;
     } else {
         // WORLD / GROUND GRID: three tiers — minor (every 1), major (every 10),
-        // mega (every 100). The brighter 10- and 100-unit lines read on top;
+        // mega (every 100). The coarser 10- and 100-unit lines read on top;
         // zooming reveals finer tiers. Keeps the tiered look (the "10 mm /
         // 100 mm lines") the user wants on the ground grid.
         float covMajor = gridCoverage(uv * u_scale * 0.1,  1.3);
         float covMega  = gridCoverage(uv * u_scale * 0.01, 1.3);
-        rgb = vec3(0.34, 0.34, 0.38);
+        rgb = minorCol;
         a   = covMinor * u_minorAlpha;
-        rgb = mix(rgb, vec3(0.85, 0.87, 0.95), covMajor);
+        rgb = mix(rgb, majorCol, covMajor);
         a   = max(a, covMajor);
-        rgb = mix(rgb, vec3(1.00, 1.00, 1.00), covMega);
+        rgb = mix(rgb, megaCol, covMega);
         a   = max(a, covMega);
     }
 
@@ -205,6 +216,7 @@ bool Grid::initialize()
     m_locGlobalAlpha = glGetUniformLocation(m_shaderProgram, "u_globalAlpha");
     m_locSketchGrid = glGetUniformLocation(m_shaderProgram, "u_sketchGrid");
     m_locDepthBias = glGetUniformLocation(m_shaderProgram, "u_depthBias");
+    m_locLightBg = glGetUniformLocation(m_shaderProgram, "u_lightBg");
 
     // Create a dummy VAO (required for core profile, even with no vertex attributes)
     glGenVertexArrays(1, &m_vao);
@@ -216,7 +228,7 @@ void Grid::render(const glm::mat4& view, const glm::mat4& projection,
                   const glm::vec3& fadeCenter, float fadeDistance,
                   const Plane& plane, float minorStep,
                   float minorAlpha, float globalAlpha, float sketchGrid,
-                  float depthBias)
+                  float depthBias, float lightBg)
 {
     if (!m_shaderProgram) return;
 
@@ -238,6 +250,7 @@ void Grid::render(const glm::mat4& view, const glm::mat4& projection,
     glUniform1f(m_locGlobalAlpha, globalAlpha);
     glUniform1f(m_locSketchGrid, sketchGrid);
     glUniform1f(m_locDepthBias, depthBias);
+    glUniform1f(m_locLightBg, lightBg);
 
     // Enable blending for grid transparency
     glEnable(GL_BLEND);
