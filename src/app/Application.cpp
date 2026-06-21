@@ -1,5 +1,6 @@
 #include "ui/UiTheme.h"
 #include "gl_common.h"
+#include <SDL.h>
 
 #include <cstdlib>
 #include <chrono>
@@ -634,7 +635,8 @@ void Application::showToast(const std::string& text, double seconds) {
 }
 
 void Application::renderTransientToast() {
-    if (m_toastText.empty() || ImGui::GetTime() > m_toastExpiry) return;
+    if (m_toastText.empty()) return;
+    if (ImGui::GetTime() > m_toastExpiry) { m_toastText.clear(); return; }
     ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
         ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
