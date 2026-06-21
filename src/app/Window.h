@@ -24,7 +24,12 @@ public:
     bool shouldClose() const { return m_shouldClose; }
     void requestClose(bool close = true) { m_shouldClose = close; }
     void swapBuffers();
-    void pollEvents();   // pumps SDL events and forwards them to the ImGui backend
+    // Pump SDL events and forward them to the ImGui backend. If waitMs > 0,
+    // blocks up to that many milliseconds for the first event before draining
+    // (use this when idle to sleep instead of busy-spinning).
+    // Returns: 0 = no events, 1 = trivial only (mouse motion, expose),
+    //          2 = significant (click, key, scroll, resize, focus, touch).
+    int pollEvents(int waitMs = 0);
 
     // Drawable (framebuffer) size in pixels — may exceed window size on HiDPI.
     void framebufferSize(int& w, int& h) const;

@@ -4499,7 +4499,35 @@ void Application::run() {
     m_pendingSketchRecovery = materializr::hasSketchDraft();
 
     while (true) {
-        m_window->pollEvents();
+        // True while any interactive tool or animation is in flight and needs
+        // continuous rendering even with no user input.
+        auto hasActiveWork = [&]() -> bool {
+            if (m_pushPullActive || m_gizmoDragging || m_edgeOpActive ||
+                m_resizeCylActive || m_moveFaceActive || m_revolveActive ||
+                m_inSketchMode || m_deferredHeavyTask || m_showUpdatePopup ||
+                !m_toastText.empty())
+                return true;
+            for (auto* c : m_iops) if (c && c->active()) return true;
+            if (PluginRegistry::instance().activeTool()) return true;
+            return false;
+        };
+
+        // When idle, block up to 500 ms for the next event. 500 ms is enough
+        // for autosave / update-check polling; anything interactive wakes us
+        // immediately via SDL events.
+        int waitMs = (m_wakeFrames == 0 && !hasActiveWork()) ? 500 : 0;
+        int eventLevel = m_window->pollEvents(waitMs);
+        // Significant events (click, key, scroll, resize, focus): 5 frames.
+        // Trivial events (mouse motion, expose): 25 frames — at 60 fps that is
+        // ~416 ms, enough for ImGui's default 300 ms hover-tooltip delay to fire
+        // AFTER the cursor stops moving. Without this extra tail, the tooltip
+        // timer freezes the moment we stop rendering (ImGui time only advances
+        // inside NewFrame). The idle timeout (eventLevel == 0) is not a trigger:
+        // we skip rendering until a real event or active work wakes us.
+        if (eventLevel >= 2)
+            m_wakeFrames = 5;
+        else if (eventLevel == 1)
+            m_wakeFrames = std::max(m_wakeFrames, 25);
 
         // Last frame's GL (driver/ImGui render) can leave the SSE FPU in
         // flush-to-zero / denormals-are-zero mode, which makes OCCT geometry —
@@ -4516,6 +4544,7 @@ void Application::run() {
             auto task = std::move(m_deferredHeavyTask);
             m_deferredHeavyTask = nullptr;
             task();
+            m_wakeFrames = 5; // task finished — repaint the result
         }
 
         // Apply the launch-time update check once its worker finishes — never
@@ -4532,6 +4561,7 @@ void Application::run() {
                 m_updateMessage    = "";
                 m_updateChecked    = true;
                 m_showUpdatePopup  = true;
+                m_wakeFrames = 5;
             }
         }
 
@@ -4549,6 +4579,12 @@ void Application::run() {
             requestClose();
             if (m_confirmedClose) break;
         }
+
+        // Skip rendering entirely when nothing has changed — saves ~30 % idle
+        // GPU on a static viewport. hasActiveWork() is re-evaluated after the
+        // deferred task and close checks above may have changed state.
+        if (m_wakeFrames == 0 && !hasActiveWork()) continue;
+        if (m_wakeFrames > 0) m_wakeFrames--;
 
         beginFrame();
         renderDockspace();

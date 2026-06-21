@@ -97,9 +97,48 @@ void Window::swapBuffers() {
     SDL_GL_SwapWindow(m_window);
 }
 
-void Window::pollEvents() {
+int Window::pollEvents(int waitMs) {
+    if (waitMs > 0) SDL_WaitEventTimeout(nullptr, waitMs);
+    // 0 = nothing, 1 = trivial (motion / expose), 2 = significant (click / key / scroll …)
+    int result = 0;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        // Classify the event before handing it to ImGui.
+        if (result < 2) {
+            switch (e.type) {
+                case SDL_KEYDOWN: case SDL_KEYUP:
+                case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
+                case SDL_MOUSEWHEEL:
+                case SDL_TEXTINPUT: case SDL_TEXTEDITING:
+                case SDL_DROPFILE:
+                case SDL_QUIT:
+                case SDL_FINGERDOWN: case SDL_FINGERUP:
+                    result = 2;
+                    break;
+                case SDL_WINDOWEVENT:
+                    switch (e.window.event) {
+                        case SDL_WINDOWEVENT_RESIZED:
+                        case SDL_WINDOWEVENT_SIZE_CHANGED:
+                        case SDL_WINDOWEVENT_FOCUS_GAINED:
+                        case SDL_WINDOWEVENT_FOCUS_LOST:
+                        case SDL_WINDOWEVENT_SHOWN:
+                        case SDL_WINDOWEVENT_RESTORED:
+                        case SDL_WINDOWEVENT_MAXIMIZED:
+                        case SDL_WINDOWEVENT_MINIMIZED:
+                            result = 2; break;
+                        default: // EXPOSED and others — need 1 repaint, not 5
+                            if (result < 1) result = 1; break;
+                    }
+                    break;
+                case SDL_MOUSEMOTION:
+                case SDL_FINGERMOTION:
+                    if (result < 1) result = 1;
+                    break;
+                default:
+                    if (result < 1) result = 1;
+                    break;
+            }
+        }
 #if defined(__ANDROID__)
         // Touch gestures, handled directly (SDL's own touch->mouse synthesis is
         // off). One finger drives the left mouse (tap = select, drag = orbit in
@@ -130,6 +169,7 @@ void Window::pollEvents() {
     pumpSyntheticRightClick();   // play back a queued long-press context-menu click
 #endif
     SDL_GetWindowSize(m_window, &m_width, &m_height);
+    return result;
 }
 
 #if defined(__ANDROID__)

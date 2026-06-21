@@ -116,6 +116,9 @@ private:
     // A heavy op deferred from a controller commit to run between frames, where
     // renderProgressFrame can pump its own frames without nesting ImGui frames.
     std::function<void()> m_deferredHeavyTask;
+    // Idle-render throttle: counts down frames to render after the last event
+    // or active-work wakeup. Zero = skip the frame and sleep for the next event.
+    int m_wakeFrames = 0;
     // True only while a load is tessellating in the deferred slot: tells
     // rebuildMeshes to pump a per-body progress frame (safe between frames).
     bool m_pumpMeshProgress = false;
