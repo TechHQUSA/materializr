@@ -28,7 +28,10 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
-#include <TopTools_ListIteratorOfListOfShape.hxx>
+// The TopTools_ListIteratorOfListOfShape typedef comes from TopTools_ListOfShape.hxx;
+// the standalone <...ListIteratorOfListOfShape.hxx> shim header was removed in OCCT
+// 8.0 (the vcpkg/MSVC Windows build), so include the list header instead.
+#include <TopTools_ListOfShape.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Pnt.hxx>
 #include <cstdio>
