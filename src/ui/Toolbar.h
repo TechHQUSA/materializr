@@ -72,6 +72,7 @@ public:
     // the "Edit Diameter" button in Face Operations when the picked face is a
     // cylinder on a recognized cylinder-or-tube body.
     void setCanEditDiameter(bool b) { m_canEditDiameter = b; }
+    void setSelectedFaceFrozenRound(bool b) { m_selFrozenRound = b; }
 
     // Active SketchToolMode (int — Toolbar avoids depending on SketchTool.h).
     // Matches SketchToolMode enum: 0=None, 1=Select, 2=Line, 3=Circle,
@@ -130,6 +131,7 @@ private:
     bool m_cameraOrtho = true;
     bool m_snapToGrid = true;
     bool m_canEditDiameter = false;
+    bool m_selFrozenRound  = false;
     bool m_showTooltips = true;
     int  m_activeSketchMode = 0; // SketchToolMode (see setActiveSketchMode)
     int  m_selPoints = 0;        // sketch points currently selected (see setSketchSelectionCounts)

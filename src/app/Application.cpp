@@ -110,6 +110,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Geom_Plane.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <Geom_ToroidalSurface.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Elips.hxx>
@@ -4566,6 +4567,46 @@ void Application::run() {
             // here, those are only used by the actual begin path.
             m_toolbar->setCanEditDiameter(!m_resizeCylActive &&
                                           detectCylindricalResizeCandidate());
+            // "Frozen round" hint: a selected fillet-shaped face (cylinder /
+            // torus) that NO enabled op owns reloaded as baked geometry — there's
+            // no editable FilletOp behind it. The toolbar surfaces a one-liner
+            // pointing at Repair Geometry. A FULL 2π cylinder is a hole / pin
+            // (Edit Diameter handles it), not a round, so it's excluded.
+            {
+                bool frozenRound = false;
+                TopoDS_Shape pf;
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == SelectionType::Face && !e.shape.IsNull()) {
+                        pf = e.shape; break;
+                    }
+                if (!pf.IsNull() && pf.ShapeType() == TopAbs_FACE) {
+                    try {
+                        TopoDS_Face f = TopoDS::Face(pf);
+                        Handle(Geom_Surface) s = BRep_Tool::Surface(f);
+                        bool round = false;
+                        if (!s.IsNull()) {
+                            if (s->IsKind(STANDARD_TYPE(Geom_ToroidalSurface))) {
+                                round = true; // curved-edge fillet
+                            } else if (s->IsKind(STANDARD_TYPE(Geom_CylindricalSurface))) {
+                                double u1, u2, v1, v2;
+                                BRepTools::UVBounds(f, u1, u2, v1, v2);
+                                round = (u2 - u1) < 2.0 * M_PI - 0.05; // partial = fillet
+                            }
+                        }
+                        if (round) {
+                            frozenRound = true; // assume frozen until an op claims it
+                            for (const auto& op : m_history->operations())
+                                if (op && op->isEnabled() && op->ownsFace(pf) &&
+                                    (op->typeId() == "fillet" ||
+                                     op->typeId() == "chamfer")) {
+                                    frozenRound = false;
+                                    break;
+                                }
+                        }
+                    } catch (...) {}
+                }
+                m_toolbar->setSelectedFaceFrozenRound(frozenRound);
+            }
             m_toolbar->setShowTooltips(m_showToolbarTooltips);
             // Mirror the live inference level (Full/Reduced/Off) so the sketch
             // toolbar button shows the current state. Int to keep Toolbar free

@@ -582,6 +582,17 @@ ToolAction Toolbar::renderFaceTools() {
         }
     }
 
+    // Frozen-round hint: a fillet-shaped face with no editable op behind it
+    // (an older save's baked geometry). "Edit Fillet" can't appear for it, so
+    // point the user at Repair Geometry — restore the edge, then re-fillet.
+    if (m_selFrozenRound) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
+        ImGui::TextColored(materializr::dimText(),
+            "This round is frozen (saved before edit support). Use Repair "
+            "Geometry above to restore the sharp edge, then re-fillet.");
+        ImGui::PopTextWrapPos();
+    }
+
     // Construction-plane / -axis creation from the selected face(s).
     renderAddPlaneMenu();
     renderAddAxisMenu();
