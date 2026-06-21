@@ -13,6 +13,7 @@
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/Operation.h"
+#include "io/ProjectIO.h"
 #include "modeling/FilletOp.h"
 #include "modeling/BooleanOp.h"
 #include "modeling/DeleteOp.h"
@@ -144,6 +145,89 @@ TEST(ReloadEdit, EditingFilletUpstreamOfReloadedBooleanPropagates) {
     EXPECT_LT(vAfter, vBefore - 1.0)
         << "the fillet edit did not propagate through the reloaded boolean "
            "(vBefore=" << vBefore << " vAfter=" << vAfter << ")";
+}
+
+// REAL file round-trip: a fillet saved to a .materializr file and re-loaded must
+// come back EDITABLE. The other ReloadEdit tests simulate reload in memory (they
+// hand-build the params + reload shapes), so they can't see a BREP edge-ordering
+// change across the file write/read that would make the saved edge index resolve
+// to the WRONG edge — which would silently un-edit every reloaded fillet. This
+// test actually writes the file and reads it back.
+TEST(ReloadEdit, FilletSurvivesRealFileRoundTrip) {
+    // 1. Box + fillet, run for real.
+    Document src;
+    int B = src.addBody(boxAt(0, 0, 0), "B");
+    const TopoDS_Shape B0 = src.getBody(B);
+    FilletOp f0;
+    f0.setBody(B);
+    f0.setEdges(firstEdge(B0));
+    f0.setRadius(1.0);
+    ASSERT_TRUE(f0.execute(src));
+    const TopoDS_Shape Bf = src.getBody(B);
+    const double vSaved = volume(src, B);
+
+    // 2. Build the savable ProjectHistory (mirrors Application's save loop).
+    using materializr::ProjectHistory;
+    using materializr::ProjectHistoryStep;
+    using materializr::ProjectIO;
+    ProjectHistory hist;
+    hist.present = true;
+    hist.initialState = {{B, B0}};
+    ProjectHistoryStep st;
+    st.typeId      = f0.typeId();          // "fillet"
+    st.name        = f0.name();
+    st.description = f0.description();
+    st.params      = f0.serializeParams(); // radius + edge index vs B0
+    st.changed     = {{B, Bf}};
+    hist.steps     = {st};
+    ASSERT_FALSE(st.params.empty()) << "fillet must serialise params to save";
+
+    // 3. Save to a temp file, then load it back into a fresh doc/history.
+    const std::string path = "/tmp/mtz_fillet_roundtrip.materializr";
+    ASSERT_TRUE(ProjectIO::save(path, src, &hist).success);
+
+    Document doc;
+    ProjectHistory loaded;
+    ASSERT_TRUE(ProjectIO::load(path, doc, &loaded).success);
+    std::remove(path.c_str());
+
+    // 4. The fillet step + its params must have survived the FILE.
+    ASSERT_EQ(loaded.steps.size(), 1u);
+    EXPECT_EQ(loaded.steps[0].typeId, "fillet");
+    ASSERT_FALSE(loaded.steps[0].params.empty())
+        << "fillet params lost in the file round-trip";
+    ASSERT_EQ(loaded.initialState.size(), 1u);
+    const TopoDS_Shape B0r = loaded.initialState[0].second;        // box, from file
+    ASSERT_EQ(loaded.steps[0].changed.size(), 1u);
+    const TopoDS_Shape Bfr = loaded.steps[0].changed[0].second;    // filleted, from file
+
+    // 5. Rehydrate the fillet from the LOADED params + LOADED shapes — this is
+    //    exactly where an edge-index mismatch after BREP read would fail.
+    auto op = std::make_unique<FilletOp>();
+    ASSERT_TRUE(op->deserializeParams(loaded.steps[0].params));
+    Operation::ReloadState rs;
+    rs.modifiedBefore = {{B, B0r}};
+    rs.modifiedAfter  = {{B, Bfr}};
+    ASSERT_TRUE(op->rehydrateFromReload(rs, doc))
+        << "reloaded fillet failed to rehydrate — edge identity lost across save";
+
+    // 6. Edit flow mirrors History::editStep: roll the body back to its
+    //    pre-fillet state, then re-run. With the SAME radius it must rebuild the
+    //    ORIGINAL filleted body — proving the saved index resolved the RIGHT edge
+    //    from the file, not just any edge. (execute() reads doc.getBody, so the
+    //    rollback is required; without it the sharp edge is already consumed.)
+    doc.updateBody(B, B0r);
+    ASSERT_TRUE(op->execute(doc))
+        << "reloaded fillet couldn't re-execute against its pre-fillet body";
+    EXPECT_NEAR(volume(doc, B), vSaved, 1e-6)
+        << "reloaded fillet rebuilt a DIFFERENT shape — wrong edge resolved from file";
+
+    // And it's genuinely editable: a bigger radius removes more material.
+    doc.updateBody(B, B0r);
+    op->setRadius(3.0);
+    ASSERT_TRUE(op->execute(doc)) << "reloaded fillet couldn't re-execute at a new radius";
+    EXPECT_LT(volume(doc, B), vSaved - 1e-3)
+        << "editing the reloaded fillet's radius had no effect (wrong/lost edge)";
 }
 
 // Free-space sketch push/pull with cut-intersecting: subtracts from VISIBLE

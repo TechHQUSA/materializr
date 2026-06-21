@@ -18,6 +18,8 @@ enable_testing()
 # ─── Core library (sources under test) ──────────────────────────────────────
 # OpenCASCADE and imgui_lib are already available from the parent CMakeLists.txt
 
+find_package(ZLIB REQUIRED)
+
 add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/core/Document.cpp
     ${CMAKE_SOURCE_DIR}/src/core/History.cpp
@@ -35,6 +37,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveHoleOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchSolver.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SubShapeIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
 )
 
 target_include_directories(materializr_core PUBLIC
@@ -60,6 +63,8 @@ target_link_libraries(materializr_core PUBLIC
     TKFillet
     TKOffset
     TKBO
+    TKBin
+    ZLIB::ZLIB
 )
 
 # ─── Test executables ────────────────────────────────────────────────────────
