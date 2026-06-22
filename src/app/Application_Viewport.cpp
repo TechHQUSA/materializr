@@ -67,6 +67,7 @@
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
 #include "core/EventBus.h"
+#include "core/Events.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
 
@@ -4413,6 +4414,14 @@ void Application::renderViewport() {
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
                                 m_history->pushExecuted(std::move(op));
+                                // Cascade the gizmo move/rotate to any body built
+                                // from this sketch. Point-drag and dimensional edits
+                                // already publish this; the gizmo path didn't, so a
+                                // gizmo-moved line/circle changed the sketch but left
+                                // the body stale.
+                                if (m_eventBus && m_activeSketchId >= 0)
+                                    m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
+                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -4480,6 +4489,14 @@ void Application::renderViewport() {
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
                                 m_history->pushExecuted(std::move(op));
+                                // Cascade the gizmo move/rotate to any body built
+                                // from this sketch. Point-drag and dimensional edits
+                                // already publish this; the gizmo path didn't, so a
+                                // gizmo-moved line/circle changed the sketch but left
+                                // the body stale.
+                                if (m_eventBus && m_activeSketchId >= 0)
+                                    m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
+                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -4787,6 +4804,15 @@ void Application::renderViewport() {
                             auto op = std::make_unique<SketchEditOp>(
                                 m_activeSketch, m_sketchDragBefore, after_ptr);
                             m_history->pushExecuted(std::move(op));
+                            // Cascade the move to any body built from this sketch.
+                            // Dimensional edits (circle Ø / constraints) publish
+                            // this so the body follows; a drag-move pushed the
+                            // SketchEditOp but never published, so moving a line/
+                            // circle changed the sketch but left the body stale.
+                            if (m_eventBus && m_activeSketchId >= 0)
+                                m_eventBus->publish(
+                                    SketchEditedEvent{m_activeSketchId});
+                            m_meshesDirty = true;
                         }
                         m_sketchDragBefore.reset();
                     }
