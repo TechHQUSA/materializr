@@ -72,7 +72,11 @@ find_library(ANDROID_LIB android)
 find_library(Z_LIB z)
 target_link_libraries(main PRIVATE ${GLES3_LIB} ${EGL_LIB} ${LOG_LIB} ${ANDROID_LIB} ${Z_LIB})
 
-# Android native build is SEPARATE from the root CMakeLists, so this version
-# must be bumped by hand to match root project(VERSION ...) / build.gradle
-# versionName on every release. (It silently drifted to 0.9.7.1 through 1.0.x.)
-target_compile_definitions(main PRIVATE MATERIALIZR_VERSION="1.2.0")
+# Version is passed in from build.gradle (-DMATERIALIZR_VERSION_NAME=<versionName>)
+# so the splash/about version can't drift from the APK version — it silently did
+# (0.9.7.1 through 1.0.x, then 1.2.0 while the app shipped 1.2.2). The fallback
+# only applies to a direct CMake build outside gradle.
+if(NOT DEFINED MATERIALIZR_VERSION_NAME OR MATERIALIZR_VERSION_NAME STREQUAL "")
+    set(MATERIALIZR_VERSION_NAME "0.0.0")
+endif()
+target_compile_definitions(main PRIVATE MATERIALIZR_VERSION="${MATERIALIZR_VERSION_NAME}")

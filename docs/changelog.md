@@ -3,6 +3,22 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.2.3] — 2026-06-21
+
+Android startup fixes (regressions/oversights from 1.2.2).
+
+### Fixed
+
+- **Android: the loading screen no longer hangs on "Almost there" until you tap.**
+  1.2.2's render-on-demand suspended drawing while the window reported no input
+  focus, but Android doesn't report focus until the first touch — so the splash
+  never handed off to the UI. The background render-suspension now only applies
+  on desktop (Android already suspends backgrounded apps at the OS level).
+- **Android: the splash showed the wrong version (1.2.0).** The Android native
+  build hardcoded the version string separately from the app version and had
+  drifted. It's now passed through from the build's `versionName`, so it can't
+  drift again.
+
 ## [1.2.2] — 2026-06-21
 
 Resource-usage and autosave fixes. Backward compatible — existing projects open

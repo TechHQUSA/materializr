@@ -4587,7 +4587,15 @@ void Application::run() {
         // makes the whole desktop's cursor lag on a shared GPU, and it's pure
         // waste on mobile. Autosave + deferred tasks below still run; FOCUS_GAINED
         // is a significant event so we repaint instantly on return.
+#if defined(__ANDROID__)
+        // Android exemption: the OS already pauses the activity (and SDL the GL
+        // surface) when backgrounded, so the gate buys nothing here — and
+        // SDL_WINDOW_INPUT_FOCUS isn't set until the first touch, so gating on it
+        // froze the startup splash→UI handoff until the user tapped the screen.
+        const bool foreground = true;
+#else
         const bool foreground = m_window->isForeground();
+#endif
 
         // When idle (or backgrounded), block up to 500 ms for the next event.
         // 500 ms is enough for autosave / update-check polling; anything

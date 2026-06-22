@@ -30,8 +30,9 @@ android {
         applicationId 'com.materializr.app'
         minSdkVersion 24
         targetSdkVersion 34
-        versionCode 10
-        versionName '1.2.2'
+        versionCode 11
+        def vName = '1.2.3'
+        versionName vName
 
         externalNativeBuild {
             cmake {
@@ -40,8 +41,11 @@ android {
                                  "${System.getenv('HOME')}/Android/prefix/arm64-v8a"
                 // c++_shared is required: OCCT and the app throw C++ exceptions
                 // across .so boundaries, which needs a single shared runtime.
+                // Pass versionName through so the native splash version can't
+                // drift from build.gradle (it silently did, pre-1.2.3).
                 arguments '-DANDROID_STL=c++_shared',
-                          "-DMATERIALIZR_OCCT_PREFIX=${occtPrefix}".toString()
+                          "-DMATERIALIZR_OCCT_PREFIX=${occtPrefix}".toString(),
+                          "-DMATERIALIZR_VERSION_NAME=${vName}".toString()
                 cppFlags '-std=c++17', '-frtti', '-fexceptions'
             }
         }
