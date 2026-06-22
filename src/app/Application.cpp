@@ -4516,19 +4516,63 @@ void Application::run() {
     // (crash / kill / quit while drawing) — offer to restore on first frame.
     m_pendingSketchRecovery = materializr::hasSketchDraft();
 
+    // Opt-in perf instrumentation (MZR_PERF=1): once a second, report how many
+    // frames we actually RENDERED vs how many loop iterations ran, plus which
+    // "active work" state forced rendering. Lets us see e.g. "in-sketch idle =
+    // 60 rendered/s" (a wasteful continuous-render state) vs "true idle = ~0".
+    const bool kPerf = std::getenv("MZR_PERF") != nullptr;
+    uint32_t perfLastMs = SDL_GetTicks();
+    int perfRendered = 0, perfIters = 0;
+
     while (true) {
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
         auto hasActiveWork = [&]() -> bool {
             if (m_pushPullActive || m_gizmoDragging || m_edgeOpActive ||
                 m_resizeCylActive || m_moveFaceActive || m_revolveActive ||
-                m_inSketchMode || m_deferredHeavyTask || m_showUpdatePopup ||
+                m_deferredHeavyTask || m_showUpdatePopup ||
                 !m_toastText.empty())
+                return true;
+            // Sketch mode renders continuously ONLY for a short grace window
+            // after the last input (m_sketchActiveUntil, refreshed on any event
+            // below), then idles like the main viewport. The grace comfortably
+            // covers the ~0.3s hover-dwell charge and keeps interaction smooth;
+            // previously sketch-idle pinned a flat 60fps for nothing (no input,
+            // nothing animating) — wasteful on the desktop iGPU and a battery/
+            // thermal sink on mobile.
+            if (m_inSketchMode && SDL_GetTicks() / 1000.0 < m_sketchActiveUntil)
                 return true;
             for (auto* c : m_iops) if (c && c->active()) return true;
             if (PluginRegistry::instance().activeTool()) return true;
             return false;
         };
+
+        ++perfIters;
+        if (kPerf) {
+            uint32_t nowMs = SDL_GetTicks();
+            if (nowMs - perfLastMs >= 1000) {
+                std::string st;
+                if (m_inSketchMode)            st += "sketch ";
+                if (m_pushPullActive)          st += "pushpull ";
+                if (m_gizmoDragging)           st += "gizmo ";
+                if (m_edgeOpActive)            st += "edgeop ";
+                if (m_moveFaceActive)          st += "moveface ";
+                if (m_resizeCylActive)         st += "resizecyl ";
+                if (m_revolveActive)           st += "revolve ";
+                if (m_deferredHeavyTask)       st += "heavy ";
+                if (!m_toastText.empty())      st += "toast ";
+                if (m_showUpdatePopup)         st += "update ";
+                bool iop = false;
+                for (auto* c : m_iops) if (c && c->active()) iop = true;
+                if (iop)                       st += "iop ";
+                if (PluginRegistry::instance().activeTool()) st += "tool ";
+                if (st.empty())                st = "(idle)";
+                std::fprintf(stderr,
+                    "[perf] rendered=%d/s iters=%d/s wake=%d state=%s\n",
+                    perfRendered, perfIters, m_wakeFrames, st.c_str());
+                perfRendered = 0; perfIters = 0; perfLastMs = nowMs;
+            }
+        }
 
         // When idle, block up to 500 ms for the next event. 500 ms is enough
         // for autosave / update-check polling; anything interactive wakes us
@@ -4546,6 +4590,16 @@ void Application::run() {
             m_wakeFrames = 5;
         else if (eventLevel == 1)
             m_wakeFrames = std::max(m_wakeFrames, 25);
+
+        // Any input refreshes the sketch-mode render grace (see hasActiveWork):
+        // keep rendering for kSketchGraceSec after the last event, then idle.
+        if (eventLevel > 0) {
+            // 1s comfortably covers the ~0.3s hover-dwell charge; rendering
+            // resumes instantly on the next event, so a short grace feels snappy
+            // while keeping sketch-idle at ~0fps (mobile battery/thermal).
+            constexpr double kSketchGraceSec = 1.0;
+            m_sketchActiveUntil = SDL_GetTicks() / 1000.0 + kSketchGraceSec;
+        }
 
         // Last frame's GL (driver/ImGui render) can leave the SSE FPU in
         // flush-to-zero / denormals-are-zero mode, which makes OCCT geometry —
@@ -4645,6 +4699,7 @@ void Application::run() {
         // deferred task and close checks above may have changed state.
         if (m_wakeFrames == 0 && !hasActiveWork()) continue;
         if (m_wakeFrames > 0) m_wakeFrames--;
+        ++perfRendered;   // passed the idle skip → this iteration renders a frame
 
         beginFrame();
         renderDockspace();

@@ -449,6 +449,10 @@ private:
     std::unique_ptr<SketchSolver> m_sketchSolver;
     std::unique_ptr<SketchTool> m_sketchTool;
     bool m_inSketchMode = false;
+    // Wall-clock (SDL_GetTicks seconds) until which sketch mode keeps rendering
+    // continuously after the last input; past it, sketch idles like the main
+    // viewport. Refreshed on every event in the main loop. See hasActiveWork().
+    double m_sketchActiveUntil = 0.0;
     // History step index immediately before the current sketch was entered.
     // The "Exit Sketch (discard)" button rewinds history back to this step
     // so the user can bail out of a half-built sketch without keeping any
