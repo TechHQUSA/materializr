@@ -53,6 +53,11 @@ public:
     void setLinkInfoCallback(std::function<std::string(bool, int)> cb) {
         m_linkInfo = std::move(cb);
     }
+    // Re-link a detached sketch (or the detached sketch[es] driving a body) back
+    // to its body. isBody distinguishes the two selection cases.
+    void setRelinkCallback(std::function<void(bool, int)> cb) {
+        m_relink = std::move(cb);
+    }
 
     // Set which history step is being edited (-1 for none)
     void setEditingStep(int step);
@@ -95,6 +100,7 @@ private:
     materializr::SketchTool* m_sketchTool = nullptr;
     std::function<void(const std::function<void()>&)> m_sketchMutate;
     std::function<std::string(bool, int)> m_linkInfo;
+    std::function<void(bool, int)> m_relink;
 
     // Buffered text for each editable constraint value in the panel above.
     // Keyed by `constraint id`. Wiped when the panel switches to a

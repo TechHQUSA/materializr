@@ -2479,6 +2479,58 @@ std::map<int, std::set<int>> Application::sketchBodyLinks() const {
     return links;
 }
 
+bool Application::bodySafelyRederivable(int bodyId, int viaSketchId) const {
+    if (!m_history) return false;
+    int n = m_history->stepCount();
+    for (int i = 0; i < n; ++i) {
+        const Operation* op = m_history->getStep(i);
+        if (!op || !op->isEnabled()) continue;
+        OperationDiff d = op->captureDiff();
+        bool touches = false;
+        for (int c : d.created) if (c == bodyId) { touches = true; break; }
+        if (!touches)
+            for (const auto& [id, _] : d.modifiedBefore)
+                if (id == bodyId) { touches = true; break; }
+        if (!touches) continue;
+        // The only op allowed to touch this body is its own sketch's extrude /
+        // push-pull. Anything else (fillet, chamfer, boolean, a second feature,
+        // a transform) means re-deriving at a new position would break — not safe.
+        if (auto* ext = dynamic_cast<const ExtrudeOp*>(op)) {
+            if (ext->getSketchId() == viaSketchId) continue;
+        } else if (auto* pp = dynamic_cast<const PushPullOp*>(op)) {
+            bool fromSketch = false;
+            for (int t = 0; t < pp->targetCount(); ++t)
+                if (pp->getSketchIdAt(t) == viaSketchId) { fromSketch = true; break; }
+            if (fromSketch) continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+void Application::relinkSketch(bool isBody, int id) {
+    if (!m_document) return;
+    std::vector<int> sketches;
+    if (isBody) {
+        auto links = sketchBodyLinks();
+        for (const auto& [sid, bodies] : links)
+            if (bodies.count(id)) sketches.push_back(sid);
+    } else {
+        sketches.push_back(id);
+    }
+    bool changed = false;
+    for (int sid : sketches)
+        if (auto sk = m_document->getSketch(sid); sk && sk->isDetachedFromBody()) {
+            sk->setDetachedFromBody(false);
+            changed = true;
+        }
+    if (changed) {
+        markDirty();
+        m_meshesDirty = true;
+        showToast("Sketch re-linked — editing it will drive the body again.");
+    }
+}
+
 std::string Application::linkHintFor(bool isBody, int id) const {
     if (!m_document) return "";
     auto links = sketchBodyLinks();

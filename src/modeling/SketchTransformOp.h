@@ -17,6 +17,7 @@ public:
     ~SketchTransformOp() override = default;
 
     void setSketch(int id) { m_sketchId = id; }
+    int getSketchId() const { return m_sketchId; }
     void setTransform(const gp_Trsf& t) { m_transform = t; }
 
     // Link-state change to apply alongside the move so one undo reverts both:

@@ -173,6 +173,10 @@ bool PropertiesPanel::render() {
                 ImGui::PushTextWrapPos(0.0f);
                 ImGui::TextDisabled("%s", hint.c_str());
                 ImGui::PopTextWrapPos();
+                if (hint.rfind("Detached", 0) == 0 && m_relink &&
+                    ImGui::SmallButton("Re-link sketch")) {
+                    m_relink(/*isBody=*/true, bodyId);
+                }
             }
         }
 
@@ -298,6 +302,10 @@ bool PropertiesPanel::render() {
                 ImGui::PushTextWrapPos(0.0f);
                 ImGui::TextDisabled("%s", hint.c_str());
                 ImGui::PopTextWrapPos();
+                if (hint.rfind("Detached", 0) == 0 && m_relink &&
+                    ImGui::SmallButton("Re-link to body")) {
+                    m_relink(/*isBody=*/false, parentSketchId);
+                }
                 ImGui::Spacing();
             }
         }

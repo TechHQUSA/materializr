@@ -6,6 +6,7 @@
 #include "../core/EventBus.h"
 #include "../core/Events.h"
 #include "../modeling/SketchEditOp.h"
+#include "../modeling/SketchTransformOp.h"
 #include <imgui.h>
 #include <chrono>
 #include <ctime>
@@ -349,6 +350,11 @@ bool HistoryPanel::render() {
                 int sid = m_document->findSketchId(target.get());
                 if (sid >= 0) m_eventBus->publish(SketchEditedEvent{sid});
             }
+        } else if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op)) {
+            // A linked 3D sketch move updated its body via the cascade — re-run it
+            // so the body follows the reverted/re-applied plane.
+            if (st->getSketchId() >= 0)
+                m_eventBus->publish(SketchEditedEvent{st->getSketchId()});
         }
     };
 

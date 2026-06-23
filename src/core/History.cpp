@@ -429,6 +429,12 @@ void History::clear() {
     m_failedReplayAt = -1;
 }
 
+void History::dropRedoTail() {
+    if (m_currentIndex + 1 < static_cast<int>(m_operations.size()))
+        m_operations.erase(m_operations.begin() + m_currentIndex + 1,
+                           m_operations.end());
+}
+
 const std::vector<std::unique_ptr<Operation>>& History::operations() const {
     return m_operations;
 }

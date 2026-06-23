@@ -80,6 +80,7 @@ inline void resetFpuForOcct() {
 #include "modeling/ShellOp.h"
 #include "modeling/DeleteOp.h"
 #include "modeling/SketchEditOp.h"
+#include "modeling/SketchTransformOp.h"
 #include "modeling/ResizeCylindricalOp.h"
 #include "io/StepIO.h"
 #include "io/StlExport.h"
@@ -264,6 +265,8 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
     m_propertiesPanel->setLinkInfoCallback(
         [this](bool isBody, int id) { return linkHintFor(isBody, id); });
+    m_propertiesPanel->setRelinkCallback(
+        [this](bool isBody, int id) { relinkSketch(isBody, id); });
     // Element-size edits from the Properties panel while sketching: snapshot +
     // re-solve inside recordSketchMutation (so it's one undoable SketchEditOp),
     // then cascade to any body built from the sketch.
@@ -1033,19 +1036,27 @@ void Application::renderMenuBar() {
             const bool histLocked = anyInteractivePreviewActive();
             if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
                                 !histLocked && m_history->canUndo())) {
+                const Operation* undone =
+                    m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
                 // Keep a sketch-driven body in sync after undoing a sketch edit
                 // (the SketchEditOp undo only reverts geometry; the cascade did
                 // the body). Mirrors the keyboard Ctrl+Z path.
                 if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
                     cascadeFromSketchEdit(m_activeSketchId);
+                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
+                    cascadeFromSketchEdit(st->getSketchId());
                 m_meshesDirty = true;
             }
             if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
                                 !histLocked && m_history->canRedo())) {
                 m_history->redo(*m_document);
+                const Operation* redone =
+                    m_history->getStep(m_history->currentStep());
                 if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
                     cascadeFromSketchEdit(m_activeSketchId);
+                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
+                    cascadeFromSketchEdit(st->getSketchId());
                 m_meshesDirty = true;
             }
             ImGui::EndMenu();
@@ -2123,7 +2134,14 @@ void Application::handleShortcuts() {
                        // sketch is live (and rendering against it) crashed.
                        (!m_inSketchMode ||
                         m_history->currentStep() > m_sketchEntryHistoryStep)) {
+                const Operation* undone =
+                    m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
+                // A linked 3D sketch move (SketchTransformOp) updated its body via
+                // the cascade; re-cascade so the body follows the reverted plane.
+                // (No-op for detached sketches — the guard in cascade returns early.)
+                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
+                    cascadeFromSketchEdit(st->getSketchId());
                 // In sketch mode, the host face is the anchor for the whole
                 // sketch session — clearing the selection would drop its blue
                 // highlight even though the sketch is still active. Skip the
@@ -2152,6 +2170,8 @@ void Application::handleShortcuts() {
         if (!m_edgeOpActive && !m_extruding && !m_pushPullActive) {
             if (m_history->canRedo()) {
                 m_history->redo(*m_document);
+                const Operation* redone =
+                    m_history->getStep(m_history->currentStep());
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
@@ -2160,6 +2180,8 @@ void Application::handleShortcuts() {
                     // re-applied sketch edit.
                     cascadeFromSketchEdit(m_activeSketchId);
                 }
+                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
+                    cascadeFromSketchEdit(st->getSketchId());
                 m_meshesDirty = true;
             }
         }
@@ -3099,6 +3121,9 @@ bool Application::loadProjectAt(const std::string& path) {
         return false;
     }
     rebuildHistoryFromProject(hist, result.savedByVersion);
+    // A reopened project should sit at the history tip with no redo stack — a
+    // phantom redo tail would, e.g., block autosave (which won't save below-tip).
+    m_history->dropRedoTail();
     m_currentProjectPath = path;
     markSaved();
     m_meshesDirty = true;

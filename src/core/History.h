@@ -108,6 +108,11 @@ public:
     // Clear history
     void clear();
 
+    // Drop any steps past the current index (the redo tail). Used after load so a
+    // reopened project never starts below the tip with a phantom redo stack
+    // (which would, e.g., block autosave). No-op when already at the tip.
+    void dropRedoTail();
+
     // Access operations for UI
     const std::vector<std::unique_ptr<Operation>>& operations() const;
 

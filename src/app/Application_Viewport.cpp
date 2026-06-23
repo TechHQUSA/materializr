@@ -3191,6 +3191,29 @@ void Application::renderViewport() {
                                 for (int b : it->second)
                                     if (inDragBodies.count(b)) { unisonSketches.insert(s); break; }
                             }
+                            // Hybrid: a unison move on a body that can be safely
+                            // re-derived (no fillet/chamfer/boolean/other feature)
+                            // STAYS LINKED — the body follows by re-derivation and
+                            // remains editable. A body with features can't re-bind
+                            // after the move, so it moves rigidly and de-links.
+                            std::set<int> rederiveSketches, rederiveBodies;
+                            for (int s : unisonSketches) {
+                                auto it = skLinks.find(s);
+                                if (it == skLinks.end()) continue;
+                                std::set<int> sBodies;
+                                bool allSafe = true;
+                                for (int b : it->second)
+                                    if (inDragBodies.count(b)) {
+                                        sBodies.insert(b);
+                                        if (!bodySafelyRederivable(b, s)) allSafe = false;
+                                    }
+                                if (allSafe && !sBodies.empty()) {
+                                    rederiveSketches.insert(s);
+                                    rederiveBodies.insert(sBodies.begin(), sBodies.end());
+                                }
+                            }
+                            // Re-derived (linked) sketches must NOT be detached.
+                            for (int s : rederiveSketches) detachSketches.erase(s);
 
                             // Shared pivot captured once at drag start.
                             const glm::vec3& pivot = m_gizmoSharedPivot;
@@ -3282,11 +3305,18 @@ void Application::renderViewport() {
                                     }
                                 }
                             } else if (isMulti) {
-                                // Batched commit: one ReplayOp covering all bodies.
+                                // Batched commit: one ReplayOp covering all bodies
+                                // EXCEPT any that follow their sketch by re-derivation
+                                // (those rebuild via the cascade below).
                                 ReplayOp::BodyState beforeState;
                                 for (auto& [id, orig] : m_gizmoDragOriginals) {
+                                    if (rederiveBodies.count(id)) continue;
                                     beforeState.push_back({id, orig});
                                 }
+                                afterState.erase(
+                                    std::remove_if(afterState.begin(), afterState.end(),
+                                        [&](const auto& e){ return rederiveBodies.count(e.first) > 0; }),
+                                    afterState.end());
                                 std::string label;
                                 std::string desc;
                                 if (gm == GizmoMode::Translate) {
@@ -3321,10 +3351,13 @@ void Application::renderViewport() {
                                 // in that state visually.
                                 op->execute(*m_document);
                                 m_history->pushExecuted(std::move(op));
-                            } else if (m_gizmoDragBodyId >= 0) {
+                            } else if (m_gizmoDragBodyId >= 0 &&
+                                       !rederiveBodies.count(m_gizmoDragBodyId)) {
                                 // Single body: keep the TransformOp path so the
                                 // Properties panel still lets the user edit the
                                 // translation/angle/scale after the fact.
+                                // (Skipped when this body stays linked and follows
+                                // its sketch via re-derivation in the cascade below.)
                                 auto op = std::make_unique<TransformOp>();
                                 op->setBodyId(m_gizmoDragBodyId);
                                 op->setCenter(pivot.x, pivot.y, pivot.z);
@@ -3401,7 +3434,12 @@ void Application::renderViewport() {
                             if (isMulti)
                                 for (int s : bodyAloneDetach)
                                     if (auto sk = m_document->getSketch(s)) sk->setDetachedFromBody(true);
-                            if (!detachSketches.empty()) markDirty();
+                            // Linked unison: the body's TransformOp was skipped — let it
+                            // follow its now-moved sketch by re-derivation (stays editable).
+                            for (int s : rederiveSketches)
+                                cascadeFromSketchEdit(s);
+                            if (!detachSketches.empty() || !rederiveSketches.empty())
+                                markDirty();
 
                             m_meshesDirty = true;
                         } catch (...) {}

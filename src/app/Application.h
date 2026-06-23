@@ -366,6 +366,17 @@ private:
     // (isBody=true) which sketch drives it, for a sketch which body it drives, plus
     // whether the link is live or was broken by an independent 3D move. "" = none.
     std::string linkHintFor(bool isBody, int id) const;
+    // True if `bodyId` can be safely rebuilt by re-running history from its
+    // sketch (`viaSketchId`) — i.e. nothing but that sketch's own extrude/
+    // push-pull touches it. A fillet/chamfer/boolean/other feature downstream
+    // can't re-bind after the geometry moves, so those bodies must move rigidly
+    // (and de-link) instead of re-deriving.
+    bool bodySafelyRederivable(int bodyId, int viaSketchId) const;
+    // Re-establish the parametric link of a detached sketch (Properties-panel
+    // "Re-link"): clears the detached flag so editing the sketch drives its body
+    // again. isBody=true re-links every detached sketch driving that body.
+    // Geometry is left as-is — re-link resumes parametric control, it doesn't move.
+    void relinkSketch(bool isBody, int id);
     void updateInteractiveExtrude();
     // Signed distance to pass to ExtrudeOp: Subtract cuts into the body (the
     // profile normal points outward), so it uses the negated distance.
