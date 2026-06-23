@@ -19,7 +19,7 @@ REGISTER_PLUGIN(Pattern, [](materializr::PluginContext& ctx) {
         "Open a popup to copy the selected body along an axis a fixed distance "
         "apart. Pick X / Y / Z, count, and spacing with a live preview."});
 
-    ctx.registerToolbarButton({"Radial Pattern", "Pattern",
+    ctx.registerToolbarButton({"Circular Pattern", "Pattern",
         materializr::SelectionContext::HasBodies, 301,
         [](materializr::PluginContext& ctx) {
             ctx.requestInteractiveOp("RadialPattern");

@@ -3,11 +3,14 @@
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
+#include "../core/EventBus.h"
+#include "../core/Events.h"
 #include "../modeling/BooleanOp.h"
 #include <imgui.h>
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <set>
 
 namespace {
 
@@ -40,10 +43,42 @@ void runChainedBoolean(materializr::PluginContext& ctx,
     else std::fprintf(stderr, "Boolean failed (%zu bodies)\n", bodies.size());
 }
 
-// Subtract is order-dependent (A − B keeps A), so unlike Union/Intersect we ask
-// which body to KEEP. These hold the selection while the picker modal is up.
-std::vector<int> g_subtractPending;
+// Subtract is order-dependent, so unlike Union/Intersect we put up a modal: the
+// user ticks which bodies are CUTTERS (subtracted) — everything unticked is kept
+// and has the cutters cut out of it. State persists while the modal is open.
+std::vector<int> g_subtractBodies;     // all selected, in selection order
+std::set<int>    g_subtractCutters;    // ticked = cutter (subtracts)
+bool g_subtractKeepCutters = false;    // keep cutter bodies after cutting
 bool g_subtractOpenRequested = false;
+
+// Subtract every cutter from every kept body. A cutter is consumed on its LAST
+// use (so a cutter shared across several targets survives until the last one),
+// unless the user asked to keep the cutters — then it's never consumed.
+void runSubtractMulti(materializr::PluginContext& ctx,
+                      const std::vector<int>& targets,
+                      const std::vector<int>& cutters, bool keepCutters) {
+    bool allOk = true;
+    for (int cutter : cutters) {
+        for (size_t i = 0; i < targets.size() && allOk; ++i) {
+            bool lastUse = (i + 1 == targets.size());
+            auto op = std::make_unique<BooleanOp>();
+            op->setTargetBodyId(targets[i]);
+            op->setToolBodyId(cutter);
+            op->setMode(BooleanMode::Subtract);
+            op->setKeepTool(keepCutters || !lastUse);
+            allOk = ctx.history().pushOperation(std::move(op), ctx.document());
+        }
+        if (!allOk) break;
+    }
+    if (allOk) { ctx.markMeshesDirty(); ctx.selection().clear(); }
+    else {
+        std::fprintf(stderr, "Subtract failed\n");
+        ctx.events().publish(materializr::ToastEvent{
+            "Subtract couldn't make a valid solid from these bodies \xE2\x80\x94 "
+            "they may not overlap, share a coincident face, or the geometry is "
+            "too degenerate.", 5.0});
+    }
+}
 
 } // anonymous namespace
 
@@ -60,12 +95,19 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
     ctx.registerToolbarButton({"Subtract", "Boolean",
         materializr::SelectionContext::MultipleBodies, 101,
         [](materializr::PluginContext& ctx) {
-            // Order matters — ask which body to keep (the rest cut out of it).
+            // Order matters — open the modal to pick cutters vs kept bodies.
             auto b = distinctSelectedBodies(ctx);
-            if (b.size() >= 2) { g_subtractPending = b; g_subtractOpenRequested = true; }
+            if (b.size() >= 2) {
+                g_subtractBodies = b;
+                g_subtractCutters.clear();
+                // Default: keep the first selected, cut the rest out of it.
+                for (size_t i = 1; i < b.size(); ++i) g_subtractCutters.insert(b[i]);
+                g_subtractKeepCutters = false;
+                g_subtractOpenRequested = true;
+            }
         },
         nullptr,
-        "Cut the other selected bodies out of one you pick (A − B)."});
+        "Cut bodies out of others. Pick which are cutters in the popup."});
 
     ctx.registerToolbarButton({"Intersect", "Boolean",
         materializr::SelectionContext::MultipleBodies, 102,
@@ -76,11 +118,11 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
         nullptr,
         "Keep only the volume the selected bodies share (A ∩ B)."});
 
-    // "Keep which body?" picker for Subtract, rendered each frame.
+    // Cutters-vs-kept picker for Subtract, rendered each frame.
     materializr::OverlayContribution overlay;
     overlay.name = "BooleanSubtractPicker";
     overlay.render = [](materializr::PluginContext& ctx) {
-        if (g_subtractPending.empty()) return;
+        if (g_subtractBodies.empty()) return;
         if (g_subtractOpenRequested) {
             ImGui::OpenPopup("Subtract##boolpick");
             g_subtractOpenRequested = false;
@@ -89,29 +131,54 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal("Subtract##boolpick", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Keep which body? The others are subtracted from it.");
+            ImGui::TextUnformatted("Tick the cutters \xE2\x80\x94 they're subtracted");
+            ImGui::TextUnformatted("from the unticked bodies, which remain.");
             ImGui::Separator();
-            int chosen = -1;
-            for (int id : g_subtractPending) {
+            for (int id : g_subtractBodies) {
                 std::string label = ctx.document().getBodyName(id);
                 if (label.empty()) label = "Body " + std::to_string(id);
+                bool cutter = g_subtractCutters.count(id) > 0;
                 ImGui::PushID(id);
-                if (ImGui::Button(label.c_str(), ImVec2(240, 0))) chosen = id;
+                if (ImGui::Checkbox(label.c_str(), &cutter)) {
+                    if (cutter) g_subtractCutters.insert(id);
+                    else        g_subtractCutters.erase(id);
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled(cutter ? "(cutter)" : "(keep)");
                 ImGui::PopID();
             }
             ImGui::Separator();
+            ImGui::Checkbox("Keep the cutter bodies after cutting",
+                            &g_subtractKeepCutters);
+            ImGui::Separator();
+
+            std::vector<int> cutters;
+            std::vector<int> targets;
+            for (int id : g_subtractBodies) {
+                if (g_subtractCutters.count(id)) cutters.push_back(id);
+                else                             targets.push_back(id);
+            }
+            bool canApply = !cutters.empty() && !targets.empty();
+            if (!canApply)
+                ImGui::TextDisabled("Need at least one cutter (ticked) and one body to keep.");
+
+            bool apply = false;
+            ImGui::BeginDisabled(!canApply);
+            if (ImGui::Button("Apply")) apply = true;
+            ImGui::EndDisabled();
+            ImGui::SameLine();
             bool cancel = ImGui::Button("Cancel");
-            if (cancel || chosen >= 0) ImGui::CloseCurrentPopup();
+            if (apply || cancel) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
 
-            if (chosen >= 0) {
-                // Keep `chosen` first; the rest become tools cut from it.
-                std::vector<int> ordered{chosen};
-                for (int id : g_subtractPending) if (id != chosen) ordered.push_back(id);
-                g_subtractPending.clear();
-                runChainedBoolean(ctx, ordered, BooleanMode::Subtract);
+            if (apply) {
+                bool keep = g_subtractKeepCutters;
+                g_subtractBodies.clear();
+                g_subtractCutters.clear();
+                runSubtractMulti(ctx, targets, cutters, keep);
             } else if (cancel) {
-                g_subtractPending.clear();
+                g_subtractBodies.clear();
+                g_subtractCutters.clear();
             }
         }
     };

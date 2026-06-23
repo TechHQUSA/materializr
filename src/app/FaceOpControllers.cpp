@@ -79,6 +79,9 @@ void ShellController::panelBody(const IopContext&, bool& changed) {
 
     if (ImGui::SliderFloat("##shellSlider", &m_thickness, 0.1f, 20.0f,
                            "%.2f mm")) {
+        // Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a
+        // free-floating 3.47 mm slider value is just noise.
+        m_thickness = std::round(m_thickness * 10.0f) / 10.0f;
         std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.2f", m_thickness);
         changed = true;
     }

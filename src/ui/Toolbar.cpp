@@ -364,7 +364,7 @@ ToolAction Toolbar::renderSketchTools() {
     tip("Mirror selected elements across a sketch line you'll pick next.");
     if (ImGui::Button("Linear Pattern", ImVec2(-1, bh(28)))) action = ToolAction::SketchLinearPattern;
     tip("Copy the selected sketch elements N times along the sketch X axis.");
-    if (ImGui::Button("Radial Pattern", ImVec2(-1, bh(28)))) action = ToolAction::SketchRadialPattern;
+    if (ImGui::Button("Circular Pattern", ImVec2(-1, bh(28)))) action = ToolAction::SketchRadialPattern;
     tip("Copy the selected sketch elements around an origin you specify.");
 
     // Drawing-inference level — a live Full → Reduced → Off toggle. Lets the
@@ -485,10 +485,19 @@ ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
     if (ImGui::Button("Mirror", ImVec2(half, bh(30))))    action = ToolAction::Mirror;
     tip("Mirror the selected bodies across a plane you pick next.");
     ImGui::SameLine();
-    if (ImGui::Button("Revolve", ImVec2(half, bh(30))))   action = ToolAction::Revolve;
-    tip("Revolve the selected body / bodies around a Construction Axis. "
-        "Pick an axis next; the popup handles angle + mode. Multi-body "
-        "selection rotates as a group.");
+    // Context-sensitive: a selected sketch lathes (spin its profile into a
+    // solid); otherwise the same button revolves the selected body around an
+    // axis (a fan, a hinge). beginRevolve() picks the matching mode from the
+    // selection, so both share one action.
+    bool sketchSel = m_selection && m_selection->hasSelectedSketches();
+    if (ImGui::Button(sketchSel ? "Lathe" : "Revolve", ImVec2(half, bh(30))))
+        action = ToolAction::Revolve;
+    if (sketchSel)
+        tip("Lathe: spin the selected sketch's profile around a Construction "
+            "Axis into a new solid. Pick the axis next.");
+    else
+        tip("Revolve the selected body/bodies around a Construction Axis (a fan, "
+            "a hinge). Pick the axis next; multi-body selection rotates as a group.");
 
     // Plugin buttons: always include HasBodies (1+ bodies), and only include
     // MultipleBodies (2+ bodies, e.g. Union / Subtract / Intersect) when at

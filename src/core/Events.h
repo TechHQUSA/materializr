@@ -5,6 +5,13 @@ namespace materializr {
 
 struct SelectionChangedEvent {};
 
+// A transient on-screen message. Lets non-UI code (plugins, ops) surface a
+// status/error to the user without a direct dependency on Application::showToast.
+struct ToastEvent {
+    std::string text;
+    double seconds = 4.0;
+};
+
 struct DocumentModifiedEvent {
     bool meshDirty = true;
 };

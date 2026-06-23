@@ -15,6 +15,10 @@ public:
     void setTargetBodyId(int id);
     void setToolBodyId(int id);
     void setMode(BooleanMode mode);
+    // Keep the tool body after the operation instead of consuming it. Used by
+    // Subtract's "keep the cutter bodies" option, and to keep a cutter alive
+    // while it's subtracted from several targets (consumed only on its last use).
+    void setKeepTool(bool keep) { m_keepTool = keep; }
 
     // Getters
     int getTargetBodyId() const { return m_targetBodyId; }
@@ -44,6 +48,7 @@ private:
     int m_targetBodyId = -1;
     int m_toolBodyId = -1;
     BooleanMode m_mode = BooleanMode::Union;
+    bool m_keepTool = false;  // keep the tool body instead of consuming it
 
     // For undo
     TopoDS_Shape m_previousTargetShape;

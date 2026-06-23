@@ -168,6 +168,10 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_eventBus->subscribe<SketchEditedEvent>(
         [this](const SketchEditedEvent& e) { cascadeFromSketchEdit(e.sketchId); });
 
+    // Transient status/error messages from non-UI code (plugins, ops).
+    m_eventBus->subscribe<materializr::ToastEvent>(
+        [this](const materializr::ToastEvent& e) { showToast(e.text, e.seconds); });
+
     // Document body lifecycle → renderer slot lifecycle. Without this, a
     // PushPullOp::undo (firing on every preview frame during a drag) deletes
     // the body from Document but the renderer keeps drawing its stale mesh

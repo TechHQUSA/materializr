@@ -204,7 +204,7 @@ void PatternOp::renderProperties() {
     ImGui::Text("Pattern");
     ImGui::Separator();
 
-    const char* typeItems[] = { "Linear", "Radial" };
+    const char* typeItems[] = { "Linear", "Circular" };
     int typeIndex = static_cast<int>(m_type);
     if (ImGui::Combo("Type", &typeIndex, typeItems, 2)) {
         m_type = static_cast<PatternType>(typeIndex);

@@ -1141,7 +1141,7 @@ void Application::renderSketchPatternPopup() {
     ImGui::SetNextWindowSize(uiSz(280, 0), ImGuiCond_Appearing);
     const char* title = (m_sketchPatternKind == PatternKind::Linear)
                             ? "Sketch Linear Pattern"
-                            : "Sketch Radial Pattern";
+                            : "Sketch Circular Pattern";
     ImGui::Begin(title, nullptr,
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
@@ -1248,7 +1248,7 @@ void Application::renderPatternPanel() {
     ImGui::SetNextWindowSize(uiSz(280, 0), ImGuiCond_Appearing);
     const char* title = (m_patternKind == PatternKind::Linear)
                             ? "Linear Pattern"
-                            : "Radial Pattern";
+                            : "Circular Pattern";
     ImGui::Begin(title, nullptr,
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
@@ -2050,29 +2050,14 @@ void Application::renderRevolvePopup() {
                                     ImGui::GetWindowPos().y + 50),
                             ImGuiCond_Appearing);
     ImGui::SetNextWindowSize(uiSz(320, 0), ImGuiCond_Appearing);
-    ImGui::Begin("Revolve", nullptr,
+    // The mode is chosen by the selection (sketch → Lathe, body → Revolve) in
+    // beginRevolve(); the window title reflects it. No in-popup mode switch —
+    // to change mode you change the selection.
+    const bool lathe = (m_revolveWhatIdx == 1);
+    ImGui::Begin(lathe ? "Lathe###RevolvePopup" : "Revolve###RevolvePopup", nullptr,
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_AlwaysAutoResize);
-
-    // What this revolve does. Two distinct flows:
-    //   - Rotate Body: TransformOp::Rotate of the selected body around the
-    //     axis (no sketch needed, body is repositioned).
-    //   - Sweep Sketch: RevolveOp sweeping a sketch profile around the
-    //     axis into a new (or boolean-combined) body.
-    ImGui::TextColored(materializr::accentText(), "What");
-    int prevWhat = m_revolveWhatIdx;
-    if (ImGui::RadioButton("Rotate Body around axis", m_revolveWhatIdx == 0))
-        m_revolveWhatIdx = 0;
-    if (ImGui::RadioButton("Sweep Sketch profile", m_revolveWhatIdx == 1))
-        m_revolveWhatIdx = 1;
-    // Toggling away from Rotate Body restores the body; toggling INTO it
-    // captures a fresh snapshot. This keeps the live-preview in sync with
-    // which flow the user is configuring.
-    if (prevWhat != m_revolveWhatIdx) {
-        if (prevWhat == 0) revolveLiveRestore();
-        if (m_revolveWhatIdx == 0) revolveLiveBegin();
-    }
 
     // Selection summary so the popup reflects what the click captured.
     // Both flows want a body shown (Rotate Body operates on it; Sweep

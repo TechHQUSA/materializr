@@ -89,7 +89,7 @@ bool RevolveOp::execute(Document& doc) {
             case RevolveMode::NewBody: {
                 // Reuse prior id on redo so folder/colour/etc. survive
                 // through undo+redo via Document's tombstone restore.
-                doc.addOrPutBody(m_createdBodyId, revolvedShape, "Revolve");
+                doc.addOrPutBody(m_createdBodyId, revolvedShape, "Lathe");
                 break;
             }
             case RevolveMode::Union: {
@@ -256,7 +256,7 @@ bool RevolveOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
 }
 
 std::string RevolveOp::description() const {
-    std::string desc = "Revolve " + std::to_string(static_cast<int>(m_angle)) + " deg";
+    std::string desc = "Lathe " + std::to_string(static_cast<int>(m_angle)) + " deg";
     switch (m_mode) {
         case RevolveMode::NewBody:   desc += " (New Body)"; break;
         case RevolveMode::Union:     desc += " (Union)"; break;
@@ -267,7 +267,7 @@ std::string RevolveOp::description() const {
 }
 
 void RevolveOp::renderProperties() {
-    ImGui::Text("Revolve");
+    ImGui::Text("Lathe");
     ImGui::Separator();
 
     ImGui::InputDouble("Angle (deg)", &m_angle, 1.0, 10.0, "%.1f");

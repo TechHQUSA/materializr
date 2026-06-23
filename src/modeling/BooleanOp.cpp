@@ -5,6 +5,7 @@
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <cstdio>
 #include <cstdlib>
 #include <imgui.h>
@@ -33,78 +34,100 @@ bool BooleanOp::execute(Document& doc) {
         m_previousTargetShape = doc.getBody(m_targetBodyId);
         m_previousToolShape = doc.getBody(m_toolBodyId);
 
-        TopoDS_Shape resultShape;
+        // Run the boolean at a given fuzzy tolerance, returning a VALID result
+        // shape or null. Null/degenerate are rejected here so the caller can
+        // escalate the fuzzy value instead of committing junk. (IsDone() is
+        // necessary but not sufficient — OCCT can report success yet hand back a
+        // null or zero-volume compound.)
+        auto attempt = [&](double fuzzy) -> TopoDS_Shape {
+            TopoDS_Shape s;
+            try {
+                switch (m_mode) {
+                    case BooleanMode::Union: {
+                        BRepAlgoAPI_Fuse op(m_previousTargetShape, m_previousToolShape);
+                        if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
+                        op.Build();
+                        if (!op.IsDone()) return TopoDS_Shape();
+                        s = op.Shape();
+                        // Merge coplanar/tangent neighbours so the union has no seam.
+                        try {
+                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
+                            u.Build();
+                            TopoDS_Shape uu = u.Shape();
+                            if (!uu.IsNull()) s = uu;
+                        } catch (...) {}
+                        break;
+                    }
+                    case BooleanMode::Subtract: {
+                        BRepAlgoAPI_Cut op(m_previousTargetShape, m_previousToolShape);
+                        if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
+                        op.Build();
+                        if (!op.IsDone()) return TopoDS_Shape();
+                        s = op.Shape();
+                        break;
+                    }
+                    case BooleanMode::Intersect: {
+                        BRepAlgoAPI_Common op(m_previousTargetShape, m_previousToolShape);
+                        if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
+                        op.Build();
+                        if (!op.IsDone()) return TopoDS_Shape();
+                        s = op.Shape();
+                        break;
+                    }
+                }
+            } catch (...) { return TopoDS_Shape(); }
+            if (s.IsNull()) return TopoDS_Shape();
+            GProp_GProps gp;
+            BRepGProp::VolumeProperties(s, gp);
+            if (gp.Mass() < 1e-6) return TopoDS_Shape();
+            // Reject topologically INVALID results (self-intersections, bad
+            // faces) — a fuzzy boolean can return a non-null, non-zero-volume
+            // shape that's still garbage. Only a valid solid is worth committing;
+            // otherwise the caller escalates the fuzzy value or fails cleanly.
+            if (!BRepCheck_Analyzer(s).IsValid()) return TopoDS_Shape();
+            return s;
+        };
 
-        switch (m_mode) {
-            case BooleanMode::Union: {
-                BRepAlgoAPI_Fuse fuse(m_previousTargetShape, m_previousToolShape);
-                fuse.Build();
-                if (!fuse.IsDone()) {
-                    return false;
+        TopoDS_Shape resultShape = attempt(0.0);
+        if (resultShape.IsNull()) {
+            // Exact booleans fail on near-coincident / overlapping faces (a body
+            // sitting flush on another, a thin sliver of overlap). A TINY fuzzy
+            // tolerance usually resolves it. Keep it sub-micron-to-micron: larger
+            // values (it used to go to 0.1 mm) let OCCT snap distant entities
+            // together and visibly distort the model.
+            for (double f : {1e-5, 1e-4, 1e-3}) {
+                resultShape = attempt(f);
+                if (!resultShape.IsNull()) {
+                    std::fprintf(stderr, "[Boolean] %s succeeded with fuzzy=%.4g "
+                                 "(target=%d tool=%d)\n",
+                                 m_mode == BooleanMode::Subtract ? "Cut" :
+                                 m_mode == BooleanMode::Union ? "Fuse" : "Common",
+                                 f, m_targetBodyId, m_toolBodyId);
+                    break;
                 }
-                resultShape = fuse.Shape();
-                // Merge coplanar/tangent neighbouring faces so the union doesn't leave
-                // a spurious seam edge between the two original bodies.
-                try {
-                    ShapeUpgrade_UnifySameDomain unifier(resultShape,
-                                                        /*UnifyEdges*/ true,
-                                                        /*UnifyFaces*/ true,
-                                                        /*ConcatBSplines*/ true);
-                    unifier.Build();
-                    TopoDS_Shape unified = unifier.Shape();
-                    if (!unified.IsNull()) resultShape = unified;
-                } catch (...) { /* fall back to un-unified result */ }
-                break;
-            }
-            case BooleanMode::Subtract: {
-                BRepAlgoAPI_Cut cut(m_previousTargetShape, m_previousToolShape);
-                cut.Build();
-                if (!cut.IsDone()) {
-                    return false;
-                }
-                resultShape = cut.Shape();
-                break;
-            }
-            case BooleanMode::Intersect: {
-                BRepAlgoAPI_Common common(m_previousTargetShape, m_previousToolShape);
-                common.Build();
-                if (!common.IsDone()) {
-                    return false;
-                }
-                resultShape = common.Shape();
-                break;
             }
         }
-
-        // Null/degenerate guard — IsDone() is necessary but not sufficient:
-        // OCCT can return a null or near-zero-volume compound while still
-        // reporting success. Committing that would silently corrupt the
-        // target body (it stores a null shape) and lose the tool body.
         if (resultShape.IsNull()) {
-            std::fprintf(stderr, "[Boolean] result is null after %s "
-                         "(target=%d tool=%d) — refusing to commit.\n",
-                         m_mode == BooleanMode::Union ? "Fuse" :
-                         m_mode == BooleanMode::Subtract ? "Cut" : "Common",
+            std::fprintf(stderr, "[Boolean] %s failed (target=%d tool=%d) even "
+                         "with fuzzy — bodies may not overlap, or the geometry is "
+                         "too degenerate.\n",
+                         m_mode == BooleanMode::Subtract ? "Cut" :
+                         m_mode == BooleanMode::Union ? "Fuse" : "Common",
                          m_targetBodyId, m_toolBodyId);
             return false;
-        }
-        {
-            GProp_GProps gp;
-            BRepGProp::VolumeProperties(resultShape, gp);
-            if (gp.Mass() < 1e-6) {
-                std::fprintf(stderr, "[Boolean] result volume ~= 0 "
-                             "(target=%d tool=%d) — refusing to commit.\n",
-                             m_targetBodyId, m_toolBodyId);
-                return false;
-            }
         }
 
         // Update target body with the result
         doc.updateBody(m_targetBodyId, resultShape);
 
-        // Remove the tool body
-        doc.removeBody(m_toolBodyId);
-        m_removedToolId = m_toolBodyId;
+        // Remove the tool body — unless we're keeping it (the "keep cutters"
+        // option, or a cutter still needed by another target).
+        if (m_keepTool) {
+            m_removedToolId = -1;
+        } else {
+            doc.removeBody(m_toolBodyId);
+            m_removedToolId = m_toolBodyId;
+        }
 
         return true;
     } catch (...) {
@@ -163,18 +186,20 @@ void BooleanOp::renderProperties() {
 
 OperationDiff BooleanOp::captureDiff() const {
     OperationDiff d;
-    // The target mutates in place; the tool body is consumed by the boolean.
+    // The target mutates in place; the tool body is consumed by the boolean
+    // unless we kept it (then it isn't deleted, so it's not in the diff).
     if (m_targetBodyId >= 0 && !m_previousTargetShape.IsNull())
         d.modifiedBefore.push_back({m_targetBodyId, m_previousTargetShape});
-    if (m_toolBodyId >= 0 && !m_previousToolShape.IsNull())
+    if (!m_keepTool && m_toolBodyId >= 0 && !m_previousToolShape.IsNull())
         d.deletedBefore.push_back({m_toolBodyId, m_previousToolShape});
     return d;
 }
 
 std::string BooleanOp::serializeParams() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "target=%d;tool=%d;mode=%d",
-                  m_targetBodyId, m_toolBodyId, static_cast<int>(m_mode));
+    std::snprintf(buf, sizeof(buf), "target=%d;tool=%d;mode=%d;keeptool=%d",
+                  m_targetBodyId, m_toolBodyId, static_cast<int>(m_mode),
+                  m_keepTool ? 1 : 0);
     return buf;
 }
 
@@ -194,6 +219,7 @@ bool BooleanOp::deserializeParams(const std::string& blob) {
         else if (key == "mode")   { int m = std::atoi(val.c_str());
                                     if (m >= 0 && m <= 2) m_mode = static_cast<BooleanMode>(m);
                                     any = true; }
+        else if (key == "keeptool") { m_keepTool = std::atoi(val.c_str()) != 0; any = true; }
         pos = end + 1;
     }
     return any;
@@ -212,10 +238,17 @@ bool BooleanOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/)
         if (id == m_targetBodyId) { m_previousTargetShape = shp; break; }
     for (const auto& [id, shp] : state.deletedBefore)
         if (id == m_toolBodyId) { m_previousToolShape = shp; break; }
-    if (m_previousTargetShape.IsNull() || m_previousToolShape.IsNull()) return false;
+    if (m_previousTargetShape.IsNull()) return false;
 
-    // Post-execution bookkeeping: this step already consumed the tool body, so
-    // undo() knows to restore it.
-    m_removedToolId = m_toolBodyId;
+    if (m_keepTool) {
+        // The tool wasn't consumed, so it isn't in the step's deleted set — it's
+        // still a live body. execute() re-fetches it; nothing to restore on undo.
+        m_removedToolId = -1;
+    } else {
+        if (m_previousToolShape.IsNull()) return false;
+        // Post-execution bookkeeping: this step consumed the tool body, so undo()
+        // knows to restore it.
+        m_removedToolId = m_toolBodyId;
+    }
     return true;
 }

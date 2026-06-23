@@ -37,9 +37,10 @@ public:
     // Operation interface
     bool execute(Document& doc) override;
     bool undo(Document& doc) override;
-    std::string name() const override { return "Revolve"; }
+    std::string name() const override { return "Lathe"; }
     std::string description() const override;
     void renderProperties() override;
+    // typeId stays "revolve" so existing project files still load.
     std::string typeId() const override { return "revolve"; }
     OperationDiff captureDiff() const override;
     std::string serializeParams() const override;
