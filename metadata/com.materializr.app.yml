@@ -84,7 +84,19 @@ Builds:
     build: JOBS=4 ANDROID_NDK="$$NDK$$" ../scripts/setup-deps.sh
     ndk: r26d
 
+  - versionName: 1.2.4
+    versionCode: 12
+    commit: v1.2.4
+    subdir: android/app
+    sudo:
+      - apt-get update
+      - apt-get install -y make gcc libc-dev cmake
+    gradle:
+      - yes
+    build: JOBS=4 ANDROID_NDK="$$NDK$$" ../scripts/setup-deps.sh
+    ndk: r26d
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.2.3
-CurrentVersionCode: 11
+CurrentVersion: 1.2.4
+CurrentVersionCode: 12
