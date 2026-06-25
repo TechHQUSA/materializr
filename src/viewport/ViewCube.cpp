@@ -103,6 +103,17 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 mp = ImGui::GetMousePos();
 
+    // Only act on clicks the viewport actually owns. The cube reads global mouse
+    // state, so without this a click on a panel that OVERLAPS the cube's corner
+    // (e.g. the Move Face Cancel button, which sits over the cube) registers as a
+    // cube-face press too — snapping the camera to that face. WantCaptureMouse is
+    // the app's signal for "an ImGui widget consumed this click" (see the
+    // viewport input gate); when set, the cube ignores clicks but still draws.
+    const bool uiBlocked = ImGui::GetIO().WantCaptureMouse;
+    auto cubeClicked = [&]() {
+        return !uiBlocked && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    };
+
     // --- Cube faces. Compute visibility per face from eye-space normal.z.
     auto pointInQuad = [&](const ImVec2* q, ImVec2 p) -> bool {
         float sign = 0.0f;
@@ -151,7 +162,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
         // Press on a face arms a pending snap; the actual snap fires on RELEASE
         // (and only if the user didn't drag in between, so dragging the cube
         // produces a free orbit instead).
-        if (hover && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (hover && cubeClicked()) {
             m_pendingClick = f.act;
             m_cubeDragging = false;
         }
@@ -178,7 +189,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
         bool hover = dist < 7.0f * ts;
         ImU32 col = hover ? IM_COL32(255, 220, 80, 240) : ink(200);
         dl->AddCircleFilled(cp, (hover ? 6.0f : 4.0f) * ts, col);
-        if (hover && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (hover && cubeClicked()) {
             m_pendingClick = kCornerActions[i];
             m_cubeDragging = false;
             cubeHover = true; // counts as cube interaction for hover-suppression
@@ -212,7 +223,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
             dl->AddTriangleFilled(tip, b1, b2, col);
             if (hover) {
                 cubeHover = true;
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                if (cubeClicked()) {
                     action = ar.act;
                 }
             }
@@ -280,7 +291,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
                                    col);
             if (hover) {
                 cubeHover = true;
-                if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                if (cubeClicked()) {
                     action = rb.act;
                 }
             }
@@ -305,7 +316,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
                           paper(255));
         if (hover) {
             cubeHover = true;
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            if (cubeClicked()) {
                 action = ViewCubeAction::Home;
             }
         }
