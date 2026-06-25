@@ -52,14 +52,15 @@ void Camera::orbitLevel(float yawDelta, float pitchDelta)
     // by entering a sketch. Pan and zoom intentionally keep ortho mode on.
     m_orthographic = false;
 
-    // Reset up to world-up so a turntable orbit always shows a level horizon.
-    // Without this, a sketch's chosen up vector (which may be -X, +Z, etc.
-    // depending on the face) sticks around on the camera and orbiting looks
-    // rotated / twisted — the look-at point is fine but the up axis is wrong.
-    // The target is left as-is so an orbit out of a sketch ortho view pivots
-    // around the world-grid-aligned anchor that alignCameraToActiveSketch set
-    // near the face centre, keeping the area the user was sketching on framed.
+    // Capture the view's CURRENT up before we reset it — a Top/Bottom ortho snap
+    // stored the screen orientation there, and we need it to recover the azimuth
+    // at the pole (below). Then reset up to world-up so a turntable orbit always
+    // shows a level horizon. Without the reset, a sketch's chosen up vector (which
+    // may be -X, +Z, etc.) sticks around and orbiting looks rotated / twisted. The
+    // target is left as-is so an orbit out of a sketch ortho view pivots around
+    // the world-grid-aligned anchor alignCameraToActiveSketch set near the face.
     const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    const glm::vec3 prevUp = m_up;
     m_up = worldUp;
 
     glm::vec3 offset = m_position - m_target; // target -> camera
@@ -70,8 +71,21 @@ void Camera::orbitLevel(float yawDelta, float pitchDelta)
     // Decompose into yaw (around world Y) and pitch (elevation above the ground
     // plane). Rebuilding the offset from these keeps the view level — there is
     // no roll term, so the horizon stays flat no matter how far we orbit.
-    float yaw = std::atan2(dir.z, dir.x);
     float pitch = std::asin(glm::clamp(dir.y, -1.0f, 1.0f));
+    float yaw;
+    const glm::vec2 upH(prevUp.x, prevUp.z); // horizontal part of the entering up
+    if (std::abs(dir.y) > 0.9999f && glm::length(upH) > 1e-4f) {
+        // Looking straight down/up (an ortho Top/Bottom view): yaw is indeterminate
+        // from `dir` alone — atan2(0,0) collapses to 0, snapping the first orbit to
+        // the +X "Right" side. Recover the azimuth from the view's up vector, which
+        // the ortho snap set to a horizontal direction, so the orbit tips off the
+        // pole the way the screen is already oriented instead of jumping to Right.
+        const glm::vec2 h = glm::normalize(upH);
+        yaw = (dir.y > 0.0f) ? std::atan2(-h.y, -h.x)   // top:    screen-up = -(cosY,sinY)
+                             : std::atan2( h.y,  h.x);   // bottom: screen-up =  (cosY,sinY)
+    } else {
+        yaw = std::atan2(dir.z, dir.x);
+    }
 
     yaw += yawDelta;
     pitch += pitchDelta;
