@@ -129,12 +129,16 @@ bool MoveHoleOp::buildVoid(const TopoDS_Shape& body, const TopoDS_Face& seedWall
         }
     }
 
-    // A through-hole opens at exactly two mouths. One mouth (+ a gathered floor)
-    // = a pocket; zero or >2 = unrecognized. Either way, refuse (for now).
+    // A through-hole opens at exactly two mouths. Exactly ONE mouth (+ a gathered
+    // floor) = a real blind hole / pocket: recognized but unsupported, so flag it
+    // and let the caller explain. ZERO mouths means the clicked face isn't a hole
+    // wall at all (a plain outer face / cube side); >2 is an unrecognized profile.
+    // In BOTH of those, leave isPocket false so the caller falls through to
+    // ordinary Move Face instead of falsely refusing it as a "pocket".
     if (mouths.size() != 2) {
-        isPocket = true; // "recognized but unsupported profile" → caller toasts
-        std::fprintf(stderr, "[MoveHole] refused: %zu mouths (need 2 for a "
-                     "through-hole; pocket/blind/odd)\n", mouths.size());
+        isPocket = (mouths.size() == 1);
+        std::fprintf(stderr, "[MoveHole] not a through-hole: %zu mouths%s\n",
+                     mouths.size(), isPocket ? " (blind/pocket)" : "");
         return false;
     }
     entryNormal = faceNormal(mouths[0].first);
