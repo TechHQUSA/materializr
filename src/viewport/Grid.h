@@ -50,12 +50,15 @@ public:
     /// the light-theme viewport (lines stay readable against a light background).
     /// `sketchShade` (0..1) is the sketch grid line greyscale: 0 = black, 1 =
     /// white, so it can be tuned to read on light bodies or in dark scenes.
+    /// `sketchThickness` multiplies the sketch grid's line width (1 = default);
+    /// it has no effect on the tiered world/ground grid.
     void render(const glm::mat4& view, const glm::mat4& projection,
                 const glm::vec3& fadeCenter, float fadeDistance,
                 const Plane& plane, float minorStep,
                 float minorAlpha = 1.0f, float globalAlpha = 0.55f,
                 float sketchGrid = 0.0f, float depthBias = 0.0005f,
-                float lightBg = 0.0f, float sketchShade = 0.5f);
+                float lightBg = 0.0f, float sketchShade = 0.5f,
+                float sketchThickness = 1.0f);
 
 private:
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
@@ -80,6 +83,7 @@ private:
     int m_locDepthBias = -1;
     int m_locLightBg = -1;
     int m_locSketchShade = -1;
+    int m_locSketchThickness = -1;
 };
 
 } // namespace materializr

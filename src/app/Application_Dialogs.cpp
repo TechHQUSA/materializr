@@ -283,6 +283,15 @@ void Application::renderSettings() {
                         "so the grid reads on a light/white body, lighter for a "
                         "dark scene.");
 
+                    if (ImGui::SliderFloat("Grid thickness", &m_sketchGridThickness,
+                                           0.1f, 2.0f, "%.2fx")) {
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip(
+                        "Sketch grid line width, as a multiplier of the default "
+                        "(1.0x). Raise it for a bolder grid, lower it for a finer "
+                        "one. Only affects the sketch-plane grid, not the ground.");
+
                     ImGui::Spacing();
                     if (ImGui::Checkbox("Show level toggle in sketch toolbar",
                                         &m_showInferenceToolbarToggle)) {

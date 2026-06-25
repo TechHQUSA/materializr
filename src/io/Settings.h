@@ -51,6 +51,7 @@ struct AppSettings {
     float selectionLineWidth = 3.0f; // px width of highlighted edges/body outlines (1..10)
     float sketchLineWidth = 2.5f;    // px width of sketch geometry — thicker reads better over the grid (1..6)
     float sketchGridOpacity = 0.55f; // opacity of the sketch-plane grid (0..1)
+    float sketchGridThickness = 1.0f; // grid line-width multiplier (0.1..2)
     float sketchGridShade   = 0.5f;  // sketch grid line shade: 0 = black … 1 = white
     bool  smallScreenWarned = false; // user dismissed the "designed for larger screens" notice
     bool  leftPanelHidden   = false; // Tools column collapsed (max-viewport / small-screen fallback)

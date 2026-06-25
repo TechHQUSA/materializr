@@ -61,6 +61,7 @@ uniform float u_depthBias;     // signed depth nudge: + toward camera (draw the
                                // - away (let a coplanar body face occlude it)
 uniform float u_lightBg;       // 1 = light viewport: use dark-on-light line palette
 uniform float u_sketchShade;   // sketch grid line shade: 0 = black … 1 = white
+uniform float u_sketchThickness; // sketch grid line-width multiplier (1 = default)
 
 out vec4 fragColor;
 
@@ -115,7 +116,9 @@ void main() {
     float fade = clamp(1.0 - dist / max(u_fadeDistance, 1e-3), 0.0, 1.0);
 
     // The finest (1×) tier, drawn with the anti-moiré pristine-grid coverage.
-    float covMinor = gridCoverage(uv * u_scale, 1.3);
+    // The thickness multiplier scales every tier's line width (sketch AND the
+    // world/ground grid) so the slider reads the same way the opacity one does.
+    float covMinor = gridCoverage(uv * u_scale, 1.3 * u_sketchThickness);
 
     // Line palettes. On the dark viewport the lines are light and coarser tiers
     // get BRIGHTER (more prominent); on the light viewport they flip to dark, and
@@ -141,7 +144,7 @@ void main() {
         // now blends over geometry (no depth punch-through) it reads cleanly. The
         // pristine-grid coverage still greys each tier out evenly when it gets
         // dense, so no moiré; the opacity slider dims the whole sheet together.
-        float covMajor = gridCoverage(uv * u_scale * 0.1, 1.6);
+        float covMajor = gridCoverage(uv * u_scale * 0.1, 1.6 * u_sketchThickness);
         rgb = sketchCol;
         a   = covMinor * u_minorAlpha;
         rgb = mix(rgb, sketchMajor, covMajor);
@@ -151,8 +154,8 @@ void main() {
         // mega (every 100). The coarser 10- and 100-unit lines read on top;
         // zooming reveals finer tiers. Keeps the tiered look (the "10 mm /
         // 100 mm lines") the user wants on the ground grid.
-        float covMajor = gridCoverage(uv * u_scale * 0.1,  1.3);
-        float covMega  = gridCoverage(uv * u_scale * 0.01, 1.3);
+        float covMajor = gridCoverage(uv * u_scale * 0.1,  1.3 * u_sketchThickness);
+        float covMega  = gridCoverage(uv * u_scale * 0.01, 1.3 * u_sketchThickness);
         rgb = minorCol;
         a   = covMinor * u_minorAlpha;
         rgb = mix(rgb, majorCol, covMajor);
@@ -228,6 +231,7 @@ bool Grid::initialize()
     m_locDepthBias = glGetUniformLocation(m_shaderProgram, "u_depthBias");
     m_locLightBg = glGetUniformLocation(m_shaderProgram, "u_lightBg");
     m_locSketchShade = glGetUniformLocation(m_shaderProgram, "u_sketchShade");
+    m_locSketchThickness = glGetUniformLocation(m_shaderProgram, "u_sketchThickness");
 
     // Create a dummy VAO (required for core profile, even with no vertex attributes)
     glGenVertexArrays(1, &m_vao);
@@ -239,7 +243,8 @@ void Grid::render(const glm::mat4& view, const glm::mat4& projection,
                   const glm::vec3& fadeCenter, float fadeDistance,
                   const Plane& plane, float minorStep,
                   float minorAlpha, float globalAlpha, float sketchGrid,
-                  float depthBias, float lightBg, float sketchShade)
+                  float depthBias, float lightBg, float sketchShade,
+                  float sketchThickness)
 {
     if (!m_shaderProgram) return;
 
@@ -263,6 +268,7 @@ void Grid::render(const glm::mat4& view, const glm::mat4& projection,
     glUniform1f(m_locDepthBias, depthBias);
     glUniform1f(m_locLightBg, lightBg);
     glUniform1f(m_locSketchShade, sketchShade);
+    glUniform1f(m_locSketchThickness, sketchThickness);
 
     // Enable blending for grid transparency
     glEnable(GL_BLEND);
