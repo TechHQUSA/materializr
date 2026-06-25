@@ -582,8 +582,18 @@ void Application::renderViewport() {
         // rings (about the face centre) so a tilt reads as a rotation. The
         // latched handle brightens.
         if (m_moveFaceActive) {
-            glm::vec3 hot(1.0f, 0.92f, 0.25f);   // bright yellow
-            glm::vec3 dim(0.78f, 0.66f, 0.12f);  // dimmer yellow
+            // Translate arrows take the colour of the WORLD axis each in-plane
+            // direction most aligns with — X=red, Y=green, Z=blue, matching the
+            // main move gizmo — so the two arrows read as the actual axes you can
+            // slide the face along. The grabbed one brightens; the other dims.
+            auto axisColor = [](const glm::vec3& d, bool grabbed) {
+                const glm::vec3 a = glm::abs(d);
+                glm::vec3 c = (a.x >= a.y && a.x >= a.z) ? glm::vec3(0.90f, 0.20f, 0.20f)  // X
+                            : (a.y >= a.z)               ? glm::vec3(0.20f, 0.90f, 0.20f)  // Y
+                                                         : glm::vec3(0.30f, 0.40f, 0.95f); // Z
+                return grabbed ? glm::clamp(c * 1.7f, glm::vec3(0.0f), glm::vec3(1.0f))
+                               : c * 0.6f;
+            };
             if (m_faceXformKind == FaceXform::Rotate) {
                 // grab 0 tilts about axis B (RED ring), grab 1 about axis A
                 // (GREEN ring) — matched to the colored controls in the panel.
@@ -604,9 +614,9 @@ void Application::renderViewport() {
                 m_gizmo->renderCubeAlong(view, proj, m_moveFacePivot, m_moveFaceAxisB, gB);
             } else {
                 m_gizmo->renderArrowAlong(view, proj, m_moveFaceP0, m_moveFaceAxisA,
-                                          m_moveFaceGrab == 0 ? hot : dim);
+                                          axisColor(m_moveFaceAxisA, m_moveFaceGrab == 0));
                 m_gizmo->renderArrowAlong(view, proj, m_moveFaceP0, m_moveFaceAxisB,
-                                          m_moveFaceGrab == 1 ? hot : dim);
+                                          axisColor(m_moveFaceAxisB, m_moveFaceGrab == 1));
             }
         }
 
