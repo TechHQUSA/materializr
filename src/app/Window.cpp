@@ -217,25 +217,34 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             m_movedBeyondHold = false;
             m_lastCentroidX = cx; m_lastCentroidY = cy;
             m_lastPinchDist = dist;
+            m_startCentroidX = cx; m_startCentroidY = cy; // net-intent references
+            m_startPinchDist = dist;
             m_twoFingerMode = 0;          // undecided until one gesture dominates
-            m_twoFingerPanMag = 0.0f;
-            m_twoFingerZoomMag = 0.0f;
         } else {
             const float dCx = cx - m_lastCentroidX;
             const float dCy = cy - m_lastCentroidY;
             const float dZ  = dist - m_lastPinchDist;
-            // Confidence check: accumulate how much the centroid has travelled
-            // (pan intent) vs how much the finger spacing has changed (zoom
-            // intent), both in pixels, and lock to whichever clearly wins. Until
-            // then apply NOTHING, so a two-finger gesture doesn't pan AND zoom at
-            // once (the jitter). Re-decided each fresh two-finger gesture.
-            m_twoFingerPanMag  += std::sqrt(dCx * dCx + dCy * dCy);
-            m_twoFingerZoomMag += std::fabs(dZ);
             if (m_twoFingerMode == 0) {
-                const float lock = 12.0f; // px of clear intent before committing
-                if (m_twoFingerPanMag > lock && m_twoFingerPanMag > m_twoFingerZoomMag * 1.4f)
+                // Decide pan vs zoom from NET change since the gesture began, not
+                // a running sum of per-frame deltas. Summing |Δspacing| each frame
+                // integrates the spacing wobble of two never-quite-parallel
+                // fingers, so a slow, deliberate pan accumulated enough phantom
+                // "zoom" to mis-lock — the slower you panned, the worse it got
+                // (issue #1). Net change cancels that wobble: only a sustained
+                // pinch grows zoomNet, while a real pan grows panNet.
+                const float panNet  = std::sqrt((cx - m_startCentroidX) * (cx - m_startCentroidX) +
+                                                (cy - m_startCentroidY) * (cy - m_startCentroidY));
+                const float zoomNet = std::fabs(dist - m_startPinchDist);
+                // Strong pan bias: pan is the gesture users struggle to land, so
+                // it commits on modest travel and only needs to edge out zoom,
+                // whereas zoom must clearly dominate AND clear a real-pinch floor
+                // (incidental splay during a pan never reaches it).
+                const float panLock   = 10.0f; // net centroid px to commit to pan
+                const float zoomFloor = 20.0f; // net spacing px before zoom is even considered
+                const float zoomDead  =  6.0f; // discount incidental spacing drift
+                if (panNet > panLock && panNet > zoomNet * 1.2f)
                     m_twoFingerMode = 1; // pan
-                else if (m_twoFingerZoomMag > lock && m_twoFingerZoomMag > m_twoFingerPanMag * 1.4f)
+                else if (zoomNet > zoomFloor && (zoomNet - zoomDead) > panNet * 2.0f)
                     m_twoFingerMode = 2; // zoom
             }
             if (m_twoFingerMode == 1) { m_panAccX += dCx; m_panAccY += dCy; }

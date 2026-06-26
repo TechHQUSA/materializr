@@ -111,7 +111,10 @@ private:
     // Two-finger gesture lock: a gesture commits to EITHER pan OR zoom once one
     // clearly dominates, so they don't fight mid-gesture (0 undecided/1 pan/2 zoom).
     int   m_twoFingerMode = 0;
-    float m_twoFingerPanMag = 0.0f, m_twoFingerZoomMag = 0.0f;
+    // Reference centroid/spacing captured when the two-finger gesture begins.
+    // pan/zoom intent is judged from NET change vs these (not summed per-frame
+    // deltas), so a slow pan's finger wobble can't accumulate into a false zoom.
+    float m_startCentroidX = 0.0f, m_startCentroidY = 0.0f, m_startPinchDist = 0.0f;
 
     // One-finger press-and-hold tracking (-> box/drag-select).
     std::uint32_t m_downTicks = 0;        // SDL_GetTicks at single-finger down
