@@ -20,6 +20,17 @@
 
 namespace materializr {
 
+// OCCT/world space is Y-up; the UI presents the user's Z-up axes
+// (user X = world X, user Y = world Z, user Z = world Y). The Measure panel
+// reports in the user's axes, so every world coordinate/extent it displays
+// goes through this swap — mirrors the Scale panel's userToWorld[]={0,2,1}
+// (Application_Dialogs.cpp). Without it a body's height (user Z) was reported
+// under Y (issue #2). A pure axis swap, so it works for points and deltas
+// alike and never flips a box's min/max.
+static inline glm::vec3 worldToUser(const glm::vec3& w) {
+    return glm::vec3(w.x, w.z, w.y);
+}
+
 MeasureTool::MeasureTool() = default;
 
 void MeasureTool::setDocument(const Document* doc)        { m_document  = doc; }
@@ -94,11 +105,12 @@ void MeasureTool::measureObjects() {
     r.type   = MeasureResult::BoundingBox;
     r.label  = (count == 1) ? "Bounding Box"
                             : "Bounding Box (" + std::to_string(count) + " bodies)";
-    r.dimX   = x1 - x0;
-    r.dimY   = y1 - y0;
-    r.dimZ   = z1 - z0;
-    r.pointA = glm::vec3((float)x0,(float)y0,(float)z0);
-    r.pointB = glm::vec3((float)x1,(float)y1,(float)z1);
+    // Report extents and corners in the user's Z-up axes (see worldToUser).
+    r.dimX   = x1 - x0;          // user X = world X
+    r.dimY   = z1 - z0;          // user Y = world Z
+    r.dimZ   = y1 - y0;          // user Z = world Y
+    r.pointA = worldToUser(glm::vec3((float)x0,(float)y0,(float)z0));
+    r.pointB = worldToUser(glm::vec3((float)x1,(float)y1,(float)z1));
     m_results.push_back(r);
 }
 
@@ -129,13 +141,16 @@ void MeasureTool::measureLine() {
     glm::vec3 d = m_point2 - m_point1;
     MeasureResult r;
     r.type   = MeasureResult::Distance;
-    r.value  = static_cast<double>(glm::length(d));
+    r.value  = static_cast<double>(glm::length(d)); // length is axis-invariant
     r.label  = "Distance";
-    r.pointA = m_point1;
-    r.pointB = m_point2;
-    r.dimX   = std::abs(d.x);
-    r.dimY   = std::abs(d.y);
-    r.dimZ   = std::abs(d.z);
+    // Captured picks are world-space; show the panel's From/To and per-axis
+    // deltas in the user's Z-up axes (see worldToUser).
+    r.pointA = worldToUser(m_point1);
+    r.pointB = worldToUser(m_point2);
+    glm::vec3 du = worldToUser(d);
+    r.dimX   = std::abs(du.x);
+    r.dimY   = std::abs(du.y);
+    r.dimZ   = std::abs(du.z);
     m_results.push_back(r);
 }
 
