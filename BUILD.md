@@ -52,8 +52,9 @@ A self-contained `Materializr.app` + `.dmg` is built by
 `brew install dylibbundler`). It copies every Homebrew/OpenCASCADE dylib into
 the bundle and rewrites install names, so the app runs on a Mac that has never
 seen Homebrew. It is ad-hoc signed, so the first launch needs right-click ▸ Open
-(or `xattr -dr com.apple.quarantine Materializr.app`). Not yet wired up:
-Intel/universal binaries, a CI workflow, and Developer-ID signing/notarization.
+(or `xattr -dr com.apple.quarantine Materializr.app`). CI builds and uploads the
+`.dmg` on pushes to `main` (`.github/workflows/macos.yml`, Apple Silicon runner).
+Not yet wired up: Intel/universal binaries and Developer-ID signing/notarization.
 
 ## Android (arm64-v8a)
 

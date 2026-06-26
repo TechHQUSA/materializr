@@ -1,0 +1,72 @@
+name: macOS Build
+
+# Builds a native macOS (Apple Silicon / arm64) build with OpenCASCADE + SDL2
+# from Homebrew, packages a self-contained Materializr.app into a .dmg via
+# packaging/macos/build-dmg.sh, and uploads it as a workflow artifact. On a
+# published GitHub Release it also attaches the .dmg. The Linux/Windows/Android
+# builds are unaffected.
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'android/**'
+      - 'scripts/**'
+      - '.github/workflows/linux.yml'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+# A newer push on main cancels an in-flight build — older runs wouldn't ship.
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (arm64)
+    # macos-14 (and -15) are Apple Silicon runners; this build is arm64-only.
+    runs-on: macos-14
+
+    # contents: write lets softprops/action-gh-release attach the .dmg to a
+    # published Release (matches linux.yml / windows.yml).
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # cmake is preinstalled on the runner; bring the rest from Homebrew. GLM
+      # and Dear ImGui are fetched by CMake, so they're not listed here.
+      - name: Install dependencies
+        run: brew install opencascade sdl2 dylibbundler
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package .app + .dmg
+        run: ./packaging/macos/build-dmg.sh
+
+      - name: Show output
+        run: ls -lh build/*.dmg
+
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Materializr-macos-arm64
+          path: build/Materializr-*-arm64.dmg
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/Materializr-*-arm64.dmg
