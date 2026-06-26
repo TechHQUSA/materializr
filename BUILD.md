@@ -44,9 +44,9 @@ and curl + zlib from the macOS SDK. The GL backend uses the system OpenGL
 framework (`<OpenGL/gl3.h>`) — no GLEW loader — with a forward-compatible **3.3
 Core** context running the same GLSL 330 shaders as the other desktop targets.
 
-Tested on arm64 (Apple Silicon). Not yet wired up: Intel/universal binaries,
-`.app`/`.dmg` packaging, a CI workflow, and HiDPI/Retina viewport scaling (the
-offscreen 3D viewport currently renders at point — not pixel — resolution).
+Tested on arm64 (Apple Silicon), including HiDPI/Retina — the offscreen 3D
+viewport renders at the display's pixel resolution. Not yet wired up:
+Intel/universal binaries, `.app`/`.dmg` packaging, and a CI workflow.
 
 ## Android (arm64-v8a)
 

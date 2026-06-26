@@ -134,7 +134,18 @@ void Application::renderViewport() {
     int h = static_cast<int>(contentSize.y);
 
     if (w > 0 && h > 0) {
-        m_viewport->resize(w, h);
+        // Render the offscreen 3D viewport at the display's PIXEL resolution, not
+        // logical points, so it stays crisp on HiDPI/Retina screens. Otherwise the
+        // FBO is point-sized and ImGui::Image upscales it — soft/blurry at 2x. Only
+        // the render target scales: the image is still laid out at contentSize
+        // (points) and picking works in point-space (mouse + viewport both points
+        // → NDC), so neither needs to change. DisplayFramebufferScale is (1,1) on
+        // non-HiDPI displays, making this a no-op there; it's re-read every frame,
+        // so dragging the window between monitors of different density adapts live.
+        const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
+        const int fbw = static_cast<int>(contentSize.x * fbScale.x);
+        const int fbh = static_cast<int>(contentSize.y * fbScale.y);
+        m_viewport->resize(fbw, fbh);
 
         bool geomChanged = m_meshesDirty || !m_dirtyBodyIds.empty();
         if (geomChanged) {
