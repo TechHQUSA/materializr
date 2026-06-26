@@ -28,7 +28,11 @@ modeling, threads, SVG & text engraving, STL/STEP/SVG export.
 > **Prefer F-Droid?** It builds each release from source on its own
 > roughly-weekly cadence, so a brand-new bug fix can take a few days to reach it.
 > If you're chasing a fix we just shipped, the GitHub APK above will have it
-> first.
+> first. One caveat: F-Droid signs its build with its own key, so you can't
+> install the GitHub APK over an F-Droid install (or vice-versa) — Android
+> rejects the signature change. Switching sources means uninstalling first,
+> which clears the app's on-device files, so export any projects you want to
+> keep beforehand. Easiest is to pick one source and stick with it.
 
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-blue)
 ![CMake](https://img.shields.io/badge/CMake-3.20%2B-blue)
