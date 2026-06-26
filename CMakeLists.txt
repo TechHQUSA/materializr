@@ -286,18 +286,20 @@ target_link_libraries(materializr PRIVATE
     glm::glm
 )
 
-if(WIN32 OR APPLE)
-    # Windows (vcpkg) and macOS (Homebrew) both expose OCCT's own CMake config,
-    # which renamed several data-exchange toolkits across versions (TKSTEP ->
-    # TKDESTEP, etc.). Link via the umbrella variable from that config so we don't
-    # have to track its toolkit reshuffles by hand — this is more robust than the
-    # explicit toolkit list used for the hand-rolled Debian path below.
+if(WIN32)
+    # vcpkg ships OpenCASCADE 7.8+, which renamed several data-exchange toolkits
+    # (TKSTEP -> TKDESTEP, etc.). Link via the umbrella variable from OCCT's
+    # CMake config so we don't have to track its toolkit reshuffles by hand.
     message(STATUS "OpenCASCADE libraries: ${OpenCASCADE_LIBRARIES}")
     target_link_libraries(materializr PRIVATE ${OpenCASCADE_LIBRARIES})
 else()
-    # OCCT 7.8 renamed the data-exchange toolkits (TKSTEP -> TKDESTEP, etc.).
-    # Pick names by version so we link on both pre- and post-refactor system
-    # OCCT (Linux distros are now shipping 7.9+).
+    # Linux (system OCCT) and macOS (Homebrew) link the explicit set of toolkits
+    # the app actually uses. This is deliberately NOT OCCT's umbrella
+    # ${OpenCASCADE_LIBRARIES}: that pulls in the Draw/test harnesses (TKDraw,
+    # TKViewerTest, TKQADraw, ...), which the app never calls and which bloat the
+    # bundled macOS .dmg with ~dozens of extra dylibs. OCCT 7.8 renamed the
+    # data-exchange toolkits (TKSTEP -> TKDESTEP, etc.); pick names by version so
+    # we link on both pre- and post-refactor OCCT (distros + Homebrew ship 7.9+).
     if(OpenCASCADE_VERSION VERSION_GREATER_EQUAL 7.8)
         set(OCCT_DATAEXCHANGE_LIBS TKDESTEP TKDEIGES TKDESTL)
     else()
