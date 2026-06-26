@@ -73,10 +73,12 @@ target_link_libraries(imgui_lib PUBLIC ${MZ_SDL2_TARGET})
 find_package(OpenGL REQUIRED)
 
 # OpenCASCADE
-if(WIN32)
-    # Windows: OpenCASCADE is provided by vcpkg (see vcpkg.json). Its CMake config
-    # exports the same TK* targets and sets OpenCASCADE_INCLUDE_DIR, so the rest
-    # of this file is identical to the Linux path.
+if(WIN32 OR APPLE)
+    # Windows (vcpkg) and macOS (Homebrew: `brew install opencascade`) both ship a
+    # clean OpenCASCADE CMake config that exports the TK* targets and sets
+    # OpenCASCADE_INCLUDE_DIR directly — no path patching needed (unlike the Debian
+    # packages handled in the else branch). The Homebrew config lives under the brew
+    # prefix; pass -DCMAKE_PREFIX_PATH="$(brew --prefix)" if CMake doesn't find it.
     find_package(OpenCASCADE CONFIG REQUIRED)
 else()
 # Linux: work around missing libtbb-dev symlinks by patching cmake files locally.
@@ -284,10 +286,12 @@ target_link_libraries(materializr PRIVATE
     glm::glm
 )
 
-if(WIN32)
-    # vcpkg ships OpenCASCADE 7.8+, which renamed several data-exchange toolkits
-    # (TKSTEP -> TKDESTEP, etc.). Link via the umbrella variable from OCCT's
-    # CMake config so we don't have to track its toolkit reshuffles by hand.
+if(WIN32 OR APPLE)
+    # Windows (vcpkg) and macOS (Homebrew) both expose OCCT's own CMake config,
+    # which renamed several data-exchange toolkits across versions (TKSTEP ->
+    # TKDESTEP, etc.). Link via the umbrella variable from that config so we don't
+    # have to track its toolkit reshuffles by hand — this is more robust than the
+    # explicit toolkit list used for the hand-rolled Debian path below.
     message(STATUS "OpenCASCADE libraries: ${OpenCASCADE_LIBRARIES}")
     target_link_libraries(materializr PRIVATE ${OpenCASCADE_LIBRARIES})
 else()
@@ -345,6 +349,15 @@ if(MSVC)
     target_compile_definitions(materializr PRIVATE
         _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN)
     target_compile_options(materializr PRIVATE /bigobj)
+endif()
+
+if(APPLE)
+    # OpenGL was deprecated on macOS 10.14; silence the framework headers app-wide.
+    # gl_common.h also defines this, but ImGui's GL3 backend pulls <OpenGL/gl3.h>
+    # in on its own, so define it on both targets. Apple still ships/supports the
+    # framework, and there's no Metal/MoltenVK port yet.
+    target_compile_definitions(materializr PRIVATE GL_SILENCE_DEPRECATION)
+    target_compile_definitions(imgui_lib PRIVATE GL_SILENCE_DEPRECATION)
 endif()
 
 # Surface the project version to the C++ code so About / update-checker can use
