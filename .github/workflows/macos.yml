@@ -16,9 +16,6 @@ on:
       - 'scripts/**'
       - '.github/workflows/linux.yml'
       - '.github/workflows/windows.yml'
-  # TEMP: validate this workflow on the open PR before merge — removed afterward.
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
   release:
     types: [ published ]
