@@ -89,6 +89,7 @@ inline void resetFpuForOcct() {
 #include "modeling/SvgImport.h"
 #include "io/ProjectIO.h"
 #include "io/SketchRecovery.h"
+#include "io/ProjectRecovery.h"
 #include "io/Settings.h"
 #include "android_files.h" // androidLastDocUri/Name + androidOpenUri (Open Recent on SAF)
 #include "core/EventBus.h"
@@ -4574,10 +4575,99 @@ void Application::restoreSketchDraftNow() {
                  m_activeSketch->elementCount());
 }
 
+void Application::writeProjectRecoveryIfDue() {
+    // Snapshot the whole project to the crash-recovery sidecar — including an
+    // UNSAVED one, which the user-facing autosave can't touch (it needs a path).
+    // Snapshots immediately when a new step commits (so a hang in the NEXT op's
+    // preview loses nothing), else throttled for non-structural dirtiness.
+    if (m_pendingProjectRecovery) return;      // don't clobber a snapshot we may restore
+    if (!isDirty()) return;                    // nothing unsaved to protect
+    // Same guards as autosave: never snapshot a half-baked live preview / sketch,
+    // and never below the history tip (the file only persists applied steps, so a
+    // below-tip save would silently drop the redo tail).
+    if (m_history && m_history->canRedo()) return;
+    if (anyInteractivePreviewActive() || m_inSketchMode || m_edgeOpActive ||
+        m_moveFaceActive) return;
+    const int bodies = m_document ? m_document->bodyCount() : 0;
+    const int curStep = m_history ? m_history->currentStep() : -1;
+    if (bodies == 0 && curStep < 0) return;    // empty new document: nothing to lose
+
+    const double now = SDL_GetTicks() / 1000.0;
+    const bool newStep = (curStep != m_lastRecoveryStep);
+    const double kThrottleSec = 5.0;
+    if (!newStep && now - m_lastRecoveryWrite < kThrottleSec) return;
+
+    ProjectHistory hist = captureProjectHistory();
+    if (materializr::writeProjectRecovery(*m_document, &hist, m_currentProjectPath,
+                                          bodies, curStep + 1)) {
+        m_lastRecoveryWrite = now;
+        m_lastRecoveryStep = curStep;
+    }
+}
+
+void Application::renderProjectRecoveryPrompt() {
+    if (!m_pendingProjectRecovery) return;
+    ImGui::OpenPopup("Recover Project?");
+    ImVec2 c = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(c, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Recover Project?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        materializr::ProjectRecoveryMeta meta;
+        materializr::readProjectRecoveryMeta(meta);
+        ImGui::TextUnformatted(
+            "Unsaved work from your last session was recovered.");
+        if (!meta.projectPath.empty())
+            ImGui::TextDisabled("Project: %s", meta.projectPath.c_str());
+        else
+            ImGui::TextDisabled("An unsaved project (never written to a file).");
+        ImGui::TextDisabled("%d bodies, %d history steps.",
+                            meta.bodyCount, meta.stepCount);
+        ImGui::TextDisabled(
+            "Materializr didn't close cleanly (a crash, hang, or restart).");
+        ImGui::Spacing();
+        if (ImGui::Button("Restore it", ImVec2(140, 0))) {
+            restoreProjectRecoveryNow();
+            m_pendingProjectRecovery = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+            materializr::clearProjectRecovery();
+            m_pendingProjectRecovery = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void Application::restoreProjectRecoveryNow() {
+    materializr::ProjectRecoveryMeta meta;
+    materializr::readProjectRecoveryMeta(meta);
+    const std::string recPath = materializr::projectRecoveryPath();
+    // Load the snapshot through the normal project loader (rebuilds bodies +
+    // editable history). loadProjectAt sets m_currentProjectPath to the sidecar
+    // and marks it saved — override both with the project's ORIGINAL identity so
+    // the user can't overwrite the sidecar and unsaved work stays unsaved/dirty.
+    if (!loadProjectAt(recPath)) {
+        std::fprintf(stderr, "[Recovery] failed to load project snapshot\n");
+        materializr::clearProjectRecovery();
+        return;
+    }
+    m_currentProjectPath = meta.projectPath; // "" if it was never saved
+    markDirty();                             // unsaved since the snapshot
+    saveAppSettings();                       // fix lastProjectPath off the sidecar
+    m_lastRecoveryStep = -2;                 // force a fresh snapshot going forward
+    std::fprintf(stdout, "[Recovery] restored project (%d bodies, %d steps)\n",
+                 meta.bodyCount, meta.stepCount);
+}
+
 void Application::run() {
     // A draft surviving from a previous session means it ended mid-sketch
     // (crash / kill / quit while drawing) — offer to restore on first frame.
     m_pendingSketchRecovery = materializr::hasSketchDraft();
+    // A whole-project recovery snapshot surviving means the last session ended
+    // unexpectedly with unsaved work — offer to restore that too.
+    m_pendingProjectRecovery = materializr::hasProjectRecovery();
 
     // Opt-in perf instrumentation (MZR_PERF=1): once a second, report how many
     // frames we actually RENDERED vs how many loop iterations ran, plus which
@@ -4736,6 +4826,8 @@ void Application::run() {
 
         // Keep the in-progress sketch crash-recoverable.
         writeSketchDraftIfDue();
+        // Keep the whole committed project crash/hang-recoverable (incl. unsaved).
+        writeProjectRecoveryIfDue();
 
         // The save-prompt's Don't Save / post-save-success path sets this flag
         // directly. Check it every frame so we exit without requiring the user
@@ -5115,7 +5207,10 @@ void Application::run() {
             renderTransientToast();
             FileDialogs::render();
             renderSavePrompt();
-            renderSketchRecoveryPrompt();
+            // Project recovery takes precedence — one modal at a time, and a
+            // restored project supersedes any leftover sketch draft anyway.
+            renderProjectRecoveryPrompt();
+            if (!m_pendingProjectRecovery) renderSketchRecoveryPrompt();
 
             handleShortcuts();
         }
@@ -5130,6 +5225,9 @@ void Application::run() {
 
     // Persist preferences on a clean exit (in addition to saving on each change).
     saveAppSettings();
+    // Clean exit → the crash-recovery snapshot is no longer "unfinished work".
+    // A snapshot surviving to the next launch therefore means a crash/hang/kill.
+    materializr::clearProjectRecovery();
 }
 
 } // namespace materializr

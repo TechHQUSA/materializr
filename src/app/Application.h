@@ -498,6 +498,19 @@ private:
     void renderSketchRecoveryPrompt();   // startup "restore unfinished sketch?" modal
     void restoreSketchDraftNow();        // re-enter sketch mode with the saved draft
 
+    // Whole-project crash/hang recovery (see io/ProjectRecovery). Independent of
+    // the user-facing autosave (which only writes a SAVED file): the committed
+    // model — bodies + full history — is snapshotted to a sidecar even for an
+    // UNSAVED project, so a crash or a hang never loses more than the last
+    // committed step. Cleared on a clean exit; a survivor drives the restore
+    // prompt. Snapshots immediately on each new committed step, else throttled.
+    double m_lastRecoveryWrite = 0.0;    // wall-clock secs of last recovery write
+    int    m_lastRecoveryStep = -2;      // history currentStep at last write
+    bool   m_pendingProjectRecovery = false;
+    void writeProjectRecoveryIfDue();    // per-frame crash-recovery snapshot
+    void renderProjectRecoveryPrompt();  // startup "restore unsaved project?" modal
+    void restoreProjectRecoveryNow();    // load the recovery snapshot
+
     // Hovered sketch region (for highlight in viewport)
     int m_hoveredSketchId = -1;
     int m_hoveredRegionIndex = -1;

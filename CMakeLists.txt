@@ -257,6 +257,7 @@ add_executable(materializr
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp
     src/io/SketchRecovery.cpp
+    src/io/ProjectRecovery.cpp
     src/io/Settings.cpp
     src/io/StepIO.cpp
     src/io/StlExport.cpp
