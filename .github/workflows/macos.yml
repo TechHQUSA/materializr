@@ -16,9 +16,6 @@ on:
       - 'scripts/**'
       - '.github/workflows/linux.yml'
       - '.github/workflows/windows.yml'
-  # TEMP: re-validate the final hardened state on the PR — removed after.
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
   release:
     types: [ published ]
