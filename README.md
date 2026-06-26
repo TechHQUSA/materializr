@@ -117,6 +117,12 @@ These are tracked and on the roadmap; both ease once topological naming is in.
 The app ships an in-app **Help → User Guide**, a **Keyboard Shortcuts**
 panel, and **Help → Check for Updates**.
 
+## Video Tutorial
+
+A walkthrough from a first sketch to a printable part:
+
+[![Watch the Materializr tutorial](https://img.youtube.com/vi/nwSwxCH3Ne0/maxresdefault.jpg)](https://youtu.be/nwSwxCH3Ne0)
+
 ## License
 
 GNU GPLv3 — see [LICENSE](LICENSE). (Releases through 0.9.7.1 were MIT; the
