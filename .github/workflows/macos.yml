@@ -16,9 +16,6 @@ on:
       - 'scripts/**'
       - '.github/workflows/linux.yml'
       - '.github/workflows/windows.yml'
-  # TEMP: validate the rewritten smoke-test + packaging on the PR — removed after.
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
   release:
     types: [ published ]
