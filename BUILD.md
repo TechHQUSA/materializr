@@ -51,9 +51,16 @@ A self-contained `Materializr.app` + `.dmg` is built by
 `./packaging/macos/build-dmg.sh` (run after the build above; needs
 `brew install dylibbundler`). It copies every Homebrew/OpenCASCADE dylib into
 the bundle and rewrites install names, so the app runs on a Mac that has never
-seen Homebrew. It is ad-hoc signed, so the first launch needs right-click ▸ Open
-(or `xattr -dr com.apple.quarantine Materializr.app`). CI builds and uploads the
-`.dmg` on pushes to `main` (`.github/workflows/macos.yml`, Apple Silicon runner).
+seen Homebrew. It is ad-hoc signed (not notarized): a downloaded copy is
+quarantined, so the first launch needs **System Settings ▸ Privacy & Security ▸
+"Open Anyway"** (macOS 15 removed the old right-click ▸ Open bypass), or
+`xattr -dr com.apple.quarantine Materializr.app`.
+
+The bundled Homebrew dylibs are built for the macOS they were compiled on, so a
+locally built `.dmg` requires that macOS or newer — the script writes the true
+floor into `LSMinimumSystemVersion`. CI builds on the `macos-14` runner, so the
+released `.dmg` targets **macOS 14+**; it is built, the bundle is launch-tested,
+and the artifact uploaded on pushes to `main` (`.github/workflows/macos.yml`).
 Not yet wired up: Intel/universal binaries and Developer-ID signing/notarization.
 
 ## Android (arm64-v8a)

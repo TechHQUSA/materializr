@@ -539,13 +539,10 @@ void Application::initImGui() {
     }
 
     // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,
-    // distinct 0/8/B/6, designed for engineering UIs. Resolved from a small
-    // list of candidate paths so both AppImage and dev builds find it:
-    //   1. <exe>/../share/materializr/fonts/    (AppImage layout)
-    //   2. <exe>/../assets/fonts/               (dev: binary in build/)
-    //   3. <cwd>/assets/fonts/                  (dev: launched from repo root)
-    // Falls through to the bundled default if the TTF isn't present, so
-    // a font miss never bricks the UI.
+    // distinct 0/8/B/6, designed for engineering UIs. resolveBundledFont() tries
+    // the AppImage, macOS .app Resources/, dev-build, and cwd layouts (see its
+    // candidate list). Falls through to the bundled default if the TTF isn't
+    // present, so a font miss never bricks the UI.
     {
         std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
         if (!path.empty()) {

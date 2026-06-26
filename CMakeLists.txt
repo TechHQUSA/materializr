@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 project(Materializr VERSION 1.2.6 LANGUAGES CXX)
 
+# macOS: deliberately do NOT pin CMAKE_OSX_DEPLOYMENT_TARGET. The bundled Homebrew
+# OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they — not our
+# compile flag — set the real floor of a packaged .dmg. Letting the binary inherit
+# the host target keeps it consistent with those dylibs (no "built for newer
+# version" linker warnings), and packaging/macos/build-dmg.sh derives the true
+# LSMinimumSystemVersion from the actual binaries so the plist can't lie. (Override
+# with -DCMAKE_OSX_DEPLOYMENT_TARGET=… only alongside dylibs built for that target.)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

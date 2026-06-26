@@ -142,9 +142,16 @@ void Application::renderViewport() {
         // → NDC), so neither needs to change. DisplayFramebufferScale is (1,1) on
         // non-HiDPI displays, making this a no-op there; it's re-read every frame,
         // so dragging the window between monitors of different density adapts live.
-        const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
-        const int fbw = static_cast<int>(contentSize.x * fbScale.x);
-        const int fbh = static_cast<int>(contentSize.y * fbScale.y);
+        // Cap the scale at 2x. Retina is 2.0, and the FBO's color + depth/stencil
+        // + MSAA buffers (all rebuilt on every resize) cost ~quadratically in it,
+        // so a display reporting >2x would burn memory for no visible gain. macOS
+        // backing scale is only ever 1 or 2, so this clamp is a safety bound, not
+        // a behaviour change there.
+        const ImGuiIO& io = ImGui::GetIO();
+        const float fbScaleX = std::min(io.DisplayFramebufferScale.x, 2.0f);
+        const float fbScaleY = std::min(io.DisplayFramebufferScale.y, 2.0f);
+        const int fbw = static_cast<int>(contentSize.x * fbScaleX);
+        const int fbh = static_cast<int>(contentSize.y * fbScaleY);
         m_viewport->resize(fbw, fbh);
 
         bool geomChanged = m_meshesDirty || !m_dirtyBodyIds.empty();

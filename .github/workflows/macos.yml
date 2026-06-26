@@ -56,8 +56,35 @@ jobs:
       - name: Package .app + .dmg
         run: ./packaging/macos/build-dmg.sh
 
-      - name: Show output
-        run: ls -lh build/*.dmg
+      # Mount the .dmg and actually launch the bundled app — the only thing that
+      # proves the dylib bundling + rpath rewrites are correct (a green build that
+      # only `ls`-es the file can still ship a bundle that doesn't load). A dyld
+      # failure aborts before main; reaching GL init proves every dylib resolved.
+      # Run from / so it can't find resources via the repo working directory.
+      - name: Smoke-test the packaged bundle
+        run: |
+          set -uo pipefail
+          DMG=$(ls build/Materializr-*-arm64.dmg)
+          echo "Testing $DMG"; ls -lh "$DMG"
+          hdiutil attach "$DMG" -mountpoint /Volumes/MZ -nobrowse -quiet
+          ( cd / && /Volumes/MZ/Materializr.app/Contents/MacOS/materializr ) > /tmp/launch.log 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 25); do
+            grep -qiE "^GL |Loaded font|dyld|Library not loaded|Failed to (create|init)" /tmp/launch.log && break
+            sleep 1
+          done
+          kill "$APP_PID" 2>/dev/null || true
+          hdiutil detach /Volumes/MZ -quiet || true
+          echo "---- launch log ----"; cat /tmp/launch.log || true
+          if grep -qiE "dyld|Library not loaded|duplicate LC_RPATH|image not found|symbol not found" /tmp/launch.log; then
+            echo "FAIL: dynamic loader error — the bundle is not self-contained"; exit 1
+          elif grep -qiE "^GL |Loaded font" /tmp/launch.log; then
+            echo "PASS: bundle launched and reached GL init"
+          elif grep -qiE "SDL|window|display" /tmp/launch.log; then
+            echo "PASS: all dylibs resolved (runner had no display; stopped at window creation)"
+          else
+            echo "FAIL: app produced no output — possible silent load failure"; exit 1
+          fi
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
