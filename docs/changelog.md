@@ -3,6 +3,25 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.2.7] — 2026-06-26
+
+Bug fixes from the first round of community reports.
+
+### Fixed
+
+- **Shell no longer crashes** when a hollow exceeds the body's available wall
+  space (e.g. shelling one face, then another, and dragging the thickness past
+  what fits). The operation now fails cleanly instead of taking the app down.
+  Under the hood this re-armed OCCT's kernel-fault guard in release builds, so
+  other modeling tools are more crash-resistant on degenerate geometry too.
+- **Measure → Object** reports a body's size on the correct axes — height now
+  reads under **Z**, not Y.
+- **Touch:** a slow, deliberate two-finger pan no longer flips into a zoom.
+  Pan/zoom intent is judged from net finger travel with a bias toward pan, so
+  the small non-parallel wobble of two fingers can't be mistaken for a pinch.
+- **Settings:** fixed an internal control-ID clash on the touch Orbit/Pan
+  sensitivity sliders (a debug-build warning; harmless but real).
+
 ## [1.2.6] — 2026-06-25
 
 Crash safety and grid polish.
