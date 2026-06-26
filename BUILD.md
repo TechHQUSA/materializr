@@ -45,8 +45,15 @@ framework (`<OpenGL/gl3.h>`) — no GLEW loader — with a forward-compatible **
 Core** context running the same GLSL 330 shaders as the other desktop targets.
 
 Tested on arm64 (Apple Silicon), including HiDPI/Retina — the offscreen 3D
-viewport renders at the display's pixel resolution. Not yet wired up:
-Intel/universal binaries, `.app`/`.dmg` packaging, and a CI workflow.
+viewport renders at the display's pixel resolution.
+
+A self-contained `Materializr.app` + `.dmg` is built by
+`./packaging/macos/build-dmg.sh` (run after the build above; needs
+`brew install dylibbundler`). It copies every Homebrew/OpenCASCADE dylib into
+the bundle and rewrites install names, so the app runs on a Mac that has never
+seen Homebrew. It is ad-hoc signed, so the first launch needs right-click ▸ Open
+(or `xattr -dr com.apple.quarantine Materializr.app`). Not yet wired up:
+Intel/universal binaries, a CI workflow, and Developer-ID signing/notarization.
 
 ## Android (arm64-v8a)
 
