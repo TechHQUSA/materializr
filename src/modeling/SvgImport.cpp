@@ -183,8 +183,19 @@ bool findFirstUse(const std::string& svg, size_t& outStart, size_t& outEnd,
 
 void expandSvgUses(std::string& svg) {
     const int maxIter = 1024; // termination guard — pathological self-refs only
+    // Output-size cap defusing the "billion laughs" amplification: when a <use>
+    // target itself contains <use>, each expansion roughly doubles the buffer
+    // (L_k ~= 2^k * L0), so the iteration cap alone lets a few-hundred-byte file
+    // reach gigabytes. Abort once the working buffer crosses this bound.
+    const size_t maxOutput = std::max<size_t>(8u * 1024 * 1024, svg.size() * 32);
     int expansions = 0;
     for (int it = 0; it < maxIter; ++it) {
+        if (svg.size() > maxOutput) {
+            std::fprintf(stderr,
+                "[SVG] <use> expansion exceeded %zu-byte cap — aborting\n",
+                maxOutput);
+            return;
+        }
         size_t us, ue;
         std::string href, attrs;
         if (!findFirstUse(svg, us, ue, href, attrs)) {
