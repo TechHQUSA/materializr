@@ -13,6 +13,7 @@
 #include <Interface_Static.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <Standard_Failure.hxx>
+#include <Standard_ErrorHandler.hxx>
 
 namespace materializr {
 
@@ -24,6 +25,7 @@ ImportResult IgesIO::import(const std::string& filePath, Document& doc) {
     // import is a graceful error rather than an uncaught exception that aborts the
     // whole process (an instant crash, notably on Android) — mirrors StepIO::import.
     try {
+    OCC_CATCH_SIGNALS // convert an OCCT kernel fault on a crafted file into the catch below
     IGESControl_Reader reader;
     IFSelect_ReturnStatus status = reader.ReadFile(filePath.c_str());
 

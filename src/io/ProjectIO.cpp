@@ -615,6 +615,16 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
         result.errorMessage = "Failed to open file for reading: " + filePath;
         return result;
     }
+    // Reject an absurdly large file before pulling it into memory: the 512 MB
+    // gunzip cap only bounds *inflated* output, so a plain uncompressed v2 file
+    // would otherwise have no size gate at all.
+    raw.seekg(0, std::ios::end);
+    std::streampos rawSize = raw.tellg();
+    raw.seekg(0, std::ios::beg);
+    if (rawSize > static_cast<std::streampos>(512LL * 1024 * 1024)) {
+        result.errorMessage = "Project file too large (> 512 MB) — refusing to load";
+        return result;
+    }
     std::ostringstream slurp;
     slurp << raw.rdbuf();
     std::string contents = slurp.str();
@@ -972,8 +982,22 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                         // / arbitrary content, used for SketchEditOp's full
                         // before+after sketch snapshots.
                         std::size_t n = 0; ls >> n;
+                        // Bound the (untrusted) length-prefix against the bytes
+                        // left before allocating — same class as the body
+                        // byteCount guard, and reached on every project open.
+                        std::streampos here = ifs.tellg();
+                        std::size_t remaining = (here >= 0 && static_cast<std::size_t>(here) <= contents.size())
+                                              ? contents.size() - static_cast<std::size_t>(here) : 0;
+                        if (n > remaining) {
+                            result.errorMessage = "PARAMS_LEN exceeds remaining file size";
+                            return result;
+                        }
                         std::string data(n, '\0');
                         ifs.read(&data[0], static_cast<std::streamsize>(n));
+                        if (static_cast<std::size_t>(ifs.gcount()) != n) {
+                            result.errorMessage = "Short read on PARAMS_LEN blob";
+                            return result;
+                        }
                         // Consume the trailing newline after the blob.
                         std::string skip; std::getline(ifs, skip);
                         st.params = std::move(data);
@@ -988,7 +1012,7 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                         }
                     } else if (t == "DELETED_COUNT") {
                         int p = 0; ls >> p;
-                        for (int j = 0; j < p; ++j) { int id = 0; ls >> id; st.deleted.push_back(id); }
+                        for (int j = 0; j < p; ++j) { int id = 0; if (!(ls >> id)) break; st.deleted.push_back(id); }
                     } else if (t == "TIMESTAMP") {
                         ls >> st.timestampUnix;
                     }
