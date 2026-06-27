@@ -191,6 +191,12 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
                                   const ProjectHistory* history) {
     ProjectSaveResult result;
 
+    // OCCT BinTools::Write (per body and inside the HISTORY blocks) can throw
+    // Standard_Failure on a degenerate in-memory shape; the inner per-body catch
+    // only handles std::exception and the history writes are unguarded. Wrap the
+    // whole save so Ctrl+S / autosave reports a graceful error instead of
+    // aborting the process and losing the document — mirrors load().
+    try {
     // Build the entire file content in memory first (binary-safe stringstream
     // so writeBodyBlockV3's raw bytes pass through unmodified), then gzip-
     // deflate the result and write it to disk as one binary blob. Lets the
@@ -460,6 +466,17 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
     }
     out.close();
     result.success = true;
+    return result;
+    } catch (const Standard_Failure& e) {
+        result.success = false;
+        result.errorMessage = std::string("Project save failed: ") + e.GetMessageString();
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.errorMessage = std::string("Project save failed: ") + e.what();
+    } catch (...) {
+        result.success = false;
+        result.errorMessage = "Project save failed: unrecognized error";
+    }
     return result;
 }
 
