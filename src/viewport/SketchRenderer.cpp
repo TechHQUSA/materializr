@@ -1115,6 +1115,76 @@ void SketchRenderer::renderSketchHighlight(const Sketch* sketch,
     glDisable(GL_BLEND);
 }
 
+void SketchRenderer::renderElementsHighlight(const Sketch* sketch,
+                                             const std::set<int>& lineIds,
+                                             const std::set<int>& circleIds,
+                                             const std::set<int>& arcIds,
+                                             const glm::vec3& color, float lineWidth,
+                                             const glm::mat4& view,
+                                             const glm::mat4& projection) {
+    if (!sketch || !m_program) return;
+    if (lineIds.empty() && circleIds.empty() && arcIds.empty()) return;
+    glm::mat4 vp = projection * view;
+
+    std::vector<float> verts;
+    auto push = [&](glm::vec3 a, glm::vec3 b) {
+        verts.push_back(a.x); verts.push_back(a.y); verts.push_back(a.z);
+        verts.push_back(b.x); verts.push_back(b.y); verts.push_back(b.z);
+    };
+
+    for (const auto& ln : sketch->getLines()) {
+        if (!lineIds.count(ln.id)) continue;
+        const SketchPoint* p1 = sketch->getPoint(ln.startPointId);
+        const SketchPoint* p2 = sketch->getPoint(ln.endPointId);
+        if (!p1 || !p2) continue;
+        push(toWorld(sketch, p1->pos), toWorld(sketch, p2->pos));
+    }
+
+    const int circSegs = 64;
+    for (const auto& c : sketch->getCircles()) {
+        if (!circleIds.count(c.id)) continue;
+        const SketchPoint* ctr = sketch->getPoint(c.centerPointId);
+        if (!ctr) continue;
+        float r = static_cast<float>(c.radius);
+        for (int i = 0; i < circSegs; ++i) {
+            float a1 = 2.0f * static_cast<float>(M_PI) * i / circSegs;
+            float a2 = 2.0f * static_cast<float>(M_PI) * (i + 1) / circSegs;
+            glm::vec2 s1(ctr->pos.x + r * std::cos(a1), ctr->pos.y + r * std::sin(a1));
+            glm::vec2 s2(ctr->pos.x + r * std::cos(a2), ctr->pos.y + r * std::sin(a2));
+            push(toWorld(sketch, s1), toWorld(sketch, s2));
+        }
+    }
+
+    const int arcSegs = 32;
+    for (const auto& a : sketch->getArcs()) {
+        if (!arcIds.count(a.id)) continue;
+        const SketchPoint* ctr = sketch->getPoint(a.centerPointId);
+        const SketchPoint* s   = sketch->getPoint(a.startPointId);
+        const SketchPoint* e   = sketch->getPoint(a.endPointId);
+        if (!ctr || !s || !e) continue;
+        float a0 = std::atan2(s->pos.y - ctr->pos.y, s->pos.x - ctr->pos.x);
+        float a1 = std::atan2(e->pos.y - ctr->pos.y, e->pos.x - ctr->pos.x);
+        if (a1 < a0) a1 += 2.0f * static_cast<float>(M_PI);
+        float r = static_cast<float>(a.radius);
+        for (int i = 0; i < arcSegs; ++i) {
+            float t1 = static_cast<float>(i) / arcSegs;
+            float t2 = static_cast<float>(i + 1) / arcSegs;
+            float ang1 = a0 + t1 * (a1 - a0);
+            float ang2 = a0 + t2 * (a1 - a0);
+            glm::vec2 q1(ctr->pos.x + r * std::cos(ang1), ctr->pos.y + r * std::sin(ang1));
+            glm::vec2 q2(ctr->pos.x + r * std::cos(ang2), ctr->pos.y + r * std::sin(ang2));
+            push(toWorld(sketch, q1), toWorld(sketch, q2));
+        }
+    }
+
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    uploadAndDraw(verts, GL_LINES, color, vp, lineWidth);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+}
+
 void SketchRenderer::renderFaceGrid(const Sketch* sketch, float faceExtent, float gridStep,
                                     const glm::mat4& view, const glm::mat4& projection) {
     if (!sketch || !m_program) return;

@@ -211,6 +211,46 @@ public:
     void setCircleRadius(int circleId, double r);
     void setArcRadius(int arcId, double r);
 
+    // --- Post-draw size edits (Properties panel) ---------------------------
+    // Resize a line to `newLength`, growing/shrinking symmetrically about its
+    // midpoint along its current direction. Both endpoints move, so any element
+    // sharing those points (chained lines, rectangle corners, arc ends) rides
+    // along — that's the "anchored to the ends" behaviour. Arcs whose endpoint
+    // moves are repaired to preserve their swept angle (see below).
+    void setLineLength(int lineId, double newLength);
+
+    // Resize an arc to `newRadius` keeping its centre fixed and its endpoints'
+    // angles fixed (endpoints slide radially). The swept angle is preserved and
+    // the endpoints stay exactly on the circle, so shared lines follow cleanly.
+    void resizeArc(int arcId, double newRadius);
+
+    // Set an arc's swept angle (radians, CCW from start) keeping centre, radius
+    // and start point fixed; the end point moves to the new angle.
+    void setArcSweep(int arcId, double sweepRad);
+
+    // Set the straight-line distance between an arc's two endpoints (its chord)
+    // keeping the SWEEP ANGLE fixed — i.e. the same arc shape, just scaled. Both
+    // endpoints slide radially about the (fixed) centre; the radius adjusts to
+    // hit the requested chord. (Equivalent to a Radius edit, parameterised by
+    // endpoint distance instead of curvature.)
+    void setArcChord(int arcId, double chordLen);
+
+    // Axis-aligned rectangle described by four lines sharing four corner points.
+    struct RectInfo {
+        glm::vec2 center{0.0f};
+        double width = 0.0;     // x-extent
+        double height = 0.0;    // y-extent
+        int cornerPts[4] = {-1, -1, -1, -1};
+        int lineIds[4]   = {-1, -1, -1, -1};
+    };
+    // If `lineId` is one side of an axis-aligned rectangle (a closed 4-cycle of
+    // axis-aligned lines over 4 shared points), fill `out` and return true.
+    // Returns false for any non-rectangular / rotated / ambiguous arrangement,
+    // so callers fall back to plain line editing.
+    bool findAxisAlignedRect(int lineId, RectInfo& out) const;
+    // Resize that rectangle to width × height, holding its centre fixed.
+    void setRectangleSize(int lineId, double width, double height);
+
     // --- Constraints (entirely opt-in; only user-applied constraints land here) ---
     // The solver reads from and writes back to this vector. Constraints persist
     // with the sketch so multiple sketches don't share solver state and project
@@ -225,6 +265,13 @@ public:
     int  getNextConstraintId() const { return m_nextConstraintId; }
 
 private:
+    // Move a point that may be an arc endpoint, then recompute each affected
+    // arc's centre+radius so the arc keeps its original swept angle with the
+    // (unmoved) opposite endpoint. Used by the size-edit mutators above so
+    // stretching a line/rectangle that shares a point with an arc bends the arc
+    // sensibly instead of leaving its endpoint off the circle.
+    void moveEndpointPreservingArcs(int pointId, glm::vec2 newPos);
+
     int m_nextId = 1;
     std::string m_name = "Sketch";
     gp_Pln m_plane;

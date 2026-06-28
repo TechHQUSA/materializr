@@ -688,6 +688,30 @@ void Application::renderViewport() {
                 }
             }
         }
+        // Highlight the element(s) a selected history step edits, so it's clear
+        // which line / rectangle / arc the Properties values refer to. Drawn in
+        // bright orange over the (live-previewed) target sketch.
+        if (m_historyPanel && m_history) {
+            int es = m_historyPanel->getEditingStep();
+            const Operation* op = (es >= 0) ? m_history->getStep(es) : nullptr;
+            if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
+                auto tgt = se->getTarget();
+                int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
+                // Show the highlight whenever the step's sketch is on screen:
+                // the active (not-yet-committed) sketch — which findSketchId
+                // can't see — or a visible committed one.
+                bool shown = tgt && (tgt == m_activeSketch ||
+                                     (sid >= 0 && m_document->isSketchVisible(sid)));
+                if (shown) {
+                    std::set<int> lines, circles, arcs;
+                    se->getEditedElements(lines, circles, arcs);
+                    m_sketchRenderer->renderElementsHighlight(
+                        tgt.get(), lines, circles, arcs,
+                        glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+                }
+            }
+        }
+
         // Hovered region in cyan (drawn last so it's on top)
         highlightRegion(m_hoveredSketchId, m_hoveredRegionIndex,
                         glm::vec3(0.2f, 0.9f, 1.0f), 3.0f, 0.12f);

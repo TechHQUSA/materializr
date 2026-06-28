@@ -4093,12 +4093,28 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
     auto signature = [](const Sketch& s) {
         size_t h = 1469598103934665603ull;
         auto mix = [&](size_t v) { h = (h ^ v) * 1099511628211ull; };
+        // Hash point positions and circle/arc radii too (quantised to 1e-4 mm)
+        // so a pure move/resize — a line length, rectangle W×H, or arc sweep
+        // edit that keeps every id and count fixed — still registers as a
+        // mutation and gets its own undoable history step.
+        auto mixPos = [&](glm::vec2 p) {
+            mix(static_cast<size_t>(std::llround(p.x * 1e4)));
+            mix(static_cast<size_t>(std::llround(p.y * 1e4)));
+        };
+        mix(s.getPoints().size());
+        for (const auto& p : s.getPoints()) { mix(static_cast<size_t>(p.id)); mixPos(p.pos); }
         mix(s.getLines().size());
         for (const auto& l : s.getLines()) mix(static_cast<size_t>(l.id));
         mix(s.getCircles().size());
-        for (const auto& c : s.getCircles()) mix(static_cast<size_t>(c.id));
+        for (const auto& c : s.getCircles()) {
+            mix(static_cast<size_t>(c.id));
+            mix(static_cast<size_t>(std::llround(c.radius * 1e4)));
+        }
         mix(s.getArcs().size());
-        for (const auto& a : s.getArcs()) mix(static_cast<size_t>(a.id));
+        for (const auto& a : s.getArcs()) {
+            mix(static_cast<size_t>(a.id));
+            mix(static_cast<size_t>(std::llround(a.radius * 1e4)));
+        }
         mix(s.getSplines().size());
         for (const auto& sp : s.getSplines()) mix(static_cast<size_t>(sp.id));
         mix(s.getPolygons().size());
@@ -5179,6 +5195,33 @@ void Application::run() {
             // collapse with the right edge handle (or Hide Panels).
             if (!m_rightPanelHidden) {
                 m_historyPanel->setHistoryLocked(anyInteractivePreviewActive());
+                // Reverse-link viewport → history: when exactly one sketch
+                // element is selected with the sketch select tool, highlight the
+                // step that introduced it so it's obvious where to edit it.
+                {
+                    int hl = -1;
+                    if (m_inSketchMode && m_sketchTool && m_activeSketch && m_history) {
+                        const auto& sl = m_sketchTool->getSelectedLines();
+                        const auto& sa = m_sketchTool->getSelectedArcs();
+                        const auto& sc = m_sketchTool->getSelectedCircles();
+                        if (sl.size() + sa.size() + sc.size() == 1) {
+                            int lid = sl.empty() ? -1 : *sl.begin();
+                            int aid = sa.empty() ? -1 : *sa.begin();
+                            int cid = sc.empty() ? -1 : *sc.begin();
+                            for (int s = 0; s < m_history->stepCount(); ++s) {
+                                auto* se = dynamic_cast<const SketchEditOp*>(
+                                    m_history->getStep(s));
+                                if (!se || se->getTarget() != m_activeSketch) continue;
+                                std::set<int> L, C, A;
+                                se->getEditedElements(L, C, A);
+                                if ((lid >= 0 && L.count(lid)) ||
+                                    (aid >= 0 && A.count(aid)) ||
+                                    (cid >= 0 && C.count(cid))) { hl = s; break; }
+                            }
+                        }
+                    }
+                    m_historyPanel->setHighlightStep(hl);
+                }
                 if (m_showHistory && m_historyPanel->render()) {
                     m_meshesDirty = true;
                 }

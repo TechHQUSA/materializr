@@ -3,6 +3,7 @@
 #include "gl_common.h"
 #include <glm/glm.hpp>
 #include <vector>
+#include <set>
 
 namespace materializr {
 
@@ -43,6 +44,16 @@ public:
     void renderSketchHighlight(const Sketch* sketch,
                                const glm::vec3& color, float lineWidth,
                                const glm::mat4& view, const glm::mat4& projection);
+
+    // Highlight only specific elements (by id) of a sketch — used to show which
+    // line / circle / arc a selected history step edits, even when that sketch
+    // isn't the one being actively drawn.
+    void renderElementsHighlight(const Sketch* sketch,
+                                 const std::set<int>& lineIds,
+                                 const std::set<int>& circleIds,
+                                 const std::set<int>& arcIds,
+                                 const glm::vec3& color, float lineWidth,
+                                 const glm::mat4& view, const glm::mat4& projection);
 
     // Draw a face-local measurement grid covering the active sketch face.
     // `faceExtent` is the half-width of the grid (in sketch units) around the sketch origin.

@@ -35,6 +35,7 @@
 #include <TopExp_Explorer.hxx>
 
 #include <algorithm>
+#include <cstdio>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -136,6 +137,220 @@ void Sketch::setCircleRadius(int circleId, double r) {
 void Sketch::setArcRadius(int arcId, double r) {
     for (auto& a : m_arcs) {
         if (a.id == arcId) { a.radius = std::max(r, 1e-6); return; }
+    }
+}
+
+namespace {
+// CCW swept angle (0, 2π] of an arc going start->end about centre c. Mirrors
+// the start->end CCW convention buildWires() uses to emit the arc edge.
+double ccwSweep(glm::vec2 c, glm::vec2 s, glm::vec2 e) {
+    double aS = std::atan2(s.y - c.y, s.x - c.x);
+    double aE = std::atan2(e.y - c.y, e.x - c.x);
+    double d = aE - aS;
+    while (d <= 0.0)        d += 2.0 * M_PI;
+    while (d > 2.0 * M_PI)  d -= 2.0 * M_PI;
+    return d;
+}
+} // namespace
+
+void Sketch::moveEndpointPreservingArcs(int pointId, glm::vec2 newPos) {
+    // Capture the arcs hinging on this point BEFORE moving it — the swept angle
+    // has to be read from the current geometry. We also remember the opposite
+    // (unmoved) endpoint's position, which stays put.
+    struct Cap { int arcId; double sweep; glm::vec2 fixedPt; bool movedIsStart; };
+    std::vector<Cap> caps;
+    for (const auto& a : m_arcs) {
+        bool isStart = (a.startPointId == pointId);
+        bool isEnd   = (a.endPointId == pointId);
+        if (!isStart && !isEnd) continue;
+        const SketchPoint* c = getPoint(a.centerPointId);
+        const SketchPoint* s = getPoint(a.startPointId);
+        const SketchPoint* e = getPoint(a.endPointId);
+        if (!c || !s || !e) continue;
+        caps.push_back({a.id, ccwSweep(c->pos, s->pos, e->pos),
+                        isStart ? e->pos : s->pos, isStart});
+    }
+
+    movePoint(pointId, newPos);
+
+    for (const auto& cap : caps) {
+        SketchArc* a = nullptr;
+        for (auto& x : m_arcs) if (x.id == cap.arcId) { a = &x; break; }
+        if (!a) continue;
+        glm::vec2 S = cap.movedIsStart ? newPos : cap.fixedPt;
+        glm::vec2 E = cap.movedIsStart ? cap.fixedPt : newPos;
+        glm::vec2 chord = E - S;
+        double c = glm::length(chord);
+        double half = cap.sweep * 0.5;
+        double sinH = std::sin(half);
+        if (c < 1e-9 || std::abs(sinH) < 1e-9) continue; // degenerate; leave arc
+        double R = std::abs(c / (2.0 * sinH));
+        glm::vec2 mid = 0.5f * (S + E);
+        glm::vec2 dir = chord / static_cast<float>(c);
+        glm::vec2 n(-dir.y, dir.x);                 // left normal of the chord
+        double h = R * std::cos(half);              // signed offset mid->centre
+        glm::vec2 c1 = mid + n * static_cast<float>(h);
+        glm::vec2 c2 = mid - n * static_cast<float>(h);
+        // Two centres give the same circle; pick the one whose CCW start->end
+        // sweep matches the angle we're preserving (vs. its 2π-complement).
+        auto err = [&](glm::vec2 cc) {
+            double d = std::abs(ccwSweep(cc, S, E) - cap.sweep);
+            return std::min(d, std::abs(d - 2.0 * M_PI));
+        };
+        glm::vec2 center = (err(c1) <= err(c2)) ? c1 : c2;
+        movePoint(a->centerPointId, center);
+        a->radius = R;
+    }
+}
+
+void Sketch::setLineLength(int lineId, double newLength) {
+    SketchLine* l = nullptr;
+    for (auto& x : m_lines) if (x.id == lineId) { l = &x; break; }
+    if (!l) return;
+    const SketchPoint* p1 = getPoint(l->startPointId);
+    const SketchPoint* p2 = getPoint(l->endPointId);
+    if (!p1 || !p2) return;
+    glm::vec2 a = p1->pos, b = p2->pos;
+    glm::vec2 d = b - a;
+    double len = glm::length(d);
+    glm::vec2 dir = (len > 1e-9) ? d / static_cast<float>(len) : glm::vec2(1.0f, 0.0f);
+    glm::vec2 mid = 0.5f * (a + b);
+    float half = static_cast<float>(std::max(newLength, 1e-6) * 0.5);
+    moveEndpointPreservingArcs(l->startPointId, mid - dir * half);
+    moveEndpointPreservingArcs(l->endPointId,   mid + dir * half);
+}
+
+void Sketch::resizeArc(int arcId, double newRadius) {
+    SketchArc* a = nullptr;
+    for (auto& x : m_arcs) if (x.id == arcId) { a = &x; break; }
+    if (!a) return;
+    const SketchPoint* c = getPoint(a->centerPointId);
+    if (!c) return;
+    glm::vec2 C = c->pos;
+    float R = static_cast<float>(std::max(newRadius, 1e-6));
+    auto reproject = [&](int pid) {
+        const SketchPoint* p = getPoint(pid);
+        if (!p) return;
+        glm::vec2 v = p->pos - C;
+        double l = glm::length(v);
+        glm::vec2 dir = (l > 1e-9) ? v / static_cast<float>(l) : glm::vec2(1.0f, 0.0f);
+        movePoint(pid, C + dir * R);
+    };
+    reproject(a->startPointId);
+    reproject(a->endPointId);
+    a->radius = R;
+}
+
+void Sketch::setArcChord(int arcId, double chordLen) {
+    SketchArc* a = nullptr;
+    for (auto& x : m_arcs) if (x.id == arcId) { a = &x; break; }
+    if (!a) return;
+    const SketchPoint* c = getPoint(a->centerPointId);
+    const SketchPoint* s = getPoint(a->startPointId);
+    const SketchPoint* e = getPoint(a->endPointId);
+    if (!c || !s || !e) return;
+    // Keep the SAME arc shape (sweep angle), just scaled so the endpoints are
+    // `chordLen` apart: chord = 2 R sin(sweep/2)  ->  R = chord / (2 sin(sweep/2)).
+    // Then resize, which holds the centre and both endpoint angles and slides
+    // the ends radially — so the arc grows/shrinks symmetrically and the sweep
+    // is unchanged.
+    double sweep = ccwSweep(c->pos, s->pos, e->pos);
+    double sinHalf = std::sin(sweep * 0.5);
+    if (std::abs(sinHalf) < 1e-9) return; // ~0° or ~360°: chord undefined
+    resizeArc(arcId, std::max(chordLen, 1e-6) / (2.0 * std::abs(sinHalf)));
+}
+
+void Sketch::setArcSweep(int arcId, double sweepRad) {
+    SketchArc* a = nullptr;
+    for (auto& x : m_arcs) if (x.id == arcId) { a = &x; break; }
+    if (!a) return;
+    const SketchPoint* c = getPoint(a->centerPointId);
+    const SketchPoint* s = getPoint(a->startPointId);
+    if (!c || !s) return;
+    double sweep = std::clamp(sweepRad, 1.0 * M_PI / 180.0, 359.0 * M_PI / 180.0);
+    double aS = std::atan2(s->pos.y - c->pos.y, s->pos.x - c->pos.x);
+    double aE = aS + sweep; // CCW from start
+    float R = static_cast<float>(a->radius);
+    movePoint(a->endPointId,
+              glm::vec2(c->pos.x + std::cos(aE) * R, c->pos.y + std::sin(aE) * R));
+}
+
+bool Sketch::findAxisAlignedRect(int lineId, RectInfo& out) const {
+    const SketchLine* l0 = nullptr;
+    for (const auto& x : m_lines) if (x.id == lineId) { l0 = &x; break; }
+    if (!l0) return false;
+
+    // Walk a closed 4-cycle of lines: each step hops to the (unique) other line
+    // sharing the current point. Bail on any T-junction (a point used by >2
+    // lines) or a chain that doesn't close after exactly four hops.
+    auto otherLineAt = [&](int pid, int excludeLine) -> const SketchLine* {
+        const SketchLine* found = nullptr;
+        for (const auto& x : m_lines) {
+            if (x.id == excludeLine) continue;
+            if (x.startPointId == pid || x.endPointId == pid) {
+                if (found) return nullptr; // ambiguous: more than one
+                found = &x;
+            }
+        }
+        return found;
+    };
+    auto otherEnd = [](const SketchLine& l, int pid) {
+        return (l.startPointId == pid) ? l.endPointId : l.startPointId;
+    };
+
+    const SketchLine* lines[4] = {l0, nullptr, nullptr, nullptr};
+    int corners[4];
+    corners[0] = l0->startPointId;
+    int cur = l0->endPointId;
+    corners[1] = cur;
+    for (int i = 1; i < 4; ++i) {
+        const SketchLine* nxt = otherLineAt(cur, lines[i - 1]->id);
+        if (!nxt) return false;
+        lines[i] = nxt;
+        cur = otherEnd(*nxt, cur);
+        if (i < 3) corners[i + 1] = cur;
+    }
+    // The fourth line must close back onto the start point.
+    if (cur != corners[0]) return false;
+    // Four distinct corners.
+    for (int i = 0; i < 4; ++i)
+        for (int j = i + 1; j < 4; ++j)
+            if (corners[i] == corners[j]) return false;
+
+    glm::vec2 P[4];
+    for (int i = 0; i < 4; ++i) {
+        const SketchPoint* p = getPoint(corners[i]);
+        if (!p) return false;
+        P[i] = p->pos;
+    }
+    // Every side axis-aligned (horizontal or vertical).
+    const float axTol = 1e-4f;
+    for (int i = 0; i < 4; ++i) {
+        glm::vec2 d = P[(i + 1) % 4] - P[i];
+        if (std::abs(d.x) > axTol && std::abs(d.y) > axTol) return false;
+    }
+    float minx = std::min(std::min(P[0].x, P[1].x), std::min(P[2].x, P[3].x));
+    float maxx = std::max(std::max(P[0].x, P[1].x), std::max(P[2].x, P[3].x));
+    float miny = std::min(std::min(P[0].y, P[1].y), std::min(P[2].y, P[3].y));
+    float maxy = std::max(std::max(P[0].y, P[1].y), std::max(P[2].y, P[3].y));
+    out.center = glm::vec2(0.5f * (minx + maxx), 0.5f * (miny + maxy));
+    out.width  = maxx - minx;
+    out.height = maxy - miny;
+    for (int i = 0; i < 4; ++i) { out.cornerPts[i] = corners[i]; out.lineIds[i] = lines[i]->id; }
+    return true;
+}
+
+void Sketch::setRectangleSize(int lineId, double width, double height) {
+    RectInfo r;
+    if (!findAxisAlignedRect(lineId, r)) return;
+    float hw = static_cast<float>(std::max(width, 1e-6) * 0.5);
+    float hh = static_cast<float>(std::max(height, 1e-6) * 0.5);
+    for (int i = 0; i < 4; ++i) {
+        const SketchPoint* p = getPoint(r.cornerPts[i]);
+        if (!p) continue;
+        glm::vec2 q = p->pos - r.center;  // keep each corner in its own quadrant
+        glm::vec2 np(q.x >= 0.0f ? hw : -hw, q.y >= 0.0f ? hh : -hh);
+        moveEndpointPreservingArcs(r.cornerPts[i], r.center + np);
     }
 }
 

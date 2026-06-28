@@ -109,9 +109,15 @@ bool HistoryPanel::render() {
         bool isAboveCurrent = (i > currentStep);
         bool isFrozen = op->isReloaded(); // baked: reloaded with no editable params
 
+        // Soft highlight: the step owning the viewport-selected sketch element.
+        // Orange to match the in-viewport element highlight; editing (blue) wins.
+        bool isHighlighted = (i == m_highlightStep) && !isCurrentlyEditing;
+
         ImGui::PushID(i);
         if (isCurrentlyEditing) {
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.3f, 0.5f, 1.0f, 0.3f));
+        } else if (isHighlighted) {
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(1.0f, 0.55f, 0.1f, 0.30f));
         }
         // Colour precedence: dim (inactive/disabled) wins so the active row set
         // reads clearly; otherwise a frozen step is amber so it's easy to spot.
@@ -134,7 +140,7 @@ bool HistoryPanel::render() {
                       detail.c_str(),
                       isDisabled ? " [disabled]" : "",
                       isFrozen ? " (frozen)" : "");
-        bool selected = (i == m_editingStep);
+        bool selected = (i == m_editingStep) || isHighlighted;
         if (ImGui::Selectable(label, selected)) {
             m_editingStep = i;
             m_showProperties = true;
@@ -143,7 +149,7 @@ bool HistoryPanel::render() {
         if (pushedText) {
             ImGui::PopStyleColor();
         }
-        if (isCurrentlyEditing) {
+        if (isCurrentlyEditing || isHighlighted) {
             ImGui::PopStyleColor();
         }
         if (ImGui::BeginPopupContextItem("StepContextMenu")) {

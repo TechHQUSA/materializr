@@ -475,30 +475,85 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         for (const auto& aa : sk->getArcs()) if (aa.id == arcId) { a = &aa; break; }
         if (!a) return;
         ImGui::Text("Arc");
+        // Radius: centre fixed, endpoints slide radially (sweep preserved).
         double rad = a->radius;
         ImGui::SetNextItemWidth(140);
         if (ImGui::InputDouble("Radius (mm)", &rad, 0.0, 0.0, "%.3f",
                                ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(rad, 1e-6);
-            apply([sk, arcId, r]() { sk->setArcRadius(arcId, r); });
+            apply([sk, arcId, r]() { sk->resizeArc(arcId, r); });
         }
-        ImGui::TextDisabled("Press Enter to apply.");
+        const SketchPoint* c = sk->getPoint(a->centerPointId);
+        const SketchPoint* s = sk->getPoint(a->startPointId);
+        const SketchPoint* e = sk->getPoint(a->endPointId);
+        if (c && s && e) {
+            // Chord: straight distance between the endpoints. Keeps the sweep
+            // angle (same arc shape, just scaled), so it reads as "how far apart
+            // are the ends" while preserving the curve's character.
+            double chord = std::sqrt((e->pos.x - s->pos.x) * (e->pos.x - s->pos.x) +
+                                     (e->pos.y - s->pos.y) * (e->pos.y - s->pos.y));
+            ImGui::SetNextItemWidth(140);
+            if (ImGui::InputDouble("Chord (mm)", &chord, 0.0, 0.0, "%.3f",
+                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+                double ch = std::max(chord, 1e-6);
+                apply([sk, arcId, ch]() { sk->setArcChord(arcId, ch); });
+            }
+            // Sweep angle in degrees: start fixed, end point moves to the angle.
+            double aS = std::atan2(s->pos.y - c->pos.y, s->pos.x - c->pos.x);
+            double aE = std::atan2(e->pos.y - c->pos.y, e->pos.x - c->pos.x);
+            double sweep = aE - aS;
+            while (sweep <= 0.0)       sweep += 2.0 * M_PI;
+            while (sweep > 2.0 * M_PI) sweep -= 2.0 * M_PI;
+            double deg = sweep * 180.0 / M_PI;
+            ImGui::SetNextItemWidth(140);
+            if (ImGui::InputDouble("Sweep (\xC2\xB0)", &deg, 0.0, 0.0, "%.2f",
+                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+                double rad2 = deg * M_PI / 180.0;
+                apply([sk, arcId, rad2]() { sk->setArcSweep(arcId, rad2); });
+            }
+        }
+        ImGui::TextDisabled("Chord & Radius scale the arc (sweep kept); "
+                            "Sweep changes the angle. Press Enter to apply.");
     } else if (!selL.empty()) {
         int lid = *selL.begin();
         const SketchLine* l = nullptr;
         for (const auto& ll : sk->getLines()) if (ll.id == lid) { l = &ll; break; }
         if (!l) return;
-        const SketchPoint* p1 = sk->getPoint(l->startPointId);
-        const SketchPoint* p2 = sk->getPoint(l->endPointId);
-        ImGui::Text("Line");
-        if (p1 && p2) {
-            double len = std::sqrt((p2->pos.x - p1->pos.x) * (p2->pos.x - p1->pos.x) +
-                                   (p2->pos.y - p1->pos.y) * (p2->pos.y - p1->pos.y));
-            ImGui::Text("Length: %.3f mm", len);
+        // If this line is a side of an axis-aligned rectangle, edit the whole
+        // rectangle (Width × Height) instead of a single side — that's what the
+        // user means by "make the rectangle editable".
+        Sketch::RectInfo rect;
+        if (sk->findAxisAlignedRect(lid, rect)) {
+            ImGui::Text("Rectangle");
+            double w = rect.width, h = rect.height;
+            ImGui::SetNextItemWidth(140);
+            bool w_ed = ImGui::InputDouble("Width (mm)", &w, 0.0, 0.0, "%.3f",
+                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SetNextItemWidth(140);
+            bool h_ed = ImGui::InputDouble("Height (mm)", &h, 0.0, 0.0, "%.3f",
+                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            if (w_ed || h_ed) {
+                double nw = std::max(w, 1e-6), nh = std::max(h, 1e-6);
+                apply([sk, lid, nw, nh]() { sk->setRectangleSize(lid, nw, nh); });
+            }
+            ImGui::TextDisabled("Centre stays put. Press Enter to apply.");
+        } else {
+            const SketchPoint* p1 = sk->getPoint(l->startPointId);
+            const SketchPoint* p2 = sk->getPoint(l->endPointId);
+            ImGui::Text("Line");
+            double len = 0.0;
+            if (p1 && p2)
+                len = std::sqrt((p2->pos.x - p1->pos.x) * (p2->pos.x - p1->pos.x) +
+                                (p2->pos.y - p1->pos.y) * (p2->pos.y - p1->pos.y));
+            ImGui::SetNextItemWidth(140);
+            if (ImGui::InputDouble("Length (mm)", &len, 0.0, 0.0, "%.3f",
+                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+                double nl = std::max(len, 1e-6);
+                apply([sk, lid, nl]() { sk->setLineLength(lid, nl); });
+            }
+            ImGui::TextDisabled("Grows from its centre; attached arcs keep their "
+                                "angle. Press Enter to apply.");
         }
-        ImGui::TextDisabled("Edit a line by dragging an endpoint or adding a "
-                            "dimension (which endpoint moves is otherwise "
-                            "ambiguous).");
     } else {
         // A lone point that isn't a circle/arc centre (a line endpoint, etc.).
         ImGui::Text("Point");
