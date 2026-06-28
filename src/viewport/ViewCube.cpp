@@ -106,10 +106,16 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
     // Only act on clicks the viewport actually owns. The cube reads global mouse
     // state, so without this a click on a panel that OVERLAPS the cube's corner
     // (e.g. the Move Face Cancel button, which sits over the cube) registers as a
-    // cube-face press too — snapping the camera to that face. WantCaptureMouse is
-    // the app's signal for "an ImGui widget consumed this click" (see the
-    // viewport input gate); when set, the cube ignores clicks but still draws.
-    const bool uiBlocked = ImGui::GetIO().WantCaptureMouse;
+    // cube-face press too — snapping the camera to that face.
+    //
+    // NOTE: do NOT use io.WantCaptureMouse here. The Viewport is a normal docked
+    // window (not a passthrough central node), so WantCaptureMouse is true across
+    // the ENTIRE viewport — including the bare canvas and the cube itself — which
+    // killed all cube clicks. The cube draws inside the Viewport window's scope,
+    // so IsWindowHovered() is the right signal: true when the viewport (and not an
+    // overlay sitting on top of it) is the hovered window at the cursor. An
+    // overlapping panel/button is a separate window, so it flips this false.
+    const bool uiBlocked = !ImGui::IsWindowHovered();
     auto cubeClicked = [&]() {
         return !uiBlocked && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     };
