@@ -14,7 +14,8 @@ namespace materializr {
 
 // ── UpdateChecker (no network check on mobile; keep version compare) ──────────
 UpdateChecker::Result UpdateChecker::check(const std::string& /*owner*/,
-                                           const std::string& /*repo*/) {
+                                           const std::string& /*repo*/,
+                                           bool /*includePrereleases*/) {
     Result r;
     r.ok = false;
     r.current = MATERIALIZR_VERSION;

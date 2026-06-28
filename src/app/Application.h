@@ -1443,6 +1443,8 @@ private:
     // on save/load and cleared on closeProject().
     bool m_autoOpenLastProject = false;
     bool m_checkForUpdatesOnLaunch = true;
+    // Beta channel opt-in: update checks also consider GitHub pre-releases.
+    bool m_includePrereleases = false;
 
     // Set by the --safe-mode CLI flag. When true, loadAppSettings stomps
     // rendering, autosave, and auto-open-last-project back to safe defaults

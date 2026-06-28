@@ -1332,9 +1332,9 @@ void Application::loadAppSettings() {
         // Run on a worker thread — the synchronous version blocked startup for
         // up to its 10 s network timeout ("not responding"). The main loop
         // polls m_updateCheckFuture each frame and pops the popup when it's in.
-        m_updateCheckFuture = std::async(std::launch::async, []() {
+        m_updateCheckFuture = std::async(std::launch::async, [pre = m_includePrereleases]() {
             auto t0 = std::chrono::steady_clock::now();
-            auto r = UpdateChecker::check("materializr-cad", "materializr");
+            auto r = UpdateChecker::check("materializr-cad", "materializr", pre);
             auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - t0).count();
             std::fprintf(stderr, "[update-check] %lld ms (ok=%d)\n",
@@ -1405,6 +1405,7 @@ AppSettings Application::currentSettings() const {
     s.lastProjectPath = m_currentProjectPath; // empty after closeProject()
     s.lastFileDir = materializr::FileDialogs::getLastDir();
     s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
+    s.includePrereleases = m_includePrereleases;
     s.snapToGrid = m_snapToGrid;
     s.sketchGridStep = m_sketchGridStep;
     // Mirror the live sketch-tool inference level back into the saved settings
@@ -1470,6 +1471,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_autoOpenLastProject = s.autoOpenLastProject;
     m_recentProjects = s.recentProjects;
     m_checkForUpdatesOnLaunch = s.checkForUpdatesOnLaunch;
+    m_includePrereleases = s.includePrereleases;
     m_snapToGrid = s.snapToGrid;
     m_sketchGridStep = s.sketchGridStep;
     m_showInferenceToolbarToggle = s.showInferenceToolbarToggle;

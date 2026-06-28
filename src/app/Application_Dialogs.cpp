@@ -199,6 +199,15 @@ void Application::renderSettings() {
                                        "startup and pops a small dialog when a newer build is "
                                        "available. Turn off for offline or portable use; you can "
                                        "still check manually via Help → Check for Updates.");
+
+                    ImGui::Spacing();
+                    if (ImGui::Checkbox("Include pre-release (beta) builds", &m_includePrereleases)) {
+                        changed = true;
+                    }
+                    ImGui::TextWrapped("Join the beta channel: update checks also consider "
+                                       "pre-release builds (e.g. 1.3.0-beta.1) — early access to "
+                                       "the next version's features, which may be rougher. Off "
+                                       "keeps you on stable releases only.");
                     ImGui::EndTabItem();
                 }
 
@@ -560,7 +569,8 @@ void Application::renderUpdatePopup() {
                                ImGuiWindowFlags_NoResize)) {
         // First open: run the network check.
         if (!m_updateChecked) {
-            auto r = UpdateChecker::check("materializr-cad", "materializr");
+            auto r = UpdateChecker::check("materializr-cad", "materializr",
+                                          m_includePrereleases);
             m_updateCurrent     = r.current;
             m_updateLatest      = r.latest;
             m_updateAvailable   = r.updateAvailable;

@@ -94,6 +94,10 @@ struct AppSettings {
     // available" dialog if the running build is older. Off in --safe-mode
     // (no surprise network calls when the user is recovering from a crash).
     bool  checkForUpdatesOnLaunch = true;
+    // Opt in to the beta channel: the update check also considers GitHub
+    // pre-releases (tags like 1.3.0-beta.1) instead of only final releases.
+    // Off by default so stable users are never offered test builds.
+    bool  includePrereleases      = false;
 
     // --- Snap / grid (persisted) ---
     // Snap-to-grid toggle and step (mm) shared by the sketch grid and the

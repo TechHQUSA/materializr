@@ -87,6 +87,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readString(kv, "lastProjectPath",    s.lastProjectPath);
     readString(kv, "lastFileDir",        s.lastFileDir);
     readBool(kv, "checkForUpdatesOnLaunch", s.checkForUpdatesOnLaunch);
+    readBool(kv, "includePrereleases",   s.includePrereleases);
     readBool(kv, "snapToGrid",           s.snapToGrid);
     readInt (kv, "inferenceLevel",       s.inferenceLevel);
     readBool(kv, "showInferenceToolbarToggle", s.showInferenceToolbarToggle);
@@ -275,6 +276,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
         ofs << "recent" << i << "_name = " << s.recentProjects[i].name << "\n";
     }
     ofs << "checkForUpdatesOnLaunch = " << (s.checkForUpdatesOnLaunch ? "true" : "false") << "\n";
+    ofs << "includePrereleases = "      << (s.includePrereleases ? "true" : "false") << "\n";
     ofs << "snapToGrid = "              << (s.snapToGrid ? "true" : "false") << "\n";
     ofs << "sketchGridStep = "          << s.sketchGridStep      << "\n";
     ofs << "inferenceLevel = "          << s.inferenceLevel      << "\n";
@@ -322,6 +324,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"showToolbarTooltips\": "     << b(s.showToolbarTooltips)<< ",\n";
     ofs << "  \"autoOpenLastProject\": "     << b(s.autoOpenLastProject)<< ",\n";
     ofs << "  \"checkForUpdatesOnLaunch\": " << b(s.checkForUpdatesOnLaunch) << ",\n";
+    ofs << "  \"includePrereleases\": " << b(s.includePrereleases) << ",\n";
     ofs << "  \"snapToGrid\": "              << b(s.snapToGrid)         << ",\n";
     ofs << "  \"sketchGridStep\": "          << s.sketchGridStep        << ",\n";
     ofs << "  \"inferenceLevel\": "          << s.inferenceLevel        << ",\n";
