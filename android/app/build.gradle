@@ -30,8 +30,8 @@ android {
         applicationId 'com.materializr.app'
         minSdkVersion 24
         targetSdkVersion 34
-        versionCode 15
-        def vName = '1.2.7'
+        versionCode 16
+        def vName = '1.2.8'
         versionName vName
 
         externalNativeBuild {

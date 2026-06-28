@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 1.2.7 LANGUAGES CXX)
+project(Materializr VERSION 1.2.8 LANGUAGES CXX)
 
 # macOS: deliberately do NOT pin CMAKE_OSX_DEPLOYMENT_TARGET. The bundled Homebrew
 # OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they — not our

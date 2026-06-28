@@ -3,6 +3,44 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.2.8] — 2026-06-27
+
+macOS arrives, plus security hardening, correctness fixes, and sketch/history polish.
+
+### Added
+
+- **macOS (Apple Silicon) desktop build.** A native arm64 build, shipped as a
+  `.dmg` — the fourth platform alongside Linux, Windows, and Android. Retina /
+  HiDPI viewport, the system OpenGL backend, and a self-contained bundle.
+
+### Fixed
+
+- **Sketch — lines latch anywhere on an arc**, not just at its endpoints. Arcs
+  now snap like circles do, with the latch confined to the arc's actual span.
+- **Sketch — arcs (and splines) divide regions.** An interior arc that splits a
+  face (e.g. the band between two arcs) is now its own selectable, push/pullable
+  region instead of being swallowed by the surrounding area.
+- **History — disabling a step no longer deletes the whole body.** Toggling a
+  step rebuilds the model in place, so disabling a lone push/pull on a base body
+  reverts just that move and keeps the body; re-enabling restores it cleanly
+  instead of erroring. Disabled steps are also respected by undo/redo (no model
+  desync), and the threaded thread-cut worker no longer races the render thread.
+
+### Security
+
+- **Hardened the untrusted-file parsers and the update flow** following a code
+  audit: decompression-bomb caps on the project/recovery and SVG loaders,
+  bounded length-prefixes and count loops, try/catch around STEP / IGES /
+  project import (including OCCT kernel faults), a shell-free URL opener with
+  https-pinned update URLs, and a size-/redirect-capped update checker. No
+  behavior change for valid files.
+
+### Changed
+
+- **Docs now match reality:** de-advertised features that weren't actually
+  reachable (Sweep, the 2D Drawing workspace, Align, DXF / image export) and
+  relabeled SVG export as the real per-sketch path.
+
 ## [1.2.7] — 2026-06-26
 
 Bug fixes from the first round of community reports.
