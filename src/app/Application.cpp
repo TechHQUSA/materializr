@@ -126,6 +126,11 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <gp_GTrsf.hxx>
@@ -3830,6 +3835,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             gp_Pnt O = ax3.Location();
             gp_Dir Xd = ax3.XDirection();
             gp_Dir Yd = ax3.YDirection();
+            gp_Dir Nd = ax3.Direction();
             auto project = [&](const gp_Pnt& p) -> glm::vec2 {
                 double dx = p.X() - O.X();
                 double dy = p.Y() - O.Y();
@@ -3838,73 +3844,169 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                 double v = dx * Yd.X() + dy * Yd.Y() + dz * Yd.Z();
                 return glm::vec2(static_cast<float>(u), static_cast<float>(v));
             };
+            // Signed distance of a 3D point from the sketch plane (along normal).
+            auto planeDist = [&](const gp_Pnt& p) -> double {
+                return (p.X() - O.X()) * Nd.X() + (p.Y() - O.Y()) * Nd.Y() +
+                       (p.Z() - O.Z()) * Nd.Z();
+            };
             auto dedup = [](std::vector<glm::vec2>& v, glm::vec2 p) {
                 for (const auto& q : v) {
                     if (glm::length(q - p) < 1e-4f) return;
                 }
                 v.push_back(p);
             };
+            auto dedupLine = [](std::vector<std::pair<glm::vec2, glm::vec2>>& v,
+                                glm::vec2 a, glm::vec2 b) {
+                for (const auto& q : v) {
+                    if ((glm::length(q.first - a) < 1e-4f && glm::length(q.second - b) < 1e-4f) ||
+                        (glm::length(q.first - b) < 1e-4f && glm::length(q.second - a) < 1e-4f))
+                        return;
+                }
+                v.emplace_back(a, b);
+            };
+            auto dedupCircle = [](std::vector<Sketch::FaceReference::Circle>& v,
+                                  const Sketch::FaceReference::Circle& c) {
+                for (const auto& q : v) {
+                    if (glm::length(q.center - c.center) < 1e-4f &&
+                        std::abs(q.radius - c.radius) < 1e-4f)
+                        return;
+                }
+                v.push_back(c);
+            };
 
-            // Vertices — the face's corner points.
-            for (TopExp_Explorer ex(face, TopAbs_VERTEX); ex.More(); ex.Next()) {
-                gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
-                dedup(refs.points, project(p));
-            }
-            // Edges — for straight edges, also stash the endpoint pair as a
-            // reference line (so on-line / midpoint inferences can fire) and
-            // the midpoint as a reference point. Curved edges get their
-            // endpoints (already covered by vertex iteration above).
-            for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-                TopoDS_Edge edge = TopoDS::Edge(ex.Current());
-                BRepAdaptor_Curve curve(edge);
-                double f = curve.FirstParameter();
-                double l = curve.LastParameter();
-                gp_Pnt pStart, pEnd;
-                curve.D0(f, pStart);
-                curve.D0(l, pEnd);
-                glm::vec2 a = project(pStart);
-                glm::vec2 b = project(pEnd);
-                if (curve.GetType() == GeomAbs_Line) {
-                    refs.lines.emplace_back(a, b);
-                    dedup(refs.points, 0.5f * (a + b)); // midpoint
-                } else if (curve.GetType() == GeomAbs_Circle) {
-                    // Circle / arc edge — add the centre as a snap point
-                    // (very common target: hole centres, fillet centres).
-                    // Also sample the perimeter so the cursor can catch the
-                    // curve itself along a few spots until proper curve-
-                    // perimeter snapping ships.
-                    gp_Circ circ = curve.Circle();
-                    dedup(refs.points, project(circ.Location()));
-                    const int samples = 8;
-                    for (int i = 1; i < samples; ++i) {
-                        double t = f + (l - f) * (double(i) / samples);
-                        gp_Pnt p;
-                        curve.D0(t, p);
-                        dedup(refs.points, project(p));
-                    }
-                } else if (curve.GetType() == GeomAbs_Ellipse) {
-                    // Ellipse also has a centre; treat it as a snap target.
-                    gp_Elips el = curve.Ellipse();
-                    dedup(refs.points, project(el.Location()));
-                    const int samples = 8;
-                    for (int i = 1; i < samples; ++i) {
-                        double t = f + (l - f) * (double(i) / samples);
-                        gp_Pnt p;
-                        curve.D0(t, p);
-                        dedup(refs.points, project(p));
-                    }
-                } else {
-                    // Splines / hyperbolas / etc. — just sample perimeter
-                    // points so something snappable exists along the curve.
-                    const int samples = 8;
-                    for (int i = 1; i < samples; ++i) {
-                        double t = f + (l - f) * (double(i) / samples);
-                        gp_Pnt p;
-                        curve.D0(t, p);
-                        dedup(refs.points, project(p));
+            // Project one face's vertices and edges into the sketch plane and
+            // append them to the reference set. Reused for the host face and
+            // each neighbouring face so the cursor can snap to the body's
+            // nearby corners / edges (Fusion-style projected geometry).
+            auto processFace = [&](const TopoDS_Face& f3d) {
+                // Vertices — the face's corner points.
+                for (TopExp_Explorer ex(f3d, TopAbs_VERTEX); ex.More(); ex.Next()) {
+                    gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
+                    dedup(refs.points, project(p));
+                }
+                // Edges — straight edges become reference lines (+ midpoint);
+                // in-plane circles become true circle refs for continuous
+                // perimeter snapping; everything else is sampled to points.
+                for (TopExp_Explorer ex(f3d, TopAbs_EDGE); ex.More(); ex.Next()) {
+                    TopoDS_Edge edge = TopoDS::Edge(ex.Current());
+                    BRepAdaptor_Curve curve(edge);
+                    double f = curve.FirstParameter();
+                    double l = curve.LastParameter();
+                    gp_Pnt pStart, pEnd;
+                    curve.D0(f, pStart);
+                    curve.D0(l, pEnd);
+                    glm::vec2 a = project(pStart);
+                    glm::vec2 b = project(pEnd);
+                    if (curve.GetType() == GeomAbs_Line) {
+                        dedupLine(refs.lines, a, b);
+                        dedup(refs.points, 0.5f * (a + b)); // midpoint
+                    } else if (curve.GetType() == GeomAbs_Circle) {
+                        gp_Circ circ = curve.Circle();
+                        dedup(refs.points, project(circ.Location()));
+                        // A circle lies *in* the sketch plane when its axis is
+                        // parallel to the plane normal and its centre sits on
+                        // the plane. Only then does it project to a true circle
+                        // we can snap to continuously; otherwise it foreshortens
+                        // to an ellipse, so we fall back to sampled points.
+                        bool inPlane =
+                            std::abs(circ.Axis().Direction().Dot(Nd)) > 0.999 &&
+                            std::abs(planeDist(circ.Location())) < 1e-4;
+                        if (inPlane) {
+                            Sketch::FaceReference::Circle fc;
+                            fc.center = project(circ.Location());
+                            fc.radius = static_cast<float>(circ.Radius());
+                            const float TWO_PI = 2.0f * static_cast<float>(M_PI);
+                            if (std::abs((l - f) - 2.0 * M_PI) < 1e-6) {
+                                fc.startAngle = 0.0f;
+                                fc.sweep = TWO_PI;
+                            } else {
+                                // Build the CCW span (in projected 2D) bounded by
+                                // the edge's start/end and verified to pass
+                                // through its midpoint param.
+                                gp_Pnt pm;
+                                curve.D0(0.5 * (f + l), pm);
+                                glm::vec2 m2 = project(pm);
+                                float a0 = std::atan2(a.y - fc.center.y, a.x - fc.center.x);
+                                float a1 = std::atan2(b.y - fc.center.y, b.x - fc.center.x);
+                                float am = std::atan2(m2.y - fc.center.y, m2.x - fc.center.x);
+                                auto ccw = [&](float from, float to) {
+                                    float d = to - from;
+                                    while (d < 0.0f) d += TWO_PI;
+                                    while (d >= TWO_PI) d -= TWO_PI;
+                                    return d;
+                                };
+                                if (ccw(a0, am) <= ccw(a0, a1)) {
+                                    fc.startAngle = a0;
+                                    fc.sweep = ccw(a0, a1);
+                                } else {
+                                    fc.startAngle = a1;
+                                    fc.sweep = ccw(a1, a0);
+                                }
+                            }
+                            dedupCircle(refs.circles, fc);
+                        } else {
+                            const int samples = 8;
+                            for (int i = 1; i < samples; ++i) {
+                                double t = f + (l - f) * (double(i) / samples);
+                                gp_Pnt p;
+                                curve.D0(t, p);
+                                dedup(refs.points, project(p));
+                            }
+                        }
+                    } else if (curve.GetType() == GeomAbs_Ellipse) {
+                        // Ellipse also has a centre; treat it as a snap target.
+                        gp_Elips el = curve.Ellipse();
+                        dedup(refs.points, project(el.Location()));
+                        const int samples = 8;
+                        for (int i = 1; i < samples; ++i) {
+                            double t = f + (l - f) * (double(i) / samples);
+                            gp_Pnt p;
+                            curve.D0(t, p);
+                            dedup(refs.points, project(p));
+                        }
+                    } else {
+                        // Splines / hyperbolas / etc. — just sample perimeter
+                        // points so something snappable exists along the curve.
+                        const int samples = 8;
+                        for (int i = 1; i < samples; ++i) {
+                            double t = f + (l - f) * (double(i) / samples);
+                            gp_Pnt p;
+                            curve.D0(t, p);
+                            dedup(refs.points, project(p));
+                        }
                     }
                 }
+            };
+
+            // The originating face.
+            processFace(face);
+
+            // Neighbouring faces: any face sharing one of the host face's edges.
+            // Their projected geometry (side-wall edges, bordering faces) becomes
+            // snappable too. One-time walk on sketch entry, so cost is fine.
+            if (sourceBodyId >= 0) {
+                try {
+                    const TopoDS_Shape& body = m_document->getBody(sourceBodyId);
+                    if (!body.IsNull()) {
+                        TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
+                        TopExp::MapShapesAndAncestors(body, TopAbs_EDGE,
+                                                      TopAbs_FACE, edgeFaceMap);
+                        TopTools_MapOfShape seenFaces;
+                        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+                            const TopoDS_Shape& he = ex.Current();
+                            if (!edgeFaceMap.Contains(he)) continue;
+                            const TopTools_ListOfShape& adj = edgeFaceMap.FindFromKey(he);
+                            for (TopTools_ListIteratorOfListOfShape it(adj); it.More(); it.Next()) {
+                                const TopoDS_Shape& nf = it.Value();
+                                if (nf.IsSame(face)) continue;
+                                if (!seenFaces.Add(nf)) continue; // already projected
+                                processFace(TopoDS::Face(nf));
+                            }
+                        }
+                    }
+                } catch (...) {}
             }
+
             m_activeSketch->setFaceReferences(std::move(refs));
         }
     }

@@ -802,6 +802,27 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             return center->pos + (v / dist) * r;
         }
     }
+    // Face-reference circular / arc edges — continuous perimeter snapping for
+    // in-plane host/neighbour circles (hole rims, fillet arcs). Mirrors the
+    // sketch-circle behaviour: grid wins ties; never fires when inference is Off.
+    if (m_inferenceLevel != InferenceLevel::Off) {
+        const float TWO_PI = 2.0f * static_cast<float>(M_PI);
+        for (const auto& fc : m_sketch->getFaceReferences().circles) {
+            glm::vec2 v = pos - fc.center;
+            float dist = glm::length(v);
+            if (dist < 1e-6f) continue;
+            if (std::abs(dist - fc.radius) >= curveSnapThreshold) continue;
+            // Honour the arc's angular span (full circles have sweep == 2*PI).
+            if (fc.sweep < TWO_PI - 1e-3f) {
+                float a = std::atan2(v.y, v.x) - fc.startAngle;
+                while (a < 0.0f)    a += TWO_PI;
+                while (a >= TWO_PI) a -= TWO_PI;
+                if (a > fc.sweep) continue;
+            }
+            if (gridActive && std::abs(dist - fc.radius) >= gridDist) continue;
+            return fc.center + (v / dist) * fc.radius;
+        }
+    }
     // Line midpoints (matches the green dots drawn by the renderer).
     const auto& lines = m_sketch->getLines();
     for (const auto& ln : lines) {

@@ -182,6 +182,19 @@ public:
     struct FaceReference {
         std::vector<glm::vec2> points;
         std::vector<std::pair<glm::vec2, glm::vec2>> lines;
+        // In-plane circular / arc edges (hole rims, fillet arcs) from the host
+        // face or any coaxial in-plane neighbour edge. Stored as true circles so
+        // the snap engine can land continuously on the perimeter rather than on
+        // a handful of sampled points. A full circle has sweep == 2*PI; an arc's
+        // live span is [startAngle, startAngle + sweep] measured CCW in the
+        // sketch-plane 2D frame.
+        struct Circle {
+            glm::vec2 center;
+            float radius;
+            float startAngle;
+            float sweep;
+        };
+        std::vector<Circle> circles;
     };
     void setFaceReferences(FaceReference refs) { m_faceRefs = std::move(refs); }
     const FaceReference& getFaceReferences() const { return m_faceRefs; }
