@@ -3,6 +3,19 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.3.0-beta.6] — 2026-06-29 (pre-release)
+
+### Added
+
+- **Snap to the host body's edges while sketching.** Starting a sketch on a
+  solid's face already let the cursor snap to that face's own corners and edges;
+  now it also snaps to the edges of every neighbouring face that touches it —
+  the side walls and bordering edges around the face you're drawing on — so you
+  can line geometry up with the existing body, not just the single face.
+- **Continuous snapping along round host edges.** Hole rims and fillet arcs that
+  lie in the sketch plane are now snapped along their whole perimeter (respecting
+  the arc's span), instead of catching only at a few sampled points.
+
 ## [1.3.0-beta.5] — 2026-06-29 (pre-release)
 
 ### Added
