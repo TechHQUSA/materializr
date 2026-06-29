@@ -120,6 +120,10 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <cstring>
 #include <gp_Cylinder.hxx>
 #include <gp_Pln.hxx>
+#include <Poly_Triangulation.hxx>
+#include <Poly_Triangle.hxx>
+#include <TopLoc_Location.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
@@ -1425,6 +1429,8 @@ AppSettings Application::currentSettings() const {
         ? static_cast<int>(m_sketchTool->getInferenceLevel()) : 0;
     s.showInferenceToolbarToggle = m_showInferenceToolbarToggle;
     s.angleSnapDeg = m_sketchTool ? m_sketchTool->getAngleSnapDeg() : 15;
+    s.stlImportAccuracy = m_stlImportAccuracy;
+    s.meshShowWireframe = m_meshShowWireframe;
     return s;
 }
 
@@ -1486,6 +1492,8 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_snapToGrid = s.snapToGrid;
     m_sketchGridStep = s.sketchGridStep;
     m_showInferenceToolbarToggle = s.showInferenceToolbarToggle;
+    m_stlImportAccuracy = s.stlImportAccuracy;
+    m_meshShowWireframe = s.meshShowWireframe;
     materializr::FileDialogs::setLastDir(s.lastFileDir);
     if (m_sketchTool) {
         using IL = SketchTool::InferenceLevel;
@@ -2627,7 +2635,12 @@ void Application::rebuildMeshes() {
                     m_shapeRenderer->setSubtractPreview(idx, true);
                 }
             }
-            m_edgeRenderer->setBodyEdges(id, shape, deflection);
+            // Imported meshes have a facet edge per triangle; only draw that
+            // wireframe when the user wants it (clean shaded body otherwise).
+            if (m_document->isBodyMesh(id) && !m_meshShowWireframe)
+                m_edgeRenderer->removeBody(id);
+            else
+                m_edgeRenderer->setBodyEdges(id, shape, deflection);
         }
         m_dirtyBodyIds.clear();
         return;
@@ -2661,7 +2674,11 @@ void Application::rebuildMeshes() {
                 m_shapeRenderer->setSubtractPreview(idx, true);
             }
         }
-        m_edgeRenderer->setBodyEdges(id, shape, deflection);
+        // See note above: skip the facet wireframe for imported meshes unless on.
+        if (m_document->isBodyMesh(id) && !m_meshShowWireframe)
+            m_edgeRenderer->removeBody(id);
+        else
+            m_edgeRenderer->setBodyEdges(id, shape, deflection);
     }
 }
 
@@ -3721,6 +3738,43 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             showToast("Can't sketch on a curved face \xE2\x80\x94 use Add "
                       "Plane\xE2\x80\xA6 to place a construction plane.");
             return;
+        }
+    }
+
+    // For an imported MESH face, the recovered plane is an arbitrary seed
+    // triangle's plane (UnifySameDomain keeps a seed, it doesn't best-fit), which
+    // at low import accuracy can be visibly tilted from the flat you picked. Best-
+    // fit the plane to the face's actual triangulation — an area-weighted normal +
+    // centroid — so the sketch lands on the region's true average plane. This is
+    // what makes "sketch on a flat-ish face" reliable regardless of import accuracy.
+    if (sourceBodyId >= 0 && m_document && m_document->isBodyMesh(sourceBodyId)) {
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+        if (tri.IsNull()) {
+            BRepMesh_IncrementalMesh mesher(face, 0.1);
+            mesher.Perform();
+            tri = BRep_Tool::Triangulation(face, loc);
+        }
+        if (!tri.IsNull() && tri->NbTriangles() > 0) {
+            const gp_Trsf& trsf = loc.Transformation();
+            const bool hasX = !loc.IsIdentity();
+            gp_Vec nSum(0.0, 0.0, 0.0);
+            gp_XYZ cSum(0.0, 0.0, 0.0);
+            double aSum = 0.0;
+            for (int i = 1; i <= tri->NbTriangles(); ++i) {
+                int a, b, c;
+                tri->Triangle(i).Get(a, b, c);
+                gp_Pnt p1 = tri->Node(a), p2 = tri->Node(b), p3 = tri->Node(c);
+                if (hasX) { p1.Transform(trsf); p2.Transform(trsf); p3.Transform(trsf); }
+                const gp_Vec cross = gp_Vec(p1, p2).Crossed(gp_Vec(p1, p3)); // 2·area·n̂
+                const double area = cross.Magnitude();
+                nSum += cross;
+                cSum += (p1.XYZ() + p2.XYZ() + p3.XYZ()) * (area / 3.0);
+                aSum += area;
+            }
+            if (nSum.Magnitude() > 1e-12 && aSum > 1e-12) {
+                pln = gp_Pln(gp_Pnt(cSum / aSum), gp_Dir(nSum));
+            }
         }
     }
 
@@ -5204,6 +5258,7 @@ void Application::run() {
                     else if (pending == "PrimitiveSphere")   beginPrimitivePopup(2);
                     else if (pending == "PrimitiveCone")     beginPrimitivePopup(3);
                     else if (pending == "PrimitiveTorus")    beginPrimitivePopup(4);
+                    else if (pending == "StlImport")         beginStlImportDialog();
                     // Unknown ids are silently ignored — future plugins can
                     // ship their own without modifying Application by routing
                     // through whatever new dispatcher is added here.
@@ -5305,6 +5360,7 @@ void Application::run() {
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
             renderPrimitivePopup();
+            renderStlImportDialog();
             renderRevolvePopup();
             renderRotatePlaneAboutAxisPopup();
             renderSketchMovePanel();

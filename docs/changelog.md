@@ -3,6 +3,29 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.3.0-beta.7] — 2026-06-29 (pre-release)
+
+### Added
+
+- **Import STL meshes.** File ▸ Import ▸ STL brings in an STL (ASCII or binary)
+  as a mesh body. An import dialog offers an **Accuracy** slider — lower
+  simplifies the mesh (faster, with larger merged flat faces), higher keeps more
+  detail — and a **wireframe** toggle. Genuinely near-coplanar facets are merged
+  into single planar faces, so you can **pick a flat region and use "Sketch on
+  Face"** to retrace it by hand — handy for recreating a model from a scan or a
+  print when it can't be done automatically. Sketching on a mesh face best-fits
+  the plane to the region you picked, so it stays accurate even on a simplified
+  import. Imported bodies are tagged as meshes (saved with the project) and use a
+  fast cached picker so selection stays smooth; the facet wireframe can be turned
+  off here or in Settings ▸ Rendering.
+
+### Fixed
+
+- The sketch grid step now persists across launches (it was written to the
+  settings file but never read back).
+- Settings export/import (JSON) now round-trips the panel-visibility toggles and
+  touch sensitivities, matching the on-disk settings.
+
 ## [1.3.0-beta.6] — 2026-06-29 (pre-release)
 
 ### Added

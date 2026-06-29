@@ -120,6 +120,15 @@ struct AppSettings {
     // Line angle-snap increment in degrees (0 = off). The line tool snaps its
     // direction to multiples of this from the segment anchor. Default 15.
     int  angleSnapDeg = 15;
+
+    // --- STL import ---
+    // Default fidelity for STL import, 0..1 (coarse/fast .. faithful/slow). Pre-
+    // fills the import dialog's accuracy slider. See StlIO::import.
+    float stlImportAccuracy = 0.5f;
+    // Whether imported mesh (STL) bodies draw their facet wireframe. Off gives a
+    // clean shaded body to sketch on; the merged flat-region edges are still
+    // useful, so it defaults on and the import dialog/Settings can disable it.
+    bool  meshShowWireframe  = true;
 };
 
 // Reads/writes AppSettings as a simple `key = value` text file. The reader is

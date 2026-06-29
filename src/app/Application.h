@@ -704,6 +704,11 @@ private:
     // button. Off hides the button so users who set the level once in
     // Settings can declutter the sketch toolbar.
     bool  m_showInferenceToolbarToggle = true;
+    // STL import (persisted). m_stlImportAccuracy pre-fills the import dialog's
+    // fidelity slider; m_meshShowWireframe gates the facet wireframe of imported
+    // mesh bodies (live — toggling it re-runs the mesh-body edge rebuild).
+    float m_stlImportAccuracy = 0.5f;
+    bool  m_meshShowWireframe = true;
     // Apply m_light*/m_msaaSamples/m_selectionLineWidth to the renderer + viewport.
     void applyRenderingSettings();
     // Map m_meshQuality to OCCT tessellation parameters.
@@ -1232,6 +1237,20 @@ private:
     void commitPrimitivePopup();
     void cancelPrimitivePopup();
     void renderPrimitivePopup();
+
+    // STL import options dialog. Opened from the Import > STL menu (the plugin
+    // routes through requestInteractiveOp("StlImport")). Collects a file path
+    // (via Browse), a fidelity/accuracy slider, and a wireframe toggle, then
+    // runs StlIO::import on commit. Mirrors the primitive-popup begin/render/
+    // commit/cancel pattern.
+    bool   m_stlDialogActive = false;
+    std::string m_stlDialogPath;
+    float  m_stlDialogAccuracy = 0.5f;
+    bool   m_stlDialogWireframe = true;
+    void beginStlImportDialog();
+    void commitStlImport();
+    void cancelStlImport();
+    void renderStlImportDialog();
 
     // Revolve popup. Opens when the user clicks Revolve in the body Tools
     // panel; takes a sketch profile + an axis (canonical world axis or a

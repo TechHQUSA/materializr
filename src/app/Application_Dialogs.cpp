@@ -61,10 +61,12 @@
 #include "modeling/DeleteOp.h"
 #include "modeling/SketchEditOp.h"
 #include "io/StepIO.h"
+#include "io/StlIO.h"
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
+#include <algorithm>
 #include "core/EventBus.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
@@ -474,6 +476,25 @@ void Application::renderSettings() {
                     }
                     ImGui::SetItemTooltip("Thickness of sketch lines, circles and arcs (and the vertex dots). "
                                           "Increase if sketch geometry is too thin or blends into the grid.");
+
+                    ImGui::SeparatorText("Imported meshes (STL)");
+                    // Wireframe of imported mesh bodies — toggling applies live by
+                    // re-running just the mesh bodies' edge rebuild.
+                    if (ImGui::Checkbox("Show mesh wireframe", &m_meshShowWireframe)) {
+                        for (int id : m_document->getAllBodyIds())
+                            if (m_document->isBodyMesh(id)) markBodyDirty(id);
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip("Draw the facet edges of imported STL bodies. "
+                                          "Turn off for a clean shaded surface to sketch on.");
+                    // Default fidelity pre-filling the STL import dialog's slider.
+                    if (ImGui::SliderFloat("Default STL accuracy", &m_stlImportAccuracy,
+                                           0.0f, 1.0f, "%.2f")) {
+                        m_stlImportAccuracy = std::clamp(m_stlImportAccuracy, 0.0f, 1.0f);
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip("Pre-fills the STL import dialog. Lower = coarser/faster with "
+                                          "larger merged flat faces; higher = more faithful but heavier.");
                     ImGui::EndTabItem();
                 }
 
@@ -3144,6 +3165,136 @@ void Application::renderPrimitivePopup() {
     if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         cancelPrimitivePopup();
+    }
+    ImGui::End();
+}
+
+void Application::beginStlImportDialog() {
+    cancelAllInteractivePreviews();
+    m_stlDialogActive = true;
+    m_stlDialogPath.clear();
+    m_stlDialogAccuracy = std::clamp(m_stlImportAccuracy, 0.0f, 1.0f);
+    m_stlDialogWireframe = m_meshShowWireframe;
+}
+
+void Application::commitStlImport() {
+    if (m_stlDialogPath.empty()) return;
+    // Remember the chosen accuracy as the new default, and apply the wireframe
+    // choice to the global mesh-wireframe setting.
+    m_stlImportAccuracy = m_stlDialogAccuracy;
+    m_meshShowWireframe = m_stlDialogWireframe;
+    saveAppSettings(); // persist the accuracy/wireframe choices
+
+    const std::string path = m_stlDialogPath;
+    const double acc = m_stlDialogAccuracy;
+    m_stlDialogActive = false; // close the dialog before the heavy work
+
+    // Defer the import: decimate + build + UnifySameDomain can take a few seconds
+    // at high accuracy, so run it in the between-frames slot where it can paint a
+    // progress frame instead of freezing the window (same path as project load).
+    m_deferredHeavyTask = [this, path, acc]() {
+        renderProgressFrame(-1.0f, "Importing STL\xE2\x80\xA6");
+        auto result = materializr::StlIO::import(path, *m_document, acc);
+        if (result.success) {
+            m_meshesDirty = true;
+            auto ids = m_document->getAllBodyIds();
+            if (!ids.empty()) {
+                SelectionEntry e;
+                e.type = SelectionType::Body;
+                e.bodyId = ids.back();
+                m_selection->select(e);
+            }
+            std::string msg = "Imported STL \xE2\x80\x94 " +
+                              std::to_string(result.faceCount) + " faces";
+            if (result.trianglesAfter > 0 && result.trianglesAfter < result.trianglesBefore)
+                msg += " (simplified " + std::to_string(result.trianglesBefore) +
+                       " \xE2\x86\x92 " + std::to_string(result.trianglesAfter) + " triangles)";
+            msg += ". Pick a flat face \xE2\x86\x92 Sketch on Face to trace it.";
+            showToast(msg, 9.0);
+        } else {
+            showToast("STL import failed: " + result.errorMessage, 6.0);
+        }
+    };
+}
+
+void Application::cancelStlImport() {
+    m_stlDialogActive = false;
+}
+
+void Application::renderStlImportDialog() {
+    if (!m_stlDialogActive) return;
+
+    ImGui::SetNextWindowPos(
+        ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 300,
+               ImGui::GetWindowPos().y + 50),
+        ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(300, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Import STL", nullptr,
+                 ImGuiWindowFlags_NoResize |
+                 ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(materializr::accentText(), "File");
+    if (ImGui::Button("Browse\xE2\x80\xA6", ImVec2(90, 0))) {
+        // Deferred/non-blocking: the callback fires on a later frame and just
+        // stores the path; the dialog stays open meanwhile.
+        materializr::FileDialogs::openFile(
+            "Import STL", {{"STL Files", "*.stl *.STL"}},
+            // Guard on m_stlDialogActive: if the user cancels this dialog while
+            // the native picker is still open, a late-resolving path must not
+            // leak into a freshly-reopened dialog.
+            [this](const std::string& p) {
+                if (m_stlDialogActive && !p.empty()) m_stlDialogPath = p;
+            });
+    }
+    ImGui::SameLine();
+    if (m_stlDialogPath.empty()) {
+        ImGui::TextDisabled("(no file chosen)");
+    } else {
+        // Show just the file name; full path on hover.
+        size_t slash = m_stlDialogPath.find_last_of("/\\");
+        std::string name = slash == std::string::npos
+                               ? m_stlDialogPath : m_stlDialogPath.substr(slash + 1);
+        ImGui::TextUnformatted(name.c_str());
+        ImGui::SetItemTooltip("%s", m_stlDialogPath.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::TextColored(materializr::accentText(), "Detail");
+    ImGui::SetNextItemWidth(180.0f);
+    ImGui::SliderFloat("Accuracy", &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");
+    m_stlDialogAccuracy = std::clamp(m_stlDialogAccuracy, 0.0f, 1.0f);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 280.0f);
+    ImGui::TextDisabled("Lower = coarser, faster, with larger merged flat faces "
+                        "to sketch on. Higher = more faithful but heavier; very "
+                        "high may take a few seconds.");
+    ImGui::PopTextWrapPos();
+
+    ImGui::Spacing();
+    ImGui::Checkbox("Show facet wireframe", &m_stlDialogWireframe);
+    ImGui::SetItemTooltip("Off gives a clean shaded body. You can also toggle "
+                          "this later in Settings \xE2\x96\xB8 Rendering.");
+    if (m_stlDialogWireframe) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 280.0f);
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f),
+                           "Note: drawing the facet wireframe has a performance "
+                           "cost on dense meshes \xE2\x80\x94 turn it off if the "
+                           "viewport feels sluggish.");
+        ImGui::PopTextWrapPos();
+    }
+
+    ImGui::Spacing();
+    const bool ok = !m_stlDialogPath.empty();
+    if (!ok) ImGui::BeginDisabled();
+    if (ImGui::Button("Import", ImVec2(120, 0)) ||
+        (ok && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
+        commitStlImport();
+    }
+    if (!ok) ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button(materializr::btnCancel(), ImVec2(120, 0)) ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        cancelStlImport();
     }
     ImGui::End();
 }

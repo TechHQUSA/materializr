@@ -7,21 +7,26 @@ class Document;
 
 namespace materializr {
 
-// STL import. Reads an ASCII or binary STL mesh (triangle soup), sews the
-// facets into a shell/solid, merges coplanar facets, and adds the result as a
-// body. The imported body is tessellated geometry — thousands of planar faces,
-// not analytic surfaces — so it is useful as a reference body, a boolean tool,
-// or for re-export, but is not parametrically editable like a sketched feature.
+// STL import. Reads an ASCII or binary STL mesh, optionally decimates it
+// (quadric edge collapse), sews the facets into a solid, and merges near-flat
+// regions into single planar faces — so the result is selectable and sketchable
+// (pick a flat face → "Sketch on Face"), useful for manually re-creating a model
+// from a scan/print. The body is tagged isMesh so the viewport takes a
+// mesh-aware path (cached picking, optional wireframe).
 //
-// PARKED: the menu entry is currently disabled (see StlImportPlugin). A faceted
-// body of this size makes the viewport's per-frame per-face hover-pick and the
-// per-triangle wireframe crawl, and decimating it enough to be smooth lost too
-// much fidelity. Kept in the tree for a future mesh-native rework (display the
-// triangulation directly instead of converting to a heavy B-rep). Export still
-// lives in StlExport (see StlExportPlugin); this is import only.
+// A single `accuracy` in [0,1] drives the fidelity/cost trade-off:
+//   0.0 = coarse/fast — aggressive decimation + wide flat-merge (big faces, snappy)
+//   1.0 = faithful/slow — light decimation + tight merge (keeps detail, heavier)
+// It maps to: decimation target triangles, UnifySameDomain angular tolerance
+// (the flat-merge knob), and sewing tolerance. See StlIO.cpp for the mapping.
+//
+// Export still lives in StlExport (see StlExportPlugin); this is import only.
 class StlIO {
 public:
-    static ImportResult import(const std::string& filePath, Document& doc);
+    static constexpr double kDefaultAccuracy = 0.5;
+
+    static ImportResult import(const std::string& filePath, Document& doc,
+                               double accuracy = kDefaultAccuracy);
 };
 
 } // namespace materializr

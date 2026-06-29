@@ -19,6 +19,11 @@ struct BodyEntry {
     glm::vec3 color = glm::vec3(0.80f, 0.80f, 0.82f); // default: light grey
     // -1 = at the root (not in any folder). >0 = a FolderEntry::id.
     int folderId = -1;
+    // An imported tessellated mesh (e.g. STL): the shape is a sewn solid built
+    // from many small facets, not analytic CAD geometry. The viewport uses this
+    // to take a mesh-aware path (cached picking, optional wireframe). Serialized
+    // to project files since it can't be re-derived from the shape — see ProjectIO.
+    bool isMesh = false;
 };
 
 // Bodies can be grouped under a folder for organisation in the Items panel.
@@ -91,6 +96,8 @@ public:
     void setBodyName(int id, const std::string& name);
     void setBodyVisible(int id, bool visible);
     bool isBodyVisible(int id) const;
+    void setBodyMesh(int id, bool isMesh);
+    bool isBodyMesh(int id) const;
     glm::vec3 getBodyColor(int id) const;
     void setBodyColor(int id, const glm::vec3& color);
     std::vector<int> getAllBodyIds() const;
