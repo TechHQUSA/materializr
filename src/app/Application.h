@@ -1269,6 +1269,7 @@ private:
     bool  m_unfoldPageA4 = false;                 // PDF export page size: A4 vs US Letter
     float m_unfoldRotationDeg = 0.0f;             // viewer/export rotation of the whole flat pattern
     int   m_unfoldExportFmt = 0;                  // export format: 0 = SVG (no page grid), 1 = PDF (tiled)
+    int   m_unfoldRegDensity = 2;                 // PDF alignment-mark density: 0 None,1 Sparse,2 Normal,3 Dense
     void beginUnfoldDialog();
     void recomputeUnfold();
     void renderUnfoldDialog();
