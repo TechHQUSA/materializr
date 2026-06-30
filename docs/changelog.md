@@ -3,6 +3,28 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.3.0-beta.9] — 2026-06-30 (pre-release)
+
+### Added
+
+- **Flat-pattern viewer: rotate + print preview.** The Unfold dialog can now
+  **rotate** the whole pattern — a slider, **−/+ 1°** fine steps, a **+90°**
+  button, and **Auto-fit**, which snaps to the orientation that needs the fewest
+  pages. A single **Export** button with an **SVG / PDF** dropdown drives the
+  preview: SVG shows a clean 1:1 layout, PDF overlays a live **page-break grid**
+  with a page count so you can see exactly how it tiles before exporting.
+- **PDF alignment marks.** Tiled PDFs get magenta **registration crosses** in the
+  page overlaps — the same point prints on both adjacent sheets, so you overlay
+  and slide until the crosses coincide for precise assembly. A **Marks** dropdown
+  (None / Sparse / Normal / Dense) sets their density.
+
+### Fixed
+
+- **Conformal unwrap of a cone** came out a wrapped full disk (~12000% stretch);
+  it now slits the apex and unwraps to a clean **sector** like the developable
+  net. Conformal on a closed solid (which can't flatten to one piece) now shows a
+  clear warning steering you to untick Conformal for the developable net.
+
 ## [1.3.0-beta.8] — 2026-06-30 (pre-release)
 
 ### Added
