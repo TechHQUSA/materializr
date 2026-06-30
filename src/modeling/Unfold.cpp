@@ -1401,6 +1401,20 @@ void cutMeshToDisks(std::vector<gp_Pnt>& verts, std::vector<Tri>& tris) {
         return path;
     };
 
+    // Per-vertex angle defect (2π − Σ incident-triangle angles): ~0 on a flat
+    // interior vertex, large at a cone apex / sharp tip. Plus the boundary-vertex
+    // set (endpoints of single-use edges).
+    std::vector<double> angleSum(nv, 0.0);
+    for (const Tri& t : tris)
+        for (int k = 0; k < 3; ++k) {
+            const gp_Pnt& O = verts[t.v[k]];
+            gp_Vec e1(O, verts[t.v[(k+1)%3]]), e2(O, verts[t.v[(k+2)%3]]);
+            if (e1.Magnitude() < 1e-12 || e2.Magnitude() < 1e-12) continue;
+            angleSum[t.v[k]] += std::acos(std::max(-1.0, std::min(1.0, e1.Normalized().Dot(e2.Normalized()))));
+        }
+    std::vector<char> isBoundaryVert(nv, 0);
+    for (const auto& b : bedges) { isBoundaryVert[b.first] = 1; isBoundaryVert[b.second] = 1; }
+
     std::set<uint64_t> cutEdges;
     auto addPath = [&](const std::vector<int>& path){ for (size_t i = 1; i < path.size(); ++i) cutEdges.insert(vkey(path[i-1], path[i])); };
 
@@ -1408,8 +1422,25 @@ void cutMeshToDisks(std::vector<gp_Pnt>& verts, std::vector<Tri>& tris) {
         const int comp = cv.first;
         const std::vector<int>& clo = loopsByComp[comp];
         const int nB = int(clo.size());
-        if (nB == 1) continue;                          // already a disk
         std::unordered_map<int,int> par;
+        if (nB == 1) {
+            // A topological disk can still need a slit: a large interior angle
+            // defect (a cone apex / sharp tip) makes LSCM wrap the surface all the
+            // way around it — a cone otherwise unwraps to a full disk instead of a
+            // sector. Release it with a slit from the apex to the nearest boundary.
+            int apex = -1; double worst = 1.0;          // ≈57° defect floor
+            for (int v : cv.second)
+                if (!isBoundaryVert[v]) {
+                    const double defect = 2.0 * M_PI - angleSum[v];
+                    if (defect > worst) { worst = defect; apex = v; }
+                }
+            if (apex < 0) continue;                      // a genuinely flat-ish disk
+            std::set<int> bnd;
+            for (int li : clo) for (int v : loops[li]) bnd.insert(v);
+            const int hit = dijkstra({apex}, &bnd, par);
+            if (hit >= 0) addPath(pathTo(par, hit));
+            continue;
+        }
         if (nB == 0) {                                  // closed → one geodesic slit
             if (cv.second.size() < 2) continue;
             const int a = dijkstra({cv.second[0]}, nullptr, par);  // farthest from seed

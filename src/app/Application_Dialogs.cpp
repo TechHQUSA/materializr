@@ -3733,7 +3733,15 @@ void Application::renderUnfoldDialog() {
     // Developability: ~0 = unrolls exactly; large = doubly-curved.
     if (m_unfoldConformal) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
-        if (fp.distortionPct > 0.5)
+        if (fp.distortionPct > 150.0)
+            // Hundreds of % stretch = the surface can't be conformally flattened in
+            // one piece (a closed solid, or something far too curved). Steer back to
+            // the developable net rather than present an unusable squashed blob.
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.3f, 1.0f),
+                "⚠ Can't flatten this in one piece (%.0f%% stretch — it'd be a squashed "
+                "blob). Untick \"Conformal unwrap\" for accurate developable pieces.",
+                fp.distortionPct);
+        else if (fp.distortionPct > 0.5)
             ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
                 "Conformal unwrap — one piece, up to %.0f%% area stretch (a pliable "
                 "material takes up the difference).", fp.distortionPct);
