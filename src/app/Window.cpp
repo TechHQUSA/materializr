@@ -66,6 +66,37 @@ Window::Window(int width, int height, const std::string& title)
     // immersive system-UI flags instead — those hide the bars without that flag,
     // so in a desktop dock the app stays a normal window with the taskbar intact.
 
+    // Clamp the fixed initial size to the display's usable area (the screen minus
+    // the taskbar) BEFORE creating the window. On a 1080p Windows laptop the OS
+    // default display scaling is 125–150%; because we don't declare per-monitor
+    // DPI awareness (intentionally — it's what keeps the desktop UI legibly scaled
+    // up rather than rendered tiny at 1:1 px), Windows hands us a *virtualised*,
+    // scaled-down desktop (e.g. 1280×720 at 150%). The hardcoded 1600×900 request
+    // is bigger than that, so the window spilled past every edge — hiding the
+    // taskbar, the title-bar close button, and the sides of both dock panels.
+    // 2K+ Windows screens and Linux/macOS had room so only small/scaled displays
+    // showed it; Android overrides the size below regardless. SDL_GetDisplay
+    // UsableBounds reports the work area in the same (virtualised) coordinates the
+    // create size uses, so clamping to it fits on every screen. Leave a margin so
+    // the window's own title bar + borders stay on-screen too.
+    SDL_Rect usable;
+    if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.w > 0 && usable.h > 0) {
+        const int marginW = 16;  // left+right borders
+        const int marginH = 64;  // title bar + bottom border
+        const int maxW = usable.w - marginW;
+        const int maxH = usable.h - marginH;
+        bool clamped = false;
+        if (maxW > 0 && m_width  > maxW) { m_width  = maxW; clamped = true; }
+        if (maxH > 0 && m_height > maxH) { m_height = maxH; clamped = true; }
+#if !defined(__ANDROID__)
+        // On a screen too small for the default size, also start maximized so the
+        // app fills the work area immediately. The clamped values above become the
+        // window's *restore* size, so un-maximizing — or a minimize→restore — drops
+        // back to a size that still fits the screen instead of overrunning it again.
+        if (clamped) flags |= SDL_WINDOW_MAXIMIZED;
+#endif
+    }
+
     m_window = SDL_CreateWindow(title.c_str(),
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 m_width, m_height, flags);
