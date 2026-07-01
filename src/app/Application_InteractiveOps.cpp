@@ -472,6 +472,11 @@ void Application::commitInteractiveEdgeOp() {
         for (const auto& e : m_edgeOpEdges) typedEdges.push_back(TopoDS::Edge(e));
         op->setEdges(typedEdges);
         op->setRadius(static_cast<double>(m_edgeOpValue));
+        // Generative anchoring: tell the fillet which sketch drives this body
+        // so a filleted corner can follow a later dimension edit. Inert unless
+        // every filleted edge is a corner over a sketch vertex.
+        for (const auto& [sid, bodies] : sketchBodyLinks())
+            if (bodies.count(m_edgeOpBodyId)) { op->setSourceSketch(sid); break; }
         committed = m_history->pushOperation(std::move(op), *m_document);
     } else {
         auto op = std::make_unique<ChamferOp>();

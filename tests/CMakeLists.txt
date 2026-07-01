@@ -120,6 +120,11 @@ add_executable(test_unfold test_unfold.cpp)
 target_link_libraries(test_unfold PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_unfold COMMAND test_unfold)
 
+# test_generative_edges — fillet corner anchored to sketch vertex survives resize
+add_executable(test_generative_edges test_generative_edges.cpp)
+target_link_libraries(test_generative_edges PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_generative_edges COMMAND test_generative_edges)
+
 # bench_stl_import — manual stopwatch for STL import stages (not run by ctest)
 add_executable(bench_stl_import bench_stl_import.cpp)
 target_link_libraries(bench_stl_import PRIVATE materializr_core)

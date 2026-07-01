@@ -16,6 +16,14 @@ public:
     void setEdges(const std::vector<TopoDS_Edge>& edges);
     void setRadius(double radius);
 
+    // Generative edge tracking (experiment/generative-edges): remember which
+    // SKETCH generated this body so a filleted CORNER edge can be re-found by
+    // the sketch VERTEX it sits over — surviving a dimension edit that
+    // relocates the corner, where ordinal/carrier matching fails. -1 = unknown
+    // (falls back to today's behaviour).
+    void setSourceSketch(int sketchId) { m_sourceSketchId = sketchId; }
+    int  getSourceSketch() const { return m_sourceSketchId; }
+
     // Getters
     int getBodyId() const { return m_bodyId; }
     double getRadius() const { return m_radius; }
@@ -59,4 +67,18 @@ private:
     // resolved against the before/after shapes in rehydrateFromReload.
     std::vector<int> m_edgeIndices;
     std::vector<int> m_genFaceIndices;
+
+    // Generative anchors: for each entry of m_edges, the sketch POINT id the
+    // (vertical/corner) edge sits over, or -1 if the edge isn't a corner of
+    // m_sourceSketchId (then it falls back to ordinal/carrier matching).
+    int m_sourceSketchId = -1;
+    std::vector<int> m_edgeAnchorPts;
+
+    // Fill m_edgeAnchorPts from the current m_edges + source sketch (called
+    // once, on the first successful execute).
+    void computeAnchors(Document& doc);
+    // Replace m_edges by re-finding each anchor's corner edge at the sketch
+    // vertex's CURRENT position in `base`. Returns false unless EVERY edge is
+    // an anchored corner that resolves (Phase 1 scope).
+    bool resolveAnchors(Document& doc, const TopoDS_Shape& base);
 };
