@@ -763,6 +763,200 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     return true;
 }
 
+namespace {
+
+// ─── Arc / circle recovery ───────────────────────────────────────────────────
+// nanosvg hands every path to us as cubic béziers, which sampleCubic() flattens
+// into a dense polyline. Storing that verbatim (one SketchLine per chord) is
+// what makes SVG sketches heavy: buildWires' O(n^2) crossing pass, region
+// building and per-frame snapping all scale with the segment count, and the
+// curves import visibly faceted. Here we walk each already-sampled loop and
+// recover the primitives the samples came from — a full SketchCircle for a
+// closed round loop, SketchArcs for circular stretches, single SketchLines for
+// straight (or collinear-oversampled) runs. Anything that doesn't collapse
+// cleanly falls back to the original dense fromText polyline, so the worst case
+// equals the old behaviour. Recovered circles/arcs are real (non-fromText)
+// geometry, so they snap and edit like hand-drawn ones and can anchor a region;
+// leftover lines stay fromText (out of the inference guides) but keep snappable
+// endpoints. Returns true if it placed anything.
+bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) {
+    constexpr double PI = 3.14159265358979323846;
+    const int n = static_cast<int>(P.size());
+    if (n < 2) return false;
+
+    auto emitPolyline = [&]() {
+        std::vector<int> ids; ids.reserve(P.size());
+        for (const auto& q : P) ids.push_back(sk->addPoint(q, /*fromText=*/true));
+        for (size_t i = 0; i + 1 < ids.size(); ++i)
+            sk->addLine(ids[i], ids[i + 1], /*fromText=*/true);
+        if (closed && ids.size() >= 3)
+            sk->addLine(ids.back(), ids.front(), /*fromText=*/true);
+    };
+    if (n < 4 || n > 6000) { emitPolyline(); return true; }
+
+    glm::vec2 mn = P[0], mx = P[0];
+    for (const auto& q : P) { mn = glm::min(mn, q); mx = glm::max(mx, q); }
+    const double diag = glm::length(mx - mn);
+    if (diag < 1e-9) { emitPolyline(); return true; }
+
+    // Tight, because a near-tangent straight point sits close to a corner arc's
+    // circle: too loose and an arc run bleeds into the adjacent straight edge,
+    // inflating its radius/sweep and corrupting the corner. SVG circle samples
+    // (bézier-circle error ~0.02%) fit comfortably inside these.
+    const double fitTol    = 0.0022 * diag; // max radial deviation to accept a fit
+    const double lineTol   = 0.0012 * diag; // max perp deviation to accept a straight run
+    const double MIN_SWEEP = 0.20;          // ~11°: below this an "arc" is just noise
+    const double MAX_SWEEP = 6.10;          // ~349°: above this it should be a full circle
+    const double MAX_R     = 60.0 * diag;   // beyond this it's effectively straight -> line
+
+    // Cyclic accessor: index n aliases index 0 so a closed loop's final segment
+    // closes back onto its start point.
+    auto at = [&](int k) -> glm::vec2 { return P[k >= n ? k - n : k]; };
+    const int hi = closed ? n : (n - 1);
+
+    // Algebraic (Kåsa) circle solve from accumulated moment sums.
+    auto solveCircle = [](double Sx,double Sy,double Sxx,double Syy,double Sxy,
+                          double Sz,double Sxz,double Syz,int m,
+                          glm::vec2& C,double& R) -> bool {
+        if (m < 3) return false;
+        const double md = static_cast<double>(m);
+        double det = Sxx*(Syy*md - Sy*Sy) - Sxy*(Sxy*md - Sy*Sx) + Sx*(Sxy*Sy - Syy*Sx);
+        if (std::abs(det) < 1e-12) return false;
+        double b1 = -Sxz, b2 = -Syz, b3 = -Sz;
+        double D = ( b1*(Syy*md - Sy*Sy) - Sxy*(b2*md - Sy*b3) + Sx*(b2*Sy - Syy*b3)) / det;
+        double E = ( Sxx*(b2*md - Sy*b3) - b1*(Sxy*md - Sy*Sx) + Sx*(Sxy*b3 - b2*Sx)) / det;
+        double F = ( Sxx*(Syy*b3 - b2*Sy) - Sxy*(Sxy*b3 - b2*Sx) + b1*(Sxy*Sy - Syy*Sx)) / det;
+        C = glm::vec2(static_cast<float>(-D*0.5), static_cast<float>(-E*0.5));
+        double r2 = (D*D + E*E)*0.25 - F;
+        if (!(r2 > 0)) return false;
+        R = std::sqrt(r2);
+        return std::isfinite(R) && R > 0;
+    };
+    auto radErr = [](glm::vec2 p, glm::vec2 C, double R) {
+        return std::abs(static_cast<double>(glm::length(p - C)) - R);
+    };
+    auto signedSweep = [&](int a, int b, glm::vec2 C) -> double {
+        double sw = 0;
+        for (int k = a; k < b; ++k) {
+            glm::vec2 v1 = at(k) - C, v2 = at(k + 1) - C;
+            double cr = static_cast<double>(v1.x)*v2.y - static_cast<double>(v1.y)*v2.x;
+            double dt = static_cast<double>(v1.x)*v2.x + static_cast<double>(v1.y)*v2.y;
+            sw += std::atan2(cr, dt);
+        }
+        return sw;
+    };
+
+    // ── Whole closed loop that is one circle ──
+    if (closed && n >= 8) {
+        double Sx=0,Sy=0,Sxx=0,Syy=0,Sxy=0,Sz=0,Sxz=0,Syz=0;
+        for (int k = 0; k < n; ++k) { glm::vec2 p = at(k);
+            double x=p.x,y=p.y,z=x*x+y*y;
+            Sx+=x;Sy+=y;Sxx+=x*x;Syy+=y*y;Sxy+=x*y;Sz+=z;Sxz+=x*z;Syz+=y*z; }
+        glm::vec2 C; double R;
+        if (solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,n,C,R) && R > 1e-6 && R < MAX_R) {
+            double maxErr = 0;
+            for (int k = 0; k < n; ++k) maxErr = std::max(maxErr, radErr(at(k), C, R));
+            if (maxErr < fitTol && std::abs(signedSweep(0, n, C)) > 1.5*PI) {
+                int cp = sk->addPoint(C, /*fromText=*/false);
+                sk->addCircle(cp, R);
+                return true;
+            }
+        }
+    }
+
+    // ── Greedy arc: longest circular run starting at i (incremental Kåsa) ──
+    auto tryArc = [&](int i, glm::vec2& Cout, double& Rout, double& sweepOut, int& jOut) -> bool {
+        if (i + 2 > hi) return false;
+        double Sx=0,Sy=0,Sxx=0,Syy=0,Sxy=0,Sz=0,Sxz=0,Syz=0; int m=0;
+        auto acc = [&](glm::vec2 p, int s) { double x=p.x,y=p.y,z=x*x+y*y;
+            Sx+=s*x;Sy+=s*y;Sxx+=s*x*x;Syy+=s*y*y;Sxy+=s*x*y;Sz+=s*z;Sxz+=s*x*z;Syz+=s*y*z; m+=s; };
+        acc(at(i),1); acc(at(i+1),1); acc(at(i+2),1);
+        glm::vec2 C; double R;
+        if (!solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,m,C,R)) return false;
+        if (radErr(at(i),C,R)>fitTol || radErr(at(i+1),C,R)>fitTol || radErr(at(i+2),C,R)>fitTol)
+            return false;
+        int j = i + 2;
+        while (j + 1 <= hi) {
+            glm::vec2 np = at(j + 1);
+            acc(np, 1);
+            glm::vec2 C2; double R2;
+            if (!solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,m,C2,R2) || radErr(np,C2,R2) > fitTol) {
+                acc(np, -1); break;
+            }
+            C = C2; R = R2; ++j;
+        }
+        if (j - i < 3) return false;                 // need >= 4 points of evidence
+        double maxErr = 0;
+        for (int k = i; k <= j; ++k) maxErr = std::max(maxErr, radErr(at(k), C, R));
+        if (maxErr > fitTol || R > MAX_R) return false;
+        double sw = signedSweep(i, j, C);
+        if (std::abs(sw) < MIN_SWEEP || std::abs(sw) > MAX_SWEEP) return false;
+        Cout = C; Rout = R; sweepOut = sw; jOut = j; return true;
+    };
+
+    // ── Greedy line: longest run staying within lineTol of the i->? chord ──
+    auto tryLine = [&](int i) -> int {
+        glm::vec2 d = at(i + 1) - at(i);
+        double dl = glm::length(d);
+        if (dl < 1e-12) return i + 1;
+        d /= static_cast<float>(dl);
+        int j = i + 1;
+        while (j + 1 <= hi) {
+            glm::vec2 p = at(j + 1);
+            glm::vec2 w = p - at(i);
+            double t = glm::dot(w, d);
+            glm::vec2 proj = at(i) + d * static_cast<float>(t);
+            if (static_cast<double>(glm::length(p - proj)) > lineTol) break;
+            ++j;
+        }
+        return j;
+    };
+
+    struct Seg { int type; int a, b; glm::vec2 C; double R; double sweep; };
+    std::vector<Seg> segs;
+    int i = 0, guard = 0; const int guardMax = 4 * n + 16;
+    while (i < hi && guard++ < guardMax) {
+        glm::vec2 C; double R, sweep; int jArc;
+        bool haveArc = tryArc(i, C, R, sweep, jArc);
+        int jLine = tryLine(i);
+        // Prefer a line on ties: a straight edge must not be eaten by an arc
+        // that merely reaches as far. An arc has to strictly out-reach the line.
+        if (haveArc && (jArc - i) >= 4 && jArc > jLine) {
+            segs.push_back({1, i, jArc, C, R, sweep}); i = jArc;
+        } else {
+            int j = std::max(jLine, i + 1);
+            segs.push_back({0, i, j, glm::vec2(0), 0.0, 0.0}); i = j;
+        }
+    }
+
+    // Only worth it if we actually collapsed the loop; otherwise keep the old path.
+    if (segs.empty() || static_cast<double>(segs.size()) > 0.8 * n || segs.size() > 500) {
+        emitPolyline();
+        return true;
+    }
+
+    std::vector<int> pid(n, -1);
+    auto idAt = [&](int k) -> int {
+        int kk = (k >= n) ? k - n : k;
+        if (pid[kk] < 0) pid[kk] = sk->addPoint(at(kk), /*fromText=*/false);
+        return pid[kk];
+    };
+    for (const auto& s : segs) {
+        if (s.type == 0) {
+            sk->addLine(idAt(s.a), idAt(s.b), /*fromText=*/true);
+        } else {
+            int sp, ep;
+            if (s.sweep >= 0) { sp = idAt(s.a); ep = idAt(s.b); }  // CCW run
+            else              { sp = idAt(s.b); ep = idAt(s.a); }  // CW run: swap for buildWires' CCW draw
+            int cp = sk->addPoint(s.C, /*fromText=*/false);
+            sk->addArc(cp, sp, ep, s.R);
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 int SvgImport::place(Sketch* sketch, const SvgPaths& svg, glm::vec2 pos,
                      float widthMm, float angleDeg) {
     if (!sketch || svg.empty() || widthMm <= 0.01f) return 0;
@@ -782,16 +976,12 @@ int SvgImport::place(Sketch* sketch, const SvgPaths& svg, glm::vec2 pos,
     int placed = 0;
     for (size_t li = 0; li < svg.loops.size(); ++li) {
         const auto& loop = svg.loops[li];
-        // ids only — SketchPoint* would dangle across reallocations
-        std::vector<int> ids;
-        ids.reserve(loop.size());
-        for (const auto& p : loop)
-            ids.push_back(sketch->addPoint(map(p), /*fromText=*/true));
-        for (size_t i = 0; i + 1 < ids.size(); ++i)
-            sketch->addLine(ids[i], ids[i + 1], /*fromText=*/true);
-        if (svg.closed[li] && ids.size() >= 3)
-            sketch->addLine(ids.back(), ids.front(), /*fromText=*/true);
-        placed++;
+        // Map to sketch space first (arc/circle recovery is invariant under the
+        // similarity+Y-flip map, and running it here gets arc orientation right).
+        std::vector<glm::vec2> P;
+        P.reserve(loop.size());
+        for (const auto& p : loop) P.push_back(map(p));
+        if (emitDetectedLoop(sketch, P, svg.closed[li])) placed++;
     }
     std::fprintf(stderr, "[SVG] placed %d loops at %.1f mm wide\n", placed,
                  widthMm);
