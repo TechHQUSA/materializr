@@ -765,20 +765,24 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
 
 namespace {
 
-// ─── Arc / circle recovery ───────────────────────────────────────────────────
+// ─── Circle / spline / line recovery ─────────────────────────────────────────
 // nanosvg hands every path to us as cubic béziers, which sampleCubic() flattens
 // into a dense polyline. Storing that verbatim (one SketchLine per chord) is
 // what makes SVG sketches heavy: buildWires' O(n^2) crossing pass, region
 // building and per-frame snapping all scale with the segment count, and the
 // curves import visibly faceted. Here we walk each already-sampled loop and
-// recover the primitives the samples came from — a full SketchCircle for a
-// closed round loop, SketchArcs for circular stretches, single SketchLines for
-// straight (or collinear-oversampled) runs. Anything that doesn't collapse
-// cleanly falls back to the original dense fromText polyline, so the worst case
-// equals the old behaviour. Recovered circles/arcs are real (non-fromText)
-// geometry, so they snap and edit like hand-drawn ones and can anchor a region;
-// leftover lines stay fromText (out of the inference guides) but keep snappable
-// endpoints. Returns true if it placed anything.
+// recover native primitives: a full SketchCircle for a closed round loop, and
+// otherwise a split at sharp corners into straight runs (SketchLine) and smooth
+// runs (SketchSpline through Douglas–Peucker-simplified samples). The spline is
+// the SAME centripetal Catmull-Rom the renderer draws and buildWires extrudes,
+// and it interpolates its control points, so adjacent segments join exactly (no
+// gaps) and stay true to the curve — unlike a fitted arc, whose circle doesn't
+// pass through the sampled endpoints. Anything jagged / oversized falls back to
+// the original dense fromText polyline, so the worst case equals the old
+// behaviour. Circles and the shared corner points are real (non-fromText)
+// geometry — they snap, edit and can anchor a region; spline-internal points and
+// leftover lines stay fromText (out of the inference guides). Returns true if it
+// placed anything.
 bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) {
     constexpr double PI = 3.14159265358979323846;
     const int n = static_cast<int>(P.size());
@@ -792,165 +796,130 @@ bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) 
         if (closed && ids.size() >= 3)
             sk->addLine(ids.back(), ids.front(), /*fromText=*/true);
     };
-    if (n < 4 || n > 6000) { emitPolyline(); return true; }
+    if (n < 4 || n > 8000) { emitPolyline(); return true; }
 
     glm::vec2 mn = P[0], mx = P[0];
     for (const auto& q : P) { mn = glm::min(mn, q); mx = glm::max(mx, q); }
     const double diag = glm::length(mx - mn);
     if (diag < 1e-9) { emitPolyline(); return true; }
 
-    // Tight, because a near-tangent straight point sits close to a corner arc's
-    // circle: too loose and an arc run bleeds into the adjacent straight edge,
-    // inflating its radius/sweep and corrupting the corner. SVG circle samples
-    // (bézier-circle error ~0.02%) fit comfortably inside these.
-    const double fitTol    = 0.0022 * diag; // max radial deviation to accept a fit
-    const double lineTol   = 0.0012 * diag; // max perp deviation to accept a straight run
-    const double MIN_SWEEP = 0.20;          // ~11°: below this an "arc" is just noise
-    const double MAX_SWEEP = 6.10;          // ~349°: above this it should be a full circle
-    const double MAX_R     = 60.0 * diag;   // beyond this it's effectively straight -> line
+    const double circTol = 0.004 * diag;    // whole-loop circle acceptance
+    const double dpTol   = 0.0016 * diag;   // Douglas–Peucker fidelity (spline / line)
+    const double CORNER  = 0.52;            // ~30°: a sharper turn splits a segment
 
-    // Cyclic accessor: index n aliases index 0 so a closed loop's final segment
-    // closes back onto its start point.
-    auto at = [&](int k) -> glm::vec2 { return P[k >= n ? k - n : k]; };
-    const int hi = closed ? n : (n - 1);
+    // Cyclic accessor: wraps for closed loops; also handles negative indices.
+    auto at = [&](int k) -> glm::vec2 { return P[((k % n) + n) % n]; };
 
-    // Algebraic (Kåsa) circle solve from accumulated moment sums.
-    auto solveCircle = [](double Sx,double Sy,double Sxx,double Syy,double Sxy,
-                          double Sz,double Sxz,double Syz,int m,
-                          glm::vec2& C,double& R) -> bool {
-        if (m < 3) return false;
-        const double md = static_cast<double>(m);
-        double det = Sxx*(Syy*md - Sy*Sy) - Sxy*(Sxy*md - Sy*Sx) + Sx*(Sxy*Sy - Syy*Sx);
-        if (std::abs(det) < 1e-12) return false;
-        double b1 = -Sxz, b2 = -Syz, b3 = -Sz;
-        double D = ( b1*(Syy*md - Sy*Sy) - Sxy*(b2*md - Sy*b3) + Sx*(b2*Sy - Syy*b3)) / det;
-        double E = ( Sxx*(b2*md - Sy*b3) - b1*(Sxy*md - Sy*Sx) + Sx*(Sxy*b3 - b2*Sx)) / det;
-        double F = ( Sxx*(Syy*b3 - b2*Sy) - Sxy*(Sxy*b3 - b2*Sx) + b1*(Sxy*Sy - Syy*Sx)) / det;
-        C = glm::vec2(static_cast<float>(-D*0.5), static_cast<float>(-E*0.5));
-        double r2 = (D*D + E*E)*0.25 - F;
-        if (!(r2 > 0)) return false;
-        R = std::sqrt(r2);
-        return std::isfinite(R) && R > 0;
-    };
-    auto radErr = [](glm::vec2 p, glm::vec2 C, double R) {
-        return std::abs(static_cast<double>(glm::length(p - C)) - R);
-    };
-    auto signedSweep = [&](int a, int b, glm::vec2 C) -> double {
-        double sw = 0;
-        for (int k = a; k < b; ++k) {
-            glm::vec2 v1 = at(k) - C, v2 = at(k + 1) - C;
-            double cr = static_cast<double>(v1.x)*v2.y - static_cast<double>(v1.y)*v2.x;
-            double dt = static_cast<double>(v1.x)*v2.x + static_cast<double>(v1.y)*v2.y;
-            sw += std::atan2(cr, dt);
-        }
-        return sw;
-    };
-
-    // ── Whole closed loop that is one circle ──
+    // ── Whole closed loop that is one circle → SketchCircle (Kåsa fit) ──
     if (closed && n >= 8) {
         double Sx=0,Sy=0,Sxx=0,Syy=0,Sxy=0,Sz=0,Sxz=0,Syz=0;
-        for (int k = 0; k < n; ++k) { glm::vec2 p = at(k);
-            double x=p.x,y=p.y,z=x*x+y*y;
+        for (int k = 0; k < n; ++k) { glm::vec2 p = at(k); double x=p.x,y=p.y,z=x*x+y*y;
             Sx+=x;Sy+=y;Sxx+=x*x;Syy+=y*y;Sxy+=x*y;Sz+=z;Sxz+=x*z;Syz+=y*z; }
-        glm::vec2 C; double R;
-        if (solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,n,C,R) && R > 1e-6 && R < MAX_R) {
-            double maxErr = 0;
-            for (int k = 0; k < n; ++k) maxErr = std::max(maxErr, radErr(at(k), C, R));
-            if (maxErr < fitTol && std::abs(signedSweep(0, n, C)) > 1.5*PI) {
-                int cp = sk->addPoint(C, /*fromText=*/false);
-                sk->addCircle(cp, R);
-                return true;
+        const double md = n;
+        double det = Sxx*(Syy*md-Sy*Sy) - Sxy*(Sxy*md-Sy*Sx) + Sx*(Sxy*Sy-Syy*Sx);
+        if (std::abs(det) > 1e-12) {
+            double b1=-Sxz,b2=-Syz,b3=-Sz;
+            double D=( b1*(Syy*md-Sy*Sy) - Sxy*(b2*md-Sy*b3) + Sx*(b2*Sy-Syy*b3))/det;
+            double E=( Sxx*(b2*md-Sy*b3) - b1*(Sxy*md-Sy*Sx) + Sx*(Sxy*b3-b2*Sx))/det;
+            double F=( Sxx*(Syy*b3-b2*Sy) - Sxy*(Sxy*b3-b2*Sx) + b1*(Sxy*Sy-Syy*Sx))/det;
+            glm::vec2 C(static_cast<float>(-D*0.5), static_cast<float>(-E*0.5));
+            double r2 = (D*D+E*E)*0.25 - F;
+            if (r2 > 0) {
+                double R = std::sqrt(r2);
+                if (std::isfinite(R) && R > 1e-6 && R < 60.0*diag) {
+                    double maxErr = 0;
+                    for (int k = 0; k < n; ++k)
+                        maxErr = std::max(maxErr,
+                                          std::abs(static_cast<double>(glm::length(at(k)-C)) - R));
+                    if (maxErr < circTol) { sk->addCircle(sk->addPoint(C, false), R); return true; }
+                }
             }
         }
     }
 
-    // ── Greedy arc: longest circular run starting at i (incremental Kåsa) ──
-    auto tryArc = [&](int i, glm::vec2& Cout, double& Rout, double& sweepOut, int& jOut) -> bool {
-        if (i + 2 > hi) return false;
-        double Sx=0,Sy=0,Sxx=0,Syy=0,Sxy=0,Sz=0,Sxz=0,Syz=0; int m=0;
-        auto acc = [&](glm::vec2 p, int s) { double x=p.x,y=p.y,z=x*x+y*y;
-            Sx+=s*x;Sy+=s*y;Sxx+=s*x*x;Syy+=s*y*y;Sxy+=s*x*y;Sz+=s*z;Sxz+=s*x*z;Syz+=s*y*z; m+=s; };
-        acc(at(i),1); acc(at(i+1),1); acc(at(i+2),1);
-        glm::vec2 C; double R;
-        if (!solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,m,C,R)) return false;
-        if (radErr(at(i),C,R)>fitTol || radErr(at(i+1),C,R)>fitTol || radErr(at(i+2),C,R)>fitTol)
-            return false;
-        int j = i + 2;
-        while (j + 1 <= hi) {
-            glm::vec2 np = at(j + 1);
-            acc(np, 1);
-            glm::vec2 C2; double R2;
-            if (!solveCircle(Sx,Sy,Sxx,Syy,Sxy,Sz,Sxz,Syz,m,C2,R2) || radErr(np,C2,R2) > fitTol) {
-                acc(np, -1); break;
+    // ── Otherwise: split at sharp corners (so straight edges stay straight),
+    //    then each run becomes a single line or a spline that passes THROUGH the
+    //    samples. Centripetal Catmull-Rom interpolates its control points, so a
+    //    spline joins its neighbours exactly — no gaps, and truer to the curve
+    //    than the arc fit was. ──
+    auto isCorner = [&](int i) -> bool {
+        glm::vec2 v1 = at(i) - at(i-1), v2 = at(i+1) - at(i);
+        if (glm::length(v1) < 1e-9f || glm::length(v2) < 1e-9f) return false;
+        double cr = static_cast<double>(v1.x)*v2.y - static_cast<double>(v1.y)*v2.x;
+        double dt = static_cast<double>(v1.x)*v2.x + static_cast<double>(v1.y)*v2.y;
+        return std::abs(std::atan2(cr, dt)) > CORNER;
+    };
+    std::vector<int> corners;
+    if (closed) { for (int i = 0; i < n; ++i)     if (isCorner(i)) corners.push_back(i); }
+    else        { for (int i = 1; i < n - 1; ++i) if (isCorner(i)) corners.push_back(i); }
+    if (static_cast<int>(corners.size()) > n / 2) { emitPolyline(); return true; } // jagged
+
+    // Douglas–Peucker over global indices [a..b] inclusive; appends kept indices.
+    auto dp = [&](int a, int b, std::vector<int>& kept) {
+        const int m = b - a;
+        std::vector<glm::vec2> rp(m + 1);
+        for (int k = 0; k <= m; ++k) rp[k] = at(a + k);
+        std::vector<char> keep(m + 1, 0); keep[0] = keep[m] = 1;
+        std::vector<std::pair<int,int>> stk; stk.push_back({0, m});
+        while (!stk.empty()) {
+            int lo = stk.back().first, hiK = stk.back().second; stk.pop_back();
+            if (hiK <= lo + 1) continue;
+            glm::vec2 A = rp[lo], B = rp[hiK], AB = B - A;
+            double L = glm::length(AB);
+            double best = -1.0; int bi = -1;
+            for (int k = lo + 1; k < hiK; ++k) {
+                glm::vec2 w = rp[k] - A;
+                double d = (L < 1e-12) ? static_cast<double>(glm::length(w))
+                    : std::abs(static_cast<double>(w.x)*AB.y - static_cast<double>(w.y)*AB.x) / L;
+                if (d > best) { best = d; bi = k; }
             }
-            C = C2; R = R2; ++j;
+            if (best > dpTol && bi > lo) { keep[bi] = 1;
+                stk.push_back({lo, bi}); stk.push_back({bi, hiK}); }
         }
-        if (j - i < 3) return false;                 // need >= 4 points of evidence
-        double maxErr = 0;
-        for (int k = i; k <= j; ++k) maxErr = std::max(maxErr, radErr(at(k), C, R));
-        if (maxErr > fitTol || R > MAX_R) return false;
-        double sw = signedSweep(i, j, C);
-        if (std::abs(sw) < MIN_SWEEP || std::abs(sw) > MAX_SWEEP) return false;
-        Cout = C; Rout = R; sweepOut = sw; jOut = j; return true;
+        for (int k = 0; k <= m; ++k) if (keep[k]) kept.push_back(a + k);
     };
 
-    // ── Greedy line: longest run staying within lineTol of the i->? chord ──
-    auto tryLine = [&](int i) -> int {
-        glm::vec2 d = at(i + 1) - at(i);
-        double dl = glm::length(d);
-        if (dl < 1e-12) return i + 1;
-        d /= static_cast<float>(dl);
-        int j = i + 1;
-        while (j + 1 <= hi) {
-            glm::vec2 p = at(j + 1);
-            glm::vec2 w = p - at(i);
-            double t = glm::dot(w, d);
-            glm::vec2 proj = at(i) + d * static_cast<float>(t);
-            if (static_cast<double>(glm::length(p - proj)) > lineTol) break;
-            ++j;
+    // Shared corner/boundary points snap; spline-internal points stay fromText.
+    std::vector<int> cornerPid(n, -1);
+    auto cornerId = [&](int gi) -> int { int kk = ((gi % n) + n) % n;
+        if (cornerPid[kk] < 0) cornerPid[kk] = sk->addPoint(at(kk), /*fromText=*/false);
+        return cornerPid[kk]; };
+    auto internalId = [&](int gi) -> int { return sk->addPoint(at(gi), /*fromText=*/true); };
+
+    auto emitRun = [&](int a, int b) {
+        std::vector<int> kept; dp(a, b, kept);
+        if (kept.size() <= 2) {                     // straight run → single line
+            sk->addLine(cornerId(a), cornerId(b), /*fromText=*/true);
+            return;
         }
-        return j;
+        std::vector<int> ctrl; ctrl.reserve(kept.size());
+        for (size_t k = 0; k < kept.size(); ++k)
+            ctrl.push_back((k == 0 || k + 1 == kept.size()) ? cornerId(kept[k])
+                                                            : internalId(kept[k]));
+        sk->addSpline(ctrl);
     };
 
-    struct Seg { int type; int a, b; glm::vec2 C; double R; double sweep; };
-    std::vector<Seg> segs;
-    int i = 0, guard = 0; const int guardMax = 4 * n + 16;
-    while (i < hi && guard++ < guardMax) {
-        glm::vec2 C; double R, sweep; int jArc;
-        bool haveArc = tryArc(i, C, R, sweep, jArc);
-        int jLine = tryLine(i);
-        // Prefer a line on ties: a straight edge must not be eaten by an arc
-        // that merely reaches as far. An arc has to strictly out-reach the line.
-        if (haveArc && (jArc - i) >= 4 && jArc > jLine) {
-            segs.push_back({1, i, jArc, C, R, sweep}); i = jArc;
+    if (closed && corners.empty()) {
+        // Smooth closed loop that isn't a circle → one closed spline.
+        std::vector<int> kept; dp(0, n, kept);          // at(n) == at(0)
+        if (kept.size() >= 4) {
+            int firstId = cornerId(0);
+            std::vector<int> ctrl; ctrl.push_back(firstId);
+            for (size_t k = 1; k + 1 < kept.size(); ++k) ctrl.push_back(internalId(kept[k]));
+            ctrl.push_back(firstId);                    // first == last → closed spline
+            sk->addSpline(ctrl);
         } else {
-            int j = std::max(jLine, i + 1);
-            segs.push_back({0, i, j, glm::vec2(0), 0.0, 0.0}); i = j;
+            emitPolyline();
         }
-    }
-
-    // Only worth it if we actually collapsed the loop; otherwise keep the old path.
-    if (segs.empty() || static_cast<double>(segs.size()) > 0.8 * n || segs.size() > 500) {
-        emitPolyline();
-        return true;
-    }
-
-    std::vector<int> pid(n, -1);
-    auto idAt = [&](int k) -> int {
-        int kk = (k >= n) ? k - n : k;
-        if (pid[kk] < 0) pid[kk] = sk->addPoint(at(kk), /*fromText=*/false);
-        return pid[kk];
-    };
-    for (const auto& s : segs) {
-        if (s.type == 0) {
-            sk->addLine(idAt(s.a), idAt(s.b), /*fromText=*/true);
-        } else {
-            int sp, ep;
-            if (s.sweep >= 0) { sp = idAt(s.a); ep = idAt(s.b); }  // CCW run
-            else              { sp = idAt(s.b); ep = idAt(s.a); }  // CW run: swap for buildWires' CCW draw
-            int cp = sk->addPoint(s.C, /*fromText=*/false);
-            sk->addArc(cp, sp, ep, s.R);
-        }
+    } else if (closed) {
+        const int m = static_cast<int>(corners.size());
+        for (int k = 0; k < m; ++k)
+            emitRun(corners[k], (k + 1 < m) ? corners[k + 1] : corners[0] + n);
+    } else {
+        std::vector<int> bnd; bnd.push_back(0);
+        for (int c : corners) bnd.push_back(c);
+        bnd.push_back(n - 1);
+        for (size_t k = 0; k + 1 < bnd.size(); ++k) emitRun(bnd[k], bnd[k + 1]);
     }
     return true;
 }

@@ -1496,6 +1496,13 @@ std::vector<Sketch::Region> Sketch::buildRegionsUncached() const {
             if (sp.isConstruction || sp.controlPointIds.size() < 2) continue;
             std::vector<glm::vec2> samp = sampleSpline2D(sp, 24);
             if (samp.size() < 2) continue;
+            {   // boundary splines (e.g. an imported outline) must not sliver
+                size_t mi = samp.size() / 2;
+                size_t lo = mi > 0 ? mi - 1 : mi;
+                size_t hiK = mi + 1 < samp.size() ? mi + 1 : mi;
+                glm::vec2 tang = samp[hiK] - samp[lo];
+                if (!isDivider(samp[mi], glm::vec2(-tang.y, tang.x))) continue;
+            }
             try {
                 TColgp_Array1OfPnt arr(1, static_cast<int>(samp.size()));
                 for (size_t k = 0; k < samp.size(); ++k)
