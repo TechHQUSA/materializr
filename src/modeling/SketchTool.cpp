@@ -979,7 +979,14 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // sketch segment.
     if (allowSnaps) {
         for (const auto& ln : lines) {
-            if (ln.fromText) continue;
+            // fromText (SVG-import / Text-tool) segments ARE valid on-edge
+            // targets: landing a point on an imported outline is how you anchor
+            // new geometry to it and close an extrudable region against it
+            // (Sketch::buildWires then splits the segment at the contact point,
+            // so the loop-walker can route the new loop through it). They stay
+            // excluded from endpoint/midpoint/symmetry snaps and every
+            // directional guide, so a dense outline never spams inference — only
+            // this perpendicular on-edge landing, cheap and unambiguous, fires.
             if (m_snapExcludePoints.count(ln.startPointId) ||
                 m_snapExcludePoints.count(ln.endPointId)) continue;
             const SketchPoint* p1 = m_sketch->getPoint(ln.startPointId);
