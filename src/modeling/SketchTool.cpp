@@ -1020,6 +1020,35 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                                  proj, true, len, proj, d, true});
             }
         }
+        // On-spline: cursor's projection lands anywhere along a spline curve.
+        // Splines were invisible to snapping, so you couldn't anchor a line onto
+        // an imported cursive stroke. Project onto the sampled curve and register
+        // the hit with the LOCAL tangent so it resolves like an on-edge landing;
+        // a line drawn across the region then divides it via the region splitter.
+        for (const auto& sp : m_sketch->getSplines()) {
+            if (sp.isConstruction || sp.controlPointIds.size() < 2) continue;
+            bool excluded = false;
+            for (int cpid : sp.controlPointIds)
+                if (m_snapExcludePoints.count(cpid)) { excluded = true; break; }
+            if (excluded) continue;
+            std::vector<glm::vec2> samp = m_sketch->sampleSpline2D(sp, 32);
+            float bestD = onLineThresh; glm::vec2 bestProj(0.0f), bestDir(1.0f, 0.0f);
+            bool found = false;
+            for (size_t k = 0; k + 1 < samp.size(); ++k) {
+                glm::vec2 a = samp[k], b = samp[k + 1], ab = b - a;
+                float len = glm::length(ab);
+                if (len < 1e-6f) continue;
+                glm::vec2 dir = ab / len;
+                float t = glm::clamp(glm::dot(pos - a, dir), 0.0f, len);
+                glm::vec2 proj = a + dir * t;
+                float d = glm::distance(pos, proj);
+                if (d < bestD) { bestD = d; bestProj = proj; bestDir = dir; found = true; }
+            }
+            if (found) {
+                cands.push_back({bestProj, bestDir, InferenceGuide::OnLine, -1,
+                                 bestProj, true, onLineThresh * 4.0f, bestProj, bestD, true});
+            }
+        }
     }
 
     // On-line-extension: cursor lies on the infinite line through an
