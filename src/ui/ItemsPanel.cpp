@@ -46,6 +46,14 @@ bool ItemsPanel::render() {
 
     bool colorChanged = false; // a body colour edit also needs a mesh rebuild
 
+    // Selected-body ids collected ONCE per frame — renderBodyRow used to
+    // rescan the whole selection per row (O(bodies × selection) per frame).
+    m_selectedBodyIdsFrame.clear();
+    if (m_selection)
+        for (const auto& e : m_selection->getSelection())
+            if (e.type == SelectionType::Body && e.bodyId >= 0)
+                m_selectedBodyIdsFrame.insert(e.bodyId);
+
     // Filter toggles at top
     ImGui::TextColored(materializr::accentText(), "Filter");
     ImGui::Separator();
@@ -566,14 +574,7 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
     }
     ImGui::SameLine();
 
-    bool isSelected = false;
-    if (m_selection) {
-        for (const auto& e : m_selection->getSelection()) {
-            if (e.type == SelectionType::Body && e.bodyId == id) {
-                isSelected = true; break;
-            }
-        }
-    }
+    const bool isSelected = m_selectedBodyIdsFrame.count(id) > 0;
 
     if (m_renamingId == id) {
         ImGui::SetKeyboardFocusHere();

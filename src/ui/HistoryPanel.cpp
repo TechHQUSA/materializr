@@ -194,7 +194,7 @@ bool HistoryPanel::render() {
     // expanded, all older buckets are collapsed (so the panel boots
     // minimised).
     using ymd_t = std::tuple<int, int, int>; // year, month, day (0-based mon)
-    auto stepDate = [&](int idx) -> ymd_t {
+    auto computeStepDate = [&](int idx) -> ymd_t {
         const Operation* op = m_history->getStep(idx);
         if (!op) return {1970, 0, 1};
         std::time_t tt = std::chrono::system_clock::to_time_t(op->timestamp());
@@ -205,6 +205,24 @@ bool HistoryPanel::render() {
         localtime_r(&tt, &local);
 #endif
         return {local.tm_year + 1900, local.tm_mon, local.tm_mday};
+    };
+    // Step timestamps never change, so their calendar dates are cached and
+    // rebuilt only when history mutates — the grouping loop below reads the
+    // date of EVERY step EVERY frame, which was 150+ localtime_r calls per
+    // frame on a long history. ("Today"/"Yesterday" labels still use a fresh
+    // `today` below, so the midnight rollover renames buckets correctly.)
+    static std::vector<ymd_t> s_stepDates;
+    static unsigned s_stepDatesRev = ~0u;
+    if (s_stepDatesRev != m_history->revision() ||
+        static_cast<int>(s_stepDates.size()) != stepCount) {
+        s_stepDatesRev = m_history->revision();
+        s_stepDates.resize(stepCount);
+        for (int k = 0; k < stepCount; ++k) s_stepDates[k] = computeStepDate(k);
+    }
+    auto stepDate = [&](int idx) -> ymd_t {
+        return (idx >= 0 && idx < static_cast<int>(s_stepDates.size()))
+                   ? s_stepDates[idx]
+                   : ymd_t{1970, 0, 1};
     };
     auto dateLabel = [](ymd_t d, ymd_t today, ymd_t yest) -> std::string {
         if (d == today) return "Today";
