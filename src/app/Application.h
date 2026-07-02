@@ -825,10 +825,17 @@ private:
     // (1.5m airplane skeleton: many trimmed B-spline surfaces per body) that
     // bbox walk is 50–150 ms each, dropping the idle frame rate to 6 FPS the
     // moment one or two bodies are selected. Key: the body's TShape pointer
-    // (stable through location-only transforms via gizmo drags, invalidated
-    // automatically when topology rebuilds — push/pull, fillet, transform-
-    // rotate, revolve apply — exactly when we'd want a fresh centroid).
-    std::map<int, std::pair<const void*, glm::vec3>> m_gizmoCenterCache;
+    // PLUS the shape's location — a location-only transform (multi-body move
+    // commit) keeps the TShape while moving the body, and a TShape-only key
+    // left the gizmo sitting at the pre-move centroid. Topology rebuilds
+    // (push/pull, fillet, single-body transform via copy=true) still miss on
+    // the pointer — exactly when we'd want a fresh centroid anyway.
+    struct GizmoCenterCacheEntry {
+        const void* tsh = nullptr;
+        TopLoc_Location loc;
+        glm::vec3 center{0.0f};
+    };
+    std::map<int, GizmoCenterCacheEntry> m_gizmoCenterCache;
 
     // Sketches do NOT show the gizmo automatically on selection — that lets
     // the Tools toolbar surface its Move / Rotate / Loft / Edit options

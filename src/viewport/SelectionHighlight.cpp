@@ -294,16 +294,22 @@ void SelectionHighlight::renderEdge(const TopoDS_Shape& edgeShape, const glm::ma
 
 void SelectionHighlight::renderBody(const TopoDS_Shape& bodyShape, const glm::mat4& vp,
                                      const glm::vec3& color) {
-    // Cache key = the body's TShape pointer. Stable across location-only
-    // transforms (the kind gizmo drags use) but invalidated whenever the
-    // underlying topology is rebuilt (push/pull, fillet, transform-rotate
-    // since it uses copy=true, etc.) — which is exactly when we want a
-    // fresh tessellation. Stored per-body so multiple selected bodies
-    // each keep their own cached verts without clobbering each other.
+    // Cache key = the body's TShape pointer, PLUS the location the verts
+    // were sampled at. The verts are baked in world coords, and a
+    // location-only transform (multi-body gizmo move commit) keeps the
+    // TShape while moving the body — with a TShape-only key the cache
+    // "hit" kept drawing the outline at the pre-move position until the
+    // selection changed. Comparing the stored location catches that and
+    // re-samples once at the new pose; topology rebuilds (push/pull,
+    // fillet, single-body transform via copy=true) still miss on the
+    // TShape pointer as before. Stored per-body so multiple selected
+    // bodies each keep their own cached verts.
     const void* key = bodyShape.TShape().get();
     auto it = m_bodyCache.find(key);
-    if (it == m_bodyCache.end()) {
-        std::vector<float>& verts = m_bodyCache[key];
+    if (it == m_bodyCache.end() || !(it->second.loc == bodyShape.Location())) {
+        BodyOutlineCache& entry = m_bodyCache[key];
+        entry.loc = bodyShape.Location();
+        entry.verts.clear();
         for (TopExp_Explorer exp(bodyShape, TopAbs_EDGE); exp.More(); exp.Next()) {
             try {
                 TopoDS_Edge edge = TopoDS::Edge(exp.Current());
@@ -313,21 +319,21 @@ void SelectionHighlight::renderBody(const TopoDS_Shape& bodyShape, const glm::ma
                 for (int i = 1; i < nPts; i++) {
                     gp_Pnt p1 = discretizer.Value(i);
                     gp_Pnt p2 = discretizer.Value(i + 1);
-                    verts.insert(verts.end(),
+                    entry.verts.insert(entry.verts.end(),
                         {(float)p1.X(),(float)p1.Y(),(float)p1.Z()});
-                    verts.insert(verts.end(),
+                    entry.verts.insert(entry.verts.end(),
                         {(float)p2.X(),(float)p2.Y(),(float)p2.Z()});
                 }
             } catch (...) { continue; }
         }
         it = m_bodyCache.find(key);
     }
-    if (it == m_bodyCache.end() || it->second.empty()) return;
+    if (it == m_bodyCache.end() || it->second.verts.empty()) return;
 
     // Body outlines track the configured edge width but stay a touch thinner
     // (the original 2.5:3.0 ratio) so a whole body reads differently from a
     // single picked edge.
-    drawThickLines(it->second, vp, color, m_edgeLineWidth * 0.5f * (2.5f / 3.0f));
+    drawThickLines(it->second.verts, vp, color, m_edgeLineWidth * 0.5f * (2.5f / 3.0f));
 }
 
 void SelectionHighlight::drawThickLines(const std::vector<float>& verts, const glm::mat4& vp,

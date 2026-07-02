@@ -2,6 +2,7 @@
 #include "gl_common.h"
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
+#include <TopLoc_Location.hxx>
 #include <map>
 #include <vector>
 
@@ -65,9 +66,19 @@ private:
     // during orbit. Key: the TShape pointer of the selected body, which
     // is stable for the body's lifetime and changes the moment the
     // topology is rebuilt (push/pull, fillet, transform rotate, etc.).
+    // The cached verts are WORLD coords (the shape's location is baked
+    // in at fill time), so the entry also remembers the location it was
+    // built at and recomputes when it changes: a location-only transform
+    // (multi-body gizmo move commits via copy=false) keeps the TShape but
+    // moves the body — a TShape-only key kept drawing the outline at the
+    // pre-move position ("wireframe lagging behind after release").
     // Multi-body: each entry caches independently so multiple selected
     // bodies don't clobber each other's tessellation each frame.
-    std::map<const void*, std::vector<float>> m_bodyCache;
+    struct BodyOutlineCache {
+        TopLoc_Location loc;
+        std::vector<float> verts;
+    };
+    std::map<const void*, BodyOutlineCache> m_bodyCache;
 
     // Same caching scheme for selected faces and edges: every frame the
     // selection-highlight pass re-tessellates the triangulation or

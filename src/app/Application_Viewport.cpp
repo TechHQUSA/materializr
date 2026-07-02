@@ -438,8 +438,10 @@ void Application::renderViewport() {
                 const void* tsh = shape.TShape().get();
                 auto cit = m_gizmoCenterCache.find(bodyId);
                 glm::vec3 center;
-                if (cit != m_gizmoCenterCache.end() && cit->second.first == tsh) {
-                    center = cit->second.second;
+                if (cit != m_gizmoCenterCache.end() &&
+                    cit->second.tsh == tsh &&
+                    cit->second.loc == shape.Location()) {
+                    center = cit->second.center;
                 } else {
                     Bnd_Box bbox;
                     BRepBndLib::Add(shape, bbox);
@@ -448,7 +450,7 @@ void Application::renderViewport() {
                     center = glm::vec3((xmin+xmax)*0.5f,
                                        (ymin+ymax)*0.5f,
                                        (zmin+zmax)*0.5f);
-                    m_gizmoCenterCache[bodyId] = {tsh, center};
+                    m_gizmoCenterCache[bodyId] = {tsh, shape.Location(), center};
                 }
                 m_gizmo->setPosition(center);
                 m_gizmo->setVisible(true);
