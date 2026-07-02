@@ -2453,20 +2453,33 @@ void Application::handleShortcuts() {
         } else if (m_mirrorPickFace) {
             m_mirrorPickFace = false; // cancel "mirror across a face" mode
         } else if (m_gizmoDragging) {
-            // Revert the body to where the drag started — same idea as cancelling
-            // any other in-progress operation. Also cancel the gizmo's own drag
-            // state so it doesn't keep dragging once the mouse moves again.
+            // Cancel the drag. The live preview is GPU-only (model matrices on
+            // the mesh slots — the document never moved), so reverting the
+            // bodies is just resetting the matrices: no doc write, no remesh.
+            // Sketch planes / construction planes / axes WERE live-written
+            // during the drag, so restore those from their captured
+            // before-poses (the old cancel missed them — and missed every
+            // body but the primary in a multi-drag).
+            gizmoPreviewReset();
             try {
-                if (m_gizmoDragBodyId >= 0 && !m_gizmoDragOriginalShape.IsNull()) {
-                    m_document->updateBody(m_gizmoDragBodyId, m_gizmoDragOriginalShape);
+                for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
+                    auto sk = m_document->getSketch(sid);
+                    if (sk) sk->setPlane(plnBefore);
                 }
+                for (auto& [pid, plnBefore] : m_planeGizmoDrag)
+                    m_document->setPlane(pid, plnBefore);
+                for (auto& a : m_axisGizmoDrag)
+                    m_document->setAxis(a.id, a.origin, a.direction);
             } catch (...) {}
             m_gizmo->cancelDrag();
             m_gizmoDragging = false;
             m_gizmoDragOriginalShape.Nullify();
             m_gizmoDragBodyId = -1;
             m_gizmoTotalDelta = glm::vec3(0.0f);
-            m_meshesDirty = true;
+            m_gizmoDragOriginals.clear();
+            m_sketchGizmoDragSketches.clear();
+            m_planeGizmoDrag.clear();
+            m_axisGizmoDrag.clear();
         } else if (m_pushPullActive) {
             cancelPushPull();
         } else if (anyIopActive()) {

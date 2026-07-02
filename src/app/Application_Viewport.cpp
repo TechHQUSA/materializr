@@ -117,6 +117,23 @@ static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& nor
     return glm::dot(mouseDelta, sd / len) * 0.05f;
 }
 
+void Application::gizmoPreviewApply(const glm::mat4& m) {
+    // Push the drag's accumulated transform onto every dragged body's mesh
+    // slots (shape + edges). GPU-only — the document is untouched, so a drag
+    // frame costs two uniform updates per body instead of re-tessellating
+    // the body (see the Revolve live preview, which pioneered the pattern).
+    for (auto& [id, orig] : m_gizmoDragOriginals) {
+        if (m_shapeRenderer) {
+            int slot = m_shapeRenderer->findSlotByBody(id);
+            if (slot >= 0) m_shapeRenderer->setModelMatrix(slot, m);
+        }
+        if (m_edgeRenderer) {
+            int slot = m_edgeRenderer->findSlotByBody(id);
+            if (slot >= 0) m_edgeRenderer->setModelMatrix(slot, m);
+        }
+    }
+}
+
 void Application::renderViewport() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("Viewport");
@@ -374,11 +391,11 @@ void Application::renderViewport() {
 
         // Render selection highlight (face/edge/body)
         // Selection highlight is cached in world coords — it wouldn't follow
-        // the GPU-model-matrix Revolve preview, so we hide it while a live
-        // preview is animating. The body itself remains highlighted by the
-        // body-renderer's outline; the selection chrome reappears the
-        // moment the preview ends.
-        if (!m_revolveLiveActive) {
+        // the GPU-model-matrix Revolve preview OR the (equally GPU-only)
+        // gizmo drag preview, so we hide it while either is animating. The
+        // body itself remains highlighted by the body-renderer's outline;
+        // the selection chrome reappears the moment the preview ends.
+        if (!m_revolveLiveActive && !m_gizmoDragging) {
             m_selectionHighlight->render(*m_selection, *m_document, view, proj);
         }
 
@@ -3162,6 +3179,26 @@ void Application::renderViewport() {
                                 m_gizmoDragBodyId = -1;
                                 m_gizmoDragOriginalShape = TopoDS_Shape();
                             }
+                            // Primary body's bbox, captured ONCE — the original
+                            // never changes during the drag, and BRepBndLib per
+                            // frame is 50-150 ms on a complex body (the Scale
+                            // branch reads the diagonal every drag frame). The
+                            // sketch-only fallback (pivot, zero extent) is
+                            // applied per-frame below where the pivot exists.
+                            m_gizmoDragBBoxMin = glm::vec3(0.0f);
+                            m_gizmoDragBBoxMax = glm::vec3(0.0f);
+                            if (!m_gizmoDragOriginalShape.IsNull()) {
+                                try {
+                                    Bnd_Box ob;
+                                    BRepBndLib::Add(m_gizmoDragOriginalShape, ob);
+                                    if (!ob.IsVoid()) {
+                                        double x1,y1,z1,x2,y2,z2;
+                                        ob.Get(x1,y1,z1,x2,y2,z2);
+                                        m_gizmoDragBBoxMin = glm::vec3(x1,y1,z1);
+                                        m_gizmoDragBBoxMax = glm::vec3(x2,y2,z2);
+                                    }
+                                } catch (...) {}
+                            }
                             m_gizmoDragging = true;
                             m_gizmoTotalDelta = glm::vec3(0.0f);
                             m_gizmoTotalAngle = 0.0f;
@@ -3246,19 +3283,22 @@ void Application::renderViewport() {
                             // 1 (Scale isn't meaningful for a sketch's plane
                             // anyway — translate and rotate are the supported
                             // modes for the sketch-only path below).
-                            double ox1=0,oy1=0,oz1=0,ox2=0,oy2=0,oz2=0;
+                            // Primary bbox from the drag-start capture — see
+                            // the drag-start block; recomputing BRepBndLib per
+                            // frame was a big slice of the drag lag on complex
+                            // bodies. Sketch-only drag: zero-extent at the
+                            // pivot so the Scale branch's `os` ends up 1.
+                            double ox1,oy1,oz1,ox2,oy2,oz2;
                             if (!m_gizmoDragOriginalShape.IsNull()) {
-                                Bnd_Box ob; BRepBndLib::Add(m_gizmoDragOriginalShape, ob);
-                                ob.Get(ox1,oy1,oz1,ox2,oy2,oz2);
+                                ox1 = m_gizmoDragBBoxMin.x; oy1 = m_gizmoDragBBoxMin.y;
+                                oz1 = m_gizmoDragBBoxMin.z;
+                                ox2 = m_gizmoDragBBoxMax.x; oy2 = m_gizmoDragBBoxMax.y;
+                                oz2 = m_gizmoDragBBoxMax.z;
                             } else {
                                 ox1 = ox2 = m_gizmoSharedPivot.x;
                                 oy1 = oy2 = m_gizmoSharedPivot.y;
                                 oz1 = oz2 = m_gizmoSharedPivot.z;
                             }
-                            gp_Pnt center((ox1+ox2)/2,(oy1+oy2)/2,(oz1+oz2)/2);
-
-                            TopoDS_Shape result;
-                            bool applied = false;
 
                             if (gResult.mode == GizmoMode::Translate) {
                                 m_gizmoTotalDelta += gResult.delta;
@@ -3280,16 +3320,16 @@ void Application::renderViewport() {
                                     if (std::abs(d.z) > eps) d.z = s(absAfter.z) - m_gizmoSharedPivot.z;
                                 }
                                 gp_Trsf trsf; trsf.SetTranslation(gp_Vec(d.x, d.y, d.z));
-                                // Apply the same translation to every selected body,
-                                // each from its own original shape. copy=false is
-                                // a location-only transform, so the underlying
-                                // topology (and its cached triangulation) is shared
-                                // — orders of magnitude faster per frame than the
-                                // full topology copy.
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    BRepBuilderAPI_Transform xf(orig, trsf, /*copy=*/false);
-                                    if (xf.IsDone()) m_document->updateBody(id, xf.Shape());
-                                }
+                                // GPU-only preview: push the translation as a
+                                // model matrix onto the dragged bodies' mesh
+                                // slots. No document write, no re-tessellation,
+                                // no edge re-discretization — a drag frame on a
+                                // dense body costs uniform updates instead of a
+                                // remesh (the "moving one part lags on complex
+                                // projects" report). The real transform lands
+                                // once, on release.
+                                gizmoPreviewApply(
+                                    glm::translate(glm::mat4(1.0f), d));
                                 // Standalone sketches in the drag: transform
                                 // each one's plane from its captured before-
                                 // plane so the live preview shows the new
@@ -3321,18 +3361,6 @@ void Application::renderViewport() {
                                                 a.origin.Z() + d.z);
                                     m_document->setAxis(a.id, newO, a.direction);
                                 }
-                                // Partial mesh refresh: just the bodies in the
-                                // drag, not every body in the scene. m_meshesDirty
-                                // triggers a full clear+re-tessellate of every
-                                // visible body — on a 65-body airplane that's
-                                // tens of bodies' worth of NURBS meshing per
-                                // drag frame, which is the "painful Move/Rotate"
-                                // the user reported. Sketch plane writes don't
-                                // affect body meshes, so they're not in here.
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    m_dirtyBodyIds.insert(id);
-                                }
-                                applied = false; // already handled per-body above
                             } else if (gResult.mode == GizmoMode::Rotate) {
                                 glm::vec3 ad = axisDirOf(gResult.activeAxis);
                                 m_gizmoRotAxis = ad;
@@ -3346,11 +3374,12 @@ void Application::renderViewport() {
                                 trsf.SetRotation(gp_Ax1(gp_Pnt(pivot.x, pivot.y, pivot.z),
                                                         gp_Dir(ad.x, ad.y, ad.z)),
                                                  ang * M_PI / 180.0);
-                                // copy=false: location-only, shared topology, fast.
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    BRepBuilderAPI_Transform xf(orig, trsf, /*copy=*/false);
-                                    if (xf.IsDone()) m_document->updateBody(id, xf.Shape());
-                                }
+                                // GPU-only preview — see the Translate branch.
+                                glm::mat4 pm(1.0f);
+                                pm = glm::translate(pm, pivot);
+                                pm = glm::rotate(pm, glm::radians(ang), ad);
+                                pm = glm::translate(pm, -pivot);
+                                gizmoPreviewApply(pm);
                                 // Same rotation applied to each sketch plane.
                                 for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
                                     auto sk = m_document->getSketch(sid);
@@ -3365,12 +3394,6 @@ void Application::renderViewport() {
                                     pln.Transform(trsf);
                                     m_document->setPlane(pid, pln);
                                 }
-                                // See translate branch — partial refresh only
-                                // for the dragged bodies, not full scene.
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    m_dirtyBodyIds.insert(id);
-                                }
-                                applied = false; // per-body above
                             } else { // Scale — per-axis, non-uniform about the centre
                                 float os = static_cast<float>(glm::length(
                                     glm::vec3(ox2-ox1, oy2-oy1, oz2-oz1)));
@@ -3390,32 +3413,14 @@ void Application::renderViewport() {
                                 }
                                 // Cached pivot — see Rotate branch above.
                                 const glm::vec3& pivot = m_gizmoSharedPivot;
-                                gp_GTrsf gt;
-                                gt.SetVectorialPart(gp_Mat(m_gizmoTotalScale.x,0,0,
-                                                           0,m_gizmoTotalScale.y,0,
-                                                           0,0,m_gizmoTotalScale.z));
-                                gt.SetTranslationPart(gp_XYZ(pivot.x - m_gizmoTotalScale.x * pivot.x,
-                                                             pivot.y - m_gizmoTotalScale.y * pivot.y,
-                                                             pivot.z - m_gizmoTotalScale.z * pivot.z));
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    BRepBuilderAPI_GTransform xf(orig, gt, true);
-                                    if (xf.IsDone()) m_document->updateBody(id, xf.Shape());
-                                }
-                                // Partial refresh — only the scaled bodies need
-                                // re-tessellation, not every body in the scene.
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    m_dirtyBodyIds.insert(id);
-                                }
-                                applied = false; // per-body above
-                            }
-
-                            if (applied) {
-                                m_document->updateBody(m_gizmoDragBodyId, result);
-                                // Single-body fallback path (when none of the
-                                // per-mode branches handled the body update).
-                                // Same reasoning as the per-mode branches: only
-                                // mark the touched body dirty, not the whole scene.
-                                m_dirtyBodyIds.insert(m_gizmoDragBodyId);
+                                // GPU-only preview — see the Translate branch.
+                                // Same affine map as the commit's gp_GTrsf:
+                                // x' = pivot + S * (x - pivot).
+                                glm::mat4 pm(1.0f);
+                                pm = glm::translate(pm, pivot);
+                                pm = glm::scale(pm, m_gizmoTotalScale);
+                                pm = glm::translate(pm, -pivot);
+                                gizmoPreviewApply(pm);
                             }
                         } catch (...) {}
                         gizmoConsumedInput = true;
@@ -3427,28 +3432,28 @@ void Application::renderViewport() {
                     // ReplayOp snapshot so the history shows one entry, not one
                     // per body.
                     if (m_gizmoDragging && gResult.activeAxis == GizmoAxis::None && !mouseDown) {
+                        // The live drag was GPU-only (model matrices on the mesh
+                        // slots; the document never moved). Reset the matrices
+                        // first — the ops below apply the REAL transform to the
+                        // document and the partial remesh redraws the bodies at
+                        // their committed pose.
+                        gizmoPreviewReset();
                         try {
                             GizmoMode gm = m_gizmo->getMode();
                             const size_t nBodies = m_gizmoDragOriginals.size();
                             const bool isMulti = nBodies > 1;
 
-                            // Snapshot the post-drag state BEFORE restoring originals,
-                            // since the batched ReplayOp needs it as the "after".
-                            ReplayOp::BodyState afterState;
-                            if (isMulti) {
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    afterState.push_back({id, m_document->getBody(id)});
-                                }
-                            }
-                            // Restore originals so any TransformOp captures the right
-                            // previousShape on execute(), and so the ReplayOp's
-                            // "before" snapshot is the pre-drag state.
+                            // Defensive: the document should already hold the
+                            // originals (the GPU preview never wrote to it), but
+                            // restore anyway so any TransformOp captures the
+                            // right previousShape on execute() even if some
+                            // path did write through.
                             for (auto& [id, orig] : m_gizmoDragOriginals) {
                                 m_document->updateBody(id, orig);
                             }
-                            // Same idea for sketch planes — restore before the
-                            // SketchTransformOps run their own execute() with
-                            // the cumulative gp_Trsf.
+                            // Sketch planes WERE live-written during the drag —
+                            // restore before the SketchTransformOps run their
+                            // own execute() with the cumulative gp_Trsf.
                             for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
                                 auto sk = m_document->getSketch(sid);
                                 if (sk) sk->setPlane(plnBefore);
@@ -3611,10 +3616,47 @@ void Application::renderViewport() {
                                     if (rederiveBodies.count(id)) continue;
                                     beforeState.push_back({id, orig});
                                 }
-                                afterState.erase(
-                                    std::remove_if(afterState.begin(), afterState.end(),
-                                        [&](const auto& e){ return rederiveBodies.count(e.first) > 0; }),
-                                    afterState.end());
+                                // "After" = the final transform applied to each
+                                // original — the same shapes the per-frame doc
+                                // preview used to leave behind before the drag
+                                // went GPU-only (copy=false for the rigid modes,
+                                // GTransform copy for scale).
+                                ReplayOp::BodyState afterState;
+                                if (gm == GizmoMode::Scale) {
+                                    gp_GTrsf gt;
+                                    gt.SetVectorialPart(gp_Mat(m_gizmoTotalScale.x,0,0,
+                                                               0,m_gizmoTotalScale.y,0,
+                                                               0,0,m_gizmoTotalScale.z));
+                                    gt.SetTranslationPart(gp_XYZ(
+                                        pivot.x - m_gizmoTotalScale.x * pivot.x,
+                                        pivot.y - m_gizmoTotalScale.y * pivot.y,
+                                        pivot.z - m_gizmoTotalScale.z * pivot.z));
+                                    for (auto& [id, orig] : m_gizmoDragOriginals) {
+                                        if (rederiveBodies.count(id)) continue;
+                                        BRepBuilderAPI_GTransform xf(orig, gt, true);
+                                        if (xf.IsDone())
+                                            afterState.push_back({id, xf.Shape()});
+                                    }
+                                } else {
+                                    gp_Trsf trsf;
+                                    if (gm == GizmoMode::Translate) {
+                                        trsf.SetTranslation(gp_Vec(d.x, d.y, d.z));
+                                    } else {
+                                        trsf.SetRotation(
+                                            gp_Ax1(gp_Pnt(pivot.x, pivot.y, pivot.z),
+                                                   gp_Dir(m_gizmoRotAxis.x,
+                                                          m_gizmoRotAxis.y,
+                                                          m_gizmoRotAxis.z)),
+                                            ang * M_PI / 180.0);
+                                    }
+                                    for (auto& [id, orig] : m_gizmoDragOriginals) {
+                                        if (rederiveBodies.count(id)) continue;
+                                        BRepBuilderAPI_Transform xf(orig, trsf,
+                                                                    /*copy=*/false);
+                                        if (xf.IsDone())
+                                            afterState.push_back({id, xf.Shape()});
+                                    }
+                                }
                                 std::string label;
                                 std::string desc;
                                 if (gm == GizmoMode::Translate) {
@@ -3739,7 +3781,14 @@ void Application::renderViewport() {
                             if (!detachSketches.empty() || !rederiveSketches.empty())
                                 markDirty();
 
-                            m_meshesDirty = true;
+                            // Partial remesh: only the dragged bodies changed.
+                            // (cascadeFromSketchEdit marks its own re-derived
+                            // bodies; sketch/plane/axis writes don't have body
+                            // meshes.) The old full m_meshesDirty re-tessellated
+                            // every visible body once per release — a visible
+                            // hitch on a many-body project.
+                            for (auto& [id, orig] : m_gizmoDragOriginals)
+                                m_dirtyBodyIds.insert(id);
                         } catch (...) {}
 
                         m_gizmoDragging = false;

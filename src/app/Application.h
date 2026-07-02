@@ -766,6 +766,22 @@ private:
     // so a cylinder resting on Z=0 reads `Z 0.00` instead of `Z 10.00`.
     // Sketch-only drags get the pivot's Y here (no bbox → no offset).
     float m_gizmoSharedBottomY{0.0f};
+    // Primary body's bbox captured ONCE at drag start (the originals never
+    // change during a drag). The Scale branch needs its diagonal every
+    // frame; recomputing BRepBndLib::Add per drag frame was 50-150 ms on a
+    // complex body — a large slice of the "moving one part lags" report.
+    glm::vec3 m_gizmoDragBBoxMin{0.0f};
+    glm::vec3 m_gizmoDragBBoxMax{0.0f};
+
+    // GPU-only gizmo drag preview (same pattern as the Revolve live preview):
+    // during the drag the document is NOT touched — the accumulated transform
+    // is pushed as a model matrix onto the dragged bodies' shape+edge mesh
+    // slots, so a drag frame costs two uniform updates instead of a BRep
+    // transform + updateBody + re-tessellation + edge re-discretization of
+    // the dragged body. The real (parametric, undoable) transform is applied
+    // exactly once on release; Esc just resets the matrices.
+    void gizmoPreviewApply(const glm::mat4& m);
+    void gizmoPreviewReset() { gizmoPreviewApply(glm::mat4(1.0f)); }
 
     // Standalone-sketch gizmo drag — set when the gizmo is shown on a Sketch
     // selection (no body in the selection, not in sketch-edit, perspective
