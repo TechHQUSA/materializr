@@ -37,6 +37,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveHoleOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchSolver.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ShellOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/MoveFaceOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SubShapeIndex.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/EdgeAnchor.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
@@ -174,3 +175,8 @@ target_link_libraries(probe_undoredo PRIVATE materializr_core)
 # produce a genuine twist, and at what angle does OCCT refuse?
 add_executable(probe_twist_face probe_twist_face.cpp)
 target_link_libraries(probe_twist_face PRIVATE materializr_core)
+
+# test_twist_face — MoveFaceOp Kind::Twist: valid, twisted, volume-preserving
+add_executable(test_twist_face test_twist_face.cpp)
+target_link_libraries(test_twist_face PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_twist_face COMMAND test_twist_face)
