@@ -1274,8 +1274,18 @@ void densifyWire2D(const TopoDS_Wire& wire, const gp_Pln& plane,
         double f, l;
         Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, f, l);
         if (curve.IsNull()) continue;
+        // Sample in the WIRE's traversal direction, not the curve's natural
+        // f->l one. BRepTools_WireExplorer walks edges head-to-tail, but a
+        // TopAbs_REVERSED edge (which the BOP region-builder routinely emits
+        // for multi-loop sketches) runs opposite to its curve parameter — so
+        // sampling f->l appends its points backwards, producing a self-
+        // intersecting polygon that makes the even-odd point-in-polygon test
+        // miscount. Honouring the orientation keeps the polygon simple so
+        // interior clicks land. (Same scramble noted in getSourceFaceCentroid.)
+        const bool rev = (ex.Orientation() == TopAbs_REVERSED);
         for (int i = 0; i < samplesPerEdge; ++i) {
-            double t = f + (l - f) * (double(i) / samplesPerEdge);
+            double frac = double(i) / samplesPerEdge;
+            double t = rev ? l - (l - f) * frac : f + (l - f) * frac;
             gp_Pnt p;
             curve->D0(t, p);
             out.push_back(toSketch2D(p));

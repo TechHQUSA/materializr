@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -4541,28 +4542,42 @@ void Application::alignCameraToActiveSketch() {
     glm::vec3 normal(static_cast<float>(n.X()), static_cast<float>(n.Y()), static_cast<float>(n.Z()));
     glm::vec3 up(static_cast<float>(y.X()), static_cast<float>(y.Y()), static_cast<float>(y.Z()));
 
-    // Frame the host face when one is present: target the face's 3D centre
-    // (the plane origin may not coincide with it for off-centre faces), and
-    // size the ortho box to its bbox diagonal.
+    // Frame the drawn content: union the host face's bbox (when present, for
+    // context) with the sketch geometry's own world bounds, then target that
+    // union's centre and size the ortho box to its diagonal. Framing the face
+    // alone left off-face or off-origin drawings shoved into a corner; framing
+    // the plane origin (the no-source-face case) was worse — the origin sits
+    // at a corner of the drawing, so the whole sketch landed in one quadrant.
     float orthoSize = std::max(20.0f, m_sketchGridStep * 40.0f);
     glm::vec3 lookAt = planeOrigin;
-    if (!m_activeSketch->getSourceFace().IsNull()) {
-        try {
-            Bnd_Box bb;
-            BRepBndLib::Add(m_activeSketch->getSourceFace(), bb);
-            if (!bb.IsVoid()) {
-                double xmin, ymin, zmin, xmax, ymax, zmax;
-                bb.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-                float dx = static_cast<float>(xmax - xmin);
-                float dy = static_cast<float>(ymax - ymin);
-                float dz = static_cast<float>(zmax - zmin);
-                float diag = 0.5f * std::sqrt(dx*dx + dy*dy + dz*dz);
-                if (diag > 1e-3f) orthoSize = diag * 1.2f;
-                lookAt = glm::vec3(static_cast<float>((xmin + xmax) * 0.5),
-                                   static_cast<float>((ymin + ymax) * 0.5),
-                                   static_cast<float>((zmin + zmax) * 0.5));
-            }
-        } catch (...) {}
+    {
+        glm::vec3 bmin( std::numeric_limits<float>::max());
+        glm::vec3 bmax(-std::numeric_limits<float>::max());
+        bool haveBounds = false;
+        if (!m_activeSketch->getSourceFace().IsNull()) {
+            try {
+                Bnd_Box bb;
+                BRepBndLib::Add(m_activeSketch->getSourceFace(), bb);
+                if (!bb.IsVoid()) {
+                    double x0, y0, z0, x1, y1, z1;
+                    bb.Get(x0, y0, z0, x1, y1, z1);
+                    bmin = glm::min(bmin, glm::vec3((float)x0, (float)y0, (float)z0));
+                    bmax = glm::max(bmax, glm::vec3((float)x1, (float)y1, (float)z1));
+                    haveBounds = true;
+                }
+            } catch (...) {}
+        }
+        glm::vec3 smin, smax;
+        if (m_activeSketch->getWorldBounds(smin, smax)) {
+            bmin = glm::min(bmin, smin);
+            bmax = glm::max(bmax, smax);
+            haveBounds = true;
+        }
+        if (haveBounds) {
+            float diag = 0.5f * glm::length(bmax - bmin);
+            if (diag > 1e-3f) orthoSize = diag * 1.2f;
+            lookAt = (bmin + bmax) * 0.5f;
+        }
     }
 
     // Snap the look-at point to the nearest world-grid intersection PROJECTED

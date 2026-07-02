@@ -134,3 +134,8 @@ target_link_libraries(bench_stl_import PRIVATE materializr_core)
 # fillets against every sketch (experiment/generative-edges, not run by ctest)
 add_executable(probe_anchor_coverage probe_anchor_coverage.cpp)
 target_link_libraries(probe_anchor_coverage PRIVATE materializr_core)
+
+# test_sketch_regions — multi-loop interior selection (wire-orientation fix)
+add_executable(test_sketch_regions test_sketch_regions.cpp)
+target_link_libraries(test_sketch_regions PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_regions COMMAND test_sketch_regions)
