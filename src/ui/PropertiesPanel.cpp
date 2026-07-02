@@ -13,6 +13,7 @@
 #include "../core/EventBus.h"
 #include "../core/Events.h"
 #include "../core/Verbose.h"
+#include "../core/NumParse.h"
 #include <imgui.h>
 #include <cmath>
 #include <cstdio>
@@ -715,7 +716,10 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             }
             // Commit on Enter / focus-out (whichever fires first).
             if (justDeactivated) {
-                double typed = std::atof(edit.buf);
+                // parseFinite: a non-finite constraint value would wedge the
+                // solver; garbage entry commits nothing (typed stays == value).
+                double typed = c.value;
+                (void)materializr::parseFinite(edit.buf, typed);
                 double newRaw = (c.type == ConstraintType::Radius)
                                     ? typed * 0.5
                               : (c.type == ConstraintType::Angle)

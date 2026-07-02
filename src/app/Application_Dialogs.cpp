@@ -857,8 +857,9 @@ void Application::renderResizeCylindricalPanel() {
                                     ImGuiInputTextFlags_EnterReturnsTrue |
                                     ImGuiInputTextFlags_CharsDecimal);
 
-    double parsed = std::atof(buf);
-    bool changed = std::abs(parsed - *val) > 0.001;
+    double parsed = *val; // parseFinite: garbage/inf keeps the previous value
+    bool changed = materializr::parseFinite(buf, parsed) &&
+                   std::abs(parsed - *val) > 0.001;
     if (changed) {
         *val = parsed;
         if (both) {
@@ -1223,8 +1224,9 @@ void Application::renderSketchPatternPopup() {
                          sizeof(m_sketchPatternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("mm");
-        float newDist = static_cast<float>(std::atof(m_sketchPatternDistanceBuf));
-        if (std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
+        float newDist = m_sketchPatternDistance;
+        if (materializr::parseFinite(m_sketchPatternDistanceBuf, newDist) &&
+            std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
             m_sketchPatternDistance = newDist; changed = true;
         }
         if (ImGui::SliderFloat("##spdistslider", &m_sketchPatternDistance,
@@ -1241,8 +1243,9 @@ void Application::renderSketchPatternPopup() {
                          sizeof(m_sketchPatternAngleBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("°");
-        float newAng = static_cast<float>(std::atof(m_sketchPatternAngleBuf));
-        if (std::abs(newAng - m_sketchPatternAngle) > 1e-3f) {
+        float newAng = m_sketchPatternAngle;
+        if (materializr::parseFinite(m_sketchPatternAngleBuf, newAng) &&
+            std::abs(newAng - m_sketchPatternAngle) > 1e-3f) {
             m_sketchPatternAngle = newAng; changed = true;
         }
         if (ImGui::SliderFloat("##spangslider", &m_sketchPatternAngle,
@@ -1377,8 +1380,9 @@ void Application::renderPatternPanel() {
                          sizeof(m_patternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("mm");
-        float parsed = static_cast<float>(std::atof(m_patternDistanceBuf));
-        if (std::abs(parsed - m_patternDistance) > 1e-4f) {
+        float parsed = m_patternDistance;
+        if (materializr::parseFinite(m_patternDistanceBuf, parsed) &&
+            std::abs(parsed - m_patternDistance) > 1e-4f) {
             m_patternDistance = parsed; distChanged = true;
         }
         // Slider that mirrors the text field — quick sweep without retyping.
@@ -1394,8 +1398,9 @@ void Application::renderPatternPanel() {
                          sizeof(m_patternAngleBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("°");
-        float parsed = static_cast<float>(std::atof(m_patternAngleBuf));
-        if (std::abs(parsed - m_patternAngle) > 1e-3f) {
+        float parsed = m_patternAngle;
+        if (materializr::parseFinite(m_patternAngleBuf, parsed) &&
+            std::abs(parsed - m_patternAngle) > 1e-3f) {
             m_patternAngle = parsed; distChanged = true;
         }
         if (ImGui::SliderFloat("##patangleslider", &m_patternAngle, 5.0f, 360.0f, "%.1f°")) {
@@ -1512,8 +1517,9 @@ void Application::renderThreadPanel() {
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
-        float v = static_cast<float>(std::atof(m_threadPitchBuf));
-        if (v >= 0.1f) m_threadPitch = v;
+        float v = 0.0f; // parseFinite: inf would pass the >= 0.1 guard
+        if (materializr::parseFinite(m_threadPitchBuf, v) && v >= 0.1f)
+            m_threadPitch = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
 
@@ -1521,8 +1527,9 @@ void Application::renderThreadPanel() {
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
-        float v = static_cast<float>(std::atof(m_threadDepthBuf));
-        if (v >= 0.05f) m_threadDepth = v;
+        float v = 0.0f;
+        if (materializr::parseFinite(m_threadDepthBuf, v) && v >= 0.05f)
+            m_threadDepth = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
@@ -1681,7 +1688,8 @@ void Application::renderSketchMovePanel() {
                          ImGuiInputTextFlags_CharsNoBlank |
                          ImGuiInputTextFlags_AutoSelectAll);
         ImGui::SameLine(); ImGui::Text("mm");
-        m_sketchMove[i] = static_cast<float>(std::atof(m_sketchMoveBuf[i]));
+        { float mv = m_sketchMove[i];
+          if (materializr::parseFinite(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv; }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(130);
         if (ImGui::SliderFloat("##slider", &m_sketchMove[i], -100.0f, 100.0f, "%.2f")) {
@@ -1939,8 +1947,9 @@ void Application::renderConstructionPlanePanel() {
     bool offsetChanged = false;
     if (ImGui::InputText("##planeoffset", m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
-        double parsed = std::atof(m_planeOpOffsetBuf);
-        if (std::abs(parsed - m_planeOpOffset) > 1e-4) {
+        double parsed = m_planeOpOffset;
+        if (materializr::parseFinite(m_planeOpOffsetBuf, parsed) &&
+            std::abs(parsed - m_planeOpOffset) > 1e-4) {
             m_planeOpOffset = parsed;
             offsetChanged = true;
         }
@@ -1985,8 +1994,8 @@ void Application::renderConstructionPlanePanel() {
     ImGui::SameLine();
     bool rotApply = ImGui::SmallButton("Apply##planeRotApply");
     if (rotApply || rotEnter) {
-        float deg = static_cast<float>(std::atof(m_planeOpRotBuf));
-        if (std::abs(deg) > 1e-4f) {
+        float deg = 0.0f;
+        if (materializr::parseFinite(m_planeOpRotBuf, deg) && std::abs(deg) > 1e-4f) {
             // Find the most-recently-added plane (auto-selected on push)
             // and rotate it around its CURRENT origin by `deg`° about the
             // chosen world axis. Stays additive: typing 10°, Apply, then
@@ -2179,7 +2188,8 @@ void Application::renderRevolvePopup() {
     bool angleChanged = false;
     if (ImGui::InputText("##revAng", m_revolveAngleBuf, sizeof(m_revolveAngleBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
-        m_revolveAngle = static_cast<float>(std::atof(m_revolveAngleBuf));
+        { float a = m_revolveAngle;
+          if (materializr::parseFinite(m_revolveAngleBuf, a)) m_revolveAngle = a; }
         angleChanged = true;
     }
     ImGui::SameLine(); ImGui::Text("°");
@@ -2303,7 +2313,8 @@ void Application::renderRotatePlaneAboutAxisPopup() {
     bool angleChanged = false;
     if (ImGui::InputText("##rotPlaneAng", m_rotPlaneAngleBuf, sizeof(m_rotPlaneAngleBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
-        m_rotPlaneAngle = static_cast<float>(std::atof(m_rotPlaneAngleBuf));
+        { float a = m_rotPlaneAngle;
+          if (materializr::parseFinite(m_rotPlaneAngleBuf, a)) m_rotPlaneAngle = a; }
         angleChanged = true;
     }
     ImGui::SameLine(); ImGui::Text("°");
@@ -2640,8 +2651,9 @@ void Application::renderConstructionAxisPanel() {
         if (ImGui::InputText("##axisOrig", m_axisOpOriginBuf[i],
                              sizeof(m_axisOpOriginBuf[i]),
                              ImGuiInputTextFlags_CharsDecimal)) {
-            double parsed = std::atof(m_axisOpOriginBuf[i]);
-            if (std::abs(parsed - m_axisOpOrigin[i]) > 1e-4) {
+            double parsed = m_axisOpOrigin[i];
+            if (materializr::parseFinite(m_axisOpOriginBuf[i], parsed) &&
+                std::abs(parsed - m_axisOpOrigin[i]) > 1e-4) {
                 m_axisOpOrigin[i] = parsed;
                 originChanged = true;
             }

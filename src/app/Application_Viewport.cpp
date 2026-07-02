@@ -5093,7 +5093,8 @@ void Application::renderViewport() {
                         if (ImGui::IsItemDeactivatedAfterEdit()) {
                             // Re-apply the typed value live as the user clicks off
                             // the field, so the sketch reflects what they typed.
-                            float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
+                            float deg = m_sketchGizmoRotateDegrees;
+                            (void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);
                             m_sketchGizmoRotateDegrees = deg;
                             float rad = deg * static_cast<float>(M_PI) / 180.0f;
                             float ca = std::cos(rad), sa = std::sin(rad);
@@ -5109,7 +5110,8 @@ void Application::renderViewport() {
                         bool cancel = ImGui::Button("Cancel", ImVec2(70, 0));
 
                         if (apply) {
-                            float deg = static_cast<float>(std::atof(m_sketchGizmoRotateBuf));
+                            float deg = m_sketchGizmoRotateDegrees;
+                            (void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);
                             float rad = deg * static_cast<float>(M_PI) / 180.0f;
                             float ca = std::cos(rad), sa = std::sin(rad);
                             for (auto& [id, orig] : m_sketchGizmoOriginals) {
@@ -6053,14 +6055,15 @@ void Application::renderViewport() {
         bool valueChanged = false;
         if (ImGui::InputText("##dist", m_extrudeInputBuf, sizeof(m_extrudeInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            // Enter pressed — commit
-            m_extrudeDistance = static_cast<float>(std::atof(m_extrudeInputBuf));
+            // Enter pressed — commit (parseFinite: keep last on garbage)
+            (void)materializr::parseFinite(m_extrudeInputBuf, m_extrudeDistance);
             updateInteractiveExtrude();
             commitInteractiveExtrude();
         } else {
             // Update distance from text as user types
-            float parsed = static_cast<float>(std::atof(m_extrudeInputBuf));
-            if (std::abs(parsed - m_extrudeDistance) > 0.01f && std::abs(parsed) > 0.01f) {
+            float parsed = m_extrudeDistance;
+            if (materializr::parseFinite(m_extrudeInputBuf, parsed) &&
+                std::abs(parsed - m_extrudeDistance) > 0.01f && std::abs(parsed) > 0.01f) {
                 m_extrudeDistance = parsed;
                 updateInteractiveExtrude();
             }
@@ -6118,13 +6121,14 @@ void Application::renderViewport() {
 
         if (ImGui::InputText("##ppdist", m_pushPullInputBuf, sizeof(m_pushPullInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            m_pushPullDistance = static_cast<float>(std::atof(m_pushPullInputBuf));
+            (void)materializr::parseFinite(m_pushPullInputBuf, m_pushPullDistance);
             m_pushPullDistanceRaw = m_pushPullDistance;
             updatePushPull();
             commitPushPull();
         } else {
-            float parsed = static_cast<float>(std::atof(m_pushPullInputBuf));
-            if (std::abs(parsed - m_pushPullDistance) > 0.01f) {
+            float parsed = m_pushPullDistance;
+            if (materializr::parseFinite(m_pushPullInputBuf, parsed) &&
+                std::abs(parsed - m_pushPullDistance) > 0.01f) {
                 m_pushPullDistance = parsed;
                 m_pushPullDistanceRaw = parsed;
                 updatePushPull();
@@ -6215,12 +6219,13 @@ void Application::renderViewport() {
 
         if (ImGui::InputText("##val", m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            m_edgeOpValue = static_cast<float>(std::atof(m_edgeOpInputBuf));
+            (void)materializr::parseFinite(m_edgeOpInputBuf, m_edgeOpValue);
             updateInteractiveEdgeOp();
             commitInteractiveEdgeOp();
         } else {
-            float parsed = static_cast<float>(std::atof(m_edgeOpInputBuf));
-            if (std::abs(parsed - m_edgeOpValue) > 0.01f && parsed > 0.01f) {
+            float parsed = m_edgeOpValue;
+            if (materializr::parseFinite(m_edgeOpInputBuf, parsed) &&
+                std::abs(parsed - m_edgeOpValue) > 0.01f && parsed > 0.01f) {
                 m_edgeOpValue = parsed;
                 updateInteractiveEdgeOp();
             }
@@ -6254,12 +6259,13 @@ void Application::renderViewport() {
                 if (ImGui::InputText("##val2", m_edgeOpInputBuf2,
                                      sizeof(m_edgeOpInputBuf2),
                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
-                    m_edgeOpValue2 = static_cast<float>(std::atof(m_edgeOpInputBuf2));
+                    (void)materializr::parseFinite(m_edgeOpInputBuf2, m_edgeOpValue2);
                     updateInteractiveEdgeOp();
                     commitInteractiveEdgeOp();
                 } else {
-                    float p2 = static_cast<float>(std::atof(m_edgeOpInputBuf2));
-                    if (std::abs(p2 - m_edgeOpValue2) > 0.01f && p2 > 0.01f) {
+                    float p2 = m_edgeOpValue2;
+                    if (materializr::parseFinite(m_edgeOpInputBuf2, p2) &&
+                        std::abs(p2 - m_edgeOpValue2) > 0.01f && p2 > 0.01f) {
                         m_edgeOpValue2 = p2;
                         updateInteractiveEdgeOp();
                     }
@@ -6473,8 +6479,8 @@ void Application::renderViewport() {
                                  ImGuiInputTextFlags_EnterReturnsTrue |
                                  ImGuiInputTextFlags_CharsDecimal |
                                  ImGuiInputTextFlags_AutoSelectAll)) {
-                float v = static_cast<float>(std::atof(m_sketchDimBuf));
-                if (v > 0.0f) {
+                float v = 0.0f;
+                if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
                     recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
                 }
                 m_sketchDimBuf[0] = '\0';

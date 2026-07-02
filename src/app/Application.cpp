@@ -96,6 +96,7 @@ inline void resetFpuForOcct() {
 #include "core/EventBus.h"
 #include "core/Events.h"
 #include "core/Verbose.h"
+#include "core/NumParse.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
 
@@ -2512,17 +2513,17 @@ void Application::handleShortcuts() {
         }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_edgeOpActive) {
-        m_edgeOpValue = static_cast<float>(std::atof(m_edgeOpInputBuf));
+        (void)materializr::parseFinite(m_edgeOpInputBuf, m_edgeOpValue);
         updateInteractiveEdgeOp();
         commitInteractiveEdgeOp();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_extruding) {
-        m_extrudeDistance = static_cast<float>(std::atof(m_extrudeInputBuf));
+        (void)materializr::parseFinite(m_extrudeInputBuf, m_extrudeDistance);
         updateInteractiveExtrude();
         commitInteractiveExtrude();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_pushPullActive) {
-        m_pushPullDistance = static_cast<float>(std::atof(m_pushPullInputBuf));
+        (void)materializr::parseFinite(m_pushPullInputBuf, m_pushPullDistance);
         updatePushPull();
         commitPushPull();
     }

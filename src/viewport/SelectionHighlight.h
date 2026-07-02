@@ -38,10 +38,12 @@ private:
 
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
 
-    // Upload `verts` (xyz triplets, GL_LINES order) and draw them as quads of
-    // `halfWidthPx` pixels using the geometry-shader line program. Used by both
-    // edge and body highlighting so thickness is honoured in core-profile GL.
-    void drawThickLines(const std::vector<float>& verts, const glm::mat4& vp,
+    // Draw the `count` vertices already resident in `vao` (xyz triplets,
+    // GL_LINES order) as quads of `halfWidthPx` pixels using the geometry-
+    // shader line program. Used by both edge and body highlighting so
+    // thickness is honoured in core-profile GL. No per-frame upload — the
+    // buffer was filled once when the cache entry was built.
+    void drawThickLines(unsigned int vao, int count, const glm::mat4& vp,
                         const glm::vec3& color, float halfWidthPx);
 
     // Faces are a translucent triangle tint (no geometry shader).
@@ -56,9 +58,6 @@ private:
     int m_locLineColor = -1;
     int m_locViewport = -1;
     int m_locHalfWidth = -1;
-
-    unsigned int m_vao = 0;
-    unsigned int m_vbo = 0;
 
     // Highlighted-edge line width in pixels. Body outlines render slightly
     // thinner so a whole selected body stays distinguishable from single edges.
@@ -87,15 +86,27 @@ private:
     //     outright: only the CURRENT selection's entries get rebuilt next
     //     frame, so the flush is invisible. clearCaches() drops everything on
     //     project load (the pinned shapes belong to the outgoing project).
+    //
+    // Each entry owns a PERSISTENT GPU buffer: the tessellation is uploaded
+    // once (GL_STATIC_DRAW) when the entry is built and the CPU copy freed,
+    // so every subsequent frame just binds the VAO and draws — no per-frame
+    // glBufferData re-upload of the (unchanging) selection geometry.
     struct CacheEntry {
-        TopoDS_Shape shape;  // ownership pin (see above)
-        TopLoc_Location loc; // pose the verts were sampled at
-        std::vector<float> verts;
+        TopoDS_Shape shape;   // ownership pin (see above)
+        TopLoc_Location loc;  // pose the geometry was sampled at
+        unsigned int vao = 0; // persistent GPU buffers (uploaded once)
+        unsigned int vbo = 0;
+        int count = 0;        // vertex count (0 = nothing to draw)
     };
     static constexpr size_t kCacheCap = 32;
     std::map<const void*, CacheEntry> m_bodyCache;
     std::map<const void*, CacheEntry> m_faceCache;
     std::map<const void*, CacheEntry> m_edgeCache;
+
+    // GPU-buffer lifecycle for the caches above (see CacheEntry).
+    static void freeEntryGL(CacheEntry& e);
+    static void freeCacheGL(std::map<const void*, CacheEntry>& m);
+    static void uploadEntry(CacheEntry& e, const std::vector<float>& verts);
 };
 
 } // namespace materializr
