@@ -42,6 +42,8 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/MeshDecimate.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ProjectRecovery.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Verbose.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Unfold.cpp
 )
 
@@ -86,6 +88,11 @@ add_test(NAME test_document COMMAND test_document)
 add_executable(test_history test_history.cpp)
 target_link_libraries(test_history PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_history COMMAND test_history)
+
+# test_recovery — multi-instance recovery slots (flock claim/probe/orphan scan)
+add_executable(test_recovery test_recovery.cpp)
+target_link_libraries(test_recovery PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_recovery COMMAND test_recovery)
 
 # test_operations
 add_executable(test_operations test_operations.cpp)

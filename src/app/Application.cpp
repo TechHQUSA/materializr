@@ -4952,7 +4952,9 @@ void Application::renderProjectRecoveryPrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button("Discard", ImVec2(140, 0))) {
-            materializr::clearProjectRecovery();
+            // The candidate is the dead session's orphaned snapshot — our own
+            // live slot is separate and untouched.
+            materializr::clearProjectRecoveryCandidate();
             m_pendingProjectRecovery = false;
             ImGui::CloseCurrentPopup();
         }
@@ -4963,16 +4965,22 @@ void Application::renderProjectRecoveryPrompt() {
 void Application::restoreProjectRecoveryNow() {
     materializr::ProjectRecoveryMeta meta;
     materializr::readProjectRecoveryMeta(meta);
-    const std::string recPath = materializr::projectRecoveryPath();
+    // The dead session's orphaned snapshot — NOT projectRecoveryPath(), which
+    // is this instance's own (live, empty-so-far) slot.
+    const std::string recPath = materializr::projectRecoveryRestorePath();
     // Load the snapshot through the normal project loader (rebuilds bodies +
     // editable history). loadProjectAt sets m_currentProjectPath to the sidecar
     // and marks it saved — override both with the project's ORIGINAL identity so
     // the user can't overwrite the sidecar and unsaved work stays unsaved/dirty.
-    if (!loadProjectAt(recPath)) {
+    if (recPath.empty() || !loadProjectAt(recPath)) {
         std::fprintf(stderr, "[Recovery] failed to load project snapshot\n");
-        materializr::clearProjectRecovery();
+        materializr::clearProjectRecoveryCandidate();
         return;
     }
+    // Consumed: drop the orphan so it isn't offered again next launch. The
+    // restored state is re-snapshotted into OUR slot within seconds (the
+    // markDirty below makes writeProjectRecoveryIfDue fire).
+    materializr::clearProjectRecoveryCandidate();
     m_currentProjectPath = meta.projectPath; // "" if it was never saved
     markDirty();                             // unsaved since the snapshot
     saveAppSettings();                       // fix lastProjectPath off the sidecar
