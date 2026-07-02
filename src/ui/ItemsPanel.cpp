@@ -685,14 +685,8 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
             }
             colorChanged = true;
         }
-        if (!deleted && ImGui::MenuItem("Hide Others")) {
-            for (int otherId : m_document->getAllBodyIds()) {
-                if (otherId != id) m_document->setBodyVisible(otherId, false);
-            }
-            colorChanged = true;
-        }
-        // The way back from Isolate / Hide Others in one click (mirrors the
-        // viewport context menu) — beats re-ticking every checkbox above.
+        // The way back from Isolate in one click (mirrors the viewport
+        // context menu) — beats re-ticking every checkbox above.
         if (!deleted && ImGui::MenuItem("Show All Bodies")) {
             for (int otherId : m_document->getAllBodyIds()) {
                 m_document->setBodyVisible(otherId, true);

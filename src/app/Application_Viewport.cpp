@@ -5757,15 +5757,8 @@ void Application::renderViewport() {
                 m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Hide Others")) {
-                for (int o : m_document->getAllBodyIds())
-                    if (o != bid) m_document->setBodyVisible(o, false);
-                markDirty();
-                m_meshesDirty = true;
-                m_contextMenuFace.Nullify();
-            }
-            // The way back from Isolate / Hide Others — without this the only
-            // recovery is re-ticking every body's checkbox in the Items panel.
+            // The way back from Isolate — without this the only recovery is
+            // re-ticking every body's checkbox in the Items panel.
             if (ImGui::MenuItem("Show All Bodies")) {
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, true);
