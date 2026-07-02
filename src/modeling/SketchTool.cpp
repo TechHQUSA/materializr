@@ -983,8 +983,14 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // POSITIONAL cap on directional / charged inferences: fires-checks are
     // ANGULAR for those, so capture distance grows with segment length (3°
     // at 100 mm = 5 mm of cursor theft). An inference may only pull the
-    // cursor a couple of millimetres from where the user actually is.
-    const float posCap       = std::max(1.5f, m_gridStep * 1.5f);
+    // cursor a short distance from where the user actually is. Grid-relative
+    // when snap is on (same reasoning as the point/axis bands): the old
+    // absolute 1.5 mm floor let a directional guide yank the cursor ~1.5 mm —
+    // 15 increments at a 0.1 mm grid — so once the (now tight) endpoint band
+    // stopped grabbing, these took over and the preview wouldn't start until
+    // ~1.3 mm out. Tie the pull to the grid so it can't reach past ~1.5
+    // increments; coarse grids and grid-off keep the absolute cap.
+    const float posCap       = (gridActive ? m_gridStep * 1.5f : 1.5f);
 
     // On-line: cursor's perpendicular projection lands within an existing
     // sketch segment.
