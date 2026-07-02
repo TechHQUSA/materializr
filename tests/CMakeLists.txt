@@ -129,3 +129,8 @@ add_test(NAME test_generative_edges COMMAND test_generative_edges)
 # bench_stl_import — manual stopwatch for STL import stages (not run by ctest)
 add_executable(bench_stl_import bench_stl_import.cpp)
 target_link_libraries(bench_stl_import PRIVATE materializr_core)
+
+# probe_anchor_coverage — diagnostic: anchor classification of a real project's
+# fillets against every sketch (experiment/generative-edges, not run by ctest)
+add_executable(probe_anchor_coverage probe_anchor_coverage.cpp)
+target_link_libraries(probe_anchor_coverage PRIVATE materializr_core)

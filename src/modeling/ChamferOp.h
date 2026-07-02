@@ -85,8 +85,9 @@ private:
 
 public:
     // Retrofit anchors for a chamfer loaded from a pre-anchoring project.
+    // Anchoring consults every sketch in the document (see FilletOp).
     void ensureAnchors(Document& doc) {
-        if (m_sourceSketchId >= 0 && m_edgeAnchors.empty() && !m_edges.empty())
+        if (m_edgeAnchors.empty() && !m_edges.empty())
             computeAnchors(doc);
     }
 };

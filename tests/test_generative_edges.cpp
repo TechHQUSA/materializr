@@ -186,7 +186,7 @@ TEST(GenerativeEdges, WholePrismEveryEdgeAnchors) {
     for (int i = 1; i <= emap.Extent(); ++i) all.push_back(TopoDS::Edge(emap(i)));
     ASSERT_EQ(all.size(), 12u); // box: 4 vertical + 4 top + 4 bottom
 
-    auto anchors = EdgeAnchor::compute(all, *sk);
+    auto anchors = EdgeAnchor::compute(all, {{sid, sk.get()}});
     int corners = 0, rims = 0, none = 0;
     for (const auto& a : anchors)
         (a.kind == EdgeAnchor::Anchor::Corner ? corners :
@@ -196,8 +196,9 @@ TEST(GenerativeEdges, WholePrismEveryEdgeAnchors) {
     EXPECT_EQ(none, 0) << "every prism edge must be attributable to a sketch feature";
 }
 
-// Control: WITHOUT an anchor (no setSourceSketch), the same resize+re-execute
-// fails — proving it's the anchoring, not something else, doing the work.
+// Control: a fillet whose anchors were never captured (a stale edge from the
+// pre-resize body, as any pre-anchoring op has) cannot follow the resize —
+// proving it's the anchoring, not something else, doing the work.
 TEST(GenerativeEdges, WithoutAnchorResizeStillFails) {
     Document doc;
     int pid[4];
@@ -213,24 +214,23 @@ TEST(GenerativeEdges, WithoutAnchorResizeStillFails) {
 
     TopoDS_Edge corner = verticalEdgeAt(doc.getBody(body), 20.0, 10.0);
     ASSERT_FALSE(corner.IsNull());
-    FilletOp f;
-    f.setBody(body);
-    f.setEdges({corner});
-    f.setRadius(2.0);
-    // NB: no setSourceSketch — this is the current (unanchored) behaviour.
-    ASSERT_TRUE(f.execute(doc));
 
     sk->movePoint(pid[1], {40.0f, 0.0f});
     sk->movePoint(pid[2], {40.0f, 10.0f});
     ASSERT_TRUE(ext.rebuildProfileFromSketch(doc));
     ASSERT_TRUE(ext.execute(doc));
 
+    FilletOp f;
+    f.setBody(body);
+    f.setEdges({corner}); // stale: from the pre-resize body, no anchors captured
+    f.setRadius(2.0);
     EXPECT_FALSE(f.execute(doc))
         << "without an anchor the fillet cannot follow the resized corner "
            "(this is the limitation the feature fixes)";
 }
 
-// The anchor round-trips through serialize/deserialize.
+// Anchors round-trip through the op's serialize/deserialize (v2 format), and
+// the legacy v1 blob form still parses.
 TEST(GenerativeEdges, AnchorSerializesAndParses) {
     Document doc;
     int pid[4];
@@ -245,13 +245,89 @@ TEST(GenerativeEdges, AnchorSerializesAndParses) {
     f.setBody(body);
     f.setEdges({verticalEdgeAt(doc.getBody(body), 20.0, 10.0)});
     f.setRadius(2.0);
-    f.setSourceSketch(sid);
     ASSERT_TRUE(f.execute(doc));
 
     const std::string blob = f.serializeParams();
-    EXPECT_NE(blob.find("anchor="), std::string::npos);
+    EXPECT_NE(blob.find("anchor=v2"), std::string::npos);
 
     FilletOp f2;
     ASSERT_TRUE(f2.deserializeParams(blob));
-    EXPECT_EQ(f2.getSourceSketch(), sid);
+
+    // Field-level round-trip at the EdgeAnchor layer.
+    std::vector<EdgeAnchor::Anchor> in = {
+        { EdgeAnchor::Anchor::Corner, 2, 7, 5.0, 0.5 },
+        { EdgeAnchor::Anchor::Rim,    3, 4, 90.0, 0.25 },
+        { EdgeAnchor::Anchor::Arc,    4, 9, -32.5, 0.5 },
+        { EdgeAnchor::Anchor::Circle, 4, 11, 0.0, 0.5 },
+        { EdgeAnchor::Anchor::None,  -1, -1, 0.0, 0.5 },
+    };
+    std::vector<EdgeAnchor::Anchor> back;
+    ASSERT_TRUE(EdgeAnchor::parse(EdgeAnchor::serialize(in), back));
+    ASSERT_EQ(back.size(), in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        EXPECT_EQ(back[i].kind, in[i].kind) << i;
+        if (in[i].kind == EdgeAnchor::Anchor::None) continue;
+        EXPECT_EQ(back[i].sketchId, in[i].sketchId) << i;
+        EXPECT_EQ(back[i].elemId, in[i].elemId) << i;
+        EXPECT_NEAR(back[i].h, in[i].h, 1e-6) << i;
+        EXPECT_NEAR(back[i].t, in[i].t, 1e-6) << i;
+    }
+
+    // Legacy v1 blob ("<sid>~C,<pid>~R,<lid>,<h>") still parses, header sketch
+    // id fanned out to every anchor.
+    std::vector<EdgeAnchor::Anchor> legacy;
+    ASSERT_TRUE(EdgeAnchor::parse("2~C,7~R,4,90.000000~N", legacy));
+    ASSERT_EQ(legacy.size(), 3u);
+    EXPECT_EQ(legacy[0].kind, EdgeAnchor::Anchor::Corner);
+    EXPECT_EQ(legacy[0].sketchId, 2);
+    EXPECT_EQ(legacy[0].elemId, 7);
+    EXPECT_EQ(legacy[1].kind, EdgeAnchor::Anchor::Rim);
+    EXPECT_EQ(legacy[1].sketchId, 2);
+    EXPECT_NEAR(legacy[1].h, 90.0, 1e-6);
+    EXPECT_EQ(legacy[2].kind, EdgeAnchor::Anchor::None);
+}
+
+// Arc coverage: a rounded-corner profile (two lines bridged by an arc, closed
+// back to the origin) extrudes to a body whose every edge must anchor —
+// including the two circular rim edges from the ARC and the seamless walls.
+TEST(GenerativeEdges, ArcProfileEveryEdgeAnchors) {
+    Document doc;
+    auto sk = std::make_shared<Sketch>();
+    sk->setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0))));
+    // Rectangle 20x10 with its (20,10) corner rounded by an R5 arc centred
+    // at (15,5): p0(0,0) p1(20,0) ... arc p1a(20,5)->(15,10)p2a ... p3(0,10).
+    int p0  = sk->addPoint({0, 0});
+    int p1  = sk->addPoint({20, 0});
+    int p1a = sk->addPoint({20, 5});
+    int ctr = sk->addPoint({15, 5});
+    int p2a = sk->addPoint({15, 10});
+    int p3  = sk->addPoint({0, 10});
+    sk->addLine(p0, p1);
+    sk->addLine(p1, p1a);
+    sk->addArc(ctr, p1a, p2a, 5.0);
+    sk->addLine(p2a, p3);
+    sk->addLine(p3, p0);
+    int sid = doc.addSketch(sk);
+
+    ExtrudeOp ext; ext.setSketchSource(sid); ext.setDistance(10.0);
+    ASSERT_TRUE(ext.rebuildProfileFromSketch(doc));
+    ASSERT_TRUE(ext.execute(doc));
+    int body = onlyBodyId(doc);
+
+    TopTools_IndexedMapOfShape emap;
+    TopExp::MapShapes(doc.getBody(body), TopAbs_EDGE, emap);
+    std::vector<TopoDS_Edge> all;
+    for (int i = 1; i <= emap.Extent(); ++i) all.push_back(TopoDS::Edge(emap(i)));
+
+    auto anchors = EdgeAnchor::compute(all, {{sid, sk.get()}});
+    int none = 0;
+    for (size_t i = 0; i < anchors.size(); ++i)
+        if (anchors[i].kind == EdgeAnchor::Anchor::None) ++none;
+    EXPECT_EQ(none, 0) << "every edge of an arc-cornered prism must anchor";
+
+    // And they all resolve back to distinct edges on the unchanged body.
+    std::vector<TopoDS_Edge> out;
+    EXPECT_TRUE(EdgeAnchor::resolve(anchors, {{sid, sk.get()}},
+                                    doc.getBody(body), out));
+    EXPECT_EQ(out.size(), all.size());
 }

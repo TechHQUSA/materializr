@@ -52,31 +52,34 @@ double faceBlendRadius(const TopoDS_Face& face) {
 }
 } // namespace
 
+// Every sketch in the document, as EdgeAnchor references. Real bodies are
+// carved by several sketches (base extrude + profile cuts), so anchoring
+// consults them all; sketches unrelated to this body simply never match.
+static std::vector<EdgeAnchor::SketchRef> anchorSketches(Document& doc) {
+    std::vector<EdgeAnchor::SketchRef> refs;
+    for (int sid : doc.getAllSketchIds())
+        if (auto sk = doc.getSketch(sid)) refs.push_back({ sid, sk.get() });
+    return refs;
+}
+
 void FilletOp::computeAnchors(Document& doc) {
     m_edgeAnchors.clear();
-    if (m_sourceSketchId < 0) {
-        std::fprintf(stderr, "[Fillet] no source sketch — anchors disabled\n");
-        return;
-    }
-    auto sk = doc.getSketch(m_sourceSketchId);
-    if (!sk) return;
-    m_edgeAnchors = EdgeAnchor::compute(m_edges, *sk);
-    int corners = 0, rims = 0, none = 0;
+    m_edgeAnchors = EdgeAnchor::compute(m_edges, anchorSketches(doc));
+    int corners = 0, rims = 0, arcs = 0, none = 0;
     for (const auto& a : m_edgeAnchors)
         (a.kind == EdgeAnchor::Anchor::Corner ? corners :
-         a.kind == EdgeAnchor::Anchor::Rim    ? rims : none)++;
+         a.kind == EdgeAnchor::Anchor::Rim    ? rims :
+         a.kind == EdgeAnchor::Anchor::None   ? none : arcs)++;
     std::fprintf(stderr,
-        "[Fillet] anchored %zu edges vs sketch %d: %d corner, %d rim, %d none\n",
-        m_edges.size(), m_sourceSketchId, corners, rims, none);
+        "[Fillet] anchored %zu edges: %d corner, %d rim, %d arc, %d none\n",
+        m_edges.size(), corners, rims, arcs, none);
 }
 
 bool FilletOp::resolveAnchors(Document& doc, const TopoDS_Shape& base) {
-    if (m_sourceSketchId < 0 || m_edgeAnchors.size() != m_edges.size())
-        return false;
-    auto sk = doc.getSketch(m_sourceSketchId);
-    if (!sk) return false;
+    if (m_edgeAnchors.size() != m_edges.size()) return false;
     std::vector<TopoDS_Edge> resolved;
-    if (!EdgeAnchor::resolve(m_edgeAnchors, *sk, base, resolved)) return false;
+    if (!EdgeAnchor::resolve(m_edgeAnchors, anchorSketches(doc), base, resolved))
+        return false;
     m_edges = std::move(resolved);
     std::fprintf(stderr, "[Fillet] resolved %zu edge(s) via generative anchors\n",
                  m_edges.size());
@@ -304,7 +307,7 @@ std::string FilletOp::serializeParams() const {
         if (!idx.empty()) blob += ";gen=" + idx;
     }
     // Generative anchors (additive; old readers ignore the key). See EdgeAnchor.
-    std::string anc = EdgeAnchor::serialize(m_sourceSketchId, m_edgeAnchors);
+    std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
     if (!anc.empty()) blob += ";anchor=" + anc;
     return blob;
 }
@@ -326,7 +329,7 @@ bool FilletOp::deserializeParams(const std::string& blob) {
         else if (key == "edges")  { m_edgeIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "gen")    { m_genFaceIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "anchor") {
-            EdgeAnchor::parse(val, m_sourceSketchId, m_edgeAnchors);
+            EdgeAnchor::parse(val, m_edgeAnchors);
             any = true;
         }
         pos = end + 1;
