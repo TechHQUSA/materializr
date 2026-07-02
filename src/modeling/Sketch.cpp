@@ -1319,6 +1319,10 @@ std::vector<Sketch::Region> Sketch::buildRegions() const {
     return m_regionCache;
 }
 
+bool Sketch::regionsCached() const {
+    return m_regionCacheValid && geometryHash() == m_regionHash;
+}
+
 // FNV-1a over everything region construction depends on. ~10 µs on a text
 // sketch — noise next to the general fuse this guards (tens of ms).
 uint64_t Sketch::geometryHash() const {

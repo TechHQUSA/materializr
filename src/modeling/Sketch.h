@@ -147,6 +147,12 @@ public:
     // remember an invalidate call.
     std::vector<Region> buildRegions() const;
 
+    // True when buildRegions() would be a cache HIT (valid cache + current
+    // geometry hash). Lets the per-frame hover pick skip sketches whose
+    // regions would need the heavy OCCT fuse — a freshly-unhidden complex
+    // sketch otherwise turns the first hover into a seconds-long stall.
+    bool regionsCached() const;
+
     // 2D point-in-region test (sketch-space coordinates)
     bool isPointInRegion(const Region& region, glm::vec2 p) const;
 

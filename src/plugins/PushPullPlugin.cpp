@@ -37,7 +37,11 @@ public:
                 PushPullTarget t;
                 t.sketchId = e.sketchId;
                 t.regionIndex = e.subShapeIndex;
-                t.sourceBodyId = sketch->getSourceBody();
+                // Detached sketch = independent of its former host; don't
+                // fuse into the stale source body (see beginPushPull).
+                t.sourceBodyId = sketch->isDetachedFromBody()
+                                     ? -1
+                                     : sketch->getSourceBody();
                 t.profile = regions[e.subShapeIndex].face;
                 if (t.profile.IsNull()) continue;
                 m_targets.push_back(t);

@@ -3880,9 +3880,19 @@ void Application::renderViewport() {
 
                     m_hoveredBodyId = result.hit ? result.bodyId : -1;
 
-                    // Sketch-region hover (takes priority over body picking when present)
+                    // Sketch-region hover (takes priority over body picking
+                    // when present). This one pick serves BOTH hover and
+                    // clicks, so region caches are only allowed to BUILD on a
+                    // click frame: hover must never trigger the OCCT fuse on
+                    // a cold (freshly-unhidden) complex sketch — that read as
+                    // "unhide sketch → app not responding". Until first
+                    // click, a cold sketch simply has no hover fill.
+                    const bool regionClickFrame =
+                        ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+                        ImGui::IsMouseClicked(ImGuiMouseButton_Right);
                     SketchRegionHit regionHit = pickSketchRegion(localX, localY,
-                        contentSize.x, contentSize.y);
+                        contentSize.x, contentSize.y,
+                        /*buildIfCold=*/regionClickFrame);
                     // Reject a sketch region that sits behind a body under the cursor —
                     // only what's visible should be selectable. Compare hit distances
                     // from the camera (origin-independent) and drop the region if the

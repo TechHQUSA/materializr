@@ -250,7 +250,11 @@ bool ItemsPanel::render() {
             bool visible = m_document->isSketchVisible(id);
             if (ImGui::Checkbox("##svis", &visible)) {
                 m_document->setSketchVisible(id, visible);
-                colorChanged = true;
+                // NOT colorChanged: sketch visibility is read live by the
+                // viewport's sketch loop every frame — setting the flag here
+                // forced a FULL re-tessellation of every visible body (a
+                // multi-second stall on a heavy project) for a toggle that
+                // doesn't touch body meshes at all.
             }
             ImGui::SameLine();
 

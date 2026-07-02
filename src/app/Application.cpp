@@ -3200,6 +3200,11 @@ void Application::ensureSketchSourceFace(int sketchId) {
     auto sk = m_document->getSketch(sketchId);
     if (!sk) return;
     if (!sk->getSourceFace().IsNull()) return; // already set; nothing to do
+    // A detached sketch is independent of its former host: don't rebind its
+    // face (the geometric match below would fail anyway once moved, but a
+    // detached-in-place sketch could still match and inherit the host's
+    // hole wires into its regions).
+    if (sk->isDetachedFromBody()) return;
     int bid = sk->getSourceBody();
     if (bid < 0) return;
     TopoDS_Shape body;
@@ -4533,10 +4538,14 @@ void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
 
     int targetBody = -1;
     if (mode == ExtrudeMode::Subtract) {
-        targetBody = sketch->getSourceBody();
+        // A detached sketch no longer belongs to its former host — cutting
+        // that body from a sketch moved elsewhere is never what's meant.
+        targetBody = sketch->isDetachedFromBody() ? -1
+                                                  : sketch->getSourceBody();
         if (targetBody < 0) {
-            std::fprintf(stderr, "Subtract needs a sketch drawn on a body face; "
-                                 "this sketch has no source body\n");
+            std::fprintf(stderr, "Subtract needs a sketch attached to a body "
+                                 "face; this sketch is free-floating or was "
+                                 "unlinked from its body\n");
             return;
         }
     }
@@ -4547,10 +4556,13 @@ void Application::subtractSketchRegion(int sketchId, int regionIndex) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
 
-    int targetBody = sketch->getSourceBody();
+    // Detached sketch: see subtract path above — never cut the former host.
+    int targetBody = sketch->isDetachedFromBody() ? -1
+                                                  : sketch->getSourceBody();
     if (targetBody < 0) {
-        std::fprintf(stderr, "Subtract needs a sketch drawn on a body face; "
-                             "this sketch has no source body\n");
+        std::fprintf(stderr, "Subtract needs a sketch attached to a body "
+                             "face; this sketch is free-floating or was "
+                             "unlinked from its body\n");
         return;
     }
 

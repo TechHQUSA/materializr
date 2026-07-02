@@ -1140,7 +1140,8 @@ void Application::cancelInteractiveExtrude() {
 // pushing and undoing successive preview ops on the history stack.
 
 Application::SketchRegionHit Application::pickSketchRegion(float screenX, float screenY,
-                                                           float vpW, float vpH) const {
+                                                           float vpW, float vpH,
+                                                           bool buildIfCold) const {
     SketchRegionHit hit;
     if (!m_document || !m_viewport) return hit;
 
@@ -1188,6 +1189,13 @@ Application::SketchRegionHit Application::pickSketchRegion(float screenX, float 
         glm::vec2 p2d;
         if (!projectToPlane(rayOrigin, rayDir, t, p2d)) return;
         if (t >= bestT) return;
+
+        // Cold region cache: building it runs the OCCT general fuse — on a
+        // heavy sketch (SVG import, text) that's a SECONDS-long stall. The
+        // per-frame HOVER pick must never trigger it (unhiding a complex
+        // sketch used to freeze the app on the very next mouse move); a
+        // CLICK still builds (one user-initiated wait, exactly as before).
+        if (!buildIfCold && !sketch.regionsCached()) return;
 
         // Screen-space pick tolerance: how far ~6px maps to on this plane, so the
         // boundary catch area is a consistent, comfortable width at any zoom.
@@ -1371,7 +1379,14 @@ void Application::beginPushPull() {
             PushPullTarget t;
             t.sketchId = e.sketchId;
             t.regionIndex = e.subShapeIndex;
-            t.sourceBodyId = sketch->getSourceBody();
+            // A DETACHED sketch has been deliberately broken away from its
+            // former host (moved independently in 3D). Keeping the stale
+            // source-body id fused the new prism into a body that can be
+            // hundreds of mm away — a push/pull on an unlinked sketch must
+            // behave like a free-floating sketch and make its own body.
+            t.sourceBodyId = sketch->isDetachedFromBody()
+                                 ? -1
+                                 : sketch->getSourceBody();
             t.profile = regions[e.subShapeIndex].face;
             if (t.profile.IsNull()) continue;
             m_pushPullTargets.push_back(t);

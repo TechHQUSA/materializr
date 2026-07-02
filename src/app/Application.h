@@ -275,10 +275,15 @@ private:
     // Called when entering sketch mode / editing an existing sketch.
     void alignCameraToActiveSketch();
 
-    // Sketch region hover/pick + Push/Pull
+    // Sketch region hover/pick + Push/Pull. buildIfCold=false makes the pick
+    // SKIP sketches whose region cache would need the heavy OCCT fuse —
+    // required on the per-frame hover path (a cold complex sketch would
+    // freeze the app on the first mouse move after being unhidden); click
+    // frames pass true and build as before.
     struct SketchRegionHit { int sketchId = -1; int regionIndex = -1; glm::vec3 worldPoint{0.0f}; };
     SketchRegionHit pickSketchRegion(float screenX, float screenY,
-                                     float vpW, float vpH) const;
+                                     float vpW, float vpH,
+                                     bool buildIfCold = true) const;
     void beginPushPull();
     void updatePushPull();
     void commitPushPull();
