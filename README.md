@@ -158,9 +158,9 @@ project is GPLv3 from here on.)
 
 ## Contributing
 
-Contributions welcome — bug reports and missing-workflow notes especially,
-as the road to 1.0 is field testing. Open an issue first for substantial
-changes; small fixes can go straight to a PR.
+Contributions welcome — bug reports and missing-workflow notes especially;
+real-world dogfooding is what hardens each release. Open an issue first for
+substantial changes; small fixes can go straight to a PR.
 
 Join the community on **[Discord](https://discord.gg/BRjzbMGZvE)** for questions, show-and-tell, and development chat.
 
@@ -168,7 +168,6 @@ Join the community on **[Discord](https://discord.gg/BRjzbMGZvE)** for questions
 
 - **R4stl1n** — original project.
 - **stevebushwa** — design, testing, direction.
-- **TechHQUSA** — security hardening, OCCT thread-safety fix, undo/redo robustness.
 - **Claude (Anthropic)** — pair-coding collaborator.
 
 ## Acknowledgments
