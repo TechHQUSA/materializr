@@ -27,6 +27,19 @@ Window::Window(int width, int height, const std::string& title)
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 
+#if defined(_WIN32)
+    // Per-monitor-v2 DPI awareness (SDL 2.24+) so Windows renders us at NATIVE
+    // resolution instead of bitmap-upscaling a virtualised low-res desktop —
+    // the upscale is what made the whole UI blurry on a scaled (125–200%)
+    // laptop display. We deliberately do NOT set SDL_HINT_WINDOWS_DPI_SCALING:
+    // that makes SDL report the window in points and hand back a >1
+    // DisplayFramebufferScale, which would double-scale against our own
+    // uiScale(). Instead window + drawable stay in physical pixels (so the 3D
+    // viewport is crisp at native res) and uiScale() sizes the UI up by the
+    // display DPI so fonts/panels stay legible. Must precede SDL_Init.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
+
     // NOTE: the port uses SDL2 on every platform, so upstream's GLFW-only X11/
     // Wayland drag-and-drop workaround doesn't apply here (kept the SDL init).
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
@@ -66,19 +79,37 @@ Window::Window(int width, int height, const std::string& title)
     // immersive system-UI flags instead — those hide the bars without that flag,
     // so in a desktop dock the app stays a normal window with the taskbar intact.
 
+#if defined(_WIN32)
+    // DPI-aware ⇒ the window is created in PHYSICAL pixels, so scale the default
+    // logical 1600×900 up by the display DPI — otherwise it would render smaller
+    // on a high-DPI panel than the pre-awareness (virtualised) window did (a
+    // 4K/150% screen used to get a 2400×1350 physical window; without this it'd
+    // drop to 1600×900). Matches uiScale() so the window holds the same amount of
+    // logical UI room at any scaling. The clamp below then caps it to the work
+    // area on genuinely small panels.
+    {
+        float ddpi = 96.0f, hh = 0.0f, vv = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hh, &vv) == 0 && ddpi > 96.0f) {
+            float sc = ddpi / 96.0f;
+            if (sc > 3.0f) sc = 3.0f;
+            m_width  = static_cast<int>(m_width  * sc);
+            m_height = static_cast<int>(m_height * sc);
+        }
+    }
+#endif
+
     // Clamp the fixed initial size to the display's usable area (the screen minus
-    // the taskbar) BEFORE creating the window. On a 1080p Windows laptop the OS
-    // default display scaling is 125–150%; because we don't declare per-monitor
-    // DPI awareness (intentionally — it's what keeps the desktop UI legibly scaled
-    // up rather than rendered tiny at 1:1 px), Windows hands us a *virtualised*,
-    // scaled-down desktop (e.g. 1280×720 at 150%). The hardcoded 1600×900 request
-    // is bigger than that, so the window spilled past every edge — hiding the
-    // taskbar, the title-bar close button, and the sides of both dock panels.
-    // 2K+ Windows screens and Linux/macOS had room so only small/scaled displays
-    // showed it; Android overrides the size below regardless. SDL_GetDisplay
-    // UsableBounds reports the work area in the same (virtualised) coordinates the
-    // create size uses, so clamping to it fits on every screen. Leave a margin so
-    // the window's own title bar + borders stay on-screen too.
+    // the taskbar) BEFORE creating the window. Now that the process is per-monitor
+    // DPI-aware (see the SDL_HINT_WINDOWS_DPI_AWARENESS above), both the create
+    // size and SDL_GetDisplayUsableBounds are in PHYSICAL pixels, so the two are
+    // in the same coordinate space and the clamp is apples-to-apples. On a small
+    // or low-res laptop panel the hardcoded 1600×900 can still exceed the work
+    // area (e.g. a 1366×768 screen), so we clamp + start maximized rather than
+    // spill past the taskbar / title bar / dock panels; roomier screens are
+    // untouched, and Android overrides the size below regardless. (Pre-DPI-aware
+    // this also fixed the *virtualised* small-desktop overflow at 125–150%
+    // scaling; the crisp-rendering fix removed the virtualisation, the clamp still
+    // guards genuinely small panels.) Leave a margin for the window's own borders.
     SDL_Rect usable;
     if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.w > 0 && usable.h > 0) {
         const int marginW = 16;  // left+right borders
@@ -549,17 +580,35 @@ void Window::framebufferSize(int& w, int& h) const {
 }
 
 float Window::uiScale() const {
-    // Only the touch UI scales up; in desktop mode the UI is already sized right
-    // (this is what lets a tablet with a mouse/keyboard run the desktop layout).
-    if (!materializr::touchMode()) return 1.0f;
-    // Scale the desktop-density UI up for a touch screen. Use the physical DPI
-    // against a 96-dpi desktop baseline (so a 240-dpi tablet -> 2.5x), clamped.
-    float ddpi = 240.0f, hdpi = 0.0f, vdpi = 0.0f;
-    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0.0f) ddpi = 240.0f;
-    float s = ddpi / 120.0f;    // 240-dpi tablet -> 2.0x (was 2.5x, a bit too big)
-    if (s < 1.4f) s = 1.4f;     // never smaller than 1.4x on a touch device
-    if (s > 2.5f) s = 2.5f;
+    if (materializr::touchMode()) {
+        // Scale the desktop-density UI up for a touch screen. Use the physical
+        // DPI against a 96-dpi baseline (so a 240-dpi tablet -> 2.5x), clamped.
+        float ddpi = 240.0f, hdpi = 0.0f, vdpi = 0.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0.0f) ddpi = 240.0f;
+        float s = ddpi / 120.0f;    // 240-dpi tablet -> 2.0x (was 2.5x, a bit too big)
+        if (s < 1.4f) s = 1.4f;     // never smaller than 1.4x on a touch device
+        if (s > 2.5f) s = 2.5f;
+        return s;
+    }
+#if defined(_WIN32)
+    // Desktop Windows HiDPI: now that the process is per-monitor DPI-aware (see
+    // the SDL_HINT_WINDOWS_DPI_AWARENESS above) the framebuffer is NATIVE-res
+    // and crisp, but window coordinates are physical pixels — so a 15 px font
+    // would render tiny on a 150% display. Scale the UI up by the display's DPI
+    // (96 dpi = 100% = 1.0x, 144 = 150% = 1.5x, …) so it stays the same physical
+    // size the user set in Windows, now sharp instead of bitmap-upscaled. Fonts
+    // are rasterised at 15·scale (crisp) and ImGui sizes scale to match.
+    float ddpi = 96.0f, hdpi = 0.0f, vdpi = 0.0f;
+    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0.0f) ddpi = 96.0f;
+    float s = ddpi / 96.0f;
+    if (s < 1.0f) s = 1.0f;     // never shrink below 100%
+    if (s > 3.0f) s = 3.0f;     // 300% cap (Windows tops out ~250% on laptops)
     return s;
+#else
+    // Linux / macOS handle HiDPI through the drawable-size / DisplayFramebufferScale
+    // path (Retina, Wayland fractional scaling), so the UI is already right at 1.0.
+    return 1.0f;
+#endif
 }
 
 bool Window::isCtrlDown() {
