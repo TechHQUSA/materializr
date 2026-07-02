@@ -691,6 +691,14 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
             }
             colorChanged = true;
         }
+        // The way back from Isolate / Hide Others in one click (mirrors the
+        // viewport context menu) — beats re-ticking every checkbox above.
+        if (!deleted && ImGui::MenuItem("Show All Bodies")) {
+            for (int otherId : m_document->getAllBodyIds()) {
+                m_document->setBodyVisible(otherId, true);
+            }
+            colorChanged = true;
+        }
         // Per-body STL export: dumps only this body's mesh to a file the
         // user picks. Default filename = the body's current name (see
         // Application::exportBodyAsStl). Wired via callback so ItemsPanel

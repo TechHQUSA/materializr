@@ -5745,16 +5745,32 @@ void Application::renderViewport() {
         // Shared body-level actions — they operate on the whole body the face
         // belongs to, so they appear under both the Face and Body branches.
         auto sharedBodyOps = [&]() {
+            // Both actions change visibility flags, and the renderer only
+            // reflects those on a rebuild — m_meshesDirty is required or the
+            // menu item "doesn't seem to do anything" (markDirty() alone only
+            // flags the PROJECT as unsaved). The full rebuild skips invisible
+            // bodies, so post-isolate it re-tessellates just the one body.
             if (ImGui::MenuItem("Isolate")) {
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, o == bid);
                 markDirty();
+                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
             if (ImGui::MenuItem("Hide Others")) {
                 for (int o : m_document->getAllBodyIds())
                     if (o != bid) m_document->setBodyVisible(o, false);
                 markDirty();
+                m_meshesDirty = true;
+                m_contextMenuFace.Nullify();
+            }
+            // The way back from Isolate / Hide Others — without this the only
+            // recovery is re-ticking every body's checkbox in the Items panel.
+            if (ImGui::MenuItem("Show All Bodies")) {
+                for (int o : m_document->getAllBodyIds())
+                    m_document->setBodyVisible(o, true);
+                markDirty();
+                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
             if (ImGui::MenuItem("Export Body to STL…")) {
