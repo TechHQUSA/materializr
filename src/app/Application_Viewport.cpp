@@ -105,16 +105,41 @@ namespace materializr {
 // that direction is nearly perpendicular to the screen (face head-on) — otherwise
 // normalizing a near-zero vector yields NaN, which propagates into a NaN prism
 // and crashes the boolean kernel.
+// Convert a mouse drag (pixels) into a world distance along `normal` — EXACT:
+// +1 world unit along the axis spans a measurable pixel vector on screen, and
+// the returned distance is the drag's projection onto that vector divided by
+// its pixel length. The face/arrow therefore tracks the cursor 1:1 at every
+// zoom level (same philosophy as the exact pan) instead of the old fixed
+// 0.05 mm-per-pixel, which felt sluggish zoomed in and jumpy zoomed out.
+// Near head-on the axis's screen footprint collapses and exact tracking would
+// turn one pixel into metres, so the sensitivity gain over a screen-parallel
+// axis at the same depth is clamped (÷ max(|sin θ|, 0.25) worth).
 static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& normal,
-                                   const glm::vec2& mouseDelta, const glm::mat4& vp) {
+                                   const glm::vec2& mouseDelta, const glm::mat4& vp,
+                                   const glm::vec2& viewportPx,
+                                   const glm::vec3& viewDir) {
     glm::vec4 o = vp * glm::vec4(origin, 1.0f);
     glm::vec4 t = vp * glm::vec4(origin + normal, 1.0f);
     if (o.w <= 1e-5f || t.w <= 1e-5f) return -mouseDelta.y * 0.05f;
     glm::vec2 os(o.x / o.w, o.y / o.w), ts(t.x / t.w, t.y / t.w);
-    glm::vec2 sd(ts.x - os.x, -(ts.y - os.y)); // screen +y is down
-    float len = glm::length(sd);
-    if (len < 1e-4f) return -mouseDelta.y * 0.05f; // head-on: use vertical drag
-    return glm::dot(mouseDelta, sd / len) * 0.05f;
+    // NDC → pixels (screen +y is down).
+    glm::vec2 sd((ts.x - os.x) * 0.5f * viewportPx.x,
+                 -(ts.y - os.y) * 0.5f * viewportPx.y);
+    float lenPx = glm::length(sd); // pixels spanned by +1 world unit
+    if (lenPx < 1e-4f) return -mouseDelta.y * 0.05f; // truly head-on: legacy feel
+    // Foreshortening guard: lenPx shrinks by |sin θ| (θ = axis vs view dir).
+    // Cap the world-per-pixel gain at 4× the screen-parallel rate so a
+    // near-head-on arrow stays controllable.
+    float sinT = 1.0f;
+    if (glm::length(normal) > 1e-6f && glm::length(viewDir) > 1e-6f) {
+        float c = glm::dot(glm::normalize(normal), glm::normalize(viewDir));
+        sinT = std::sqrt(std::max(0.0f, 1.0f - c * c));
+    }
+    if (sinT > 1e-4f) {
+        float lenPxParallel = lenPx / sinT;      // footprint if screen-parallel
+        lenPx = std::max(lenPx, lenPxParallel * 0.25f);
+    }
+    return glm::dot(mouseDelta, sd / glm::length(sd)) / lenPx;
 }
 
 void Application::gizmoPreviewApply(const glm::mat4& m) {
@@ -2607,12 +2632,19 @@ void Application::renderViewport() {
                 // (Caller still does the camera + UI rendering paths.)
             }
 
+            // Shared by the exact drag→distance mapping below: viewport size in
+            // points (the units MouseDelta uses) and the view direction for the
+            // head-on sensitivity clamp.
+            const glm::vec2 vpPx(contentSize.x, contentSize.y);
+            const glm::vec3 viewDirW =
+                glm::normalize(cam.getTarget() - cam.getPosition());
+
             // Interactive extrude drag: left-drag moves distance along normal
             if (m_extruding && !camDragging &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
                 m_extrudeDistance += projectDragOntoNormal(m_extrudeOrigin, m_extrudeNormal,
-                                                           md, proj * view);
+                                                           md, proj * view, vpPx, viewDirW);
                 std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf), "%.1f", m_extrudeDistance);
                 updateInteractiveExtrude();
             }
@@ -2677,7 +2709,7 @@ void Application::renderViewport() {
                     float half = sfc.dragAxis() == 0 ? sfc.halfU()
                                                      : sfc.halfV();
                     float dW = projectDragOntoNormal(sfc.center(), axis,
-                                                     md, proj * view);
+                                                     md, proj * view, vpPx, viewDirW);
                     float dPct = dW / std::max(half, 1e-3f) * 100.0f;
                     sfc.applyHandleDrag(sfc.dragAxis(), dPct, iopContext());
                 }
@@ -2693,7 +2725,8 @@ void Application::renderViewport() {
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
                 m_pushPullDistanceRaw += projectDragOntoNormal(
-                    m_pushPullOrigin, m_pushPullNormal, md, proj * view);
+                    m_pushPullOrigin, m_pushPullNormal, md, proj * view,
+                    vpPx, viewDirW);
                 m_pushPullDistance = m_pushPullDistanceRaw; // snapped in updatePushPull
                 std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
                 updatePushPull();
@@ -2721,7 +2754,8 @@ void Application::renderViewport() {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
                 if (md.x != 0.0f || md.y != 0.0f) {
                     m_pushPullDistanceRaw += projectDragOntoNormal(
-                        m_pushPullOrigin, m_pushPullNormal, md, proj * view);
+                        m_pushPullOrigin, m_pushPullNormal, md, proj * view,
+                        vpPx, viewDirW);
                     m_pushPullDistance = m_pushPullDistanceRaw;
                     std::snprintf(m_pushPullInputBuf,
                                   sizeof(m_pushPullInputBuf),
