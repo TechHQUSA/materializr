@@ -25,6 +25,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <BRepAdaptor_Surface.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 
 using materializr::ProjectIO;
 using materializr::ProjectHistory;
@@ -58,6 +63,28 @@ int main(int argc, char** argv) {
     if (!ProjectIO::load(argv[1], doc, &hist).success) { std::fprintf(stderr, "load failed\n"); return 1; }
     int id = doc.getAllBodyIds().front();
     TopoDS_Shape body = doc.getBody(id);
+
+    // radii mode: histogram of rounded-face radii — a doubled count of the same
+    // radius exposes a fillet stacked on itself by a bad re-derivation.
+    if (std::strcmp(argv[2], "radii") == 0) {
+        int total = 0, plane = 0, cyl = 0, tor = 0;
+        std::map<int,int> buckets; // radius*10 -> count
+        for (TopExp_Explorer e(body, TopAbs_FACE); e.More(); e.Next(), ++total) {
+            try {
+                BRepAdaptor_Surface s(TopoDS::Face(e.Current()));
+                if (s.GetType() == GeomAbs_Cylinder) { ++cyl; buckets[(int)(s.Cylinder().Radius()*10+0.5)]++; }
+                else if (s.GetType() == GeomAbs_Torus) { ++tor; buckets[(int)(s.Torus().MinorRadius()*10+0.5)]++; }
+                else if (s.GetType() == GeomAbs_Plane) ++plane;
+            } catch (...) {}
+        }
+        GProp_GProps gv; BRepGProp::VolumeProperties(body, gv);
+        Bnd_Box bb; BRepBndLib::Add(body, bb);
+        double x0,y0,z0,x1,y1,z1; bb.Get(x0,y0,z0,x1,y1,z1);
+        double bbvol=(x1-x0)*(y1-y0)*(z1-z0);
+        std::printf("total=%d plane=%d cyl=%d torus=%d  volume=%.0f bbox=%.0f fill=%.1f%%\n", total, plane, cyl, tor, gv.Mass(), bbvol, 100.0*gv.Mass()/bbvol);
+        for (auto& kv : buckets) std::printf("   radius %.1fmm : %d faces\n", kv.first/10.0, kv.second);
+        return 0;
+    }
 
     // scan mode: try EVERY face as the open face at this thickness/join.
     if (std::strcmp(argv[2], "scan") == 0) {

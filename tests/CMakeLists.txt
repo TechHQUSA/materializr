@@ -150,3 +150,15 @@ target_compile_definitions(probe_shell PRIVATE OCC_CONVERT_SIGNALS)
 add_executable(test_shell test_shell.cpp)
 target_link_libraries(test_shell PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_shell COMMAND test_shell)
+
+# probe_rebuild — repro: does fillet re-execution stack a phantom fillet
+add_executable(probe_rebuild probe_rebuild.cpp)
+target_link_libraries(probe_rebuild PRIVATE materializr_core)
+
+# probe_fillet_repair — recover a fillet-corrupted project from its clean params
+add_executable(probe_fillet_repair probe_fillet_repair.cpp)
+target_link_libraries(probe_fillet_repair PRIVATE materializr_core)
+
+# probe_undoredo — repro: phantom fillet via undo/redo cascade
+add_executable(probe_undoredo probe_undoredo.cpp)
+target_link_libraries(probe_undoredo PRIVATE materializr_core)
