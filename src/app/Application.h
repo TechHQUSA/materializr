@@ -202,7 +202,13 @@ private:
     void doCloseProject();      // the actual clear; called from closeProject + save prompt
     // Snapshot the operation history (parameters + per-step body diffs) for the
     // project file, and rebuild a replayable history from a loaded project.
-    ProjectHistory captureProjectHistory();
+    // Cancels live interactive previews first by default: the snapshot seeds
+    // from the CURRENT doc body, so an uncommitted preview (e.g. a shell being
+    // dragged) would otherwise bake into the previous step's snapshot with no
+    // op behind it — a hollow body that reloads un-editable and can't be
+    // re-shelled. The background recovery autosave passes false so it doesn't
+    // yank an active preview out from under the user mid-drag.
+    ProjectHistory captureProjectHistory(bool cancelPreviews = true);
     void rebuildHistoryFromProject(const ProjectHistory& hist,
                                    const std::string& savedByVersion = "");
 

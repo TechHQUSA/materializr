@@ -2865,11 +2865,10 @@ void Application::saveProject() {
 }
 
 void Application::saveProjectQuick() {
-    // Saving mid-preview would persist the preview body and its phantom
-    // history step into the file (and the half-applied state crashed at
-    // least once). An explicit save expresses "keep what's committed" —
-    // cancel live previews first.
-    cancelAllInteractivePreviews();
+    // An explicit save expresses "keep what's committed" — captureProjectHistory
+    // cancels any live preview first, so a mid-preview save can't persist the
+    // preview body and its phantom history step. (Historically that leaked and
+    // crashed at least once.)
     if (m_currentProjectPath.empty()) {
         saveProject();
         return;
@@ -2899,7 +2898,16 @@ void Application::saveProjectQuick() {
     m_closeAfterSave = false;
 }
 
-ProjectHistory Application::captureProjectHistory() {
+ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
+    // A live preview writes the previewed geometry straight into the document
+    // body every frame. Since we seed the snapshot from the current body
+    // (below), an uncommitted preview would leak into the last committed step's
+    // snapshot — the shell-preview-not-cancelled leak that produced a hollow,
+    // un-re-shellable body with no shell op in the history. Cancel first so the
+    // capture reflects only committed operations. (Recovery opts out to avoid
+    // reverting the user's in-progress drag on a background autosave tick.)
+    if (cancelPreviews) cancelAllInteractivePreviews();
+
     ProjectHistory h;
     int n = m_history->currentStep() + 1; // number of applied steps
     if (n <= 0) return h;                  // nothing to persist
@@ -4883,7 +4891,10 @@ void Application::writeProjectRecoveryIfDue() {
     const double kThrottleSec = 5.0;
     if (!newStep && now - m_lastRecoveryWrite < kThrottleSec) return;
 
-    ProjectHistory hist = captureProjectHistory();
+    // Don't cancel a live preview on a background recovery tick — that would
+    // revert the user's in-progress drag. The recovery file may then capture a
+    // preview, which is acceptable for crash recovery (best-effort snapshot).
+    ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
     if (materializr::writeProjectRecovery(*m_document, &hist, m_currentProjectPath,
                                           bodies, curStep + 1)) {
         m_lastRecoveryWrite = now;
