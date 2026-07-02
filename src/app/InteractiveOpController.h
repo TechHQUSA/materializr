@@ -1,7 +1,6 @@
 #pragma once
 #include <functional>
 #include <memory>
-#include <chrono>
 #include <TopoDS_Shape.hxx>
 
 class Document;
@@ -87,25 +86,12 @@ protected:
 
 private:
     void cleanup();
-    // Run update() and record how long it took, so the preview can self-tune
-    // between "live" and "settle-then-preview" (see renderPanel).
-    void timedUpdate(const IopContext& ctx);
 
     bool m_active = false;
     bool m_previewOk = false;
     bool m_commitRequested = false;
     int m_bodyId = -1;
     TopoDS_Shape m_snapshot;
-
-    // Adaptive preview pacing. The op re-runs (a full OCCT recompute) on every
-    // value change; on a heavy body that stutters a drag. Measure the last
-    // recompute: if it was cheap, keep previewing live; if it was expensive,
-    // coalesce rapid changes and only recompute once the value settles. The
-    // signal is free — it's the recompute we already ran. Thresholds are the
-    // only tuning; no cost model.
-    double m_lastUpdateMs = 0.0;
-    bool   m_pendingUpdate = false;
-    std::chrono::steady_clock::time_point m_lastChange;
 };
 
 } // namespace materializr

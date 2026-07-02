@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <future>
-#include <chrono>
 #include <vector>
 #include <functional>
 #include <string>
@@ -947,17 +946,6 @@ private:
     // that case). Begin uses the return value to probe a starting radius
     // for new fillets so a fresh op shows a visible preview right away.
     bool updateInteractiveEdgeOp();
-    // The actual preview recompute (create-mode transient op / edit-mode replay).
-    // updateInteractiveEdgeOp is a debounce wrapper around it; timedEdgeOpUpdate
-    // measures its cost; tickInteractiveEdgeOp (called per frame from the panel)
-    // fires a deferred recompute once the value settles. Same self-tuning pacing
-    // as InteractiveOpController — live when cheap, settle-then-preview when heavy.
-    bool runInteractiveEdgeOpUpdate();
-    bool timedEdgeOpUpdate();
-    void tickInteractiveEdgeOp(bool dragActive);
-    double m_edgeOpLastUpdateMs = 0.0;
-    bool   m_edgeOpPendingUpdate = false;
-    std::chrono::steady_clock::time_point m_edgeOpLastChange;
     void commitInteractiveEdgeOp();
     void cancelInteractiveEdgeOp();
     // Re-resolve every fillet/chamfer op's generated-face mapping against the

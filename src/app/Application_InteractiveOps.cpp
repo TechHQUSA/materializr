@@ -2,7 +2,6 @@
 
 #include <cstdio>
 #include <cmath>
-#include <chrono>
 #include <limits>
 #include <map>
 #include <set>
@@ -211,8 +210,6 @@ void Application::beginInteractiveEdgeOp(EdgeOpType type) {
     else m_edgeOpHasFaceDirs = false;
 
     m_edgeOpEditingIndex = -1; // creating new
-    m_edgeOpLastUpdateMs = 0.0; // fresh op: first preview runs live, not deferred
-    m_edgeOpPendingUpdate = false;
     updateInteractiveEdgeOp();
 }
 
@@ -253,8 +250,6 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
 
     m_edgeOpActive        = true;
     m_edgeOpEditingIndex  = historyIndex;
-    m_edgeOpLastUpdateMs  = 0.0; // fresh edit: first preview runs live
-    m_edgeOpPendingUpdate = false;
     m_edgeOpOrigValue     = m_edgeOpValue; // restored on cancel
     m_edgeOpOrigValue2    = m_edgeOpValue2;
     std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
@@ -333,44 +328,7 @@ void setEdgeOpParam(const Operation* opRaw, bool isFillet, float v, float v2 = -
 }
 } // namespace
 
-// Debounce entry (called by every value-change / drag site). If the last
-// preview recompute was cheap, run it live; if it was heavy — a fillet on a
-// dense body, or an EDIT-mode replay of the whole history — coalesce the drag
-// and recompute only once the value settles (tickInteractiveEdgeOp fires it).
-// Same self-tuning pacing as InteractiveOpController; the cost signal is free.
 bool Application::updateInteractiveEdgeOp() {
-    if (!m_edgeOpActive || m_edgeOpBodyId < 0) return false;
-    m_edgeOpLastChange = std::chrono::steady_clock::now();
-    constexpr double kBudgetMs = 40.0;
-    if (m_edgeOpLastUpdateMs <= kBudgetMs) return timedEdgeOpUpdate();
-    m_edgeOpPendingUpdate = true;   // heavy: defer to the settle tick
-    return true;                    // commit always rebuilds from the live value
-}
-
-bool Application::timedEdgeOpUpdate() {
-    auto t0 = std::chrono::steady_clock::now();
-    bool r = runInteractiveEdgeOpUpdate();
-    m_edgeOpLastUpdateMs = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - t0).count();
-    m_edgeOpPendingUpdate = false;
-    return r;
-}
-
-// Per-frame (called from the edge-op panel render). Fire a deferred heavy
-// recompute when the drag RELEASES (dragActive false), or after a deliberate
-// mid-drag pause — never while the value is actively being dragged. Firing on
-// a short timer instead froze the preview behind the cursor mid-drag; this
-// mirrors push/pull (cheap during the drag, real op on release). The 1s
-// post-input grace keeps frames coming so the release fire lands.
-void Application::tickInteractiveEdgeOp(bool dragActive) {
-    if (!m_edgeOpActive || !m_edgeOpPendingUpdate) return;
-    constexpr double kPauseMs = 350.0; // deliberate mid-drag peek
-    double sinceMs = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - m_edgeOpLastChange).count();
-    if (!dragActive || sinceMs >= kPauseMs) timedEdgeOpUpdate();
-}
-
-bool Application::runInteractiveEdgeOpUpdate() {
     if (!m_edgeOpActive || m_edgeOpBodyId < 0) return false;
 
     if (m_edgeOpEditingIndex >= 0) {

@@ -6010,11 +6010,6 @@ void Application::renderViewport() {
 
     // Interactive fillet/chamfer UI
     if (m_edgeOpActive) {
-        // Fire a deferred fillet/chamfer preview when the drag releases (mouse
-        // up) so a heavy fillet doesn't stall behind the cursor mid-drag. Runs
-        // every frame the panel is up — cheap no-op unless a recompute is
-        // pending. Left mouse held = still dragging the gizmo arrow or slider.
-        tickInteractiveEdgeOp(ImGui::IsMouseDown(ImGuiMouseButton_Left));
         const char* opName = m_edgeOpType == EdgeOpType::Fillet ? "FILLET" : "CHAMFER";
         const char* label = m_edgeOpType == EdgeOpType::Fillet ? "Radius (mm)" : "Distance (mm)";
 
