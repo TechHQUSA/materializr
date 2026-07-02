@@ -681,6 +681,12 @@ void Application::renderViewport() {
                                                       : glm::vec3(0.24f, 0.66f, 0.28f);
                 m_gizmo->renderRingAbout(view, proj, m_moveFacePivot, m_moveFaceAxisB, red0);
                 m_gizmo->renderRingAbout(view, proj, m_moveFacePivot, m_moveFaceAxisA, grn1);
+                // Third ring: about the face NORMAL (lies IN the face plane) —
+                // grabbing it TWISTS the face rather than tilting it. Blue, the
+                // "third axis" colour; brightens when latched (grab 2).
+                glm::vec3 blu2 = m_moveFaceGrab == 2 ? glm::vec3(0.45f, 0.62f, 1.0f)
+                                                     : glm::vec3(0.28f, 0.40f, 0.78f);
+                m_gizmo->renderRingAbout(view, proj, m_moveFacePivot, m_moveFaceN, blu2);
             } else if (m_faceXformKind == FaceXform::Scale) {
                 // Scale: cube handles (the regular scale-gizmo look). Axis A =
                 // red, axis B = green, matched to the non-uniform controls.
@@ -2824,6 +2830,17 @@ void Application::renderViewport() {
                         glm::vec3 d = (ro + rd * tt) - m_moveFacePivot;
                         return std::atan2(glm::dot(d, m_moveFaceN), glm::dot(d, u));
                     };
+                    // Twist ring lies IN the face plane (about the normal): the
+                    // cursor's angle is measured in the (axisA, axisB) basis of
+                    // the point where the ray meets the face plane.
+                    auto twistCursorAngle = [&]() -> float {
+                        float dn = glm::dot(rd, m_moveFaceN);
+                        if (std::abs(dn) < 1e-5f) return m_moveFaceTwistStart;
+                        float tt = glm::dot(m_moveFacePivot - ro, m_moveFaceN) / dn;
+                        glm::vec3 d = (ro + rd * tt) - m_moveFacePivot;
+                        return std::atan2(glm::dot(d, m_moveFaceAxisB),
+                                          glm::dot(d, m_moveFaceAxisA));
+                    };
                     if (!m_moveFaceDragging) {
                         if (m_faceXformKind == FaceXform::Rotate) {
                             // Ring-aware latch: sample each ring's actual circle
@@ -2844,10 +2861,14 @@ void Application::renderViewport() {
                                 }
                                 return best;
                             };
-                            // grab 0 = ring about axis B (plane A,N); 1 = about A.
+                            // grab 0 = ring about axis B (plane A,N); 1 = about A;
+                            // 2 = ring about the NORMAL (plane A,B) = the twist.
                             float dRingB = ringDist(m_moveFaceAxisA, m_moveFaceN);
                             float dRingA = ringDist(m_moveFaceAxisB, m_moveFaceN);
-                            m_moveFaceGrab = (dRingB <= dRingA) ? 0 : 1;
+                            float dRingN = ringDist(m_moveFaceAxisA, m_moveFaceAxisB);
+                            m_moveFaceGrab = 0; float bestRing = dRingB;
+                            if (dRingA < bestRing) { bestRing = dRingA; m_moveFaceGrab = 1; }
+                            if (dRingN < bestRing) { bestRing = dRingN; m_moveFaceGrab = 2; }
                         } else {
                             // Latch the arrow/cube whose shaft is nearest the cursor.
                             float armLen = 0.25f * glm::length(
@@ -2868,15 +2889,24 @@ void Application::renderViewport() {
                         m_moveFaceScaleABase = m_moveFaceScaleA;
                         m_moveFaceScaleBBase = m_moveFaceScaleB;
                         if (m_faceXformKind == FaceXform::Rotate) {
-                            // Latch the rotation axis + the cursor's starting
-                            // angle around the ring; the tilt tracks the sweep.
-                            m_moveFaceRotAxis = (m_moveFaceGrab == 0) ? m_moveFaceAxisB
-                                                                      : m_moveFaceAxisA;
-                            // u chosen so rotAxis × u = +N for BOTH rings (else
-                            // the red ring's sweep reads inverted vs the green).
-                            glm::vec3 u = (m_moveFaceGrab == 0) ? -m_moveFaceAxisA
-                                                               : m_moveFaceAxisB;
-                            m_moveFaceRotStartAngle = ringCursorAngle(m_moveFaceRotAxis, u);
+                            if (m_moveFaceGrab == 2) {
+                                // Twist ring: latch the cursor's angle in the
+                                // face plane; the twist tracks the sweep.
+                                m_moveFaceIsTwist = true;
+                                m_moveFaceTwistBase = m_moveFaceTwist;
+                                m_moveFaceTwistStart = twistCursorAngle();
+                            } else {
+                                m_moveFaceIsTwist = false;
+                                // Latch the tilt axis + the cursor's starting
+                                // angle around the ring; the tilt tracks the sweep.
+                                m_moveFaceRotAxis = (m_moveFaceGrab == 0) ? m_moveFaceAxisB
+                                                                          : m_moveFaceAxisA;
+                                // u chosen so rotAxis × u = +N for BOTH rings (else
+                                // the red ring's sweep reads inverted vs the green).
+                                glm::vec3 u = (m_moveFaceGrab == 0) ? -m_moveFaceAxisA
+                                                                   : m_moveFaceAxisB;
+                                m_moveFaceRotStartAngle = ringCursorAngle(m_moveFaceRotAxis, u);
+                            }
                         }
                         m_moveFaceDragging = true;
                     }
@@ -2887,6 +2917,18 @@ void Application::renderViewport() {
                         if (m_snapToGrid && m_sketchGridStep > 0.0f)
                             along = std::round(along / m_sketchGridStep) * m_sketchGridStep;
                         m_moveFaceVec = m_moveFaceBase + axis * along;
+                    } else if (m_faceXformKind == FaceXform::Rotate && m_moveFaceIsTwist) {
+                        // Twist: sweep the cursor around the normal ring (in the
+                        // face plane). The change in its angle since drag-start
+                        // IS the twist about the normal.
+                        float cur = twistCursorAngle();
+                        float delta = cur - m_moveFaceTwistStart;
+                        delta = std::atan2(std::sin(delta), std::cos(delta)); // wrap ±π
+                        m_moveFaceTwist = m_moveFaceTwistBase + delta;
+                        if (m_moveFaceRotSnap) {
+                            float step = 1.0f / 57.2957795f;
+                            m_moveFaceTwist = std::round(m_moveFaceTwist / step) * step;
+                        }
                     } else if (m_faceXformKind == FaceXform::Rotate) {
                         // Sweep the cursor AROUND the ring: the tilt = the change
                         // in the cursor's angle in the ring plane since the drag
@@ -2960,6 +3002,16 @@ void Application::renderViewport() {
                         return m_moveFacePivot + m_moveFaceAxisA * (dA * m_moveFaceScaleA)
                                                + m_moveFaceAxisB * (dB * m_moveFaceScaleB)
                                                + m_moveFaceN * dN;
+                    }
+                    if (m_moveFaceIsTwist) {
+                        // Twist: spin the top loop about the face normal through
+                        // the pivot (Rodrigues) — shows the final top orientation.
+                        glm::vec3 d = p - m_moveFacePivot;
+                        float c = std::cos(m_moveFaceTwist), s = std::sin(m_moveFaceTwist);
+                        const glm::vec3& k = m_moveFaceN;
+                        glm::vec3 r = d * c + glm::cross(k, d) * s +
+                                      k * glm::dot(k, d) * (1.0f - c);
+                        return m_moveFacePivot + r;
                     }
                     // Composed tilt (live ring ∘ accumulated tilts) about pivot.
                     return m_moveFacePivot + faceRotTotal() * (p - m_moveFacePivot);
@@ -6323,7 +6375,7 @@ void Application::renderViewport() {
         ImGui::Text(materializr::touchMode()
                         ? "%s - drag a handle, then Confirm / Cancel."
                         : "%s - drag a handle. Enter to confirm, Escape to cancel.",
-                    isRot ? "TILT FACE (about its centre)"
+                    isRot ? "TILT / TWIST FACE (rings about its centre)"
                           : isScl ? "SCALE FACE (about its centre)"
                                   : "MOVE FACE (slide in plane)");
         ImGui::PopStyleColor();
@@ -6350,8 +6402,26 @@ void Application::renderViewport() {
             if (ch) {
                 if (m_moveFaceRotSnap) deg = std::round(deg);
                 m_moveFaceAngle = deg / 57.2957795f;
+                m_moveFaceIsTwist = false; // editing tilt switches the gesture to tilt
                 if (glm::length(m_moveFaceRotAxis) < 0.5f)
                     m_moveFaceRotAxis = m_moveFaceAxisB;
+                updateMoveFace();
+            }
+            // Twist = the third (blue) ring, about the face normal. Editable
+            // here too so an exact angle can be dialled without dragging.
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.55f, 0.68f, 1.0f, 1.0f), "Twist (deg)");
+            ImGui::Separator();
+            float twdeg = m_moveFaceTwist * 57.2957795f;
+            bool twch = false;
+            ImGui::SetNextItemWidth(150);
+            if (ImGui::SliderFloat("##twist", &twdeg, -180.0f, 180.0f, "%.1f")) twch = true;
+            ImGui::SetNextItemWidth(90);
+            if (ImGui::InputFloat("deg##tw", &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
+            if (twch) {
+                if (m_moveFaceRotSnap) twdeg = std::round(twdeg);
+                m_moveFaceTwist = twdeg / 57.2957795f;
+                m_moveFaceIsTwist = true; // editing twist switches the gesture to twist
                 updateMoveFace();
             }
         } else if (isScl) {

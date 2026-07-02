@@ -345,6 +345,15 @@ private:
     bool m_moveFaceRotHasAccum = false;
     float m_moveFaceHalfExtent = 1.0f; // face size, maps drag distance → angle/scale
     bool  m_moveFaceRotSnap = true;    // snap tilt to whole degrees (default on)
+    // TWIST = the THIRD rotation ring, about the face NORMAL (lies in the face
+    // plane). Lives under FaceXform::Rotate: grabbing this ring (grab 2) spins
+    // the face relative to its base and commits a MoveFaceOp::Kind::Twist —
+    // distinct from the two tilt rings. Mutually exclusive with a tilt within a
+    // session (m_moveFaceIsTwist picks which op the gesture builds).
+    float m_moveFaceTwist = 0.0f;      // accumulated twist (radians) about the normal
+    float m_moveFaceTwistBase = 0.0f;  // twist banked before the current drag
+    float m_moveFaceTwistStart = 0.0f; // cursor angle in the face plane at drag start
+    bool  m_moveFaceIsTwist = false;   // this Rotate gesture is a twist, not a tilt
     // DEFERRED REBUILD: the body rebuild is deferred to mouse-release, so the
     // drag only moves ghost SILHOUETTES of the face's loops. Loop 0 = outer
     // outline, 1..N = hole loops (same order as the op enumerates them). Each is

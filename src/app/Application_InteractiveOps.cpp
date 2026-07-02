@@ -1736,6 +1736,8 @@ void Application::beginMoveFace(FaceXform kind) {
     m_moveFaceAngle = m_moveFaceAngleBase = 0.0f;
     m_moveFaceRotAccum = glm::mat3(1.0f);
     m_moveFaceRotHasAccum = false;
+    m_moveFaceTwist = m_moveFaceTwistBase = 0.0f;
+    m_moveFaceIsTwist = false;
     m_moveFaceScale = m_moveFaceScaleBase = 1.0f;
     m_moveFaceScaleA = m_moveFaceScaleABase = 1.0f;
     m_moveFaceScaleB = m_moveFaceScaleBBase = 1.0f;
@@ -2027,6 +2029,8 @@ glm::mat3 Application::faceRotTotal() const {
 // Bake the just-released ring drag into the accumulated tilt (so the next ring
 // drag stacks on top), then reset the live angle.
 void Application::bakeFaceRotationDrag() {
+    // Twist isn't a tilt-matrix accumulation — nothing to bake for it.
+    if (m_moveFaceIsTwist) return;
     if (m_faceXformKind != FaceXform::Rotate || std::abs(m_moveFaceAngle) < 1e-5f)
         return;
     m_moveFaceRotAccum = rodrigues(m_moveFaceRotAxis, m_moveFaceAngle) * m_moveFaceRotAccum;
@@ -2043,6 +2047,11 @@ void Application::configureFaceOp(MoveFaceOp& op) const {
             op.setMoveVector(gp_Vec(m_moveFaceVec.x, m_moveFaceVec.y, m_moveFaceVec.z));
             break;
         case FaceXform::Rotate: {
+            if (m_moveFaceIsTwist) { // third ring = twist about the normal
+                op.setKind(MoveFaceOp::Kind::Twist);
+                op.setTwist(m_moveFaceTwist);
+                break;
+            }
             op.setKind(MoveFaceOp::Kind::Rotate);
             // Composed rotation (live drag ∘ accumulated tilts) as a gp_Trsf
             // about the pivot, so stacked tilts about both axes apply at once.
@@ -2073,8 +2082,10 @@ void Application::configureFaceOp(MoveFaceOp& op) const {
 bool Application::faceXformNontrivial() const {
     switch (m_faceXformKind) {
         case FaceXform::Translate: return glm::length(m_moveFaceVec) > 1e-4f;
-        case FaceXform::Rotate:    return std::abs(m_moveFaceAngle) > 1e-4f ||
-                                          m_moveFaceRotHasAccum;
+        case FaceXform::Rotate:
+            return m_moveFaceIsTwist
+                ? std::abs(m_moveFaceTwist) > 1e-4f
+                : (std::abs(m_moveFaceAngle) > 1e-4f || m_moveFaceRotHasAccum);
         case FaceXform::Scale:
             return m_moveFaceScaleUniform
                 ? std::abs(m_moveFaceScale - 1.0f) > 1e-4f
@@ -2168,7 +2179,8 @@ void Application::commitMoveFace() {
         committed = m_history->pushOperation(std::move(op), *m_document);
         if (committed)
             std::fprintf(stdout, "Face %s committed\n",
-                         m_faceXformKind == FaceXform::Rotate ? "tilt"
+                         (m_faceXformKind == FaceXform::Rotate && m_moveFaceIsTwist) ? "twist"
+                         : m_faceXformKind == FaceXform::Rotate ? "tilt"
                          : m_faceXformKind == FaceXform::Scale ? "scale" : "move");
     }
 
