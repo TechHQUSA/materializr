@@ -17,6 +17,7 @@
 #include "app/Application.h"
 #include "app/Window.h"
 #include "core/Verbose.h"
+#include "core/NumParse.h"
 #include "viewport/Viewport.h"
 #include "viewport/Grid.h"
 #include "viewport/ShapeRenderer.h"
@@ -1040,8 +1041,14 @@ void Application::renderScalePanel() {
                         // then route to WORLD axes via userToWorld. Pivot at
                         // bbox-MIN so the body grows along +axis only.
                         double targetUser[3];
-                        for (int i = 0; i < 3; ++i)
-                            targetUser[i] = std::atof(m_scaleMmEdit[i].buf);
+                        for (int i = 0; i < 3; ++i) {
+                            // parseFinite: "1e999" → inf passed the > 0 guards
+                            // below and exploded the body; garbage input now
+                            // means "no scale on this axis" (ratio stays 1).
+                            targetUser[i] = 0.0;
+                            (void)materializr::parseFinite(m_scaleMmEdit[i].buf,
+                                                           targetUser[i]);
+                        }
                         // Uniform mode: derive ratio from whichever axis the
                         // user most recently changed (focused), or from X by
                         // default. Mirror that ratio to the other axes.

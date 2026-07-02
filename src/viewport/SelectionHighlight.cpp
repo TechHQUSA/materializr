@@ -193,21 +193,23 @@ void SelectionHighlight::render(const SelectionManager& sel, const Document& doc
     }
 }
 
+void SelectionHighlight::clearCaches() {
+    m_bodyCache.clear();
+    m_faceCache.clear();
+    m_edgeCache.clear();
+}
+
 void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::mat4& vp,
                                      const glm::vec3& color) {
     // Just a blue tint over the face — no outline, no solid
     TopoDS_Face face = TopoDS::Face(faceShape);
 
-    // Cache the triangulated vertex buffer per face. Without this we walk
-    // every triangle and build the float vector on every frame the face is
-    // selected — 5-50ms per frame on a big NURBS face. Key on the face's
-    // TShape pointer, which is invalidated when the parent body's topology
-    // is rebuilt (any modeling op that changes faces), so the cache stays
-    // valid through translates and rotates (location-only changes) but
-    // refreshes the moment the surface itself changes.
+    // Cache the triangulated vertex buffer per face — walking every triangle
+    // per frame was 5-50ms on a big NURBS face. See the CacheEntry comment in
+    // the header for the key/ownership/revalidation/cap scheme.
     const void* key = faceShape.TShape().get();
     auto it = m_faceCache.find(key);
-    if (it == m_faceCache.end()) {
+    if (it == m_faceCache.end() || !(it->second.loc == faceShape.Location())) {
         TopLoc_Location location;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, location);
         if (tri.IsNull()) {
@@ -220,8 +222,14 @@ void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::ma
         const gp_Trsf& trsf = location.Transformation();
         bool hasXform = !location.IsIdentity();
 
-        std::vector<float>& verts = m_faceCache[key];
-        verts.reserve(tri->NbTriangles() * 9);
+        if (it == m_faceCache.end() && m_faceCache.size() >= kCacheCap)
+            m_faceCache.clear(); // flush orphans; live entries rebuild next frame
+        CacheEntry& entry = m_faceCache[key];
+        entry.shape = faceShape;
+        entry.loc = faceShape.Location();
+        entry.verts.clear();
+        entry.verts.reserve(tri->NbTriangles() * 9);
+        std::vector<float>& verts = entry.verts;
         for (int i = 1; i <= tri->NbTriangles(); i++) {
             int n1, n2, n3;
             tri->Triangle(i).Get(n1, n2, n3);
@@ -234,7 +242,7 @@ void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::ma
         it = m_faceCache.find(key);
     }
     if (it == m_faceCache.end()) return;
-    const std::vector<float>& verts = it->second;
+    const std::vector<float>& verts = it->second.verts;
     if (verts.empty()) return;
 
     glUseProgram(m_program);
@@ -265,19 +273,25 @@ void SelectionHighlight::renderEdge(const TopoDS_Shape& edgeShape, const glm::ma
                                      const glm::vec3& color) {
     try {
         // Same caching scheme as renderBody/renderFace: the GCPnts curve
-        // discretization is the per-frame cost we want to skip, so cache
-        // the resulting line-segment vertex buffer by edge TShape pointer.
+        // discretization is the per-frame cost we want to skip. See the
+        // CacheEntry comment in the header for the key/ownership/cap scheme.
         const void* key = edgeShape.TShape().get();
         auto it = m_edgeCache.find(key);
-        if (it == m_edgeCache.end()) {
+        if (it == m_edgeCache.end() || !(it->second.loc == edgeShape.Location())) {
             TopoDS_Edge edge = TopoDS::Edge(edgeShape);
             BRepAdaptor_Curve curve(edge);
             GCPnts_TangentialDeflection discretizer(curve, 0.05, 0.05);
             int nPts = discretizer.NbPoints();
             if (nPts < 2) return;
 
-            std::vector<float>& verts = m_edgeCache[key];
-            verts.reserve((nPts - 1) * 6);
+            if (it == m_edgeCache.end() && m_edgeCache.size() >= kCacheCap)
+                m_edgeCache.clear();
+            CacheEntry& entry = m_edgeCache[key];
+            entry.shape = edgeShape;
+            entry.loc = edgeShape.Location();
+            entry.verts.clear();
+            entry.verts.reserve((nPts - 1) * 6);
+            std::vector<float>& verts = entry.verts;
             for (int i = 1; i < nPts; i++) {
                 gp_Pnt p1 = discretizer.Value(i);
                 gp_Pnt p2 = discretizer.Value(i + 1);
@@ -286,28 +300,26 @@ void SelectionHighlight::renderEdge(const TopoDS_Shape& edgeShape, const glm::ma
             }
             it = m_edgeCache.find(key);
         }
-        if (it == m_edgeCache.end() || it->second.empty()) return;
+        if (it == m_edgeCache.end() || it->second.verts.empty()) return;
 
-        drawThickLines(it->second, vp, color, m_edgeLineWidth * 0.5f);
+        drawThickLines(it->second.verts, vp, color, m_edgeLineWidth * 0.5f);
     } catch (...) {}
 }
 
 void SelectionHighlight::renderBody(const TopoDS_Shape& bodyShape, const glm::mat4& vp,
                                      const glm::vec3& color) {
-    // Cache key = the body's TShape pointer, PLUS the location the verts
-    // were sampled at. The verts are baked in world coords, and a
-    // location-only transform (multi-body gizmo move commit) keeps the
-    // TShape while moving the body — with a TShape-only key the cache
-    // "hit" kept drawing the outline at the pre-move position until the
-    // selection changed. Comparing the stored location catches that and
-    // re-samples once at the new pose; topology rebuilds (push/pull,
-    // fillet, single-body transform via copy=true) still miss on the
-    // TShape pointer as before. Stored per-body so multiple selected
-    // bodies each keep their own cached verts.
+    // Cache key = the body's TShape pointer, revalidated on the shape's
+    // location (the verts are world coords; a multi-body gizmo move commit
+    // keeps the TShape but moves the body). See the CacheEntry comment in
+    // the header for the full ownership/cap scheme. Stored per-body so
+    // multiple selected bodies each keep their own cached verts.
     const void* key = bodyShape.TShape().get();
     auto it = m_bodyCache.find(key);
     if (it == m_bodyCache.end() || !(it->second.loc == bodyShape.Location())) {
-        BodyOutlineCache& entry = m_bodyCache[key];
+        if (it == m_bodyCache.end() && m_bodyCache.size() >= kCacheCap)
+            m_bodyCache.clear();
+        CacheEntry& entry = m_bodyCache[key];
+        entry.shape = bodyShape;
         entry.loc = bodyShape.Location();
         entry.verts.clear();
         for (TopExp_Explorer exp(bodyShape, TopAbs_EDGE); exp.More(); exp.Next()) {

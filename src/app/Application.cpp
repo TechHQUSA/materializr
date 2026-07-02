@@ -3257,6 +3257,10 @@ bool Application::loadProjectAt(const std::string& path) {
     m_document->clear();
     m_history->clear();
     m_selection->clear();
+    // Every cached highlight tessellation belongs to the outgoing project's
+    // shapes — drop them (the entries pin their TShapes alive; see
+    // SelectionHighlight::clearCaches).
+    if (m_selectionHighlight) m_selectionHighlight->clearCaches();
     ProjectHistory hist;
     auto result = ProjectIO::load(path, *m_document, &hist);
     if (!result.success) {

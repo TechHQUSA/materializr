@@ -2,6 +2,7 @@
 #include "UserAxes.h"
 #include "../core/Document.h"
 #include "../core/SelectionManager.h"
+#include "../core/NumParse.h"
 #include "../modeling/ShellOp.h"
 #include "../modeling/TaperOp.h"
 #include "../modeling/ScaleFaceOp.h"
@@ -62,14 +63,17 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         m_inputFocus = false;
     }
     ImGui::SetNextItemWidth(140);
+    // parseFinite: non-finite input keeps the previous thickness rather
+    // than feeding inf into MakeThickSolid.
     if (ImGui::InputText("##shellThickness", m_inputBuf, sizeof(m_inputBuf),
                          ImGuiInputTextFlags_EnterReturnsTrue |
                          ImGuiInputTextFlags_CharsDecimal)) {
-        m_thickness = static_cast<float>(std::atof(m_inputBuf));
+        (void)materializr::parseFinite(m_inputBuf, m_thickness);
         requestCommit();
     } else {
-        float parsed = static_cast<float>(std::atof(m_inputBuf));
-        if (std::abs(parsed - m_thickness) > 0.001f) {
+        float parsed = m_thickness;
+        if (materializr::parseFinite(m_inputBuf, parsed) &&
+            std::abs(parsed - m_thickness) > 0.001f) {
             m_thickness = parsed;
             changed = true;
         }

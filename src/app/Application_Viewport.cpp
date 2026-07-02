@@ -36,6 +36,7 @@
 #include "core/History.h"
 #include "core/SelectionManager.h"
 #include "core/Verbose.h"
+#include "core/NumParse.h"
 #include "ui/Toolbar.h"
 #include "ui/HistoryPanel.h"
 #include "ui/ItemsPanel.h"
@@ -2182,7 +2183,11 @@ void Application::renderViewport() {
                                              ImGuiInputTextFlags_EnterReturnsTrue |
                                              ImGuiInputTextFlags_CharsDecimal |
                                              ImGuiInputTextFlags_AutoSelectAll)) {
-                            double v = std::atof(m_dimEditingBuf);
+                            // parseFinite: CharsDecimal blocks "nan" but not
+                            // "1e999" → inf, which passed the v > 0 guards
+                            // below into the constraint solver.
+                            double v = 0.0;
+                            (void)materializr::parseFinite(m_dimEditingBuf, v);
                             // recordSketchMutation snapshots before/after and
                             // pushes a SketchEditOp so the dimension edit is
                             // Ctrl-Z-able and visible in the History panel.
