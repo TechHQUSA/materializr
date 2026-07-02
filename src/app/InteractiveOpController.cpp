@@ -20,8 +20,17 @@ bool InteractiveOpController::begin(const IopContext& ctx) {
     m_bodyId = body;
     m_active = true;
     m_commitRequested = false;
-    update(ctx);
+    m_pendingUpdate = false;
+    m_lastUpdateMs = 0.0;
+    timedUpdate(ctx); // seeds m_lastUpdateMs so the first change knows the cost
     return true;
+}
+
+void InteractiveOpController::timedUpdate(const IopContext& ctx) {
+    auto t0 = std::chrono::steady_clock::now();
+    update(ctx);
+    m_lastUpdateMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0).count();
 }
 
 void InteractiveOpController::update(const IopContext& ctx) {
@@ -101,6 +110,8 @@ void InteractiveOpController::cleanup() {
     m_active = false;
     m_commitRequested = false;
     m_previewOk = false;
+    m_pendingUpdate = false;
+    m_lastUpdateMs = 0.0;
     m_bodyId = -1;
     m_snapshot.Nullify();
     onCleanup();
@@ -128,7 +139,24 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
 
     bool changed = false;
     panelBody(ctx, changed);
-    if (changed) update(ctx);
+    // Adaptive pacing (see header): if the last recompute was cheap, preview
+    // live on every change; if it was expensive, coalesce the drag and only
+    // recompute once the value has been still for a short settle window. The
+    // 1s post-input grace (hasActiveWork) keeps frames coming, so the deferred
+    // recompute reliably fires. Commit always rebuilds from the current value,
+    // so a still-pending preview never commits stale geometry.
+    constexpr double kBudgetMs = 40.0;   // >~40ms preview ⇒ too heavy to run live
+    constexpr double kSettleMs = 120.0;  // quiet time before a deferred recompute
+    auto now = std::chrono::steady_clock::now();
+    if (changed) {
+        m_lastChange = now;
+        if (m_lastUpdateMs <= kBudgetMs) timedUpdate(ctx);
+        else m_pendingUpdate = true;
+    } else if (m_pendingUpdate) {
+        double sinceMs = std::chrono::duration<double, std::milli>(
+            now - m_lastChange).count();
+        if (sinceMs >= kSettleMs) { m_pendingUpdate = false; timedUpdate(ctx); }
+    }
 
     ImGui::Spacing();
     bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
