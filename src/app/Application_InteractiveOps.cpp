@@ -356,15 +356,18 @@ bool Application::timedEdgeOpUpdate() {
     return r;
 }
 
-// Per-frame (called from the edge-op panel render): fire a deferred recompute
-// once the value has been still for the settle window. The 1s post-input grace
-// keeps frames coming, so this lands even after the drag stops.
-void Application::tickInteractiveEdgeOp() {
+// Per-frame (called from the edge-op panel render). Fire a deferred heavy
+// recompute when the drag RELEASES (dragActive false), or after a deliberate
+// mid-drag pause — never while the value is actively being dragged. Firing on
+// a short timer instead froze the preview behind the cursor mid-drag; this
+// mirrors push/pull (cheap during the drag, real op on release). The 1s
+// post-input grace keeps frames coming so the release fire lands.
+void Application::tickInteractiveEdgeOp(bool dragActive) {
     if (!m_edgeOpActive || !m_edgeOpPendingUpdate) return;
-    constexpr double kSettleMs = 120.0;
+    constexpr double kPauseMs = 350.0; // deliberate mid-drag peek
     double sinceMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - m_edgeOpLastChange).count();
-    if (sinceMs >= kSettleMs) timedEdgeOpUpdate();
+    if (!dragActive || sinceMs >= kPauseMs) timedEdgeOpUpdate();
 }
 
 bool Application::runInteractiveEdgeOpUpdate() {

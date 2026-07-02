@@ -140,22 +140,24 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
     bool changed = false;
     panelBody(ctx, changed);
     // Adaptive pacing (see header): if the last recompute was cheap, preview
-    // live on every change; if it was expensive, coalesce the drag and only
-    // recompute once the value has been still for a short settle window. The
-    // 1s post-input grace (hasActiveWork) keeps frames coming, so the deferred
-    // recompute reliably fires. Commit always rebuilds from the current value,
-    // so a still-pending preview never commits stale geometry.
+    // live on every change; if it was expensive, DON'T recompute mid-drag —
+    // resolve it when the drag releases (mouse up) or after a deliberate pause,
+    // so the slider tracks the cursor with no lag. (Firing on a short timer
+    // instead froze the preview behind the drag.) Mirrors push/pull: cheap
+    // during the drag, real op on release. Commit always rebuilds from the
+    // current value, so a still-pending preview never commits stale geometry.
     constexpr double kBudgetMs = 40.0;   // >~40ms preview ⇒ too heavy to run live
-    constexpr double kSettleMs = 120.0;  // quiet time before a deferred recompute
+    constexpr double kPauseMs  = 350.0;  // deliberate mid-drag peek
     auto now = std::chrono::steady_clock::now();
     if (changed) {
         m_lastChange = now;
         if (m_lastUpdateMs <= kBudgetMs) timedUpdate(ctx);
         else m_pendingUpdate = true;
     } else if (m_pendingUpdate) {
+        bool dragging = ImGui::IsMouseDown(ImGuiMouseButton_Left);
         double sinceMs = std::chrono::duration<double, std::milli>(
             now - m_lastChange).count();
-        if (sinceMs >= kSettleMs) { m_pendingUpdate = false; timedUpdate(ctx); }
+        if (!dragging || sinceMs >= kPauseMs) { m_pendingUpdate = false; timedUpdate(ctx); }
     }
 
     ImGui::Spacing();

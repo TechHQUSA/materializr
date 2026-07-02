@@ -954,7 +954,7 @@ private:
     // as InteractiveOpController — live when cheap, settle-then-preview when heavy.
     bool runInteractiveEdgeOpUpdate();
     bool timedEdgeOpUpdate();
-    void tickInteractiveEdgeOp();
+    void tickInteractiveEdgeOp(bool dragActive);
     double m_edgeOpLastUpdateMs = 0.0;
     bool   m_edgeOpPendingUpdate = false;
     std::chrono::steady_clock::time_point m_edgeOpLastChange;
