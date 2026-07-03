@@ -34,6 +34,15 @@ int segmented(const char* id, const char* const items[], int count, int active);
 // Small-caps grey group header ("BODIES") with breathing room above.
 void sectionHeader(const char* text);
 
+// Fusion-style history timeline box (im-touch-lite bottom strip): a rounded
+// square holding the step's op icon. `current` fills it with the accent (the
+// history marker sits on this step); `editing` outlines it (its properties
+// popup is open); `dim` greys the icon (undone / disabled steps); `iconCol`
+// overrides the icon colour when non-zero (frozen amber, failed red).
+// Returns true on press.
+bool timelineBox(const char* id, const char* icon, bool current, bool editing,
+                 bool dim, ImU32 iconCol = 0, float side = 0.0f);
+
 // 44pt list row: leading visibility checkbox, label, trailing ⋯ button.
 // Returns which part was pressed this frame.
 struct ListRowAction {

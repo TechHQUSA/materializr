@@ -31,6 +31,10 @@ struct AppSettings {
     // Construction) floating on the right edge. Toggled by the list button
     // in the lite top-right cluster.
     bool imTouchLiteTree    = true;
+    // Lite shell only: the Fusion-style history timeline (one box per history
+    // step) floating along the bottom edge. Toggled by the clock button in
+    // the lite top-right cluster.
+    bool imTouchLiteTimeline = true;
     int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History & Properties
     // Shell right-panel width in logical px (× uiScale at use) — written by
     // the panel's left-edge drag splitter.

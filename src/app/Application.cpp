@@ -1575,6 +1575,7 @@ AppSettings Application::currentSettings() const {
     s.imTouchUi = m_imTouchUi;
     s.imTouchLite = m_imTouchLite;
     s.imTouchLiteTree = m_imTouchLiteTree;
+    s.imTouchLiteTimeline = m_imTouchLiteTimeline;
     s.touchRightTab = m_touchRightTab;
     s.touchRightW = m_touchRightW;
     s.orbitButton = m_orbitButton;
@@ -1641,6 +1642,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_imTouchUi = s.imTouchUi;   // tablet shell — live, no restart needed
     m_imTouchLite = s.imTouchLite;
     m_imTouchLiteTree = s.imTouchLiteTree;
+    m_imTouchLiteTimeline = s.imTouchLiteTimeline;
     m_touchRightTab = (s.touchRightTab == 1) ? 1 : 0;
     m_touchRightW = s.touchRightW;
     if (m_touchRightW < 200.0f) m_touchRightW = 200.0f;

@@ -58,6 +58,8 @@
 #define MZ_ICON_LATHE      ICON_IC_ROTATE_CAMERA_RIGHT
 #define MZ_ICON_SUBTRACT   ICON_IC_MINUS
 #define MZ_ICON_LOOK       ICON_IC_EYE
+#define MZ_ICON_COPY       ICON_IC_COPY
+#define MZ_ICON_PATTERN    ICON_IC_DOTS_GRID_3X3
 // Rail "Primitive" group — sentinel (PUA U+E001): no Iconoir glyph reads as
 // "basic solids", so drawIconCentered (TouchWidgets.cpp) draws a square
 // overlapping a circle (Steve's CAD-sketch reference: square top-left, larger

@@ -720,6 +720,12 @@ private:
     bool m_imTouchLite = false;
     // Lite-only: the transparent model tree on the right edge.
     bool m_imTouchLiteTree = true;
+    // Lite-only: the Fusion-style history timeline along the bottom edge.
+    bool m_imTouchLiteTimeline = true;
+    // Lite timeline: step whose properties popup is open (-1 = none).
+    // Mirrored into m_historyPanel's editing step so the viewport's orange
+    // edited-element highlight follows. Session-local.
+    int m_liteHistoryEdit = -1;
     // Center rect the touch shell leaves for the viewport window this frame
     // (screen coords, points). Written by renderTouchShell(), read by
     // renderViewport() to pin the undocked "Viewport" window.

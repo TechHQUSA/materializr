@@ -16,7 +16,10 @@
 #include "app/Window.h"
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/Operation.h"
 #include "core/SelectionManager.h"
+#include "modeling/SketchEditOp.h"      // lite timeline: Apply cascade targets
+#include "modeling/SketchTransformOp.h"
 #include "modeling/SketchTool.h"   // SketchToolMode for the select-mode gate
 #include "plugin/PluginContext.h"
 #include "ui/HistoryPanel.h"
@@ -62,6 +65,39 @@ ImTextureID logoTexture() {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
     return (ImTextureID)(intptr_t)tex;
+}
+
+// Icon for a history step's box in the lite timeline, by op typeId. Reloaded
+// steps (ReplayOp) report the ORIGINAL op's typeId, so they map the same.
+const char* liteStepIcon(const std::string& t) {
+    if (t == "extrude")                    return MZ_ICON_EXTRUDE;
+    if (t == "pushpull" || t == "moveface" || t == "move_hole")
+                                           return MZ_ICON_PUSHPULL;
+    if (t == "revolve")                    return MZ_ICON_LATHE;
+    if (t == "loft" || t == "sweep")       return MZ_ICON_SPLINE;
+    if (t == "fillet")                     return MZ_ICON_FILLET;
+    if (t == "chamfer")                    return MZ_ICON_CHAMFER;
+    if (t == "shell")                      return MZ_ICON_SHELL;
+    if (t == "boolean")                    return MZ_ICON_SUBTRACT;
+    if (t == "split_body")                 return MZ_ICON_TRIM;
+    if (t == "delete")                     return MZ_ICON_DELETE;
+    if (t == "defeature")                  return MZ_ICON_REPAIR;
+    if (t == "mirror")                     return MZ_ICON_MIRROR;
+    if (t == "pattern")                    return MZ_ICON_PATTERN;
+    if (t == "copy" || t == "duplicate_sketch")
+                                           return MZ_ICON_COPY;
+    if (t == "scale_face" || t == "resize_cylindrical" || t == "taper")
+                                           return MZ_ICON_SCALE;
+    if (t == "primitive")                  return MZ_ICON_PRIMITIVE;
+    if (t == "thread")                     return MZ_ICON_ROTATE;
+    if (t == "construction_plane" || t == "construction_axis")
+                                           return MZ_ICON_AXES;
+    if (t == "sketchedit" || t == "combine_sketches" || t == "project_sketch")
+                                           return MZ_ICON_SKETCH;
+    if (t == "transform" || t == "axis_transform" || t == "plane_transform" ||
+        t == "sketchtransform" || t == "align")
+                                           return MZ_ICON_MOVE;
+    return MZ_ICON_EDIT;
 }
 
 } // namespace
@@ -515,8 +551,9 @@ void Application::renderTouchShell() {
 
 // im-touch-lite: near-zero chrome. The viewport fills the whole work rect;
 // everything else floats over it — project/selection chip (top-left), undo +
-// keyboard + menu (top-right), the contextual tool catalogue as a centered
-// bottom bar, a "+" create FAB (bottom-right), and an fps readout.
+// keyboard + menu (top-right), the contextual tool catalogue on the left
+// edge, the Fusion-style history timeline (bottom-center), a "+" create FAB
+// (bottom-right), and an fps readout.
 void Application::renderTouchShellLite() {
     touchui::Scope style;
 
@@ -631,6 +668,12 @@ void Application::renderTouchShellLite() {
             m_imTouchLiteTree = !m_imTouchLiteTree;
             saveAppSettings();
         }
+        // History-timeline toggle (the Fusion-style step boxes at the bottom).
+        ImGui::SameLine(0.0f, 8.0f * s);
+        if (touchui::iconButton("hist", MZ_ICON_HISTORY, bh)) {
+            m_imTouchLiteTimeline = !m_imTouchLiteTimeline;
+            saveAppSettings();
+        }
         // (The ⋯ menu moved to the top-left chip.)
     }
     ImGui::End();
@@ -686,6 +729,10 @@ void Application::renderTouchShellLite() {
                         SelectionEntry e;
                         e.type = SelectionType::Body;
                         e.bodyId = id;
+                        // Parity with ItemsPanel::makeEntry — downstream code
+                        // (highlight outline, ops) expects body entries to
+                        // carry the shape.
+                        try { e.shape = m_document->getBody(id); } catch (...) {}
                         pick(e, /*multiOk=*/true);
                     }
                     ImGui::PopID();
@@ -854,6 +901,196 @@ void Application::renderTouchShellLite() {
         }
     }
     ImGui::End();
+
+    // ── History timeline (bottom-center) — Fusion-360-style boxes, one per
+    //    history step, oldest → newest. Tap a box for its properties popup:
+    //    edit the op's parameters (Apply replays downstream steps, same code
+    //    path as the desktop History panel), roll the model back/forward to
+    //    it, toggle it, or delete it. Hidden while a sketch is open: rolling
+    //    the host body back under a live sketch is forbidden (see
+    //    History::setUndoFloor).
+    const int liteSteps = m_history ? m_history->stepCount() : 0;
+    if (m_imTouchLiteTimeline && !m_inSketchMode && m_document && m_history) {
+        ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x * 0.5f, wp.y + ws.y - m),
+                                ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+        // Keep clear of the fps readout (left) and the create FAB (right).
+        const float inset = 96.0f * s;
+        ImGui::SetNextWindowSizeConstraints(
+            ImVec2(0, 0), ImVec2(ws.x - 2.0f * (m + inset), FLT_MAX));
+        ImGui::SetNextWindowBgAlpha(0.92f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, touchui::panelBg());
+        if (ImGui::Begin("##LiteTimeline", nullptr,
+                         (kFloat & ~ImGuiWindowFlags_NoScrollbar) |
+                             ImGuiWindowFlags_HorizontalScrollbar)) {
+            // Empty history: keep the bar visible with a hint instead of
+            // vanishing — otherwise toggling the clock button in a fresh
+            // project looks like it does nothing.
+            if (liteSteps == 0)
+                ImGui::TextColored(touchui::textDim(),
+                                   "History: no steps yet");
+            const int curr = m_history->currentStep();
+            const int failedAt = m_history->lastReplayFailure();
+            const bool histLocked = anyInteractivePreviewActive();
+            const ImU32 amber = ImGui::GetColorU32(ImVec4(0.95f, 0.75f, 0.3f, 1.0f));
+            const ImU32 red   = ImGui::GetColorU32(ImVec4(1.0f, 0.45f, 0.35f, 1.0f));
+
+            // Auto-scroll the current step into view whenever history mutates
+            // (new op, undo/redo, edit) — not on user scrolls.
+            static unsigned s_seenRev = ~0u;
+            const bool historyMoved = (s_seenRev != m_history->revision());
+
+            bool wantOpen = false;
+            for (int i = 0; i < liteSteps; ++i) {
+                const Operation* op = m_history->getStep(i);
+                if (!op) continue;
+                if (i > 0) ImGui::SameLine(0.0f, 6.0f * s);
+                ImGui::PushID(i);
+                ImU32 tint = 0;
+                if (i == failedAt)          tint = red;
+                else if (op->isReloaded())  tint = amber;
+                const bool dim = (i > curr) || !op->isEnabled();
+                if (touchui::timelineBox("step", liteStepIcon(op->typeId()),
+                                         i == curr, i == m_liteHistoryEdit,
+                                         dim, tint)) {
+                    m_liteHistoryEdit = (m_liteHistoryEdit == i) ? -1 : i;
+                    wantOpen = (m_liteHistoryEdit == i);
+                    // Drive the viewport's orange edited-element highlight.
+                    if (m_historyPanel)
+                        m_historyPanel->setEditingStep(m_liteHistoryEdit);
+                }
+                if (i == curr && historyMoved) ImGui::SetScrollHereX(0.5f);
+                ImGui::PopID();
+            }
+            s_seenRev = m_history->revision();
+
+            if (wantOpen) ImGui::OpenPopup("##LiteStepProps");
+            ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f * s, 0),
+                                                ImVec2(360.0f * s, 460.0f * s));
+            if (ImGui::BeginPopup("##LiteStepProps")) {
+                const Operation* op =
+                    (m_liteHistoryEdit >= 0 && m_liteHistoryEdit < liteSteps)
+                        ? m_history->getStep(m_liteHistoryEdit)
+                        : nullptr;
+                if (!op) {
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    const int i = m_liteHistoryEdit;
+                    std::string detail = op->description();
+                    if (detail.empty()) detail = op->name();
+                    ImGui::TextColored(touchui::textPrimary(), "%d. %s",
+                                       i + 1, detail.c_str());
+                    if (!op->isEnabled())
+                        ImGui::TextColored(touchui::textDim(), "Disabled");
+                    if (i > curr)
+                        ImGui::TextColored(touchui::textDim(),
+                                           "Undone \xE2\x80\x94 Go Here replays it.");
+                    if (i == failedAt) {
+                        ImGui::PushTextWrapPos(0.0f);
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
+                            "Couldn't recompute after an upstream change. Edit "
+                            "its parameters, fix the step before it, or delete it.");
+                        ImGui::PopTextWrapPos();
+                    }
+                    ImGui::Separator();
+
+                    if (op->isReloaded()) {
+                        ImGui::PushTextWrapPos(0.0f);
+                        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f),
+                            "Restored from an older save \xE2\x80\x94 no editable "
+                            "parameters. Undo/redo still work.");
+                        ImGui::PopTextWrapPos();
+                    } else {
+                        // The op's own parameter editor — identical widgets to
+                        // the desktop History panel's Properties section.
+                        ImGui::BeginChild("##props", ImVec2(0.0f, 200.0f * s),
+                                          true);
+                        const_cast<Operation*>(op)->renderProperties();
+                        ImGui::EndChild();
+                        ImGui::BeginDisabled(histLocked);
+                        if (ImGui::Button("Apply Changes",
+                                          ImVec2(-1.0f, 44.0f * s))) {
+                            // Same sequence as HistoryPanel: carry inline
+                            // sketch-dimension edits into later snapshots
+                            // FIRST, then a transactional replay, then cascade
+                            // so bodies built from the sketch follow.
+                            m_history->propagateSketchValueEdits(i, *m_document);
+                            const bool applied = m_history->editStep(
+                                i, *m_document, /*transactional=*/true);
+                            m_meshesDirty = true;
+                            if (applied) {
+                                if (auto* se =
+                                        dynamic_cast<const SketchEditOp*>(op)) {
+                                    auto tgt = se->getTarget();
+                                    int sid = tgt ? m_document->findSketchId(
+                                                        tgt.get())
+                                                  : -1;
+                                    if (sid >= 0) cascadeFromSketchEdit(sid);
+                                } else if (auto* st = dynamic_cast<
+                                               const SketchTransformOp*>(op)) {
+                                    if (st->getSketchId() >= 0)
+                                        cascadeFromSketchEdit(st->getSketchId());
+                                }
+                            }
+                        }
+                        ImGui::EndDisabled();
+                    }
+                    ImGui::Separator();
+
+                    const float bw = 104.0f * s;
+                    ImGui::BeginDisabled(histLocked || i == curr);
+                    if (ImGui::Button("Go Here", ImVec2(bw, 44.0f * s))) {
+                        // Roll the model to this step (Fusion's marker drag).
+                        // Progress guard: a failed replay mid-walk must not
+                        // spin forever.
+                        while (m_history->currentStep() > i) {
+                            const int before = m_history->currentStep();
+                            undoWithCascade();
+                            if (m_history->currentStep() == before) break;
+                        }
+                        while (m_history->currentStep() < i) {
+                            const int before = m_history->currentStep();
+                            redoWithCascade();
+                            if (m_history->currentStep() == before) break;
+                        }
+                        m_meshesDirty = true;
+                    }
+                    ImGui::EndDisabled();
+                    ImGui::SameLine();
+                    ImGui::BeginDisabled(histLocked);
+                    if (ImGui::Button(op->isEnabled() ? "Disable" : "Enable",
+                                      ImVec2(bw, 44.0f * s))) {
+                        // In-place toggle — preserves base bodies the op
+                        // modifies (replayAll's doc.clear() would drop them).
+                        m_history->setStepEnabled(i, !op->isEnabled(),
+                                                  *m_document);
+                        m_meshesDirty = true;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Delete", ImVec2(bw, 44.0f * s))) {
+                        if (m_history->removeStep(i, *m_document)) {
+                            m_liteHistoryEdit = -1;
+                            if (m_historyPanel)
+                                m_historyPanel->setEditingStep(-1);
+                            ImGui::CloseCurrentPopup();
+                        } else {
+                            showToast(
+                                "Can't delete: a later operation depends on it.");
+                        }
+                        m_meshesDirty = true;
+                    }
+                    ImGui::EndDisabled();
+                }
+                ImGui::EndPopup();
+            } else if (m_liteHistoryEdit >= 0) {
+                // Popup dismissed by tapping elsewhere — drop the edit state
+                // (and the viewport highlight) with it.
+                m_liteHistoryEdit = -1;
+                if (m_historyPanel) m_historyPanel->setEditingStep(-1);
+            }
+        }
+        ImGui::End();
+        ImGui::PopStyleColor();
+    }
 
     // ── fps readout (bottom-left, like the mockup's "60 fps") ───────────────
     ImGui::SetNextWindowPos(ImVec2(wp.x + m, wp.y + ws.y - m),

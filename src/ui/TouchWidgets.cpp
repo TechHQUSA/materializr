@@ -241,6 +241,37 @@ void sectionHeader(const char* text) {
     ImGui::Dummy(ImVec2(0.0f, 16.0f * s));
 }
 
+bool timelineBox(const char* id, const char* icon, bool current, bool editing,
+                 bool dim, ImU32 iconCol, float side) {
+    const float s = uiScale();
+    if (side <= 0.0f) side = 48.0f * s;
+
+    ImGui::PushID(id);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton("##tl", ImVec2(side, side));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    ImVec4 bg = current ? accentFill() : rowBg();
+    if (hovered && !current) bg = ImVec4(0.16f, 0.19f, 0.24f, 1.0f);
+    if (ImGui::IsItemActive())
+        bg = current ? accentDeep() : ImVec4(0.20f, 0.24f, 0.31f, 1.0f);
+    dl->AddRectFilled(p, ImVec2(p.x + side, p.y + side),
+                      ImGui::GetColorU32(bg), 10.0f * s);
+    if (editing)
+        dl->AddRect(p, ImVec2(p.x + side, p.y + side),
+                    ImGui::GetColorU32(accentDeep()), 10.0f * s, 0, 2.0f * s);
+
+    ImU32 fg = iconCol;
+    if (fg == 0)
+        fg = ImGui::GetColorU32(current ? onAccent()
+                                        : (dim ? textDim() : textPrimary()));
+    drawIconCentered(dl, ImVec2(p.x + side * 0.5f, p.y + side * 0.5f),
+                     20.0f * s, icon, fg);
+    ImGui::PopID();
+    return pressed;
+}
+
 ListRowAction listRow(const char* id, bool* checked, const char* label,
                       bool selected, bool withOverflow) {
     ListRowAction act;
