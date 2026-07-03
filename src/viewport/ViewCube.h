@@ -40,8 +40,14 @@ public:
     // this to suppress its own selection logic so cube clicks don't pass through.
     bool wasHovered() const { return m_lastHovered; }
 
+    // Extra downward inset (px) added to the cube's top-right anchor — the
+    // im-touch-lite shell floats its button cluster over the viewport's
+    // top-right corner, so the cube drops below it. 0 everywhere else.
+    void setExtraTopOffset(float px) { m_extraTop = px; }
+
 private:
     float m_size = 120.0f;
+    float m_extraTop = 0.0f;
     bool  m_lastHovered = false;
     // Cube drag-to-orbit state: a press on a face arms a pending snap; if the
     // user drags before releasing, treat it as a free orbit instead and

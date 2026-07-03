@@ -1578,6 +1578,7 @@ AppSettings Application::currentSettings() const {
     s.imTouchLiteTimeline = m_imTouchLiteTimeline;
     s.touchRightTab = m_touchRightTab;
     s.touchRightW = m_touchRightW;
+    s.touchRailW = m_touchRailW;
     s.orbitButton = m_orbitButton;
     s.panButton = m_panButton;
     s.levelOrbit = m_viewport->getCamera().isLevelOrbit();
@@ -1647,6 +1648,9 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_touchRightW = s.touchRightW;
     if (m_touchRightW < 200.0f) m_touchRightW = 200.0f;
     if (m_touchRightW > 520.0f) m_touchRightW = 520.0f;
+    m_touchRailW = s.touchRailW;
+    if (m_touchRailW < 64.0f)  m_touchRailW = 64.0f;
+    if (m_touchRailW > 160.0f) m_touchRailW = 160.0f;
     // Camera button bindings are honoured on every platform. Android defaults to
     // trackpad mode (AppSettings sets orbit/pan = Left there) so one-finger touch
     // orbits out of the box, but an attached mouse/trackpad can be rebound via the

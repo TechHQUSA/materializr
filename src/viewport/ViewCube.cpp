@@ -55,6 +55,7 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
         // widget so the top accessories clear it.
         topOffset = 74.0f;
     }
+    topOffset += m_extraTop; // e.g. below the im-touch-lite floating buttons
     // Extra left inset in touch mode: the enlarged widget (and its Home button)
     // overhang further right, so nudge the whole thing ~10 px off the edge.
     const float rightInset = pad + widgetR + 26.0f +

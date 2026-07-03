@@ -37,8 +37,10 @@ struct AppSettings {
     bool imTouchLiteTimeline = true;
     int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History & Properties
     // Shell right-panel width in logical px (× uiScale at use) — written by
-    // the panel's left-edge drag splitter.
+    // the panel's left-edge drag splitter / edge tab.
     float touchRightW       = 300.0f;
+    // Shell tool-rail width, same convention (edge-tab drag).
+    float touchRailW        = 92.0f;
 #if defined(MZ_MOBILE)
     // Touch-first default: trackpad mode (one-finger drag = orbit, two-finger
     // pan/zoom). Just the first-run default — the Settings dialog can rebind to

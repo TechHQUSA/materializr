@@ -5721,7 +5721,10 @@ void Application::renderViewport() {
         }
     }
 
-    // ViewCube overlay
+    // ViewCube overlay. In im-touch-lite the top-right button cluster floats
+    // over the viewport corner where the cube lives — drop the cube below it.
+    m_viewCube->setExtraTopOffset(
+        (m_imTouchUi && m_imTouchLite) ? 68.0f * uiScale() : 0.0f);
     ViewCubeAction vcAction = m_viewCube->render(
         m_viewport->getCamera(), m_invertCubeDrag,
         m_themeManager && m_themeManager->getTheme() == Theme::Light);

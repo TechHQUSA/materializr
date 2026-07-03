@@ -60,6 +60,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readBool(kv, "imTouchLiteTimeline",  s.imTouchLiteTimeline);
     readInt (kv, "touchRightTab",        s.touchRightTab);
     readFloat(kv, "touchRightW",         s.touchRightW);
+    readFloat(kv, "touchRailW",          s.touchRailW);
     readInt (kv, "orbitButton",          s.orbitButton);
     readInt (kv, "panButton",            s.panButton);
     readBool(kv, "levelOrbit",           s.levelOrbit);
@@ -271,6 +272,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "imTouchLiteTimeline = " << (s.imTouchLiteTimeline ? "true" : "false") << "\n";
     ofs << "touchRightTab = "       << s.touchRightTab       << "\n";
     ofs << "touchRightW = "         << s.touchRightW         << "\n";
+    ofs << "touchRailW = "          << s.touchRailW          << "\n";
     ofs << "orbitButton = "         << s.orbitButton         << "\n";
     ofs << "panButton = "           << s.panButton           << "\n";
     ofs << "levelOrbit = "          << (s.levelOrbit ? "true" : "false") << "\n";

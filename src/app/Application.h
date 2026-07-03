@@ -734,8 +734,12 @@ private:
     // 1 = History & Properties). Persisted.
     int m_touchRightTab = 0;
     // Right-panel width in logical px (× uiScale at use); dragged via the
-    // panel's left-edge splitter, persisted, clamped at both ends.
+    // panel's left-edge splitter or edge tab, persisted, clamped at both ends.
     float m_touchRightW = 300.0f;
+    // Tool-rail width, same convention (edge-tab drag, persisted).
+    float m_touchRailW = 92.0f;
+    // Edge-tab drag state (tap vs drag disambiguation).
+    bool m_railTabDragged = false, m_rightTabDragged = false;
 
     // Autosave: once the project has been saved at least once (has a path on
     // disk), periodically re-save dirty changes. Toggled in File > Settings.
