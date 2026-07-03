@@ -41,6 +41,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/SubShapeIndex.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/EdgeAnchor.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/FaceAnchor.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/TopoName.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/MeshDecimate.cpp
@@ -135,6 +136,12 @@ add_test(NAME test_unfold COMMAND test_unfold)
 add_executable(test_generative_edges test_generative_edges.cpp)
 target_link_libraries(test_generative_edges PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_generative_edges COMMAND test_generative_edges)
+
+# test_topo_name — unified naming layer: best-first resolve, unknown-scheme
+# skip + preservation, ordinal round-trip (experiment/face-anchors)
+add_executable(test_topo_name test_topo_name.cpp)
+target_link_libraries(test_topo_name PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_name COMMAND test_topo_name)
 
 # bench_stl_import — manual stopwatch for STL import stages (not run by ctest)
 add_executable(bench_stl_import bench_stl_import.cpp)

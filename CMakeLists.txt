@@ -212,6 +212,7 @@ add_executable(materializr
     src/modeling/SubShapeIndex.cpp
     src/modeling/EdgeAnchor.cpp
     src/modeling/FaceAnchor.cpp
+    src/modeling/TopoName.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp

@@ -1,0 +1,171 @@
+#include "TopoName.h"
+#include "FaceAnchor.h"
+#include "core/Document.h"
+#include "modeling/Sketch.h"
+
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+
+#include <algorithm>
+#include <cstdlib>
+#include <string>
+
+namespace materializr {
+namespace topo {
+
+// ── Ref serialization ───────────────────────────────────────────────────────
+// Length-prefixed tokens ("<n>:<bytes>") so any payload survives verbatim, and
+// unknown schemes round-trip untouched (forward compatibility). A Ref is just
+// scheme/payload token pairs concatenated.
+namespace {
+void writeTok(std::string& out, const std::string& s) {
+    out += std::to_string(s.size());
+    out += ':';
+    out += s;
+}
+// Reads one token at pos; returns false at end/parse error.
+bool readTok(const std::string& b, size_t& pos, std::string& out) {
+    if (pos >= b.size()) return false;
+    size_t colon = b.find(':', pos);
+    if (colon == std::string::npos) return false;
+    size_t n = static_cast<size_t>(std::atoll(b.substr(pos, colon - pos).c_str()));
+    size_t start = colon + 1;
+    if (start + n > b.size()) return false;
+    out = b.substr(start, n);
+    pos = start + n;
+    return true;
+}
+} // namespace
+
+std::string Ref::serialize() const {
+    std::string out;
+    for (const auto& nm : names) { writeTok(out, nm.scheme); writeTok(out, nm.payload); }
+    return out;
+}
+
+Ref Ref::parse(const std::string& blob) {
+    Ref r;
+    size_t pos = 0;
+    std::string scheme, payload;
+    while (readTok(blob, pos, scheme) && readTok(blob, pos, payload))
+        r.names.push_back({ scheme, payload });
+    return r;
+}
+
+// ── Registry ────────────────────────────────────────────────────────────────
+Registry& Registry::instance() {
+    static Registry r;
+    return r;
+}
+
+void Registry::add(Strategy s) {
+    m_strategies.push_back(std::move(s));
+    std::stable_sort(m_strategies.begin(), m_strategies.end(),
+                     [](const Strategy& a, const Strategy& b) {
+                         return a.priority > b.priority; // most robust first
+                     });
+}
+
+const Strategy* Registry::forScheme(const std::string& scheme) const {
+    for (const auto& s : m_strategies) if (s.scheme == scheme) return &s;
+    return nullptr;
+}
+
+// ── Built-in strategies ─────────────────────────────────────────────────────
+namespace {
+
+std::vector<FaceAnchor::SketchRef> sketchRefs(const Document* doc) {
+    std::vector<FaceAnchor::SketchRef> refs;
+    if (!doc) return refs;
+    for (int sid : doc->getAllSketchIds())
+        if (auto sk = doc->getSketch(sid)) refs.push_back({ sid, sk.get() });
+    return refs;
+}
+
+// "sketchface" — generative naming via FaceAnchor. Robust to dimension edits
+// (re-finds the face from the sketch element's current position). Faces only.
+Strategy sketchFaceStrategy() {
+    Strategy s;
+    s.scheme = "sketchface";
+    s.priority = 80;
+    s.mint = [](const TopoDS_Shape& sub, const Context& ctx) -> std::string {
+        if (ctx.type != TopAbs_FACE || sub.ShapeType() != TopAbs_FACE) return "";
+        std::vector<TopoDS_Face> one{ TopoDS::Face(sub) };
+        auto anchors = FaceAnchor::compute(one, sketchRefs(ctx.doc));
+        if (anchors.empty() || anchors[0].kind == FaceAnchor::Anchor::None) return "";
+        return FaceAnchor::serialize(anchors);
+    };
+    s.resolve = [](const std::string& payload, const Context& ctx) -> TopoDS_Shape {
+        std::vector<FaceAnchor::Anchor> anchors;
+        if (!FaceAnchor::parse(payload, anchors)) return {};
+        std::vector<TopoDS_Face> out;
+        if (!FaceAnchor::resolve(anchors, sketchRefs(ctx.doc), ctx.shape, out) ||
+            out.empty())
+            return {};
+        return out[0];
+    };
+    return s;
+}
+
+// "ordinal" — the universal fallback: 1-based index into
+// TopExp::MapShapes(shape, type). Always mintable, resolves reliably against
+// the SAME (BREP-roundtripped) shape; fails when upstream edits shift indices,
+// at which point a higher-priority scheme in the Ref should have carried it.
+Strategy ordinalStrategy() {
+    Strategy s;
+    s.scheme = "ordinal";
+    s.priority = 10;
+    s.mint = [](const TopoDS_Shape& sub, const Context& ctx) -> std::string {
+        if (ctx.shape.IsNull() || sub.IsNull()) return "";
+        TopTools_IndexedMapOfShape map;
+        TopExp::MapShapes(ctx.shape, ctx.type, map);
+        int idx = map.FindIndex(sub);
+        return idx > 0 ? std::to_string(idx) : "";
+    };
+    s.resolve = [](const std::string& payload, const Context& ctx) -> TopoDS_Shape {
+        if (ctx.shape.IsNull()) return {};
+        int idx = std::atoi(payload.c_str());
+        TopTools_IndexedMapOfShape map;
+        TopExp::MapShapes(ctx.shape, ctx.type, map);
+        if (idx < 1 || idx > map.Extent()) return {};
+        return map.FindKey(idx);
+    };
+    return s;
+}
+
+} // namespace
+
+Registry::Registry() {
+    // Built-ins, lowest-to-highest doesn't matter — add() keeps them sorted.
+    add(ordinalStrategy());
+    add(sketchFaceStrategy());
+    // Future: add(sketchEdgeStrategy()), add(genLineageStrategy()),
+    //         add(importIdStrategy()) — all strictly additive.
+}
+
+// ── mint / resolve ──────────────────────────────────────────────────────────
+Ref mint(const TopoDS_Shape& sub, const Context& ctx) {
+    Ref r;
+    for (const auto& s : Registry::instance().strategies()) {
+        if (!s.mint) continue;
+        std::string payload = s.mint(sub, ctx);
+        if (!payload.empty()) r.names.push_back({ s.scheme, payload });
+    }
+    // strategies() is priority-sorted, so names come out best-first already.
+    return r;
+}
+
+bool resolve(const Ref& ref, const Context& ctx, TopoDS_Shape& out) {
+    for (const auto& nm : ref.names) {
+        const Strategy* s = Registry::instance().forScheme(nm.scheme);
+        if (!s || !s->resolve) continue;   // unknown scheme (newer file) — skip
+        TopoDS_Shape found = s->resolve(nm.payload, ctx);
+        if (!found.IsNull()) { out = found; return true; }
+    }
+    return false;
+}
+
+} // namespace topo
+} // namespace materializr
