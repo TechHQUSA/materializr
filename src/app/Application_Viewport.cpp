@@ -6198,7 +6198,7 @@ void Application::renderViewport() {
         // Floating distance input panel
         ImGui::SetNextWindowPos(ImVec2(
             std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
+                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
             ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##ExtrudeInput", nullptr,
@@ -6264,7 +6264,7 @@ void Application::renderViewport() {
 
         ImGui::SetNextWindowPos(ImVec2(
             std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
+                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
             ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##PushPullInput", nullptr,
@@ -6363,7 +6363,7 @@ void Application::renderViewport() {
 
         ImGui::SetNextWindowPos(ImVec2(
             std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
+                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
             ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##EdgeOpInput", nullptr,
@@ -6471,7 +6471,7 @@ void Application::renderViewport() {
                                   : "MOVE FACE (slide in plane)");
         ImGui::PopStyleColor();
 
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260,
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale(),
                                        ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##MoveFaceInput", nullptr,

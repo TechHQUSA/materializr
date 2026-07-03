@@ -1784,17 +1784,14 @@ void Application::renderSnapWidget() {
     // Tucked just under the ViewCube. We borrow the ViewCube's window-anchor
     // arithmetic (top-right of the viewport window) so the widget sits in a
     // consistent spot regardless of dock layout.
-    ImVec2 wp = ImGui::GetWindowPos();
-    ImVec2 ws = ImGui::GetWindowSize();
-    const float pad     = 10.0f;
-    // Square shrunk ~25 % from its original 38 px (font stays the same — it
-    // was over-padded before). +20 px nudge right keeps it tucked under the
-    // ViewCube's accessory arc.
-    const float size    = 28.0f;
-    const float widgetR = 38.0f;
-    const float xNudge  = 20.0f;
-    ImVec2 widgetPos(wp.x + ws.x - pad - widgetR - 26.0f - size * 0.5f + xNudge,
-                     wp.y + pad + widgetR * 2.0f + 96.0f);
+    // Match the ViewCube's touch enlargement so the square keeps pace with the
+    // cube on tablets. Anchor directly under the cube's real bottom (the cube
+    // caches it post-render): this tracks touch scaling AND the im-touch
+    // vertical offsets, so the widget no longer lands on top of the cube.
+    const float tScale = materializr::touchMode() ? 1.5f : 1.0f;
+    const float size   = 28.0f * tScale;
+    ImVec2 widgetPos(m_viewCube->widgetCenterX() - size * 0.5f,
+                     m_viewCube->widgetBottomY() + 10.0f * tScale);
     ImVec2 widgetEnd(widgetPos.x + size, widgetPos.y + size);
 
     // Manual hit-test — same pattern the ViewCube uses to anchor in a corner

@@ -63,6 +63,12 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
     ImVec2 center(wp.x + ws.x - rightInset,
                   wp.y + pad + widgetR + topOffset);
 
+    // Cache the widget's screen anchor for the snap widget to tuck beneath. The
+    // lowest accessory is the axis triad at center.y + widgetR + 22*ts; pad past
+    // its glyph so the snap square clears the whole widget at any scale/offset.
+    m_widgetCenterX = center.x;
+    m_widgetBottomY = center.y + widgetR + 42.0f * ts;
+
     // --- Camera view-rotation matrix (no translation), so the cube spins with
     //     the camera's orientation.
     glm::mat4 V = camera.getViewMatrix();
