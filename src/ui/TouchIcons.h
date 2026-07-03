@@ -42,7 +42,11 @@
 #define MZ_ICON_PUSHPULL   ICON_IC_ENLARGE
 #define MZ_ICON_SHELL      ICON_IC_CUBE_HOLE
 #define MZ_ICON_FILLET     ICON_IC_FILLET_3D
-#define MZ_ICON_CHAMFER    ICON_IC_CUBE_CUT_WITH_CURVE
+// Sentinel (PUA U+E000, below Iconoir's first glyph at U+E024): no Iconoir
+// glyph reads as a straight corner cut — cube-cut-with-curve looked like a
+// concave fillet. drawIconCentered (TouchWidgets.cpp) special-cases this and
+// draws a square outline with one chamfered corner.
+#define MZ_ICON_CHAMFER    "\xee\x80\x80"
 #define MZ_ICON_MOVE       ICON_IC_DRAG
 #define MZ_ICON_ROTATE     ICON_IC_REFRESH
 #define MZ_ICON_SCALE      ICON_IC_SCALE_FRAME_ENLARGE

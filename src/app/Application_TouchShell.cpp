@@ -92,9 +92,20 @@ void Application::renderTouchShell() {
     const float rightW = m_rightPanelHidden ? 0.0f : 300.0f * s; // compacted (was 320)
 
     // ── Top app bar ─────────────────────────────────────────────────────────
+    // The fixed bars are edge-flush strips — opt out of the theme's global
+    // WindowRounding (their corners would notch against the viewport). The
+    // pop right after Begin keeps rounding intact for anything opened inside
+    // (modals, popups pick up style at their own Begin).
+    auto beginFlushBar = [](const char* name, ImGuiWindowFlags flags) {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        const bool open = ImGui::Begin(name, nullptr, flags);
+        ImGui::PopStyleVar();
+        return open;
+    };
+
     ImGui::SetNextWindowPos(wp);
     ImGui::SetNextWindowSize(ImVec2(ws.x, topH));
-    if (ImGui::Begin("##TouchTopBar", nullptr, kShellWin)) {
+    if (beginFlushBar("##TouchTopBar", kShellWin)) {
         const float pad = 14.0f * s;
         const float bh  = 44.0f * s;
         const float cy  = (topH - bh) * 0.5f; // vertical center for controls
@@ -242,8 +253,8 @@ void Application::renderTouchShell() {
     if (railW > 0.0f) {
         ImGui::SetNextWindowPos(ImVec2(wp.x, wp.y + topH));
         ImGui::SetNextWindowSize(ImVec2(railW, ws.y - topH));
-        if (ImGui::Begin("##TouchRail", nullptr,
-                         kShellWin & ~ImGuiWindowFlags_NoScrollbar)) {
+        if (beginFlushBar("##TouchRail",
+                          kShellWin & ~ImGuiWindowFlags_NoScrollbar)) {
             ImGui::SetCursorPosX(10.0f * s);
             touchui::sectionHeader("Tools");
             if (m_toolbar) {
@@ -306,8 +317,11 @@ void Application::renderTouchShell() {
                     ImGui::EndPopup();
                 }
                 popPopupPad();
-            } else if (!m_inSketchMode && m_selection &&
-                       m_selection->hasSelection()) {
+            }
+            // Construction — always reachable in 3D mode. Plane/Axis are
+            // nested inside; options derive from the selection (hints when
+            // nothing supports a derivation yet).
+            if (!m_inSketchMode) {
                 if (touchui::railButton("constructGroup", MZ_ICON_FOCUS,
                                         "Construct", false))
                     ImGui::OpenPopup("##railConstruct");
@@ -329,8 +343,8 @@ void Application::renderTouchShell() {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, touchui::panelBg());
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                             ImVec2(14.0f * s, 12.0f * s));
-        if (ImGui::Begin("##TouchRight", nullptr, kShellWin)) {
-            static const char* kTabs[] = { "Items", "History", "Props" };
+        if (beginFlushBar("##TouchRight", kShellWin)) {
+            static const char* kTabs[] = { "Items", "History", "Properties" };
             const int tab = touchui::segmented("rightTabs", kTabs, 3,
                                                m_touchRightTab);
             if (tab != m_touchRightTab) {
