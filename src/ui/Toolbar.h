@@ -115,6 +115,10 @@ public:
     // Side count chosen from the Polygon popout; read by the app when it
     // handles the resulting ToolAction::Polygon.
     int  getRequestedPolygonSides() const { return m_requestedPolygonSides; }
+    // Lets the im-touch rail's Polygon sides popout set the count too (the
+    // classic toolbar sets m_requestedPolygonSides inline), so all three
+    // layouts drive the same polygon flow.
+    void setRequestedPolygonSides(int n) { m_requestedPolygonSides = n; }
     // Live rect/circle draw origin shown on the per-tool toggle. Ints mirror
     // SketchTool::RectMode (0=Corner,1=Center) and CircleMode (0=Center,1=2-Point).
     void setRectMode(int m) { m_rectMode = m; }

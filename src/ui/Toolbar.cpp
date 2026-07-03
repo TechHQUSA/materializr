@@ -107,6 +107,18 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "Regular polygon: tap the centre, drag to size. Side count in properties.");
         add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
             "Trim a sketch segment at its nearest intersections.");
+        // Sketch-element transforms — mirror the classic sketch toolbar so all
+        // three layouts behave identically. Like classic, they're always here
+        // in a sketch and simply no-op if nothing is selected. (The rail
+        // renderer opens a sides popout for Polygon above; these fire directly.)
+        add(MZ_ICON_COPY,    "Copy",     ToolAction::SketchCopy, false,
+            "Duplicate the selected sketch elements at an offset.");
+        add(MZ_ICON_MIRROR,  "Mirror",   ToolAction::SketchMirror, false,
+            "Mirror selected elements across a sketch line you'll pick next.");
+        add(MZ_ICON_PATTERN, "Linear",   ToolAction::SketchLinearPattern, false,
+            "Linear pattern: copy the selected sketch elements N times along the sketch X axis.");
+        add(MZ_ICON_PATTERN, "Circular", ToolAction::SketchRadialPattern, false,
+            "Circular pattern: copy the selected sketch elements around an origin you specify.");
     } else if (!m_selection || !m_selection->hasSelection()) {
         // No bare "Sketch" here: with nothing selected it just duplicated
         // "Sketch on… > XY plane". Sketch appears once a face or construction

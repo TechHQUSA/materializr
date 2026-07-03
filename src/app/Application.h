@@ -153,6 +153,9 @@ private:
     // m_imTouchUi is on. Computes the viewport rect renderViewport() pins to.
     void renderTouchShell();
     void renderTouchShellLite();   // near-zero-chrome variant (imTouchLite)
+    // Polygon in the im-touch rail opens a side-count popout (matching the
+    // classic sketch toolbar). Shared by the modern rail and lite tool bar.
+    void renderRailPolygonSidesPopup(bool clicked);
     void renderTouchOverflowPopup(); // shared ⋯/☰ menu popup (both variants)
     // Undo/redo with the sketch-edit cascade (shared by the Edit menu, the
     // touch shell's top bar, and nothing else — the Ctrl+Z shortcut has its
