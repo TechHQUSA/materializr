@@ -22,6 +22,11 @@ namespace materializr { class Sketch; }
 //          parallel to the sketch normal, over the arc/circle centre, radius =
 //          the sketch radius. Named by (sketch, arc/circle). This is the one
 //          a THREAD targets.
+//   CurveWall — a surface-of-extrusion side face swept from a sketch SPLINE
+//          (a non-circular curve): the extrusion direction is parallel to the
+//          sketch normal and its profile lies on the spline. Named by
+//          (sketch, spline). Matched by sampling the face's basis curve and
+//          testing it lies on the spline's sampled curve.
 //   Cap  — a planar face whose normal is PARALLEL to the sketch normal: the
 //          top/bottom cap of the extrude. Not tied to a single sketch element
 //          (it's the whole region), so it is the weakest to resolve under a
@@ -29,9 +34,9 @@ namespace materializr { class Sketch; }
 namespace FaceAnchor {
 
 struct Anchor {
-    enum Kind { None, Wall, Cyl, Cap } kind = None;
+    enum Kind { None, Wall, Cyl, CurveWall, Cap } kind = None;
     int    sketchId = -1;
-    int    elemId   = -1;  // Wall: line id; Cyl: arc/circle id; Cap: -1
+    int    elemId   = -1;  // Wall: line id; Cyl: arc/circle id; CurveWall: spline id; Cap: -1
     double h        = 0.0; // centroid height along the sketch normal
     double cu       = 0.0; // centroid u in sketch coords
     double cv       = 0.0; // centroid v in sketch coords
@@ -54,8 +59,9 @@ bool resolve(const std::vector<Anchor>& anchors,
              const TopoDS_Shape& base, std::vector<TopoDS_Face>& out);
 
 // Serialize as "v1~<a0>~<a1>..." where each face token is
-// "W,<sid>,<lid>,<h>,<cu>,<cv>" | "Y,<sid>,<cid>,<h>,<cu>,<cv>" |
-// "P,<sid>,<h>,<cu>,<cv>" (cap) | "N". Empty if nothing useful to store.
+// "W,<sid>,<lid>,<h>,<cu>,<cv>" (wall) | "Y,<sid>,<cid>,<h>,<cu>,<cv>" (cyl) |
+// "E,<sid>,<spid>,<h>,<cu>,<cv>" (curve wall) | "P,<sid>,<h>,<cu>,<cv>" (cap) |
+// "N". Empty if nothing useful to store.
 std::string serialize(const std::vector<Anchor>& anchors);
 bool parse(const std::string& blob, std::vector<Anchor>& anchors);
 

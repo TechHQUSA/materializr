@@ -69,19 +69,20 @@ int main(int argc, char** argv) {
             faces.push_back(TopoDS::Face(ex.Current()));
 
         auto anchors = FaceAnchor::compute(faces, refs);
-        int wall = 0, cyl = 0, cap = 0, none = 0;
+        int wall = 0, cyl = 0, cwall = 0, cap = 0, none = 0;
         for (const auto& a : anchors)
             switch (a.kind) {
-                case FaceAnchor::Anchor::Wall: ++wall; break;
-                case FaceAnchor::Anchor::Cyl:  ++cyl;  break;
-                case FaceAnchor::Anchor::Cap:  ++cap;  break;
+                case FaceAnchor::Anchor::Wall:      ++wall;  break;
+                case FaceAnchor::Anchor::Cyl:       ++cyl;   break;
+                case FaceAnchor::Anchor::CurveWall: ++cwall; break;
+                case FaceAnchor::Anchor::Cap:       ++cap;   break;
                 default: ++none; break;
             }
-        const int named = wall + cyl + cap;
-        std::printf("\nbody %d '%s': %zu faces  ->  %d wall  %d cyl  %d cap  %d NONE"
+        const int named = wall + cyl + cwall + cap;
+        std::printf("\nbody %d '%s': %zu faces  ->  %d wall  %d cyl  %d cwall  %d cap  %d NONE"
                     "  (%d/%zu named)\n",
                     bid, doc.getBodyName(bid).c_str(), faces.size(),
-                    wall, cyl, cap, none, named, faces.size());
+                    wall, cyl, cwall, cap, none, named, faces.size());
 
         // Categorize the unattributed faces by surface type — this is what
         // separates "add another face kind" (cone/torus) from "needs the

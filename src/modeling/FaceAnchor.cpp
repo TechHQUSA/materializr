@@ -3,7 +3,11 @@
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
+#include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
+#include <Geom_Curve.hxx>
+#include <Geom_SurfaceOfLinearExtrusion.hxx>
+#include <GeomAdaptor_Curve.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -13,6 +17,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
+#include <glm/glm.hpp>
 #include <cmath>
 #include <cstdio>
 
@@ -72,6 +77,44 @@ bool onSegment(double px, double py, double ax, double ay, double bx, double by,
     return true;
 }
 
+// Distance from (px,py) to a sampled polyline (min over segments). Large if
+// the polyline is degenerate.
+double distToPolyline(double px, double py, const std::vector<glm::vec2>& poly) {
+    double best = 1e18;
+    for (size_t i = 1; i < poly.size(); ++i) {
+        const double ax = poly[i - 1].x, ay = poly[i - 1].y;
+        const double bx = poly[i].x,     by = poly[i].y;
+        const double dx = bx - ax, dy = by - ay;
+        const double len2 = dx * dx + dy * dy;
+        double s = len2 > 1e-18 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0.0;
+        s = std::max(0.0, std::min(1.0, s));
+        best = std::min(best, std::hypot(px - (ax + s * dx), py - (ay + s * dy)));
+    }
+    return best;
+}
+
+// Sample the (profile) basis curve of a surface-of-extrusion face. For a
+// trimmed face the underlying surface still carries the FULL profile curve, so
+// these points trace the whole sketch curve regardless of clipping — good for
+// attribution; the centroid disambiguates fragments at resolve.
+std::vector<gp_Pnt> extrusionProfilePts(const TopoDS_Face& face) {
+    std::vector<gp_Pnt> pts;
+    Handle(Geom_Surface) gs = BRep_Tool::Surface(face);
+    Handle(Geom_SurfaceOfLinearExtrusion) ext =
+        Handle(Geom_SurfaceOfLinearExtrusion)::DownCast(gs);
+    if (ext.IsNull()) return pts;
+    Handle(Geom_Curve) bc = ext->BasisCurve();
+    if (bc.IsNull()) return pts;
+    GeomAdaptor_Curve ac(bc);
+    const double a = ac.FirstParameter(), b = ac.LastParameter();
+    if (!std::isfinite(a) || !std::isfinite(b) || b <= a) return pts;
+    const int N = 24;
+    for (int i = 0; i <= N; ++i) {
+        try { pts.push_back(ac.Value(a + (b - a) * i / N)); } catch (...) {}
+    }
+    return pts;
+}
+
 // Classify one face against one sketch frame. Returns a None anchor on no
 // match. `tol` widens for the drift pass.
 Anchor classify(const TopoDS_Face& face, int sketchId,
@@ -128,7 +171,27 @@ Anchor classify(const TopoDS_Face& face, int sketchId,
         return a;
     }
 
-    return a; // cones/tori/splines → unattributed (future kinds)
+    if (type == GeomAbs_SurfaceOfExtrusion) {
+        // Curved wall swept from a sketch spline: extruded along the sketch
+        // normal, its basis (profile) curve lying on a spline's sampled curve.
+        // Curve matching is inherently approximate, so allow a little slack
+        // over the position tol.
+        if (std::abs(s.Direction().Dot(f.axis)) < kAxisDot) return a;
+        const std::vector<gp_Pnt> prof = extrusionProfilePts(face);
+        if (prof.empty()) return a;
+        const double ctol = std::max(tol, 0.02);
+        for (const auto& sp : sk.getSplines()) {
+            const auto poly = sk.sampleSpline2D(sp, 32);
+            if (poly.size() < 2) continue;
+            bool onAll = true;
+            for (const auto& p : prof)
+                if (distToPolyline(f.u(p), f.v(p), poly) > ctol) { onAll = false; break; }
+            if (onAll) return { Anchor::CurveWall, sketchId, sp.id, ch, cu, cv };
+        }
+        return a;
+    }
+
+    return a; // cones/tori/bspline surfaces → unattributed (gen-kernel kinds)
 }
 
 // score(candidate, anchor): lower is better. Element already matched, so this
@@ -222,6 +285,10 @@ std::string serialize(const std::vector<Anchor>& anchors) {
                 std::snprintf(buf, sizeof(buf), "Y,%d,%d,%.6f,%.6f,%.6f",
                               a.sketchId, a.elemId, a.h, a.cu, a.cv);
                 s += buf; break;
+            case Anchor::CurveWall:
+                std::snprintf(buf, sizeof(buf), "E,%d,%d,%.6f,%.6f,%.6f",
+                              a.sketchId, a.elemId, a.h, a.cu, a.cv);
+                s += buf; break;
             case Anchor::Cap:
                 std::snprintf(buf, sizeof(buf), "P,%d,%.6f,%.6f,%.6f",
                               a.sketchId, a.h, a.cu, a.cv);
@@ -252,6 +319,9 @@ bool parse(const std::string& blob, std::vector<Anchor>& anchors) {
                                 &a.sketchId, &a.elemId, &a.h, &a.cu, &a.cv); break;
                 case 'Y': a.kind = Anchor::Cyl;
                     std::sscanf(tok.c_str(), "Y,%d,%d,%lf,%lf,%lf",
+                                &a.sketchId, &a.elemId, &a.h, &a.cu, &a.cv); break;
+                case 'E': a.kind = Anchor::CurveWall;
+                    std::sscanf(tok.c_str(), "E,%d,%d,%lf,%lf,%lf",
                                 &a.sketchId, &a.elemId, &a.h, &a.cu, &a.cv); break;
                 case 'P': a.kind = Anchor::Cap;
                     std::sscanf(tok.c_str(), "P,%d,%lf,%lf,%lf",
