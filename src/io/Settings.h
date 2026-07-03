@@ -23,6 +23,7 @@ struct AppSettings {
     // touchMode (layout vs input model); switches live, no restart. See
     // docs/im-touch-ui-plan.md.
     bool imTouchUi          = false;
+    int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History
 #if defined(MZ_MOBILE)
     // Touch-first default: trackpad mode (one-finger drag = orbit, two-finger
     // pan/zoom). Just the first-run default — the Settings dialog can rebind to

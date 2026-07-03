@@ -15,11 +15,13 @@
 #include "app/Application.h"
 #include "app/Window.h"
 #include "core/History.h"
-#include "ui/AboutDialog.h"
+#include "ui/HistoryPanel.h"
+#include "ui/ItemsPanel.h"
 #include "ui/Toolbar.h"       // ToolAction for the starter rail entries
 #include "ui/TouchIcons.h"
 #include "ui/TouchTheme.h"
 #include "ui/TouchWidgets.h"
+#include "touch_mode.h"
 #include "ui_scale.h"
 
 #include <imgui.h>
@@ -79,10 +81,12 @@ void Application::renderTouchShell() {
             ImGui::TextColored(touchui::textDim(), "/ %s", pn.c_str());
         }
 
-        // Right-aligned controls: Undo, Redo, Focus, ⋯.
+        // Right-aligned controls: Undo, Redo, [Keyboard,] Focus, ⋯.
         const float sp = 8.0f * s;
+        const bool showKb = materializr::touchMode();
+        const int nSquare = showKb ? 4 : 3;
         const float focusW = bh + ImGui::CalcTextSize("Focus").x + 27.0f * s;
-        float x = ws.x - pad - (bh * 3 + focusW + sp * 3);
+        float x = ws.x - pad - (bh * nSquare + focusW + sp * nSquare);
         ImGui::SetCursorPos(ImVec2(x, cy));
 
         const bool histLocked = anyInteractivePreviewActive();
@@ -94,6 +98,15 @@ void Application::renderTouchShell() {
         ImGui::BeginDisabled(histLocked || !m_history->canRedo());
         if (touchui::iconButton("redo", MZ_ICON_REDO, bh)) redoWithCascade();
         ImGui::EndDisabled();
+
+        // Soft-keyboard toggle (the desktop menu bar's right-aligned item;
+        // there's no menu bar here). Touch mode only, same flag.
+        if (showKb) {
+            ImGui::SameLine(0.0f, sp);
+            ImGui::SetCursorPosY(cy);
+            if (touchui::iconButton("kb", MZ_ICON_KEYBOARD, bh))
+                m_softKeyboardForced = !m_softKeyboardForced;
+        }
 
         // Focus: viewport + rail only (right panel hidden).
         ImGui::SameLine(0.0f, sp);
@@ -111,13 +124,30 @@ void Application::renderTouchShell() {
         if (touchui::iconButton("overflow", MZ_ICON_MORE, bh))
             ImGui::OpenPopup("##TouchOverflow");
         if (ImGui::BeginPopup("##TouchOverflow")) {
-            if (ImGui::MenuItem(MZ_ICON_OPEN "  Open Project..."))    loadProject();
-            if (ImGui::MenuItem(MZ_ICON_SAVE "  Save Project"))       saveProjectQuick();
-            if (ImGui::MenuItem(MZ_ICON_SAVE_AS "  Save Project As...")) saveProject();
+            // The full desktop menus, flattened one level: shared item lists
+            // (renderFileMenuItems & co.) so the two shells cannot drift.
+            if (ImGui::BeginMenu(MZ_ICON_OPEN "  File")) {
+                renderFileMenuItems();
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(MZ_ICON_UNDO "  Edit")) {
+                renderEditMenuItems();
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(MZ_ICON_FOCUS "  View")) {
+                renderViewMenuItems();
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu(MZ_ICON_ABOUT "  Help")) {
+                renderHelpMenuItems();
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
-            if (ImGui::MenuItem(MZ_ICON_SETTINGS "  Settings..."))    m_showSettings = true;
-            if (ImGui::MenuItem(MZ_ICON_ABOUT "  About Materializr"))
-                m_aboutDialog->setVisible(true);
+            if (ImGui::MenuItem(MZ_ICON_SETTINGS "  Settings...")) {
+                m_settingsOrbitButton = m_orbitButton;
+                m_settingsPanButton   = m_panButton;
+                m_showSettings = true;
+            }
             ImGui::EndPopup();
         }
     }
@@ -149,10 +179,27 @@ void Application::renderTouchShell() {
                             ImVec2(14.0f * s, 12.0f * s));
         if (ImGui::Begin("##TouchRight", nullptr, kShellWin)) {
             static const char* kTabs[] = { "Items", "History" };
-            m_touchRightTab = touchui::segmented("rightTabs", kTabs, 2,
-                                                 m_touchRightTab);
-            touchui::sectionHeader(m_touchRightTab == 0 ? "Bodies" : "Steps");
-            ImGui::TextColored(touchui::textDim(), "(content lands in Phase 2)");
+            const int tab = touchui::segmented("rightTabs", kTabs, 2,
+                                               m_touchRightTab);
+            if (tab != m_touchRightTab) {
+                m_touchRightTab = tab;
+                saveAppSettings();
+            }
+            // Scrolling body below the pinned switcher. The panels' content
+            // renderers are the same code the desktop docks host — identical
+            // behavior, different container.
+            if (ImGui::BeginChild("##touchRightBody", ImVec2(0, 0), false)) {
+                if (m_touchRightTab == 0) {
+                    if (m_itemsPanel && m_itemsPanel->renderContent()) {
+                        m_hoveredBodyId = -1;
+                        m_meshesDirty = true;
+                    }
+                } else {
+                    if (m_historyPanel && m_historyPanel->renderContent())
+                        m_meshesDirty = true;
+                }
+            }
+            ImGui::EndChild();
         }
         ImGui::End();
         ImGui::PopStyleVar();

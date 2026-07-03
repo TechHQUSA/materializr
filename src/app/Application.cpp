@@ -1076,161 +1076,168 @@ void Application::redoWithCascade() {
     m_meshesDirty = true;
 }
 
+// The four menu bodies, shared by the desktop menu bar and the im-touch
+// shell's overflow popup (Application_TouchShell.cpp) — one item list each,
+// so the two shells cannot drift.
+void Application::renderFileMenuItems() {
+    if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
+    // Open Recent — persisted, most-recent-first. Greyed when empty.
+    if (ImGui::BeginMenu("Open Recent", !m_recentProjects.empty())) {
+        // Snapshot: openRecentProject() mutates m_recentProjects.
+        std::vector<AppSettings::RecentProject> snapshot = m_recentProjects;
+        for (size_t i = 0; i < snapshot.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            if (ImGui::MenuItem(snapshot[i].name.c_str()))
+                openRecentProject(snapshot[i]);
+            if (ImGui::IsItemHovered() && !snapshot[i].ref.empty())
+                ImGui::SetTooltip("%s", snapshot[i].ref.c_str());
+            ImGui::PopID();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("Clear Recent")) {
+            m_recentProjects.clear();
+            saveAppSettings();
+        }
+        ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
+    if (ImGui::MenuItem("Save Project As...")) saveProject();
+    if (ImGui::MenuItem("New Project")) closeProject();
+    ImGui::Separator();
+
+    // Build Import submenu from IOFormat contributions
+    auto& formats = PluginRegistry::instance().ioFormats();
+    bool hasImporters = false;
+    for (auto& fmt : formats) { if (fmt.canImport) { hasImporters = true; break; } }
+    if (hasImporters && ImGui::BeginMenu("Import")) {
+        for (size_t i = 0; i < formats.size(); ++i) {
+            auto& fmt = formats[i];
+            if (!fmt.canImport || !fmt.importFn) continue;
+            ImGui::PushID(static_cast<int>(i));
+            std::string label = fmt.name + "...";
+            if (ImGui::MenuItem(label.c_str())) {
+                fmt.importFn(*m_pluginContext, "");
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndMenu();
+    }
+
+    // Build Export submenu from IOFormat contributions
+    bool hasExporters = false;
+    for (auto& fmt : formats) { if (fmt.canExport) { hasExporters = true; break; } }
+    if (hasExporters && ImGui::BeginMenu("Export")) {
+        for (size_t i = 0; i < formats.size(); ++i) {
+            auto& fmt = formats[i];
+            if (!fmt.canExport || !fmt.exportFn) continue;
+            ImGui::PushID(static_cast<int>(i) + 1000);
+            std::string label = fmt.name + "...";
+            if (ImGui::MenuItem(label.c_str())) {
+                fmt.exportFn(*m_pluginContext, "");
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+    if (ImGui::MenuItem("Settings...")) {
+        // Stage the current bindings so the dialog can Cancel cleanly.
+        m_settingsOrbitButton = m_orbitButton;
+        m_settingsPanButton = m_panButton;
+        m_showSettings = true;
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Exit", "Alt+F4")) m_window->requestClose(true);
+}
+
+void Application::renderEditMenuItems() {
+    // Disabled while a legacy preview is live: those previews
+    // undo/re-push their op per frame, and an outside undo pops the
+    // preview op so the preview's NEXT cycle pops the user's last
+    // COMMITTED op instead — which then gets erased for good when
+    // the preview pushes over the redo tail. (How "pull, confirm,
+    // pull the other way" ate the first body.)
+    const bool histLocked = anyInteractivePreviewActive();
+    if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
+                        !histLocked && m_history->canUndo())) {
+        undoWithCascade();
+    }
+    if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
+                        !histLocked && m_history->canRedo())) {
+        redoWithCascade();
+    }
+}
+
+void Application::renderViewMenuItems() {
+    if (ImGui::MenuItem("Reset Camera", "Home")) m_viewport->getCamera().reset();
+    // The F shortcut's menu twin — and the only way to frame on touch.
+    if (ImGui::MenuItem("Frame Selection", "F")) frameSelection();
+    if (ImGui::MenuItem("Section View", nullptr, &m_sectionEnabled)) {
+        m_sectionDirty = true;
+        if (m_sectionEnabled) {
+            // Aim the plane through the middle of the visible
+            // bodies so enabling it visibly halves the scene —
+            // a zero-offset plane at the world origin can sit
+            // entirely outside (or under) everything.
+            try {
+                Bnd_Box bb;
+                for (int id : m_document->getAllBodyIds())
+                    if (m_document->isBodyVisible(id))
+                        BRepBndLib::Add(m_document->getBody(id), bb);
+                if (!bb.IsVoid()) {
+                    double x0, y0, z0, x1, y1, z1;
+                    bb.Get(x0, y0, z0, x1, y1, z1);
+                    gp_Pnt c(0.5 * (x0 + x1), 0.5 * (y0 + y1),
+                             0.5 * (z0 + z1));
+                    gp_Pln pl = sectionBasePlane();
+                    m_sectionOffset = static_cast<float>(
+                        gp_Vec(pl.Location(), c)
+                            .Dot(gp_Vec(pl.Axis().Direction())));
+                }
+            } catch (...) {}
+        }
+    }
+    ImGui::Separator();
+    // Collapse the docked side panels to give the 3D view the whole
+    // window — a fallback for small screens (and a quick "maximize
+    // canvas" anywhere). The panels keep their docked widths and snap
+    // back on toggle. F9 on a keyboard; touch gets edge tabs. This menu
+    // item hides/shows BOTH columns at once; the checkmark = both hidden.
+    bool bothHidden = m_leftPanelHidden && m_rightPanelHidden;
+    if (ImGui::MenuItem("Hide Panels", "F9", bothHidden)) {
+        bool hide = !bothHidden;
+        m_leftPanelHidden = m_rightPanelHidden = hide;
+        saveAppSettings();
+    }
+    ImGui::Separator();
+    if (m_themeManager->renderSelector()) {
+        m_themeManager->apply();
+    }
+}
+
+void Application::renderHelpMenuItems() {
+    if (ImGui::MenuItem("User Guide")) m_helpPanel->setVisible(true);
+    if (ImGui::MenuItem("Keyboard Shortcuts")) m_shortcutsPanel->setVisible(true);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Check for Updates...")) {
+        m_showUpdatePopup = true;
+        m_updateChecked = false; // run the network call when the popup opens
+    }
+    // Plugin-contributed Help items (e.g. the Tutorial's "Getting
+    // Started"). Lets a plugin add a launcher without Application
+    // knowing about it. See renderPluginMenuItems.
+    renderPluginMenuItems("Help");
+    ImGui::Separator();
+    if (ImGui::MenuItem("About Materializr...")) m_aboutDialog->setVisible(true);
+}
+
 void Application::renderMenuBar() {
     if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
-            // Open Recent — persisted, most-recent-first. Greyed when empty.
-            if (ImGui::BeginMenu("Open Recent", !m_recentProjects.empty())) {
-                // Snapshot: openRecentProject() mutates m_recentProjects.
-                std::vector<AppSettings::RecentProject> snapshot = m_recentProjects;
-                for (size_t i = 0; i < snapshot.size(); ++i) {
-                    ImGui::PushID(static_cast<int>(i));
-                    if (ImGui::MenuItem(snapshot[i].name.c_str()))
-                        openRecentProject(snapshot[i]);
-                    if (ImGui::IsItemHovered() && !snapshot[i].ref.empty())
-                        ImGui::SetTooltip("%s", snapshot[i].ref.c_str());
-                    ImGui::PopID();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Clear Recent")) {
-                    m_recentProjects.clear();
-                    saveAppSettings();
-                }
-                ImGui::EndMenu();
-            }
-            if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
-            if (ImGui::MenuItem("Save Project As...")) saveProject();
-            if (ImGui::MenuItem("New Project")) closeProject();
-            ImGui::Separator();
-
-            // Build Import submenu from IOFormat contributions
-            auto& formats = PluginRegistry::instance().ioFormats();
-            bool hasImporters = false;
-            for (auto& fmt : formats) { if (fmt.canImport) { hasImporters = true; break; } }
-            if (hasImporters && ImGui::BeginMenu("Import")) {
-                for (size_t i = 0; i < formats.size(); ++i) {
-                    auto& fmt = formats[i];
-                    if (!fmt.canImport || !fmt.importFn) continue;
-                    ImGui::PushID(static_cast<int>(i));
-                    std::string label = fmt.name + "...";
-                    if (ImGui::MenuItem(label.c_str())) {
-                        fmt.importFn(*m_pluginContext, "");
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndMenu();
-            }
-
-            // Build Export submenu from IOFormat contributions
-            bool hasExporters = false;
-            for (auto& fmt : formats) { if (fmt.canExport) { hasExporters = true; break; } }
-            if (hasExporters && ImGui::BeginMenu("Export")) {
-                for (size_t i = 0; i < formats.size(); ++i) {
-                    auto& fmt = formats[i];
-                    if (!fmt.canExport || !fmt.exportFn) continue;
-                    ImGui::PushID(static_cast<int>(i) + 1000);
-                    std::string label = fmt.name + "...";
-                    if (ImGui::MenuItem(label.c_str())) {
-                        fmt.exportFn(*m_pluginContext, "");
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndMenu();
-            }
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Settings...")) {
-                // Stage the current bindings so the dialog can Cancel cleanly.
-                m_settingsOrbitButton = m_orbitButton;
-                m_settingsPanButton = m_panButton;
-                m_showSettings = true;
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Exit", "Alt+F4")) m_window->requestClose(true);
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Edit")) {
-            // Disabled while a legacy preview is live: those previews
-            // undo/re-push their op per frame, and an outside undo pops the
-            // preview op so the preview's NEXT cycle pops the user's last
-            // COMMITTED op instead — which then gets erased for good when
-            // the preview pushes over the redo tail. (How "pull, confirm,
-            // pull the other way" ate the first body.)
-            const bool histLocked = anyInteractivePreviewActive();
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
-                                !histLocked && m_history->canUndo())) {
-                undoWithCascade();
-            }
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
-                                !histLocked && m_history->canRedo())) {
-                redoWithCascade();
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("View")) {
-            if (ImGui::MenuItem("Reset Camera", "Home")) m_viewport->getCamera().reset();
-            // The F shortcut's menu twin — and the only way to frame on touch.
-            if (ImGui::MenuItem("Frame Selection", "F")) frameSelection();
-            if (ImGui::MenuItem("Section View", nullptr, &m_sectionEnabled)) {
-                m_sectionDirty = true;
-                if (m_sectionEnabled) {
-                    // Aim the plane through the middle of the visible
-                    // bodies so enabling it visibly halves the scene —
-                    // a zero-offset plane at the world origin can sit
-                    // entirely outside (or under) everything.
-                    try {
-                        Bnd_Box bb;
-                        for (int id : m_document->getAllBodyIds())
-                            if (m_document->isBodyVisible(id))
-                                BRepBndLib::Add(m_document->getBody(id), bb);
-                        if (!bb.IsVoid()) {
-                            double x0, y0, z0, x1, y1, z1;
-                            bb.Get(x0, y0, z0, x1, y1, z1);
-                            gp_Pnt c(0.5 * (x0 + x1), 0.5 * (y0 + y1),
-                                     0.5 * (z0 + z1));
-                            gp_Pln pl = sectionBasePlane();
-                            m_sectionOffset = static_cast<float>(
-                                gp_Vec(pl.Location(), c)
-                                    .Dot(gp_Vec(pl.Axis().Direction())));
-                        }
-                    } catch (...) {}
-                }
-            }
-            ImGui::Separator();
-            // Collapse the docked side panels to give the 3D view the whole
-            // window — a fallback for small screens (and a quick "maximize
-            // canvas" anywhere). The panels keep their docked widths and snap
-            // back on toggle. F9 on a keyboard; touch gets edge tabs. This menu
-            // item hides/shows BOTH columns at once; the checkmark = both hidden.
-            bool bothHidden = m_leftPanelHidden && m_rightPanelHidden;
-            if (ImGui::MenuItem("Hide Panels", "F9", bothHidden)) {
-                bool hide = !bothHidden;
-                m_leftPanelHidden = m_rightPanelHidden = hide;
-                saveAppSettings();
-            }
-            ImGui::Separator();
-            if (m_themeManager->renderSelector()) {
-                m_themeManager->apply();
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("User Guide")) m_helpPanel->setVisible(true);
-            if (ImGui::MenuItem("Keyboard Shortcuts")) m_shortcutsPanel->setVisible(true);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Check for Updates...")) {
-                m_showUpdatePopup = true;
-                m_updateChecked = false; // run the network call when the popup opens
-            }
-            // Plugin-contributed Help items (e.g. the Tutorial's "Getting
-            // Started"). Lets a plugin add a launcher without Application
-            // knowing about it. See renderPluginMenuItems.
-            renderPluginMenuItems("Help");
-            ImGui::Separator();
-            if (ImGui::MenuItem("About Materializr...")) m_aboutDialog->setVisible(true);
-            ImGui::EndMenu();
-        }
+        if (ImGui::BeginMenu("File")) { renderFileMenuItems(); ImGui::EndMenu(); }
+        if (ImGui::BeginMenu("Edit")) { renderEditMenuItems(); ImGui::EndMenu(); }
+        if (ImGui::BeginMenu("View")) { renderViewMenuItems(); ImGui::EndMenu(); }
+        if (ImGui::BeginMenu("Help")) { renderHelpMenuItems(); ImGui::EndMenu(); }
         // Touch: soft-keyboard toggle, right-aligned. Forces the system keyboard
         // up so you can type into the focused field (rename, save, dimensions);
         // tap again to dismiss. Check mark shows when it's forced on. (Window mode
@@ -1450,6 +1457,7 @@ AppSettings Application::currentSettings() const {
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
     s.touchMode = m_touchMode;
     s.imTouchUi = m_imTouchUi;
+    s.touchRightTab = m_touchRightTab;
     s.orbitButton = m_orbitButton;
     s.panButton = m_panButton;
     s.levelOrbit = m_viewport->getCamera().isLevelOrbit();
@@ -1512,6 +1520,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
     m_imTouchUi = s.imTouchUi;   // tablet shell — live, no restart needed
+    m_touchRightTab = (s.touchRightTab == 1) ? 1 : 0;
     // Camera button bindings are honoured on every platform. Android defaults to
     // trackpad mode (AppSettings sets orbit/pan = Left there) so one-finger touch
     // orbits out of the box, but an attached mouse/trackpad can be rebound via the

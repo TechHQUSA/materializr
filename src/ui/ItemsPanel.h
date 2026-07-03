@@ -55,6 +55,9 @@ public:
 
     // Returns true if a body was deleted (caller must rebuild meshes)
     bool render();
+    // Panel body without the "Items" window wrapper — for hosting inside
+    // another container (im-touch shell right panel). Same return contract.
+    bool renderContent();
 
 private:
     Document* m_document = nullptr;

@@ -26,6 +26,9 @@ public:
 
     // Render the panel. Returns true if history was modified (undo/redo/edit).
     bool render();
+    // Panel body without the "History" window wrapper — for hosting inside
+    // another container (im-touch shell right panel). Same return contract.
+    bool renderContent();
 
     // Open a given step in the inline editor (e.g. when the user clicks the face
     // a fillet/chamfer produced). -1 closes the editor.

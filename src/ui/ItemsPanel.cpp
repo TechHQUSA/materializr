@@ -30,8 +30,17 @@ void ItemsPanel::setHistory(History* hist) {
 }
 
 bool ItemsPanel::render() {
-    m_bodyDeleted = false;
     ImGui::Begin("Items", nullptr, ImGuiWindowFlags_NoCollapse);
+    const bool changed = renderContent();
+    ImGui::End();
+    return changed;
+}
+
+// Panel body without the window wrapper — the desktop render() hosts it in
+// the docked "Items" window, the im-touch shell hosts it inside its right
+// panel. Same return contract as render().
+bool ItemsPanel::renderContent() {
+    m_bodyDeleted = false;
     // AllowWhenBlockedByActiveItem: a held body row is the "active item", which
     // would otherwise make IsWindowHovered() report false — exactly during the
     // long-press we need to detect to arm its context menu.
@@ -40,7 +49,6 @@ bool ItemsPanel::render() {
 
     if (!m_document) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No document loaded.");
-        ImGui::End();
         return false;
     }
 
@@ -560,7 +568,6 @@ bool ItemsPanel::render() {
         }
     }
 
-    ImGui::End();
     return m_bodyDeleted || colorChanged;
 }
 

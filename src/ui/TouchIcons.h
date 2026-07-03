@@ -18,6 +18,7 @@
 #define MZ_ICON_CLOSE      ICON_IC_XMARK
 #define MZ_ICON_SETTINGS   ICON_IC_SETTINGS
 #define MZ_ICON_ABOUT      ICON_IC_INFO_CIRCLE
+#define MZ_ICON_KEYBOARD   ICON_IC_TYPE  // closest glyph: text-input "Aa"
 
 // Files
 #define MZ_ICON_OPEN       ICON_IC_FOLDER

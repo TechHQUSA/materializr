@@ -137,6 +137,11 @@ private:
     void renderDockspace();
     void renderViewport();
     void renderMenuBar();
+    // Menu bodies shared by the desktop menu bar and the im-touch overflow.
+    void renderFileMenuItems();
+    void renderEditMenuItems();
+    void renderViewMenuItems();
+    void renderHelpMenuItems();
     // "im-touch" tablet shell (Application_TouchShell.cpp): top app bar + tool
     // rail + right panel replacing dockspace/menu bar/status bar when
     // m_imTouchUi is on. Computes the viewport rect renderViewport() pins to.

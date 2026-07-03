@@ -27,13 +27,18 @@ void HistoryPanel::setDocument(Document* doc) {
 }
 
 bool HistoryPanel::render() {
-    bool modified = false;
-
     ImGui::Begin("History", nullptr, ImGuiWindowFlags_NoCollapse);
+    const bool modified = renderContent();
+    ImGui::End();
+    return modified;
+}
+
+// Panel body without the window wrapper — see ItemsPanel::renderContent().
+bool HistoryPanel::renderContent() {
+    bool modified = false;
 
     if (!m_history || !m_document) {
         ImGui::TextColored(materializr::dimText(), "No history available.");
-        ImGui::End();
         return false;
     }
 
@@ -418,7 +423,6 @@ bool HistoryPanel::render() {
     std::snprintf(stepText, sizeof(stepText), "Step %d/%d", currentStep + 1, stepCount);
     ImGui::Text("%s", stepText);
 
-    ImGui::End();
     return modified;
 }
 
