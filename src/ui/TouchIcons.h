@@ -54,6 +54,10 @@
 #define MZ_ICON_LATHE      ICON_IC_ROTATE_CAMERA_RIGHT
 #define MZ_ICON_SUBTRACT   ICON_IC_MINUS
 #define MZ_ICON_LOOK       ICON_IC_EYE
+// Rail "Primitive" group: no single Iconoir glyph reads as "basic solids", so
+// compose square+circle side by side (drawIconCentered renders the pair as one
+// centered string). Deliberately distinct from MZ_ICON_EXTRUDE.
+#define MZ_ICON_PRIMITIVE  ICON_IC_SQUARE ICON_IC_CIRCLE
 
 // Sketch-mode drawing tools (Phase 3 rail)
 #define MZ_ICON_SELECT     ICON_IC_CURSOR_POINTER

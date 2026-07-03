@@ -20,6 +20,7 @@
 #include "plugin/PluginContext.h"
 #include "ui/HistoryPanel.h"
 #include "ui/ItemsPanel.h"
+#include "ui/PropertiesPanel.h"
 #include "ui/Toolbar.h"       // ToolAction for the starter rail entries
 #include "ui/TouchIcons.h"
 #include "ui/TouchTheme.h"
@@ -56,10 +57,6 @@ void Application::renderTouchOverflowPopup() {
         renderEditMenuItems();
         ImGui::EndMenu();
     }
-    if (ImGui::BeginMenu(MZ_ICON_EXTRUDE "  Tools")) {
-        renderToolsMenuItems();
-        ImGui::EndMenu();
-    }
     if (ImGui::BeginMenu(MZ_ICON_FOCUS "  View")) {
         renderViewMenuItems();
         ImGui::EndMenu();
@@ -92,7 +89,7 @@ void Application::renderTouchShell() {
 
     const float topH   = 60.0f * s;
     const float railW  = m_leftPanelHidden  ? 0.0f : 92.0f * s;
-    const float rightW = m_rightPanelHidden ? 0.0f : 320.0f * s;
+    const float rightW = m_rightPanelHidden ? 0.0f : 300.0f * s; // compacted (was 320)
 
     // ── Top app bar ─────────────────────────────────────────────────────────
     ImGui::SetNextWindowPos(wp);
@@ -149,10 +146,18 @@ void Application::renderTouchShell() {
         // viewport bar, where it overlapped the FULL pill.
         const bool showMulti = !m_inSketchMode ||
             (m_sketchTool && m_sketchTool->getMode() == SketchToolMode::Select);
+        // Context-clear labels so nobody discards a whole sketch by reflex: while
+        // a draw tool is running the buttons act on its SHAPE (Finish / Cancel);
+        // with no tool running (e.g. Select/move) they act on the SKETCH, and say
+        // so — "Finish Sketch" / "Discard Sketch".
+        const bool toolRunning = m_inSketchMode && m_sketchTool &&
+                                 m_sketchTool->isPlacing();
+        const char* finishLbl = toolRunning ? "Finish" : "Finish Sketch";
+        const char* exitLbl   = toolRunning ? "Cancel" : "Discard Sketch";
         const float focusW = pillW("Focus");
         float total = bh * nSquare + focusW + sp * nSquare;
         if (m_inSketchMode)
-            total += pillW("Finish") + pillW("Exit") + sp * 2;
+            total += pillW(finishLbl) + pillW(exitLbl) + sp * 2;
         if (showMulti)
             total += pillW("Multi") + sp;
         float x = ws.x - pad - total;
@@ -167,10 +172,7 @@ void Application::renderTouchShell() {
         }
 
         if (m_inSketchMode) {
-            // Context-smart: a running draw tool finishes / cancels its own
-            // shape; with no tool mid-placement, Finish/Exit act on the sketch.
-            const bool toolRunning = m_sketchTool && m_sketchTool->isPlacing();
-            if (touchui::pillButton("finish", MZ_ICON_FINISH, "Finish", true)) {
+            if (touchui::pillButton("finish", MZ_ICON_FINISH, finishLbl, true)) {
                 if (toolRunning)
                     recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
                 else
@@ -178,11 +180,28 @@ void Application::renderTouchShell() {
             }
             ImGui::SameLine(0.0f, sp);
             ImGui::SetCursorPosY(cy);
-            if (touchui::pillButton("exit", MZ_ICON_DISCARD, "Exit")) {
+            if (touchui::pillButton("exit", MZ_ICON_DISCARD, exitLbl)) {
                 if (toolRunning)
                     m_sketchTool->onCancel();       // discard the in-progress shape
                 else
+                    // Whole-sketch discard is destructive — confirm first so a
+                    // misclick can't throw the sketch away.
+                    ImGui::OpenPopup("Discard sketch?");
+            }
+            if (ImGui::BeginPopupModal("Discard sketch?", nullptr,
+                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted(
+                    "Leave the sketch and throw away its changes?");
+                ImGui::Spacing();
+                const float bw = 150.0f * s;
+                if (ImGui::Button("Discard Sketch", ImVec2(bw, 44.0f * s))) {
+                    ImGui::CloseCurrentPopup();
                     handleToolAction(static_cast<int>(ToolAction::ExitSketchDiscard));
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Keep Editing", ImVec2(bw, 44.0f * s)))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
             }
             ImGui::SameLine(0.0f, sp);
             ImGui::SetCursorPosY(cy);
@@ -234,6 +253,71 @@ void Application::renderTouchShell() {
                         handleToolAction(static_cast<int>(tool.action));
                 }
             }
+
+            // Create tools the contextual rail omits — grouped popups so they're
+            // one tap away (not buried in the ⋯ menu). Themed by the surrounding
+            // TouchTheme scope. With nothing selected: primitives + sketch-on-
+            // plane; with a supporting selection: derive a construction plane/axis.
+            const bool nothingSel = !m_inSketchMode &&
+                (!m_selection || !m_selection->hasSelection());
+            // On a touch screen the group popups get roomier rows (bigger
+            // padding + row gap) so each entry is an easy finger target.
+            const bool touchPad = materializr::touchMode();
+            auto pushPopupPad = [&] {
+                if (!touchPad) return;
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                                    ImVec2(16.0f * s, 13.0f * s));
+                ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                                    ImVec2(12.0f * s, 14.0f * s));
+            };
+            auto popPopupPad = [&] { if (touchPad) ImGui::PopStyleVar(2); };
+            if (nothingSel) {
+                if (touchui::railButton("primGroup", MZ_ICON_PRIMITIVE,
+                                        "Primitive", false))
+                    ImGui::OpenPopup("##railPrimitive");
+                pushPopupPad();
+                if (ImGui::BeginPopup("##railPrimitive")) {
+                    if (m_pluginContext) {
+                        if (ImGui::MenuItem("Box"))
+                            m_pluginContext->requestInteractiveOp("PrimitiveBox");
+                        if (ImGui::MenuItem("Cylinder"))
+                            m_pluginContext->requestInteractiveOp("PrimitiveCylinder");
+                        if (ImGui::MenuItem("Sphere"))
+                            m_pluginContext->requestInteractiveOp("PrimitiveSphere");
+                        if (ImGui::MenuItem("Cone"))
+                            m_pluginContext->requestInteractiveOp("PrimitiveCone");
+                        if (ImGui::MenuItem("Torus"))
+                            m_pluginContext->requestInteractiveOp("PrimitiveTorus");
+                    }
+                    ImGui::EndPopup();
+                }
+                popPopupPad();
+                if (touchui::railButton("sketchOnGroup", MZ_ICON_SKETCH,
+                                        "Sketch on...", false))
+                    ImGui::OpenPopup("##railSketchOn");
+                pushPopupPad();
+                if (ImGui::BeginPopup("##railSketchOn")) {
+                    if (ImGui::MenuItem("XY plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchXY));
+                    if (ImGui::MenuItem("XZ plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchXZ));
+                    if (ImGui::MenuItem("YZ plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchYZ));
+                    ImGui::EndPopup();
+                }
+                popPopupPad();
+            } else if (!m_inSketchMode && m_selection &&
+                       m_selection->hasSelection()) {
+                if (touchui::railButton("constructGroup", MZ_ICON_FOCUS,
+                                        "Construct", false))
+                    ImGui::OpenPopup("##railConstruct");
+                pushPopupPad();
+                if (ImGui::BeginPopup("##railConstruct")) {
+                    renderConstructionMenuItems();
+                    ImGui::EndPopup();
+                }
+                popPopupPad();
+            }
         }
         ImGui::End();
     }
@@ -246,8 +330,8 @@ void Application::renderTouchShell() {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                             ImVec2(14.0f * s, 12.0f * s));
         if (ImGui::Begin("##TouchRight", nullptr, kShellWin)) {
-            static const char* kTabs[] = { "Items", "History" };
-            const int tab = touchui::segmented("rightTabs", kTabs, 2,
+            static const char* kTabs[] = { "Items", "History", "Props" };
+            const int tab = touchui::segmented("rightTabs", kTabs, 3,
                                                m_touchRightTab);
             if (tab != m_touchRightTab) {
                 m_touchRightTab = tab;
@@ -262,8 +346,11 @@ void Application::renderTouchShell() {
                         m_hoveredBodyId = -1;
                         m_meshesDirty = true;
                     }
-                } else {
+                } else if (m_touchRightTab == 1) {
                     if (m_historyPanel && m_historyPanel->renderContent())
+                        m_meshesDirty = true;
+                } else {
+                    if (m_propertiesPanel && m_propertiesPanel->renderContent())
                         m_meshesDirty = true;
                 }
             }
@@ -418,12 +505,15 @@ void Application::renderTouchShellLite() {
                     handleToolAction(static_cast<int>(tool.action));
             }
             if (m_inSketchMode) {
-                const float pillY = ImGui::GetCursorPosY() - 62.0f * s +
-                                    (62.0f - 44.0f) * 0.5f * s;
+                // 52 = railButton height (TouchWidgets.cpp) — keep in sync.
+                const float pillY = ImGui::GetCursorPosY() - 52.0f * s +
+                                    (52.0f - 44.0f) * 0.5f * s;
                 const bool toolRunning = m_sketchTool && m_sketchTool->isPlacing();
+                const char* finishLbl = toolRunning ? "Finish" : "Finish Sketch";
+                const char* exitLbl   = toolRunning ? "Cancel" : "Discard Sketch";
                 ImGui::SameLine(0.0f, 12.0f * s);
                 ImGui::SetCursorPosY(pillY);
-                if (touchui::pillButton("finish", MZ_ICON_FINISH, "Finish", true)) {
+                if (touchui::pillButton("finish", MZ_ICON_FINISH, finishLbl, true)) {
                     if (toolRunning)
                         recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
                     else
@@ -431,11 +521,26 @@ void Application::renderTouchShellLite() {
                 }
                 ImGui::SameLine(0.0f, 8.0f * s);
                 ImGui::SetCursorPosY(pillY);
-                if (touchui::pillButton("exit", MZ_ICON_DISCARD, "Exit")) {
+                if (touchui::pillButton("exit", MZ_ICON_DISCARD, exitLbl)) {
                     if (toolRunning)
                         m_sketchTool->onCancel();
                     else
+                        ImGui::OpenPopup("Discard sketch?"); // confirm — destructive
+                }
+                if (ImGui::BeginPopupModal("Discard sketch?", nullptr,
+                                           ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::TextUnformatted(
+                        "Leave the sketch and throw away its changes?");
+                    ImGui::Spacing();
+                    const float bw = 150.0f * s;
+                    if (ImGui::Button("Discard Sketch", ImVec2(bw, 44.0f * s))) {
+                        ImGui::CloseCurrentPopup();
                         handleToolAction(static_cast<int>(ToolAction::ExitSketchDiscard));
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Keep Editing", ImVec2(bw, 44.0f * s)))
+                        ImGui::CloseCurrentPopup();
+                    ImGui::EndPopup();
                 }
             }
         }

@@ -1203,50 +1203,6 @@ void Application::renderEditMenuItems() {
     }
 }
 
-void Application::renderToolsMenuItems() {
-    if (ImGui::MenuItem("New Sketch"))
-        handleToolAction(static_cast<int>(ToolAction::StartSketch));
-
-    // Sketch on ▸ — the world planes always, the selected face when one's picked.
-    if (ImGui::BeginMenu("Sketch on")) {
-        if (ImGui::MenuItem("XY plane"))
-            handleToolAction(static_cast<int>(ToolAction::StartSketchXY));
-        if (ImGui::MenuItem("XZ plane"))
-            handleToolAction(static_cast<int>(ToolAction::StartSketchXZ));
-        if (ImGui::MenuItem("YZ plane"))
-            handleToolAction(static_cast<int>(ToolAction::StartSketchYZ));
-        const bool haveFace = m_selection && m_selection->hasSelectedFaces();
-        if (ImGui::MenuItem("Selected face", nullptr, false, haveFace))
-            handleToolAction(static_cast<int>(ToolAction::SketchOnFace));
-        ImGui::EndMenu();
-    }
-
-    // Primitive ▸ — the same interactive ops the create FAB / toolbar fire.
-    if (m_pluginContext && ImGui::BeginMenu("Primitive")) {
-        if (ImGui::MenuItem("Box"))
-            m_pluginContext->requestInteractiveOp("PrimitiveBox");
-        if (ImGui::MenuItem("Cylinder"))
-            m_pluginContext->requestInteractiveOp("PrimitiveCylinder");
-        if (ImGui::MenuItem("Sphere"))
-            m_pluginContext->requestInteractiveOp("PrimitiveSphere");
-        if (ImGui::MenuItem("Cone"))
-            m_pluginContext->requestInteractiveOp("PrimitiveCone");
-        if (ImGui::MenuItem("Torus"))
-            m_pluginContext->requestInteractiveOp("PrimitiveTorus");
-        ImGui::EndMenu();
-    }
-
-    // Construction ▸ — Plane + Axis, both derived from the current selection.
-    if (ImGui::BeginMenu("Construction")) {
-        renderConstructionMenuItems();
-        ImGui::EndMenu();
-    }
-
-    ImGui::Separator();
-    if (ImGui::MenuItem("Measure"))
-        handleToolAction(static_cast<int>(ToolAction::Measure));
-}
-
 void Application::renderConstructionMenuItems() {
     // Detect which plane/axis derivations the current selection supports —
     // mirrors Toolbar::renderAddPlaneMenu / renderAddAxisMenu (keep in sync).

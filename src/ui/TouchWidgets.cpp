@@ -29,7 +29,10 @@ bool railButton(const char* id, const char* icon, const char* label, bool active
                 float width) {
     const float s = uiScale();
     const float w = width > 0.0f ? width : ImGui::GetContentRegionAvail().x;
-    const float h = 62.0f * s;
+    // 52 (was 62): shorter so the whole tool set fits with less scrolling,
+    // still comfortably above the 44pt touch floor. If this changes, update
+    // the lite shell's bottom-bar pill alignment (hardcodes the same height).
+    const float h = 52.0f * s;
 
     ImGui::PushID(id);
     const ImVec2 p = ImGui::GetCursorScreenPos();
