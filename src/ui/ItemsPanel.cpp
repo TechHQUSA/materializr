@@ -66,20 +66,33 @@ bool ItemsPanel::renderContent() {
     ImGui::TextColored(materializr::accentText(), "Filter");
     ImGui::Separator();
 
-    // Touch mode wraps the third toggle to a second row so the filter strip needs
-    // only the width of two buttons (the 2x font otherwise pushes the whole right
-    // panel wide). Desktop keeps all three on one line.
-    const bool filterWrap = materializr::touchMode();
-    if (ImGui::Button(m_showBodies ? "[Bodies]" : " Bodies ")) {
-        m_showBodies = !m_showBodies;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(m_showSketches ? "[Sketches]" : " Sketches ")) {
-        m_showSketches = !m_showSketches;
-    }
-    if (!filterWrap) ImGui::SameLine();
-    if (ImGui::Button(m_showPlanes ? "[Construction]" : " Construction ")) {
-        m_showPlanes = !m_showPlanes;
+    // The toggles wrap to fit whatever width the host panel has — each one
+    // stays on the current row only if it actually fits, so a narrow panel
+    // (the touch shell's is user-resizable) stacks them instead of pushing
+    // the panel wide. The width probe mirrors Button sizing (label +
+    // 2×FramePadding.x); the [x] on/off states are same-width by design.
+    {
+        const ImGuiStyle& st = ImGui::GetStyle();
+        // Measure from the PREVIOUS item's right edge (screen space) — after an
+        // item the cursor is already at the next line's start, so CursorPosX
+        // would always say "fits".
+        auto fits = [&](const char* label) {
+            const float w = ImGui::CalcTextSize(label).x + st.FramePadding.x * 2.0f;
+            const float rightEdge = ImGui::GetWindowPos().x +
+                                    ImGui::GetWindowContentRegionMax().x;
+            return ImGui::GetItemRectMax().x + st.ItemSpacing.x + w <= rightEdge;
+        };
+        if (ImGui::Button(m_showBodies ? "[Bodies]" : " Bodies ")) {
+            m_showBodies = !m_showBodies;
+        }
+        if (fits("[Sketches]")) ImGui::SameLine();
+        if (ImGui::Button(m_showSketches ? "[Sketches]" : " Sketches ")) {
+            m_showSketches = !m_showSketches;
+        }
+        if (fits("[Construction]")) ImGui::SameLine();
+        if (ImGui::Button(m_showPlanes ? "[Construction]" : " Construction ")) {
+            m_showPlanes = !m_showPlanes;
+        }
     }
 
     ImGui::Separator();

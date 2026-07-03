@@ -164,18 +164,30 @@ int segmented(const char* id, const char* const items[], int count, int active) 
     const float s = uiScale();
     const float h = 44.0f * s;
     const float w = ImGui::GetContentRegionAvail().x;
-    const float seg = w / static_cast<float>(count);
+
+    // Segments are sized proportionally to their labels (a short "Items" cedes
+    // room to "History & Properties") instead of equal halves; text is clipped
+    // to its segment so a too-narrow panel can't bleed the label off-panel.
+    float need[16];
+    float total = 0.0f;
+    const int n = count > 16 ? 16 : count;
+    for (int i = 0; i < n; ++i) {
+        need[i] = ImGui::CalcTextSize(items[i]).x + 24.0f * s;
+        total += need[i];
+    }
 
     ImGui::PushID(id);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     int result = active;
-    for (int i = 0; i < count; ++i) {
+    float x = p.x;
+    for (int i = 0; i < n; ++i) {
+        const float seg = w * (need[i] / total);
         ImGui::PushID(i);
-        ImGui::SetCursorScreenPos(ImVec2(p.x + seg * i, p.y));
+        ImGui::SetCursorScreenPos(ImVec2(x, p.y));
         if (ImGui::InvisibleButton("##seg", ImVec2(seg, h))) result = i;
         const bool hovered = ImGui::IsItemHovered();
-        const ImVec2 a(p.x + seg * i, p.y), b(p.x + seg * (i + 1), p.y + h);
+        const ImVec2 a(x, p.y), b(x + seg, p.y + h);
         if (i == active) {
             // Active segment: outlined pill (mockup style).
             dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), 10.0f * s);
@@ -185,10 +197,14 @@ int segmented(const char* id, const char* const items[], int count, int active) 
             dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), 10.0f * s);
         }
         const ImVec2 ts = ImGui::CalcTextSize(items[i]);
-        dl->AddText(ImVec2(a.x + (seg - ts.x) * 0.5f, a.y + (h - ts.y) * 0.5f),
+        dl->PushClipRect(a, b, true);
+        dl->AddText(ImVec2(a.x + std::max(6.0f * s, (seg - ts.x) * 0.5f),
+                           a.y + (h - ts.y) * 0.5f),
                     ImGui::GetColorU32(i == active ? textPrimary() : textDim()),
                     items[i]);
+        dl->PopClipRect();
         ImGui::PopID();
+        x += seg;
     }
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
     ImGui::Spacing();

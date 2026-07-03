@@ -92,7 +92,7 @@ void Application::renderTouchShell() {
 
     const float topH   = 60.0f * s;
     const float railW  = m_leftPanelHidden  ? 0.0f : 92.0f * s;
-    const float rightW = m_rightPanelHidden ? 0.0f : 300.0f * s; // compacted (was 320)
+    const float rightW = m_rightPanelHidden ? 0.0f : m_touchRightW * s; // user-resizable
 
     // ── Top app bar ─────────────────────────────────────────────────────────
     // The fixed bars are edge-flush strips — opt out of the theme's global
@@ -339,7 +339,7 @@ void Application::renderTouchShell() {
         ImGui::End();
     }
 
-    // ── Right side panel (Phase 2: Items | History content) ─────────────────
+    // ── Right side panel (Items | History & Properties) ─────────────────────
     if (rightW > 0.0f) {
         ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x - rightW, wp.y + topH));
         ImGui::SetNextWindowSize(ImVec2(rightW, ws.y - topH));
@@ -347,8 +347,35 @@ void Application::renderTouchShell() {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                             ImVec2(14.0f * s, 12.0f * s));
         if (beginFlushBar("##TouchRight", kShellWin)) {
-            static const char* kTabs[] = { "Items", "History", "Properties" };
-            const int tab = touchui::segmented("rightTabs", kTabs, 3,
+            // Left-edge drag splitter: the panel is resizable. Screen-space
+            // strip along the window's left edge; drag left = wider (the
+            // panel is right-anchored). Width persists via m_touchRightW.
+            {
+                const ImVec2 winPos = ImGui::GetWindowPos();
+                const ImVec2 keep = ImGui::GetCursorPos();
+                ImGui::SetCursorScreenPos(winPos);
+                ImGui::InvisibleButton("##rightResize",
+                                       ImVec2(10.0f * s, ws.y - topH));
+                const bool active = ImGui::IsItemActive();
+                if (ImGui::IsItemHovered() || active)
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                if (active) {
+                    m_touchRightW -= ImGui::GetIO().MouseDelta.x / s;
+                    if (m_touchRightW < 200.0f) m_touchRightW = 200.0f;
+                    if (m_touchRightW > 520.0f) m_touchRightW = 520.0f;
+                }
+                if (ImGui::IsItemDeactivated()) saveAppSettings();
+                // Grip hint: hairline normally, accent while grabbed/hovered.
+                ImGui::GetWindowDrawList()->AddRectFilled(
+                    winPos, ImVec2(winPos.x + 3.0f * s, winPos.y + ws.y - topH),
+                    ImGui::GetColorU32(active ? touchui::accentDeep()
+                                              : touchui::hairline()));
+                ImGui::SetCursorPos(keep);
+            }
+
+            static const char* kTabs[] = { "Items", "History & Properties" };
+            if (m_touchRightTab > 1) m_touchRightTab = 1; // migrate old 3-tab value
+            const int tab = touchui::segmented("rightTabs", kTabs, 2,
                                                m_touchRightTab);
             if (tab != m_touchRightTab) {
                 m_touchRightTab = tab;
@@ -363,12 +390,23 @@ void Application::renderTouchShell() {
                         m_hoveredBodyId = -1;
                         m_meshesDirty = true;
                     }
-                } else if (m_touchRightTab == 1) {
-                    if (m_historyPanel && m_historyPanel->renderContent())
-                        m_meshesDirty = true;
                 } else {
-                    if (m_propertiesPanel && m_propertiesPanel->renderContent())
-                        m_meshesDirty = true;
+                    // History on top, Properties beneath — one tab hosts both
+                    // (the step list and the editor for the selected step /
+                    // selection live together).
+                    const float histH = ImGui::GetContentRegionAvail().y * 0.5f;
+                    if (ImGui::BeginChild("##histHalf", ImVec2(0, histH), false)) {
+                        if (m_historyPanel && m_historyPanel->renderContent())
+                            m_meshesDirty = true;
+                    }
+                    ImGui::EndChild();
+                    ImGui::Separator();
+                    touchui::sectionHeader("Properties");
+                    if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0), false)) {
+                        if (m_propertiesPanel && m_propertiesPanel->renderContent())
+                            m_meshesDirty = true;
+                    }
+                    ImGui::EndChild();
                 }
             }
             ImGui::EndChild();

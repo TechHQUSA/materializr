@@ -724,9 +724,12 @@ private:
     // (screen coords, points). Written by renderTouchShell(), read by
     // renderViewport() to pin the undocked "Viewport" window.
     float m_touchVpX = 0.0f, m_touchVpY = 0.0f, m_touchVpW = 0.0f, m_touchVpH = 0.0f;
-    // Active tab of the touch shell's right panel (0 = Items, 1 = History).
-    // Session-local for now; persisted in Phase 2.
+    // Active tab of the touch shell's right panel (0 = Items,
+    // 1 = History & Properties). Persisted.
     int m_touchRightTab = 0;
+    // Right-panel width in logical px (× uiScale at use); dragged via the
+    // panel's left-edge splitter, persisted, clamped at both ends.
+    float m_touchRightW = 300.0f;
 
     // Autosave: once the project has been saved at least once (has a path on
     // disk), periodically re-save dirty changes. Toggled in File > Settings.

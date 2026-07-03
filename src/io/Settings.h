@@ -31,7 +31,10 @@ struct AppSettings {
     // Construction) floating on the right edge. Toggled by the list button
     // in the lite top-right cluster.
     bool imTouchLiteTree    = true;
-    int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History
+    int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History & Properties
+    // Shell right-panel width in logical px (× uiScale at use) — written by
+    // the panel's left-edge drag splitter.
+    float touchRightW       = 300.0f;
 #if defined(MZ_MOBILE)
     // Touch-first default: trackpad mode (one-finger drag = orbit, two-finger
     // pan/zoom). Just the first-run default — the Settings dialog can rebind to
