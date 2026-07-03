@@ -1058,9 +1058,11 @@ void Application::renderTouchShellLite() {
                 if (i == failedAt)          tint = red;
                 else if (op->isReloaded())  tint = amber;
                 const bool dim = (i > curr) || !op->isEnabled();
+                std::string stepName = op->name();
+                if (stepName.empty()) stepName = op->typeId();
                 if (touchui::timelineBox("step", liteStepIcon(op->typeId()),
                                          i == curr, i == m_liteHistoryEdit,
-                                         dim, tint)) {
+                                         dim, tint, 0.0f, stepName.c_str())) {
                     m_liteHistoryEdit = (m_liteHistoryEdit == i) ? -1 : i;
                     wantOpen = (m_liteHistoryEdit == i);
                     // Drive the viewport's orange edited-element highlight.

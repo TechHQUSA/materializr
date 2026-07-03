@@ -249,13 +249,22 @@ void sectionHeader(const char* text) {
 }
 
 bool timelineBox(const char* id, const char* icon, bool current, bool editing,
-                 bool dim, ImU32 iconCol, float side) {
+                 bool dim, ImU32 iconCol, float side, const char* label) {
     const float s = uiScale();
     if (side <= 0.0f) side = 48.0f * s;
 
+    const bool hasLabel = label && label[0];
+    const float iconSz = 20.0f * s;
+    const float pad    = 12.0f * s;   // left inset for the icon in a pill
+    const float gap    = 9.0f * s;    // icon → text gap
+    const float labelW = hasLabel ? ImGui::CalcTextSize(label).x : 0.0f;
+    // Square when icon-only; a pill sized to icon + text when labelled.
+    const float boxW = hasLabel ? (pad + iconSz + gap + labelW + pad) : side;
+    const float boxH = side;
+
     ImGui::PushID(id);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::InvisibleButton("##tl", ImVec2(side, side));
+    const bool pressed = ImGui::InvisibleButton("##tl", ImVec2(boxW, boxH));
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
@@ -263,18 +272,24 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
     if (hovered && !current) bg = ImVec4(0.16f, 0.19f, 0.24f, 1.0f);
     if (ImGui::IsItemActive())
         bg = current ? accentDeep() : ImVec4(0.20f, 0.24f, 0.31f, 1.0f);
-    dl->AddRectFilled(p, ImVec2(p.x + side, p.y + side),
+    dl->AddRectFilled(p, ImVec2(p.x + boxW, p.y + boxH),
                       ImGui::GetColorU32(bg), 10.0f * s);
     if (editing)
-        dl->AddRect(p, ImVec2(p.x + side, p.y + side),
+        dl->AddRect(p, ImVec2(p.x + boxW, p.y + boxH),
                     ImGui::GetColorU32(accentDeep()), 10.0f * s, 0, 2.0f * s);
 
     ImU32 fg = iconCol;
     if (fg == 0)
         fg = ImGui::GetColorU32(current ? onAccent()
                                         : (dim ? textDim() : textPrimary()));
-    drawIconCentered(dl, ImVec2(p.x + side * 0.5f, p.y + side * 0.5f),
-                     20.0f * s, icon, fg);
+    const float iconCx = hasLabel ? p.x + pad + iconSz * 0.5f
+                                   : p.x + boxW * 0.5f;
+    drawIconCentered(dl, ImVec2(iconCx, p.y + boxH * 0.5f), iconSz, icon, fg);
+    if (hasLabel) {
+        const float th = ImGui::GetTextLineHeight();
+        dl->AddText(ImVec2(p.x + pad + iconSz + gap, p.y + (boxH - th) * 0.5f),
+                    fg, label);
+    }
     ImGui::PopID();
     return pressed;
 }

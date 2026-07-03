@@ -43,8 +43,11 @@ void sectionHeader(const char* text);
 // popup is open); `dim` greys the icon (undone / disabled steps); `iconCol`
 // overrides the icon colour when non-zero (frozen amber, failed red).
 // Returns true on press.
+// A non-empty `label` widens the box into a pill (icon + name to its right)
+// so a strip of steps reads as words, not a wall of identical glyphs.
 bool timelineBox(const char* id, const char* icon, bool current, bool editing,
-                 bool dim, ImU32 iconCol = 0, float side = 0.0f);
+                 bool dim, ImU32 iconCol = 0, float side = 0.0f,
+                 const char* label = nullptr);
 
 // 44pt list row: leading visibility checkbox, label, trailing ⋯ button.
 // Returns which part was pressed this frame.
