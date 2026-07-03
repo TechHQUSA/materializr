@@ -26,6 +26,14 @@ modeling, threads, SVG & text engraving, STL/STEP/SVG export.
 | Android (latest APK) | `Materializr-*-arm64-v8a.apk` | sideload (enable "install unknown apps") for the freshest fixes; tablets recommended |
 | macOS (Apple Silicon) | `Materializr-*-arm64.dmg` | open the `.dmg`, drag **Materializr** to Applications — see the first-launch note below |
 
+> **Linux glibc requirement:** the AppImage is built on a current toolchain, so
+> it needs **glibc 2.38 or newer** (Ubuntu 24.04+, Fedora 39+, Zorin 18+ — any
+> 2024-or-later distro). On older systems it won't start, failing with
+> `GLIBC_2.38 not found` / `GLIBCXX_3.4.32 not found`. If you're on an older
+> distro, either [build from source](docs/building.md) — it compiles against
+> your own libraries, so there's no version floor — or run the AppImage inside
+> an `ubuntu:24.04` [Distrobox](https://distrobox.it/) / Toolbox container.
+
 > **Prefer F-Droid?** It builds each release from source on its own
 > roughly-weekly cadence, so a brand-new bug fix can take a few days to reach it.
 > If you're chasing a fix we just shipped, the GitHub APK above will have it
