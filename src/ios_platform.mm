@@ -8,6 +8,7 @@
 #if defined(MZ_IOS)
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 
 #include <SDL.h>
 
@@ -41,6 +42,24 @@ int lifecycleWatch(void*, SDL_Event* e) {
 
 bool iosInBackground() { return g_inBackground.load(std::memory_order_relaxed); }
 
+void iosSafeAreaInsets(float& top, float& left, float& bottom, float& right) {
+    top = left = bottom = right = 0.0f;
+    @autoreleasepool {
+        UIWindow* win = nil;
+        for (UIWindow* w in UIApplication.sharedApplication.windows) {
+            if (w.isKeyWindow) { win = w; break; }
+        }
+        if (!win) win = UIApplication.sharedApplication.windows.firstObject;
+        if (win) {
+            const UIEdgeInsets in = win.safeAreaInsets;
+            top    = static_cast<float>(in.top);
+            left   = static_cast<float>(in.left);
+            bottom = static_cast<float>(in.bottom);
+            right  = static_cast<float>(in.right);
+        }
+    }
+}
+
 void iosInitRuntime() {
     @autoreleasepool {
         // (1) cwd -> bundle root, so resolveBundledFont()'s cwd-relative
@@ -51,10 +70,13 @@ void iosInitRuntime() {
             std::fprintf(stderr, "ios: chdir to bundle resourcePath failed\n");
 
         // (2) Settings: SettingsIO::defaultPath() uses $HOME/.config/materializr.
-        //     $HOME already points at the sandbox container on iOS; just make
-        //     sure the directory exists (container root is writable, but be
-        //     loud if that ever changes — settings silently not persisting is
-        //     a miserable bug to chase).
+        //     The container *root* $HOME points at is not writable on device
+        //     (mkdir → EPERM; only Documents/, Library/, tmp/ are) — re-point
+        //     HOME at Library/ so the desktop path logic lands somewhere
+        //     writable, out of the user's Files view, and backed up.
+        NSString* lib = NSSearchPathForDirectoriesInDomains(
+                            NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+        if (lib) setenv("HOME", lib.UTF8String, 1);
         const char* home = std::getenv("HOME");
         if (home) {
             std::error_code ec;

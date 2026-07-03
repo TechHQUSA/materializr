@@ -54,7 +54,7 @@ void Viewport::unbind()
         glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
                           GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_windowFramebuffer);
 }
 
 void Viewport::setSamples(int samples)
@@ -123,7 +123,7 @@ void Viewport::createFramebuffer()
                                   GL_RENDERBUFFER, m_msaaDepth);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_windowFramebuffer);
 }
 
 void Viewport::destroyFramebuffer()

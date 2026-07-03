@@ -422,6 +422,19 @@ static const char* computeImguiIniPath() {
     std::error_code ec;
     std::filesystem::create_directories(base, ec);
     s_imguiIniPath = base + "\\imgui.ini";
+#elif defined(MZ_IOS)
+    // cwd is the read-only .app bundle (iosInitRuntime chdirs there for the
+    // asset lookups) — a relative path would silently never save the layout.
+    // Anchor next to the settings ($HOME -> <container>/Library, see
+    // ios_platform.mm).
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        std::string base = std::string(home) + "/.config/materializr";
+        std::error_code ec;
+        std::filesystem::create_directories(base, ec);
+        s_imguiIniPath = base + "/imgui.ini";
+    } else {
+        s_imguiIniPath = "imgui.ini";
+    }
 #else
     s_imguiIniPath = "imgui.ini";
 #endif
@@ -784,6 +797,28 @@ void Application::beginFrame() {
         }
     }
     ImGui::NewFrame();
+#if defined(MZ_IOS)
+    // Shrink the root work rect by the device safe areas (status bar, rounded
+    // corners, home indicator) so the menu bar / dockspace / status bar all
+    // clear the system UI. WorkOffset* are re-derived inside NewFrame every
+    // frame, so this must re-apply here, before any window is positioned.
+    {
+        float t = 0, l = 0, b = 0, r = 0;
+        materializr::iosSafeAreaInsets(t, l, b, r);
+        if (t > 0 || l > 0 || b > 0 || r > 0) {
+            // Claim the safe areas from the BUILD inset accumulator, the same
+            // way BeginViewportSideBar claims the menu bar's strip: the main
+            // menu bar positions itself from GetBuildWorkRect() this frame,
+            // and WorkPos/WorkSize (dockspace, status bar) pick it up next
+            // frame — ImGui's normal one-frame work-rect latency.
+            ImGuiViewportP* vp = static_cast<ImGuiViewportP*>(ImGui::GetMainViewport());
+            vp->BuildWorkInsetMin.x += l;
+            vp->BuildWorkInsetMin.y += t;
+            vp->BuildWorkInsetMax.x += r;  // insets are positive on all four sides
+            vp->BuildWorkInsetMax.y += b;
+        }
+    }
+#endif
 }
 
 void Application::endFrame() {

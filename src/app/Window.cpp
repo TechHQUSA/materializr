@@ -16,6 +16,9 @@
 
 namespace materializr {
 
+// Declared in gl_common.h; overwritten on iOS in the constructor below.
+unsigned int g_windowFramebuffer = 0;
+
 Window::Window(int width, int height, const std::string& title)
     : m_width(width), m_height(height) {
 
@@ -152,6 +155,25 @@ Window::Window(int width, int height, const std::string& title)
     }
 #endif
 
+#if defined(MZ_IOS)
+    // On iOS the screen is NOT framebuffer 0 — SDL backs the window with a
+    // renderbuffer FBO and binding 0 draws into the void. Capture the real
+    // one (bound current by SDL_GL_CreateContext) so g_windowFramebuffer
+    // binds the screen everywhere the code would otherwise bind 0. The color
+    // renderbuffer matters too: SDL's swap presents whatever GL_RENDERBUFFER
+    // is bound at that moment, so swapBuffers() re-binds this before swapping
+    // (Viewport's own depth/MSAA renderbuffer setup leaves others bound).
+    {
+        GLint fbo = 0, rbo = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+        glGetIntegerv(GL_RENDERBUFFER_BINDING, &rbo);
+        g_windowFramebuffer = static_cast<unsigned int>(fbo);
+        m_windowRenderbuffer = static_cast<unsigned int>(rbo);
+        std::cout << "iOS window framebuffer=" << fbo
+                  << " renderbuffer=" << rbo << std::endl;
+    }
+#endif
+
     // Log the context we actually got. The 3.3-core request can be silently
     // downgraded (notably on macOS without the forward-compatible flag → GL 2.1,
     // where the GLSL 330 shaders won't compile); surfacing the version here turns
@@ -177,6 +199,11 @@ Window::~Window() {
 }
 
 void Window::swapBuffers() {
+#if defined(MZ_IOS)
+    // presentRenderbuffer presents the *currently bound* GL_RENDERBUFFER —
+    // restore SDL's color renderbuffer in case frame code bound another.
+    glBindRenderbuffer(GL_RENDERBUFFER, m_windowRenderbuffer);
+#endif
     SDL_GL_SwapWindow(m_window);
 }
 
@@ -581,6 +608,13 @@ void Window::framebufferSize(int& w, int& h) const {
 
 float Window::uiScale() const {
     if (materializr::touchMode()) {
+#if defined(MZ_IOS)
+        // iOS window coords are POINTS — the OS already normalizes density
+        // (the drawable is the 2-3x pixel surface underneath). SDL's reported
+        // display DPI is a synthetic 160·scale, not physical, so no formula:
+        // desktop density is the right size in point space.
+        return 1.0f;
+#else
         // Scale the desktop-density UI up for a touch screen. Use the physical
         // DPI against a 96-dpi baseline (so a 240-dpi tablet -> 2.5x), clamped.
         float ddpi = 240.0f, hdpi = 0.0f, vdpi = 0.0f;
@@ -589,6 +623,7 @@ float Window::uiScale() const {
         if (s < 1.4f) s = 1.4f;     // never smaller than 1.4x on a touch device
         if (s > 2.5f) s = 2.5f;
         return s;
+#endif
     }
 #if defined(_WIN32)
     // Desktop Windows HiDPI: now that the process is per-monitor DPI-aware (see

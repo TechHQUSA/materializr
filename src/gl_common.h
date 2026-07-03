@@ -10,6 +10,15 @@
 //
 // Branch order matters: iOS defines __APPLE__ too, so the GLES branch must be
 // tested BEFORE the __APPLE__ (= macOS desktop GL) branch.
+
+// The window's default framebuffer object. 0 on every platform except iOS,
+// where the screen is an SDL-created renderbuffer FBO and binding 0 renders
+// into the void (black screen). Set once in Window::create(); bind THIS —
+// never literal 0 — to target the window. Defined in Window.cpp.
+namespace materializr {
+extern unsigned int g_windowFramebuffer;
+}
+
 #if defined(MZ_GLES)
 #if defined(MZ_IOS)
 // iOS / OpenGL ES 3.0 via OpenGLES.framework. Deprecated since iOS 12 but

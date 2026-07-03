@@ -35,6 +35,10 @@ set(OCCT_INC "${MATERIALIZR_IOS_PREFIX}/include/opencascade")
 set(OCCT_LIB "${MATERIALIZR_IOS_PREFIX}/lib")
 
 # ── SDL2 (static, from the prefix) ───────────────────────────────────────────
+# CMake's iOS platform sets CMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY, re-rooting
+# every find_package() path under the SDK sysroot; the prefix must be a find
+# root itself or its SDL2Config.cmake is invisible.
+list(APPEND CMAKE_FIND_ROOT_PATH "${MATERIALIZR_IOS_PREFIX}")
 find_package(SDL2 CONFIG REQUIRED PATHS "${MATERIALIZR_IOS_PREFIX}" NO_DEFAULT_PATH)
 if(TARGET SDL2::SDL2-static)
     set(MZ_SDL2_TARGET SDL2::SDL2-static)

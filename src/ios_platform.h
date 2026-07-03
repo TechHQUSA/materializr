@@ -19,9 +19,18 @@ void iosInitRuntime();
 // render loop must stop drawing whenever this is set (see Application::run).
 bool iosInBackground();
 
+// Screen safe-area insets in POINTS (same space as SDL window coords / ImGui):
+// status bar + rounded corners at the top/sides, home indicator at the bottom.
+// The UI's root work rect shrinks by these — see Application::beginFrame().
+// Must be called from the main thread (the SDL loop is one on iOS).
+void iosSafeAreaInsets(float& top, float& left, float& bottom, float& right);
+
 #else
 
 inline bool iosInBackground() { return false; }
+inline void iosSafeAreaInsets(float& top, float& left, float& bottom, float& right) {
+    top = left = bottom = right = 0.0f;
+}
 
 #endif
 
