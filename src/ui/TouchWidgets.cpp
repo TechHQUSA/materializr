@@ -254,13 +254,24 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
     if (side <= 0.0f) side = 48.0f * s;
 
     const bool hasLabel = label && label[0];
-    const float iconSz = 20.0f * s;
-    const float pad    = 12.0f * s;   // left inset for the icon in a pill
-    const float gap    = 9.0f * s;    // icon → text gap
-    const float labelW = hasLabel ? ImGui::CalcTextSize(label).x : 0.0f;
-    // Square when icon-only; a pill sized to icon + text when labelled.
-    const float boxW = hasLabel ? (pad + iconSz + gap + labelW + pad) : side;
-    const float boxH = side;
+    // History steps stack the label UNDER a slightly smaller icon, in a slightly
+    // smaller font, with tight side padding — so a long run of named steps stays
+    // compact. These metrics are private to this widget (the timeline is its
+    // only caller), so nothing else is affected.
+    const float iconSz   = 18.0f * s;                     // ~2px smaller
+    const float fscale   = 0.82f;                         // label a little smaller
+    const float fontSize = ImGui::GetFontSize() * fscale;
+    const float padX     = 8.0f * s;                      // side dead-space
+    const float padY     = 6.0f * s;
+    const float vgap     = 3.0f * s;                      // icon → label gap
+    ImVec2 ts(0.0f, 0.0f);
+    if (hasLabel) {
+        ts = ImGui::CalcTextSize(label);
+        ts.x *= fscale;   // width scales with the font (glyphs scale uniformly)
+        ts.y = fontSize;
+    }
+    const float boxW = hasLabel ? (std::max(iconSz, ts.x) + 2.0f * padX) : side;
+    const float boxH = hasLabel ? (padY + iconSz + vgap + ts.y + padY) : side;
 
     ImGui::PushID(id);
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -282,14 +293,13 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
     if (fg == 0)
         fg = ImGui::GetColorU32(current ? onAccent()
                                         : (dim ? textDim() : textPrimary()));
-    const float iconCx = hasLabel ? p.x + pad + iconSz * 0.5f
-                                   : p.x + boxW * 0.5f;
-    drawIconCentered(dl, ImVec2(iconCx, p.y + boxH * 0.5f), iconSz, icon, fg);
-    if (hasLabel) {
-        const float th = ImGui::GetTextLineHeight();
-        dl->AddText(ImVec2(p.x + pad + iconSz + gap, p.y + (boxH - th) * 0.5f),
+    const float iconCy = hasLabel ? (p.y + padY + iconSz * 0.5f)
+                                   : (p.y + boxH * 0.5f);
+    drawIconCentered(dl, ImVec2(p.x + boxW * 0.5f, iconCy), iconSz, icon, fg);
+    if (hasLabel)
+        dl->AddText(ImGui::GetFont(), fontSize,
+                    ImVec2(p.x + (boxW - ts.x) * 0.5f, p.y + padY + iconSz + vgap),
                     fg, label);
-    }
     ImGui::PopID();
     return pressed;
 }
