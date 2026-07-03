@@ -5355,6 +5355,25 @@ void Application::run() {
         else if (eventLevel == 1)
             m_wakeFrames = std::max(m_wakeFrames, 25);
 
+#if defined(MZ_MOBILE)
+        // Multi-finger tap gestures (Android/iOS): two-finger tap = undo,
+        // three-finger tap = redo. Same guards as the Edit menu; both flags
+        // are consumed every frame so a blocked tap can't fire later.
+        {
+            const bool undoTap = m_window->consumeUndoTap();
+            const bool redoTap = m_window->consumeRedoTap();
+            if (!anyInteractivePreviewActive()) {
+                if (undoTap && m_history->canUndo()) {
+                    undoWithCascade();
+                    m_wakeFrames = std::max(m_wakeFrames, 5);
+                } else if (redoTap && m_history->canRedo()) {
+                    redoWithCascade();
+                    m_wakeFrames = std::max(m_wakeFrames, 5);
+                }
+            }
+        }
+#endif
+
         // Any input refreshes the interactive-state render grace (see
         // hasActiveWork): keep rendering for kGraceSec after the last event,
         // then idle. 1s comfortably covers the ~0.3s sketch hover-dwell charge;

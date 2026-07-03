@@ -63,6 +63,8 @@ public:
     bool consumeTouchPan(float& dx, float& dy);   // centroid movement, pixels
     bool consumeTouchZoom(float& dz);             // pinch delta, wheel-equivalent
     bool consumeDoubleTap();                      // true once after two quick taps (touch "double-click")
+    bool consumeUndoTap();                        // true once after a two-finger tap (mobile undo gesture)
+    bool consumeRedoTap();                        // true once after a three-finger tap (mobile redo gesture)
 
     // True if the most recent left-button release was NOT a genuine single-finger
     // lift but a two-finger gesture taking over (the second finger landing forces
@@ -118,6 +120,17 @@ private:
     // pan/zoom intent is judged from NET change vs these (not summed per-frame
     // deltas), so a slow pan's finger wobble can't accumulate into a false zoom.
     float m_startCentroidX = 0.0f, m_startCentroidY = 0.0f, m_startPinchDist = 0.0f;
+
+    // Multi-finger tap gestures (two-finger tap = undo, three-finger = redo).
+    // A "touch session" spans first-finger-down to all-fingers-up; the tap
+    // fires on full lift-off when it was short, peaked at 2 or 3 fingers, and
+    // the two-finger tracker never committed to pan/zoom.
+    std::uint32_t m_sessionStartTicks = 0;
+    int   m_sessionMaxFingers = 0;
+    float m_sessionPanNet = 0.0f;   // peak net centroid travel while undecided
+    float m_sessionZoomNet = 0.0f;  // peak net spacing change while undecided
+    bool  m_undoTapPending = false;
+    bool  m_redoTapPending = false;
 
     // One-finger press-and-hold tracking (-> box/drag-select).
     std::uint32_t m_downTicks = 0;        // SDL_GetTicks at single-finger down
