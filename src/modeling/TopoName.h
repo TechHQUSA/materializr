@@ -74,11 +74,19 @@ struct Context {
 
 // A naming scheme. `mint` returns an empty string when it cannot name `sub`;
 // `resolve` returns a null shape when it cannot find the payload's sub-shape.
+// `resolveBatch` (optional) resolves a whole set of this scheme's payloads to
+// DISTINCT sub-shapes at once — the set-level distinct-claim that
+// EdgeAnchor/FaceAnchor already do (two fragments of one sketch line at the
+// same height must land on different edges). Schemes without a natural batch
+// (e.g. ordinal, whose indices are already unique) leave it null and
+// resolveSet falls back to per-payload resolve().
 struct Strategy {
     std::string scheme;
     int         priority = 0;   // higher = more robust; minted + tried first
     std::function<std::string(const TopoDS_Shape& sub, const Context&)> mint;
     std::function<TopoDS_Shape(const std::string& payload, const Context&)> resolve;
+    std::function<bool(const std::vector<std::string>& payloads, const Context&,
+                       std::vector<TopoDS_Shape>& out)> resolveBatch;
 };
 
 // The registry. Built-in strategies (ordinal, sketchface) self-register on
@@ -102,6 +110,17 @@ Ref mint(const TopoDS_Shape& sub, const Context& ctx);
 // Resolve a Ref against ctx.shape: try its names best-first, return the first
 // that a known scheme resolves. Returns false (out untouched) on total miss.
 bool resolve(const Ref& ref, const Context& ctx, TopoDS_Shape& out);
+
+// Resolve a SET of Refs (an op's N edges/faces) to DISTINCT sub-shapes. Tries
+// each scheme best-first: the highest-priority scheme that EVERY ref carries
+// AND whose batch resolver claims distinct sub-shapes for all of them wins;
+// otherwise falls to the next scheme, and finally to a per-ref best-first
+// resolve with a distinctness check. All-or-nothing: returns false (out
+// cleared) unless every ref resolves to a distinct sub-shape — a partial or
+// colliding result would drive an op onto the wrong geometry. This is the
+// op-facing entry point (FilletOp's edge set, ShellOp's open faces, …).
+bool resolveSet(const std::vector<Ref>& refs, const Context& ctx,
+                std::vector<TopoDS_Shape>& out);
 
 } // namespace topo
 } // namespace materializr

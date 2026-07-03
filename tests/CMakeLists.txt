@@ -143,6 +143,12 @@ add_executable(test_topo_name test_topo_name.cpp)
 target_link_libraries(test_topo_name PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_topo_name COMMAND test_topo_name)
 
+# test_topo_edge — EdgeAnchor migrated behind the registry ("sketchedge"):
+# resolveSet distinctness + survives-resize through the unified layer
+add_executable(test_topo_edge test_topo_edge.cpp)
+target_link_libraries(test_topo_edge PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_edge COMMAND test_topo_edge)
+
 # bench_stl_import — manual stopwatch for STL import stages (not run by ctest)
 add_executable(bench_stl_import bench_stl_import.cpp)
 target_link_libraries(bench_stl_import PRIVATE materializr_core)

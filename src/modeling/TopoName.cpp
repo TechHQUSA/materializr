@@ -1,4 +1,5 @@
 #include "TopoName.h"
+#include "EdgeAnchor.h"
 #include "FaceAnchor.h"
 #include "core/Document.h"
 #include "modeling/Sketch.h"
@@ -6,6 +7,7 @@
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 
 #include <algorithm>
@@ -76,6 +78,8 @@ const Strategy* Registry::forScheme(const std::string& scheme) const {
 // ── Built-in strategies ─────────────────────────────────────────────────────
 namespace {
 
+// FaceAnchor::SketchRef and EdgeAnchor::SketchRef are the same type
+// (std::pair<int, const Sketch*>), so one list feeds both.
 std::vector<FaceAnchor::SketchRef> sketchRefs(const Document* doc) {
     std::vector<FaceAnchor::SketchRef> refs;
     if (!doc) return refs;
@@ -105,6 +109,63 @@ Strategy sketchFaceStrategy() {
             out.empty())
             return {};
         return out[0];
+    };
+    s.resolveBatch = [](const std::vector<std::string>& payloads, const Context& ctx,
+                        std::vector<TopoDS_Shape>& out) -> bool {
+        std::vector<FaceAnchor::Anchor> anchors;
+        for (const auto& p : payloads) {
+            std::vector<FaceAnchor::Anchor> one;
+            if (!FaceAnchor::parse(p, one) || one.empty()) return false;
+            anchors.push_back(one[0]);
+        }
+        std::vector<TopoDS_Face> faces;
+        if (!FaceAnchor::resolve(anchors, sketchRefs(ctx.doc), ctx.shape, faces))
+            return false;
+        out.assign(faces.begin(), faces.end());
+        return out.size() == payloads.size();
+    };
+    return s;
+}
+
+// "sketchedge" — the existing (working) EdgeAnchor, hosted behind the registry.
+// Single-edge mint/resolve; resolveBatch delegates to EdgeAnchor's native
+// distinct-claim over the whole edge set. FilletOp/ChamferOp keep their own
+// direct EdgeAnchor use for now; when they cut over, their on-disk `anchor=`
+// blob simply becomes this scheme's payload (same format), so files stay
+// compatible. Edges only.
+Strategy sketchEdgeStrategy() {
+    Strategy s;
+    s.scheme = "sketchedge";
+    s.priority = 80;
+    s.mint = [](const TopoDS_Shape& sub, const Context& ctx) -> std::string {
+        if (ctx.type != TopAbs_EDGE || sub.ShapeType() != TopAbs_EDGE) return "";
+        std::vector<TopoDS_Edge> one{ TopoDS::Edge(sub) };
+        auto anchors = EdgeAnchor::compute(one, sketchRefs(ctx.doc));
+        if (anchors.empty() || anchors[0].kind == EdgeAnchor::Anchor::None) return "";
+        return EdgeAnchor::serialize(anchors);
+    };
+    s.resolve = [](const std::string& payload, const Context& ctx) -> TopoDS_Shape {
+        std::vector<EdgeAnchor::Anchor> anchors;
+        if (!EdgeAnchor::parse(payload, anchors)) return {};
+        std::vector<TopoDS_Edge> out;
+        if (!EdgeAnchor::resolve(anchors, sketchRefs(ctx.doc), ctx.shape, out) ||
+            out.empty())
+            return {};
+        return out[0];
+    };
+    s.resolveBatch = [](const std::vector<std::string>& payloads, const Context& ctx,
+                        std::vector<TopoDS_Shape>& out) -> bool {
+        std::vector<EdgeAnchor::Anchor> anchors;
+        for (const auto& p : payloads) {
+            std::vector<EdgeAnchor::Anchor> one;
+            if (!EdgeAnchor::parse(p, one) || one.empty()) return false;
+            anchors.push_back(one[0]);
+        }
+        std::vector<TopoDS_Edge> edges;
+        if (!EdgeAnchor::resolve(anchors, sketchRefs(ctx.doc), ctx.shape, edges))
+            return false;
+        out.assign(edges.begin(), edges.end());
+        return out.size() == payloads.size();
     };
     return s;
 }
@@ -141,8 +202,9 @@ Registry::Registry() {
     // Built-ins, lowest-to-highest doesn't matter — add() keeps them sorted.
     add(ordinalStrategy());
     add(sketchFaceStrategy());
-    // Future: add(sketchEdgeStrategy()), add(genLineageStrategy()),
-    //         add(importIdStrategy()) — all strictly additive.
+    add(sketchEdgeStrategy());
+    // Future: add(genLineageStrategy()), add(importIdStrategy()) — all
+    // strictly additive.
 }
 
 // ── mint / resolve ──────────────────────────────────────────────────────────
@@ -165,6 +227,60 @@ bool resolve(const Ref& ref, const Context& ctx, TopoDS_Shape& out) {
         if (!found.IsNull()) { out = found; return true; }
     }
     return false;
+}
+
+namespace {
+bool allDistinct(const std::vector<TopoDS_Shape>& v) {
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (v[i].IsNull()) return false;
+        for (size_t j = i + 1; j < v.size(); ++j)
+            if (v[i].IsSame(v[j])) return false;
+    }
+    return true;
+}
+} // namespace
+
+bool resolveSet(const std::vector<Ref>& refs, const Context& ctx,
+                std::vector<TopoDS_Shape>& out) {
+    out.clear();
+    if (refs.empty()) return false;
+
+    // Best-first: the highest-priority scheme that EVERY ref carries and whose
+    // batch resolver claims distinct sub-shapes for all of them.
+    for (const auto& s : Registry::instance().strategies()) {
+        if (!s.resolveBatch) continue;
+        std::vector<std::string> payloads;
+        payloads.reserve(refs.size());
+        bool allHave = true;
+        for (const auto& r : refs) {
+            const std::string* p = nullptr;
+            for (const auto& nm : r.names)
+                if (nm.scheme == s.scheme) { p = &nm.payload; break; }
+            if (!p) { allHave = false; break; }
+            payloads.push_back(*p);
+        }
+        if (!allHave) continue;
+        std::vector<TopoDS_Shape> batch;
+        if (s.resolveBatch(payloads, ctx, batch) &&
+            batch.size() == refs.size() && allDistinct(batch)) {
+            out = std::move(batch);
+            return true;
+        }
+    }
+
+    // Fallback: per-ref best-first resolve, then require distinctness. Sketch
+    // single-resolve lacks cross-ref claiming, so the distinctness check is
+    // what keeps a colliding fallback all-or-nothing (never silently wrong).
+    std::vector<TopoDS_Shape> got;
+    got.reserve(refs.size());
+    for (const auto& r : refs) {
+        TopoDS_Shape one;
+        if (!resolve(r, ctx, one)) return false;
+        got.push_back(one);
+    }
+    if (!allDistinct(got)) return false;
+    out = std::move(got);
+    return true;
 }
 
 } // namespace topo
