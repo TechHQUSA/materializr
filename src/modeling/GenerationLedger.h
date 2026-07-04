@@ -19,6 +19,7 @@
 #include <TopoDS_Shape.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <vector>
 
 class BRepBuilderAPI_MakeShape;
 
