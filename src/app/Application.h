@@ -733,6 +733,11 @@ private:
     bool imTouchLayout() const { return m_uiLayout == UiLayout::ImTouch; }
     // im-touch only: the transparent model tree on the right edge.
     bool m_imTouchTree = true;
+    // im-touch only: browser-tree group expansion (session-local; boots
+    // fully expanded like Fusion's browser). No other layout reads these.
+    bool m_imTouchTreeOpenBodies = true;
+    bool m_imTouchTreeOpenSketches = true;
+    bool m_imTouchTreeOpenConstruction = true;
     // im-touch only: the Fusion-style history timeline along the bottom edge.
     bool m_imTouchTimeline = true;
     // im-touch timeline: step whose properties popup is open (-1 = none).
@@ -1213,6 +1218,35 @@ private:
     bool anyInteractivePreviewActive() const; // controllers + legacy previews
     void cancelAllInteractivePreviews();      // both halves; saves call this
 
+    // im-touch: while an action (interactive preview) is live, its Confirm/
+    // Cancel are hosted as corner FABs — the sketch Finish/Discard spot —
+    // instead of buttons inside each op panel (which hide themselves while
+    // this is true). One action at a time (single-flight), so the dispatch
+    // below is unambiguous.
+    bool imTouchActionCorner() const;
+    void confirmActiveAction();  // corner ✓ — commit whichever action is live
+    void cancelActiveAction();   // corner ✗ — cancel it
+
+    // im-touch, touch input: a circle or rectangle drawn by press-drag-
+    // release is HELD as a preview on lift instead of committing — a bubble
+    // near the shape offers exact-value fields plus ✗/✓ (renderViewport's
+    // confirm-bubble block). The pending pos is the lift point in sketch
+    // coords — ✓ commits through it when nothing was typed. Drawing the next
+    // shape auto-commits the held one (press handler consumes this state).
+    bool m_sketchShapeConfirmPending = false;
+    glm::vec2 m_sketchShapePendingPos{0.0f};
+    char m_sketchShapeDimBuf[32] = {};   // circle: typed diameter
+    // Rectangle: staged Width/Height, seeded from the dragged size at lift;
+    // each is edited by its own amountField well in the bubble.
+    float m_sketchShapeDimW = 0.0f;
+    float m_sketchShapeDimH = 0.0f;
+    // Preview endpoints FROZEN at lift (getPreviewStart/End at that moment).
+    // The bubble anchors and its commit math use these, not the live
+    // preview — stray hover/motion events that twitch the held preview must
+    // not move the input box under the user's finger.
+    glm::vec2 m_sketchShapeAnchorPs{0.0f};
+    glm::vec2 m_sketchShapeAnchorPe{0.0f};
+
     // Last hover pick, reused by cursor-zoom so wheel ticks never ray-cast
     // the document themselves (see Application_Viewport zoom handler).
     bool m_zoomFocusHit = false;
@@ -1546,6 +1580,10 @@ private:
     // opens a small popup with the snap toggle + step radios. Changes save
     // immediately so the choice persists across launches.
     void renderSnapWidget();
+    // The snap settings popup body (checkbox + step radios), shared by the
+    // viewport corner widget and the im-touch top cluster's Snap button.
+    // Caller does OpenPopup("SnapSettings") in its own window context.
+    void renderSnapSettingsPopup();
 
     // Sketch-mode Linear / Radial patterns. Simpler than body patterns: the
     // sketch is on a fixed 2D plane so there's no axis radio. Linear copies

@@ -137,11 +137,18 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
     ImGui::Spacing();
     bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
     bool esc   = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-    bool doCommit = m_commitRequested || enter ||
-                    ImGui::Button(materializr::btnConfirm(), ImVec2(120, 0));
-    if (!doCommit) ImGui::SameLine();
-    bool doCancel = !doCommit &&
-                    (esc || ImGui::Button(materializr::btnCancel(), ImVec2(120, 0)));
+    bool doCommit = m_commitRequested || enter;
+    bool doCancel = esc;
+    if (!ctx.cornerCommitUi) {
+        doCommit = doCommit ||
+                   ImGui::Button(materializr::btnConfirm(), ImVec2(120, 0));
+        if (!doCommit) {
+            ImGui::SameLine();
+            doCancel = doCancel ||
+                       ImGui::Button(materializr::btnCancel(), ImVec2(120, 0));
+        }
+    }
+    doCancel = doCancel && !doCommit;
     ImGui::End();
 
     if (doCommit) commit(ctx);

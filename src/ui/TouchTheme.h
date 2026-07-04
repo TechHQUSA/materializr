@@ -22,6 +22,18 @@ inline bool g_lightMode = false;
 inline void setLightMode(bool light) { g_lightMode = light; }
 inline bool lightMode() { return g_lightMode; }
 
+// Corner-radius override, set from Application each frame next to
+// setLightMode. -1 = every caller's soft rounded default (the modern
+// layout's look); >= 0 = a flat radius in unscaled px applied across the
+// chrome AND the widget kit (im-touch asks for crisp 2 px corners, Steve).
+inline float g_cornerOverride = -1.0f;
+inline void setCornerRadius(float px) { g_cornerOverride = px; }
+// Resolve a rounding: `softScaled` is the caller's ALREADY-uiScaled soft
+// default, returned untouched unless the override is active.
+inline float radius(float softScaled) {
+    return g_cornerOverride >= 0.0f ? g_cornerOverride * uiScale() : softScaled;
+}
+
 // Palette. Exposed for the widget kit's custom draws. Each colour has a
 // dark (mockup) and light counterpart, matched for the same role/contrast.
 inline ImVec4 chromeBg()     { return g_lightMode ? ImVec4(0.937f, 0.945f, 0.957f, 1.0f)   // #EFF1F4
@@ -59,11 +71,11 @@ inline ImVec4 rowHoverBg()   { return g_lightMode ? ImVec4(0.918f, 0.929f, 0.945
 // (which clipped their labels off the right edge).
 inline void pushChrome() {
     const float s = uiScale();
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,   10.0f * s);
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding,   12.0f * s);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,   10.0f * s);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding,   radius(10.0f * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding,   radius(12.0f * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding,   radius(10.0f * s));
     // The shell's edge-flush bars opt back out with a local WindowRounding=0.
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,  12.0f * s);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding,  radius(12.0f * s));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,   ImVec2(14.0f * s, 12.0f * s));
     ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize,   14.0f * s);
     ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize,     24.0f * s);

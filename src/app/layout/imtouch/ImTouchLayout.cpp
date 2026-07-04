@@ -106,59 +106,82 @@ void Application::renderImTouchLayout() {
     const ImGuiWindowFlags kFloat =
         (layoutui::kShellWindowFlags & ~ImGuiWindowFlags_NoBringToFrontOnFocus) |
         ImGuiWindowFlags_AlwaysAutoResize;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14.0f * s);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, touchui::radius(14.0f * s));
     // No window borders on any of the floating overlays — the 1px frame reads
     // as a faint "ghost" rectangle around transparent windows (the +, the
     // chip, the buttons). Their rounded fill is the only chrome we want.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-    // ── Project / selection chip (top-left) ─────────────────────────────────
+    // ── Top-left: [Logo] [Menu] [Project name] — three INDIVIDUAL boxes of
+    //    equal height (matching the top-right cluster's button boxes), on a
+    //    fully transparent host window so each box carries its own fill.
     ImGui::SetNextWindowPos(ImVec2(wp.x + m, wp.y + m));
-    ImGui::SetNextWindowBgAlpha(0.55f);
+    ImGui::SetNextWindowBgAlpha(0.0f);
     if (ImGui::Begin("##LiteChip", nullptr, kFloat)) {
-        // ⋯ menu at the far left (moved off the top-right cluster).
-        if (touchui::iconButton("menu", MZ_ICON_MENU_BARS, 30.0f * s))
+        const float bh = 44.0f * s;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        // Logo box.
+        {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            dl->AddRectFilled(p, ImVec2(p.x + bh, p.y + bh),
+                              ImGui::GetColorU32(touchui::rowBg()),
+                              touchui::radius(10.0f * s));
+            const float lg = 26.0f * s;
+            const ImVec2 c0(p.x + (bh - lg) * 0.5f, p.y + (bh - lg) * 0.5f);
+            dl->AddImageRounded(layoutui::logoTexture(), c0,
+                                ImVec2(c0.x + lg, c0.y + lg),
+                                ImVec2(0, 0), ImVec2(1, 1),
+                                IM_COL32_WHITE, touchui::radius(4.0f * s));
+            ImGui::Dummy(ImVec2(bh, bh));
+        }
+        ImGui::SameLine(0.0f, 8.0f * s);
+
+        // Menu box.
+        if (touchui::iconButton("menu", MZ_ICON_MENU_BARS, bh))
             ImGui::OpenPopup("##TouchOverflow");
         tip("Menu: file, edit, view, help and settings");
         renderTouchOverflowPopup();
         ImGui::SameLine(0.0f, 8.0f * s);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        const float chip = 18.0f * s;
-        const ImVec2 c0 = ImGui::GetCursorScreenPos();
-        dl->AddImageRounded(layoutui::logoTexture(), c0,
-                            ImVec2(c0.x + chip, c0.y + chip),
-                            ImVec2(0, 0), ImVec2(1, 1),
-                            IM_COL32_WHITE, 4.0f * s);
-        ImGui::Dummy(ImVec2(chip, chip));
-        ImGui::SameLine();
 
-        std::string pn = "New project";
-        if (!m_currentProjectPath.empty()) {
-            pn = m_currentProjectPath;
-            auto slash = pn.find_last_of("/\\");
-            if (slash != std::string::npos) pn = pn.substr(slash + 1);
-        }
-        // Selection summary: "· Face (2)" of the primary type, mirroring the
-        // mockup's "mug.mzr · Face (1)".
-        std::string sel;
-        if (m_selection && m_selection->hasSelection()) {
-            const SelectionType t = m_selection->primaryType();
-            int n = 0;
-            for (const auto& e : m_selection->getSelection())
-                if (e.type == t) ++n;
-            static const char* kNames[] = { "None", "Body", "Face", "Edge",
-                                            "Vertex", "Sketch", "Region",
-                                            "Plane", "Axis" };
-            const int ti = static_cast<int>(t);
-            if (ti > 0 && ti < 9) {
-                sel = std::string("  ·  ") + kNames[ti] +
-                      " (" + std::to_string(n) + ")";
+        // Project-name box (name + selection summary, e.g. "mug.mzr · Face (1)").
+        {
+            std::string pn = "New project";
+            if (!m_currentProjectPath.empty()) {
+                pn = m_currentProjectPath;
+                auto slash = pn.find_last_of("/\\");
+                if (slash != std::string::npos) pn = pn.substr(slash + 1);
             }
-        }
-        ImGui::TextColored(touchui::textPrimary(), "%s", pn.c_str());
-        if (!sel.empty()) {
-            ImGui::SameLine(0.0f, 0.0f);
-            ImGui::TextColored(touchui::textDim(), "%s", sel.c_str());
+            std::string sel;
+            if (m_selection && m_selection->hasSelection()) {
+                const SelectionType t = m_selection->primaryType();
+                int n = 0;
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == t) ++n;
+                static const char* kNames[] = { "None", "Body", "Face", "Edge",
+                                                "Vertex", "Sketch", "Region",
+                                                "Plane", "Axis" };
+                const int ti = static_cast<int>(t);
+                if (ti > 0 && ti < 9) {
+                    sel = std::string("  ·  ") + kNames[ti] +
+                          " (" + std::to_string(n) + ")";
+                }
+            }
+            const float padX = 14.0f * s;
+            const ImVec2 tn = ImGui::CalcTextSize(pn.c_str());
+            const ImVec2 tsl = sel.empty() ? ImVec2(0.0f, 0.0f)
+                                           : ImGui::CalcTextSize(sel.c_str());
+            const float bw = padX * 2.0f + tn.x + tsl.x;
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            dl->AddRectFilled(p, ImVec2(p.x + bw, p.y + bh),
+                              ImGui::GetColorU32(touchui::rowBg()),
+                              touchui::radius(10.0f * s));
+            dl->AddText(ImVec2(p.x + padX, p.y + (bh - tn.y) * 0.5f),
+                        ImGui::GetColorU32(touchui::textPrimary()), pn.c_str());
+            if (!sel.empty())
+                dl->AddText(ImVec2(p.x + padX + tn.x, p.y + (bh - tsl.y) * 0.5f),
+                            ImGui::GetColorU32(touchui::textDim()), sel.c_str());
+            ImGui::Dummy(ImVec2(bw, bh));
         }
     }
     ImGui::End();
@@ -181,6 +204,30 @@ void Application::renderImTouchLayout() {
                 "(the touch equivalent of holding Ctrl)");
             ImGui::SameLine(0.0f, 8.0f * s);
         }
+        // Snap-to-grid — the corner square's im-touch home (renderSnapWidget
+        // skips itself in this layout). Label shows the current step; accent
+        // fill while snap is on; tap opens the shared settings popup.
+        {
+            char snapLbl[16];
+            std::snprintf(snapLbl, sizeof(snapLbl), "%.3g", m_sketchGridStep);
+            if (touchui::pillButton("snap", MZ_ICON_GUIDES, snapLbl,
+                                    m_snapToGrid))
+                ImGui::OpenPopup("SnapSettings");
+            tip(m_snapToGrid ? "Snap ON — tap for step / toggle"
+                             : "Snap off — tap for step / toggle");
+            renderSnapSettingsPopup();
+            ImGui::SameLine(0.0f, 8.0f * s);
+        }
+        // Items (model tree) reveal/hide — moved up from the right-edge rail
+        // button so the whole toggle row lives in one place.
+        if (touchui::pillButton("items", MZ_ICON_ITEMS, nullptr,
+                                m_imTouchTree)) {
+            m_imTouchTree = !m_imTouchTree;
+            saveAppSettings();
+        }
+        tip(m_imTouchTree ? "Hide the model tree"
+                          : "Show the model tree (bodies, sketches, construction)");
+        ImGui::SameLine(0.0f, 8.0f * s);
         const bool histLocked = anyInteractivePreviewActive();
         ImGui::BeginDisabled(histLocked || !touchCanUndo());
         if (touchui::iconButton("undo", MZ_ICON_UNDO, bh)) touchUndo();
@@ -192,56 +239,40 @@ void Application::renderImTouchLayout() {
                 m_softKeyboardForced = !m_softKeyboardForced;
             tip("Toggle the on-screen keyboard");
         }
-        // (Items toggle moved to the persistent right-edge button below;
-        // History has its own bottom toggle; the ⋯ menu lives on the top-left
-        // chip.)
+        // (History has its own bottom toggle; the ⋯ menu lives on the
+        // top-left chip.)
     }
     ImGui::End();
 
-    // ── Persistent right-edge Items button: tap to open the model tree (which
-    //    appears just left of it), tap again — or the tree's header chevron —
-    //    to collapse it back. Accent-filled while the tree is open. Vertically
-    //    centred so it clears the top-right cluster, the ViewCube and the FAB.
-    //    (History is NOT here — it lives at the bottom next to the timeline; see
-    //    below — so its reopen button sits where its minimize chevron does.)
+    // (The Items toggle now lives in the top cluster; railBtnW is still the
+    // History toggle's size at the bottom.)
     const float railBtnW = 60.0f * s;
-    {
-        ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x - m, wp.y + ws.y * 0.5f),
-                                ImGuiCond_Always, ImVec2(1.0f, 0.5f));
-        ImGui::SetNextWindowBgAlpha(0.0f);   // the button draws its own solid fill
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        if (ImGui::Begin("##LiteItemsButton", nullptr, kFloat)) {
-            if (touchui::railButton("railItems", MZ_ICON_ITEMS, "Items",
-                                    m_imTouchTree, railBtnW, /*solid=*/true)) {
-                m_imTouchTree = !m_imTouchTree;
-                saveAppSettings();
-            }
-            tip(m_imTouchTree ? "Hide the model tree"
-                              : "Show the model tree (bodies, sketches, construction)");
-        }
-        ImGui::End();
-        ImGui::PopStyleVar();
-    }
 
     // ── Transparent model tree (right edge) — the structure the modern
-    //    layout's Items panel shows, display-focused: visibility checkbox +
-    //    name + tap-to-select. Deep actions (rename, folders, export) live in
+    //    layout's Items panel shows, display-focused: visibility eye + name
+    //    + tap-to-select. Deep actions (rename, folders, export) live in
     //    the other layouts; this stays an im-touch-only overlay.
     if (m_imTouchTree && m_document) {
-        // Anchored just LEFT of the right-edge rail so its Items button stays
-        // visible and tappable while the tree is open.
+        // Flush to the right edge, below the top cluster's reach.
         ImGui::SetNextWindowPos(
-            ImVec2(wp.x + ws.x - m - railBtnW - 8.0f * s, wp.y + ws.y * 0.5f),
+            ImVec2(wp.x + ws.x - m, wp.y + ws.y * 0.5f),
             ImGuiCond_Always, ImVec2(1.0f, 0.5f));
-        const float treeW = 250.0f * s;
+        const float treeW = 260.0f * s;
         ImGui::SetNextWindowSizeConstraints(ImVec2(treeW, 0),
                                             ImVec2(treeW, ws.y - 2.0f * m));
-        ImGui::SetNextWindowBgAlpha(0.35f);
+        ImGui::SetNextWindowBgAlpha(0.25f);   // Fusion-browser translucency
         if (ImGui::Begin("##LiteTree", nullptr,
                          kFloat & ~ImGuiWindowFlags_NoScrollbar)) {
-            // "Items" title. No in-panel minimize control — the right-edge
-            // Items button (which opened it) toggles it closed again.
-            ImGui::TextColored(touchui::textPrimary(), "Items");
+            // Root node: the document name, like Fusion's browser top row.
+            // No in-panel minimize control — the right-edge Items button
+            // (which opened it) toggles it closed again.
+            std::string docName = "New project";
+            if (!m_currentProjectPath.empty()) {
+                docName = m_currentProjectPath;
+                auto slash = docName.find_last_of("/\\");
+                if (slash != std::string::npos) docName = docName.substr(slash + 1);
+            }
+            ImGui::TextColored(touchui::textPrimary(), "%s", docName.c_str());
             ImGui::Separator();
             // Selected ids per kind, collected once.
             std::set<int> selB, selS, selP, selA;
@@ -268,89 +299,103 @@ void Application::renderImTouchLayout() {
             const auto bodyIds = m_document->getAllBodyIds();
             if (!bodyIds.empty()) {
                 any = true;
-                touchui::sectionHeader("Bodies");
-                for (int id : bodyIds) {
-                    ImGui::PushID(id);
-                    bool visible = m_document->isBodyVisible(id);
-                    auto act = touchui::listRow("body", &visible,
-                                                m_document->getBodyName(id).c_str(),
-                                                selB.count(id) > 0,
-                                                /*withOverflow=*/false);
-                    if (act.toggled) m_document->setBodyVisible(id, visible);
-                    if (act.clicked) {
-                        SelectionEntry e;
-                        e.type = SelectionType::Body;
-                        e.bodyId = id;
-                        // Parity with ItemsPanel::makeEntry — downstream code
-                        // (highlight outline, ops) expects body entries to
-                        // carry the shape.
-                        try { e.shape = m_document->getBody(id); } catch (...) {}
-                        pick(e, /*multiOk=*/true);
+                if (touchui::treeGroup("grpBodies", "Bodies",
+                                       static_cast<int>(bodyIds.size()),
+                                       m_imTouchTreeOpenBodies))
+                    m_imTouchTreeOpenBodies = !m_imTouchTreeOpenBodies;
+                if (m_imTouchTreeOpenBodies)
+                    for (int id : bodyIds) {
+                        ImGui::PushID(id);
+                        bool visible = m_document->isBodyVisible(id);
+                        auto act = touchui::treeLeaf(
+                            "body", MZ_ICON_BODY,
+                            m_document->getBodyName(id).c_str(), &visible,
+                            selB.count(id) > 0);
+                        if (act.eyeToggled) m_document->setBodyVisible(id, visible);
+                        if (act.clicked) {
+                            SelectionEntry e;
+                            e.type = SelectionType::Body;
+                            e.bodyId = id;
+                            // Parity with ItemsPanel::makeEntry — downstream
+                            // code (highlight outline, ops) expects body
+                            // entries to carry the shape.
+                            try { e.shape = m_document->getBody(id); } catch (...) {}
+                            pick(e, /*multiOk=*/true);
+                        }
+                        ImGui::PopID();
                     }
-                    ImGui::PopID();
-                }
             }
             const auto sketchIds = m_document->getAllSketchIds();
             if (!sketchIds.empty()) {
                 any = true;
-                touchui::sectionHeader("Sketches");
-                for (int id : sketchIds) {
-                    ImGui::PushID(id);
-                    bool visible = m_document->isSketchVisible(id);
-                    auto act = touchui::listRow("sketch", &visible,
-                                                m_document->getSketchName(id).c_str(),
-                                                selS.count(id) > 0,
-                                                /*withOverflow=*/false);
-                    if (act.toggled) m_document->setSketchVisible(id, visible);
-                    if (act.clicked) {
-                        SelectionEntry e;
-                        e.type = SelectionType::Sketch;
-                        e.sketchId = id;
-                        pick(e, /*multiOk=*/false);
+                if (touchui::treeGroup("grpSketches", "Sketches",
+                                       static_cast<int>(sketchIds.size()),
+                                       m_imTouchTreeOpenSketches))
+                    m_imTouchTreeOpenSketches = !m_imTouchTreeOpenSketches;
+                if (m_imTouchTreeOpenSketches)
+                    for (int id : sketchIds) {
+                        ImGui::PushID(id);
+                        bool visible = m_document->isSketchVisible(id);
+                        auto act = touchui::treeLeaf(
+                            "sketch", MZ_ICON_SKETCH,
+                            m_document->getSketchName(id).c_str(), &visible,
+                            selS.count(id) > 0);
+                        if (act.eyeToggled) m_document->setSketchVisible(id, visible);
+                        if (act.clicked) {
+                            SelectionEntry e;
+                            e.type = SelectionType::Sketch;
+                            e.sketchId = id;
+                            pick(e, /*multiOk=*/false);
+                        }
+                        ImGui::PopID();
                     }
-                    ImGui::PopID();
-                }
             }
             const auto planeIds = m_document->getAllPlaneIds();
             const auto axisIds  = m_document->getAllAxisIds();
             if (!planeIds.empty() || !axisIds.empty()) {
                 any = true;
-                touchui::sectionHeader("Construction");
-                for (int id : planeIds) {
-                    ImGui::PushID(id + 100000); // avoid plane/axis id collisions
-                    const auto* p = m_document->getPlane(id);
-                    std::string label = p ? p->name
-                                          : std::string("Plane ") + std::to_string(id);
-                    bool visible = m_document->isPlaneVisible(id);
-                    auto act = touchui::listRow("plane", &visible, label.c_str(),
-                                                selP.count(id) > 0,
-                                                /*withOverflow=*/false);
-                    if (act.toggled) m_document->setPlaneVisible(id, visible);
-                    if (act.clicked) {
-                        SelectionEntry e;
-                        e.type = SelectionType::Plane;
-                        e.planeId = id;
-                        pick(e, /*multiOk=*/false);
+                if (touchui::treeGroup(
+                        "grpConstruction", "Construction",
+                        static_cast<int>(planeIds.size() + axisIds.size()),
+                        m_imTouchTreeOpenConstruction))
+                    m_imTouchTreeOpenConstruction = !m_imTouchTreeOpenConstruction;
+                if (m_imTouchTreeOpenConstruction) {
+                    for (int id : planeIds) {
+                        ImGui::PushID(id + 100000); // avoid plane/axis id collisions
+                        const auto* p = m_document->getPlane(id);
+                        std::string label = p ? p->name
+                                              : std::string("Plane ") + std::to_string(id);
+                        bool visible = m_document->isPlaneVisible(id);
+                        auto act = touchui::treeLeaf("plane", MZ_ICON_PLANE,
+                                                     label.c_str(), &visible,
+                                                     selP.count(id) > 0);
+                        if (act.eyeToggled) m_document->setPlaneVisible(id, visible);
+                        if (act.clicked) {
+                            SelectionEntry e;
+                            e.type = SelectionType::Plane;
+                            e.planeId = id;
+                            pick(e, /*multiOk=*/false);
+                        }
+                        ImGui::PopID();
                     }
-                    ImGui::PopID();
-                }
-                for (int id : axisIds) {
-                    ImGui::PushID(id + 200000);
-                    const auto* a = m_document->getAxis(id);
-                    std::string label = a ? a->name
-                                          : std::string("Axis ") + std::to_string(id);
-                    bool visible = m_document->isAxisVisible(id);
-                    auto act = touchui::listRow("axis", &visible, label.c_str(),
-                                                selA.count(id) > 0,
-                                                /*withOverflow=*/false);
-                    if (act.toggled) m_document->setAxisVisible(id, visible);
-                    if (act.clicked) {
-                        SelectionEntry e;
-                        e.type = SelectionType::Axis;
-                        e.axisId = id;
-                        pick(e, /*multiOk=*/false);
+                    for (int id : axisIds) {
+                        ImGui::PushID(id + 200000);
+                        const auto* a = m_document->getAxis(id);
+                        std::string label = a ? a->name
+                                              : std::string("Axis ") + std::to_string(id);
+                        bool visible = m_document->isAxisVisible(id);
+                        auto act = touchui::treeLeaf("axis", MZ_ICON_AXES,
+                                                     label.c_str(), &visible,
+                                                     selA.count(id) > 0);
+                        if (act.eyeToggled) m_document->setAxisVisible(id, visible);
+                        if (act.clicked) {
+                            SelectionEntry e;
+                            e.type = SelectionType::Axis;
+                            e.axisId = id;
+                            pick(e, /*multiOk=*/false);
+                        }
+                        ImGui::PopID();
                     }
-                    ImGui::PopID();
                 }
             }
             if (!any)
@@ -373,118 +418,246 @@ void Application::renderImTouchLayout() {
     if (ImGui::Begin("##LiteToolBar", nullptr,
                      kFloat & ~ImGuiWindowFlags_NoScrollbar)) {
         if (m_toolbar) {
-            int railIdx = 0;
-            for (const auto& tool : m_toolbar->railTools()) {
-                ImGui::PushID(railIdx++); // labels can repeat across groups
+            const auto tools = m_toolbar->railTools();
+            // Fire one catalogue entry; `inPopup` closes the hosting group
+            // popup after one-shot actions (the inference cycle stays open so
+            // repeated taps can walk the levels, and Polygon opens its own
+            // nested sides popup which closes the whole stack on pick).
+            auto fire = [&](const Toolbar::RailTool& tool, bool clicked,
+                            bool inPopup) {
+                if (tool.pluginIndex >= 0) {
+                    if (clicked) {
+                        m_toolbar->fireRailPlugin(tool.pluginIndex);
+                        if (inPopup) ImGui::CloseCurrentPopup();
+                    }
+                } else if (tool.action == ToolAction::Polygon) {
+                    renderRailPolygonSidesPopup(clicked);
+                } else if (clicked) {
+                    handleToolAction(static_cast<int>(tool.action));
+                    if (inPopup &&
+                        tool.action != ToolAction::SketchCycleInference)
+                        ImGui::CloseCurrentPopup();
+                }
+            };
+            auto flatButton = [&](const Toolbar::RailTool& tool, int id) {
+                ImGui::PushID(id); // labels can repeat across groups
                 const bool clicked = touchui::railButton(
                     tool.label, tool.icon, tool.label, tool.active, 64.0f * s);
                 tip(tool.tip);
-                if (tool.pluginIndex >= 0) {
-                    if (clicked) m_toolbar->fireRailPlugin(tool.pluginIndex);
-                } else if (tool.action == ToolAction::Polygon)
-                    renderRailPolygonSidesPopup(clicked);
-                else if (clicked)
-                    handleToolAction(static_cast<int>(tool.action));
+                fire(tool, clicked, /*inPopup=*/false);
                 ImGui::PopID();
-            }
-            if (m_inSketchMode) {
-                const bool toolRunning = m_sketchTool && m_sketchTool->isPlacing();
-                const char* finishLbl = toolRunning ? "Finish" : "Finish Sketch";
-                const char* exitLbl   = toolRunning ? "Cancel" : "Discard Sketch";
-                ImGui::Dummy(ImVec2(0.0f, 4.0f * s));
-                ImGui::Separator();
-                ImGui::Dummy(ImVec2(0.0f, 4.0f * s));
-                if (touchui::pillButton("finish", MZ_ICON_FINISH, finishLbl, true)) {
-                    if (toolRunning)
-                        recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
-                    else
-                        handleToolAction(static_cast<int>(ToolAction::FinishSketch));
-                }
-                tip(toolRunning
-                        ? "Finish the current shape, keeping the points placed"
-                        : "Leave sketch mode, keeping the sketch");
-                if (touchui::pillButton("exit", MZ_ICON_DISCARD, exitLbl)) {
-                    if (toolRunning)
-                        m_sketchTool->onCancel();
-                    else
-                        ImGui::OpenPopup("Discard sketch?"); // confirm — destructive
-                }
-                tip(toolRunning
-                        ? "Cancel the in-progress shape"
-                        : "Throw the sketch away and leave (asks to confirm)");
-                if (ImGui::BeginPopupModal("Discard sketch?", nullptr,
-                                           ImGuiWindowFlags_AlwaysAutoResize)) {
-                    ImGui::TextUnformatted(
-                        "Leave the sketch and throw away its changes?");
-                    ImGui::Spacing();
-                    const float bw = 150.0f * s;
-                    if (ImGui::Button("Discard Sketch", ImVec2(bw, 44.0f * s))) {
-                        ImGui::CloseCurrentPopup();
-                        handleToolAction(static_cast<int>(ToolAction::ExitSketchDiscard));
+            };
+            // Group button + flyout: the button wears the group's ACTIVE
+            // tool (icon, label, accent fill) so the current mode stays
+            // readable while collapsed; tapping opens a grid of the members.
+            auto group = [&](const char* id, const char* popupId,
+                             const char* groupIcon, const char* groupLabel,
+                             const char* groupTip,
+                             const std::vector<const Toolbar::RailTool*>& members) {
+                if (members.empty()) return;
+                const Toolbar::RailTool* activeTool = nullptr;
+                for (const auto* t : members)
+                    if (t->active) { activeTool = t; break; }
+                if (touchui::railButton(id,
+                                        activeTool ? activeTool->icon : groupIcon,
+                                        activeTool ? activeTool->label : groupLabel,
+                                        activeTool != nullptr, 64.0f * s))
+                    ImGui::OpenPopup(popupId);
+                tip(groupTip);
+                if (ImGui::BeginPopup(popupId)) {
+                    int idx = 0;
+                    for (const auto* t : members) {
+                        if (idx % 4 != 0) ImGui::SameLine(0.0f, 6.0f * s);
+                        ImGui::PushID(idx++);
+                        const bool clicked = touchui::railButton(
+                            t->label, t->icon, t->label, t->active, 64.0f * s);
+                        tip(t->tip);
+                        fire(*t, clicked, /*inPopup=*/true);
+                        ImGui::PopID();
                     }
-                    ImGui::SameLine();
-                    if (ImGui::Button("Keep Editing", ImVec2(bw, 44.0f * s)))
-                        ImGui::CloseCurrentPopup();
                     ImGui::EndPopup();
                 }
+            };
+
+            if (!m_inSketchMode) {
+                int railIdx = 0;
+                for (const auto& tool : tools) flatButton(tool, railIdx++);
+            } else {
+                // Sketch mode: the flat catalogue is ~19 buttons — a screen
+                // and a half of scrolling. The DRAWING tools stay flat (they're
+                // the constantly-switched core of sketching, and Steve wants
+                // them one tap away); the occasional tools collapse into two
+                // Fusion-style groups — Modify (trim/copy/mirror/patterns +
+                // sketch plugins) and More (guides/measure/look-at). Select,
+                // the draw tools and the active tool's origin toggle render
+                // in catalogue order, so anything unrecognised (future tools)
+                // also lands flat and can't silently vanish from the rail.
+                std::vector<const Toolbar::RailTool*> modify, aids;
+                int railIdx = 0;
+                for (const auto& t : tools) {
+                    if (t.pluginIndex >= 0) { modify.push_back(&t); continue; }
+                    switch (t.action) {
+                    case ToolAction::Trim:
+                    case ToolAction::SketchCopy:
+                    case ToolAction::SketchMirror:
+                    case ToolAction::SketchLinearPattern:
+                    case ToolAction::SketchRadialPattern:
+                        modify.push_back(&t); break;
+                    case ToolAction::SketchCycleInference:
+                    case ToolAction::Measure:
+                    case ToolAction::LookAtSketch:
+                        aids.push_back(&t); break;
+                    default:
+                        flatButton(t, railIdx++); break;
+                    }
+                }
+                group("modifyGroup", "##sketchModify", MZ_ICON_TRIM, "Modify",
+                      "Modify tools: trim, copy, mirror, linear and circular "
+                      "patterns",
+                      modify);
+                group("aidsGroup", "##sketchAids", MZ_ICON_MORE, "More",
+                      "Drawing guides level, measure, look at the sketch plane",
+                      aids);
             }
         }
     }
     ImGui::End();
     ImGui::PopStyleColor();
 
-    // ── "+" create FAB (bottom-right) ───────────────────────────────────────
+    // ── Bottom-right corner: in a sketch, the commit actions — an accent
+    //    ✓ Finish FAB with a smaller ✗ Discard beside it (gap so a Finish tap
+    //    can't stray onto Discard). During a live ACTION (push/pull, extrude,
+    //    fillet, shell, pattern, …) the same pair reads Apply/Cancel and
+    //    drives the action — the op panels hide their own Confirm/Cancel
+    //    rows while this corner hosts them (imTouchActionCorner()).
+    //    Everywhere else, the "+" create FAB. Commit actions used to live at
+    //    the bottom of the left tool bar, which coupled "done sketching" to
+    //    transient tool picking and put the throw-it-away button 8 px under
+    //    the tools; the corner FAB spot is the tablet thumb zone, and the +
+    //    menu is dead weight mid-sketch anyway.
     ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x - m, wp.y + ws.y - m),
                             ImGuiCond_Always, ImVec2(1.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.0f);
-    if (ImGui::Begin("##LiteFab", nullptr, kFloat)) {
-        if (touchui::fab("create", MZ_ICON_ADD))
-            ImGui::OpenPopup("##LiteCreate");
-        tip("Create: a sketch or a primitive solid");
-        if (ImGui::BeginPopup("##LiteCreate")) {
-            // Mirror the modern rail's create logic instead of dumping every
-            // option flat: sketch is contextual (on a picked face/plane if there
-            // is one, else a "New Sketch" submenu of world planes), the five
-            // primitives live under ONE "Primitive" submenu, and construction
-            // geometry derives from the selection — so only the relevant, grouped
-            // create tools show, matching the classic + modern layouts.
-            const bool faceOrPlaneSel = m_selection &&
-                (m_selection->hasSelectedFaces() ||
-                 m_selection->primaryType() == SelectionType::Plane);
-            if (faceOrPlaneSel) {
-                if (ImGui::MenuItem(MZ_ICON_SKETCH "  Sketch on selection"))
-                    handleToolAction(static_cast<int>(ToolAction::SketchOnFace));
-            } else if (ImGui::BeginMenu(MZ_ICON_SKETCH "  New Sketch")) {
-                if (ImGui::MenuItem("XY plane"))
-                    handleToolAction(static_cast<int>(ToolAction::StartSketchXY));
-                if (ImGui::MenuItem("XZ plane"))
-                    handleToolAction(static_cast<int>(ToolAction::StartSketchXZ));
-                if (ImGui::MenuItem("YZ plane"))
-                    handleToolAction(static_cast<int>(ToolAction::StartSketchYZ));
-                ImGui::EndMenu();
+    if (m_inSketchMode) {
+        if (ImGui::Begin("##LiteFab", nullptr, kFloat)) {
+            const bool toolRunning = m_sketchTool && m_sketchTool->isPlacing();
+            const float fabD = 56.0f * s;
+            const float side = 44.0f * s;
+            // ✗ first (left), vertically centred on the FAB.
+            const float topY = ImGui::GetCursorPosY();
+            ImGui::SetCursorPosY(topY + (fabD - side) * 0.5f);
+            if (touchui::iconButton("exitSk", MZ_ICON_DISCARD, side)) {
+                if (toolRunning)
+                    m_sketchTool->onCancel();
+                else
+                    ImGui::OpenPopup("Discard sketch?"); // confirm — destructive
             }
-            if (m_pluginContext &&
-                ImGui::BeginMenu(MZ_ICON_PRIMITIVE "  Primitive")) {
-                if (ImGui::MenuItem("Box"))
-                    m_pluginContext->requestInteractiveOp("PrimitiveBox");
-                if (ImGui::MenuItem("Cylinder"))
-                    m_pluginContext->requestInteractiveOp("PrimitiveCylinder");
-                if (ImGui::MenuItem("Sphere"))
-                    m_pluginContext->requestInteractiveOp("PrimitiveSphere");
-                if (ImGui::MenuItem("Cone"))
-                    m_pluginContext->requestInteractiveOp("PrimitiveCone");
-                if (ImGui::MenuItem("Torus"))
-                    m_pluginContext->requestInteractiveOp("PrimitiveTorus");
-                ImGui::EndMenu();
+            tip(toolRunning
+                    ? "Cancel the in-progress shape"
+                    : "Throw the sketch away and leave (asks to confirm)");
+            ImGui::SameLine(0.0f, 18.0f * s); // deliberate gap: no stray discards
+            ImGui::SetCursorPosY(topY);
+            if (touchui::fab("finishSk", MZ_ICON_FINISH, fabD)) {
+                if (m_sketchShapeConfirmPending && toolRunning) {
+                    // A circle held for its ✗/✓ bubble: commit it as-released.
+                    // (onConfirm would RESET the in-flight placement instead.)
+                    recordSketchMutation([&]{
+                        m_sketchTool->onMouseDown(m_sketchShapePendingPos,
+                                                  false); });
+                    m_sketchShapeConfirmPending = false;
+                } else if (toolRunning)
+                    recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
+                else
+                    handleToolAction(static_cast<int>(ToolAction::FinishSketch));
             }
-            if (ImGui::BeginMenu(MZ_ICON_FOCUS "  Construction")) {
-                renderConstructionMenuItems();
-                ImGui::EndMenu();
+            tip(toolRunning
+                    ? "Finish the current shape, keeping the points placed"
+                    : "Finish the sketch and leave sketch mode");
+            if (ImGui::BeginPopupModal("Discard sketch?", nullptr,
+                                       ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted(
+                    "Leave the sketch and throw away its changes?");
+                ImGui::Spacing();
+                const float bw = 150.0f * s;
+                if (ImGui::Button("Discard Sketch", ImVec2(bw, 44.0f * s))) {
+                    ImGui::CloseCurrentPopup();
+                    handleToolAction(static_cast<int>(ToolAction::ExitSketchDiscard));
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Keep Editing", ImVec2(bw, 44.0f * s)))
+                    ImGui::CloseCurrentPopup();
+                ImGui::EndPopup();
             }
-            ImGui::EndPopup();
         }
+        ImGui::End();
+    } else if (imTouchActionCorner()) {
+        if (ImGui::Begin("##LiteFab", nullptr, kFloat)) {
+            const float fabD = 56.0f * s;
+            const float side = 44.0f * s;
+            // ✗ first (left), vertically centred on the ✓ FAB — mirrors the
+            // sketch pair so the corner always means confirm/discard.
+            const float topY = ImGui::GetCursorPosY();
+            ImGui::SetCursorPosY(topY + (fabD - side) * 0.5f);
+            if (touchui::iconButton("cancelAct", MZ_ICON_DISCARD, side))
+                cancelActiveAction();
+            tip("Cancel the action and discard its preview");
+            ImGui::SameLine(0.0f, 18.0f * s); // deliberate gap: no stray cancels
+            ImGui::SetCursorPosY(topY);
+            if (touchui::fab("applyAct", MZ_ICON_FINISH, fabD))
+                confirmActiveAction();
+            tip("Apply the action");
+        }
+        ImGui::End();
+    } else {
+        if (ImGui::Begin("##LiteFab", nullptr, kFloat)) {
+            if (touchui::fab("create", MZ_ICON_ADD))
+                ImGui::OpenPopup("##LiteCreate");
+            tip("Create: a sketch or a primitive solid");
+            if (ImGui::BeginPopup("##LiteCreate")) {
+                // Mirror the modern rail's create logic instead of dumping every
+                // option flat: sketch is contextual (on a picked face/plane if there
+                // is one, else a "New Sketch" submenu of world planes), the five
+                // primitives live under ONE "Primitive" submenu, and construction
+                // geometry derives from the selection — so only the relevant, grouped
+                // create tools show, matching the classic + modern layouts.
+                const bool faceOrPlaneSel = m_selection &&
+                    (m_selection->hasSelectedFaces() ||
+                     m_selection->primaryType() == SelectionType::Plane);
+                if (faceOrPlaneSel) {
+                    if (ImGui::MenuItem(MZ_ICON_SKETCH "  Sketch on selection"))
+                        handleToolAction(static_cast<int>(ToolAction::SketchOnFace));
+                } else if (ImGui::BeginMenu(MZ_ICON_SKETCH "  New Sketch")) {
+                    if (ImGui::MenuItem("XY plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchXY));
+                    if (ImGui::MenuItem("XZ plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchXZ));
+                    if (ImGui::MenuItem("YZ plane"))
+                        handleToolAction(static_cast<int>(ToolAction::StartSketchYZ));
+                    ImGui::EndMenu();
+                }
+                if (m_pluginContext &&
+                    ImGui::BeginMenu(MZ_ICON_PRIMITIVE "  Primitive")) {
+                    if (ImGui::MenuItem("Box"))
+                        m_pluginContext->requestInteractiveOp("PrimitiveBox");
+                    if (ImGui::MenuItem("Cylinder"))
+                        m_pluginContext->requestInteractiveOp("PrimitiveCylinder");
+                    if (ImGui::MenuItem("Sphere"))
+                        m_pluginContext->requestInteractiveOp("PrimitiveSphere");
+                    if (ImGui::MenuItem("Cone"))
+                        m_pluginContext->requestInteractiveOp("PrimitiveCone");
+                    if (ImGui::MenuItem("Torus"))
+                        m_pluginContext->requestInteractiveOp("PrimitiveTorus");
+                    ImGui::EndMenu();
+                }
+                if (ImGui::BeginMenu(MZ_ICON_FOCUS "  Construction")) {
+                    renderConstructionMenuItems();
+                    ImGui::EndMenu();
+                }
+                ImGui::EndPopup();
+            }
+        }
+        ImGui::End();
     }
-    ImGui::End();
 
     // ── History: a bottom toggle whose REOPEN button sits exactly where its
     //    minimize chevron is (not up on the Items rail). The toggle is a fixed

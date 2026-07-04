@@ -52,6 +52,54 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
                  bool dim, ImU32 iconCol = 0, float side = 0.0f,
                  const char* label = nullptr);
 
+// Calculator-style value readout for the number pad: large right-aligned
+// text in a framed well. `dim` styles placeholder/default values. `width`
+// should match the pad below it (numberPadWidth) so they read as one unit.
+void valueReadout(const char* id, const char* text, bool dim, float width);
+// Total width of a numberPad with the given key side (3 keys + 2 gaps).
+float numberPadWidth(float keySide = 0.0f);
+
+// In-app numeric keypad (7 8 9 / 4 5 6 / 1 2 3 / . 0 ⌫) editing `buf` in
+// place. Exists because the NATIVE mobile keyboard is a dead end for the
+// im-touch dimension fields — raising iOS's keyboard from the SDL loop
+// starved/froze the app, and a CAD dimension only ever needs digits and a
+// dot anyway. Pure ImGui buttons: no SDL_StartTextInput, no IME, no focus.
+// `allowSign` adds a full-width ± key (push/pull's negative = cut).
+// Returns true when a key changed the buffer this frame.
+bool numberPad(const char* id, char* buf, size_t bufSize, float keySide = 0.0f,
+               bool allowSign = false);
+
+// One-line numeric AMOUNT field for the im-touch layout: label + the value
+// in a tappable well; tapping opens a number-pad popup (big readout, keys,
+// ✗/✓). ✓ (with a valid entry) writes back into *v and returns true.
+// Callers keep their InputText path for the other layouts and call this
+// only when im-touch hosts the panel. minV<maxV clamps the committed value.
+// The pad popup is PINNED: below the field's own well by default, or at
+// `padPos` (screen coords) when given — multi-field dialogs (rectangle
+// W/H) pass one shared anchor so the pad never jumps between fields.
+bool amountField(const char* id, const char* label, double* v,
+                 const char* suffix = "mm", int decimals = 1,
+                 bool allowSign = false, double minV = 0.0, double maxV = 0.0,
+                 const ImVec2* padPos = nullptr);
+bool amountField(const char* id, const char* label, float* v,
+                 const char* suffix = "mm", int decimals = 1,
+                 bool allowSign = false, float minV = 0.0f, float maxV = 0.0f,
+                 const ImVec2* padPos = nullptr);
+
+// Fusion-style browser tree rows (the im-touch transparent Items overlay).
+// Group header: disclosure triangle + label + count. Returns true on tap —
+// the caller flips its open flag.
+bool treeGroup(const char* id, const char* label, int count, bool open);
+// Leaf under a group: eye visibility toggle (own hit area) + type icon +
+// name, indented. Row tap = select; selected rows get a soft accent fill;
+// hidden items render dimmed.
+struct TreeLeafAction {
+    bool eyeToggled = false;  // *visible already flipped
+    bool clicked    = false;  // row body tapped (select)
+};
+TreeLeafAction treeLeaf(const char* id, const char* icon, const char* label,
+                        bool* visible, bool selected);
+
 // 44pt list row: leading visibility checkbox, label, trailing ⋯ button.
 // Returns which part was pressed this frame.
 struct ListRowAction {

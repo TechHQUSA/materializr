@@ -2,11 +2,13 @@
 #include "TouchTheme.h"
 #include "TouchIcons.h"
 #include "../ui_scale.h"
+#include "../core/NumParse.h" // amountField commit parsing
 
 #include <imgui_internal.h> // ImGuiItemFlags_Disabled for iconButton dimming
 
 #include <algorithm>
 #include <cfloat>
+#include <cstdio>
 #include <cstring>
 
 namespace materializr {
@@ -117,13 +119,13 @@ bool railButton(const char* id, const char* icon, const char* label, bool active
 
     if (active) {
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
-                          ImGui::GetColorU32(accentFill()), 12.0f * s);
+                          ImGui::GetColorU32(accentFill()), radius(12.0f * s));
     } else if (hovered || ImGui::IsItemActive()) {
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
-                          ImGui::GetColorU32(rowBg()), 12.0f * s);
+                          ImGui::GetColorU32(rowBg()), radius(12.0f * s));
     } else if (solid) {
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
-                          ImGui::GetColorU32(panelBg()), 12.0f * s);
+                          ImGui::GetColorU32(panelBg()), radius(12.0f * s));
     }
 
     const ImU32 fg = ImGui::GetColorU32(active ? onAccent() : textPrimary());
@@ -166,7 +168,7 @@ bool pillButton(const char* id, const char* icon, const char* label, bool accent
     ImVec4 bg = accent ? accentFill() : rowBg();
     if (hovered && !accent) bg = hoverBg();
     if (ImGui::IsItemActive()) bg = accent ? accentDeep() : pressBg();
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(bg), h * 0.32f);
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(bg), radius(h * 0.32f));
 
     const ImU32 fg = ImGui::GetColorU32(accent ? onAccent() : textPrimary());
     float x = p.x + 10.0f * s;
@@ -199,7 +201,7 @@ bool iconButton(const char* id, const char* icon, float side) {
     if (hovered) bg = hoverBg();
     if (ImGui::IsItemActive()) bg = pressBg();
     dl->AddRectFilled(p, ImVec2(p.x + side, p.y + side),
-                      ImGui::GetColorU32(bg), 10.0f * s);
+                      ImGui::GetColorU32(bg), radius(10.0f * s));
     drawIconCentered(dl, ImVec2(p.x + side * 0.5f, p.y + side * 0.5f), 17.0f * s,
                      icon,
                      ImGui::GetColorU32(enabled ? textPrimary() : textDim()));
@@ -257,11 +259,11 @@ int segmented(const char* id, const char* const items[], int count, int active) 
         const ImVec2 a(x, p.y), b(x + seg, p.y + h);
         if (i == active) {
             // Active segment: outlined pill (mockup style).
-            dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), 10.0f * s);
-            dl->AddRect(a, b, ImGui::GetColorU32(accentDeep()), 10.0f * s, 0,
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), radius(10.0f * s));
+            dl->AddRect(a, b, ImGui::GetColorU32(accentDeep()), radius(10.0f * s), 0,
                         2.0f * s);
         } else if (hovered) {
-            dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), 10.0f * s);
+            dl->AddRectFilled(a, b, ImGui::GetColorU32(rowBg()), radius(10.0f * s));
         }
         const ImVec2 ts = ImGui::CalcTextSize(items[i]);
         dl->PushClipRect(a, b, true);
@@ -330,10 +332,10 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
     if (ImGui::IsItemActive())
         bg = current ? accentDeep() : pressBg();
     dl->AddRectFilled(p, ImVec2(p.x + boxW, p.y + boxH),
-                      ImGui::GetColorU32(bg), 10.0f * s);
+                      ImGui::GetColorU32(bg), radius(10.0f * s));
     if (editing)
         dl->AddRect(p, ImVec2(p.x + boxW, p.y + boxH),
-                    ImGui::GetColorU32(accentDeep()), 10.0f * s, 0, 2.0f * s);
+                    ImGui::GetColorU32(accentDeep()), radius(10.0f * s), 0, 2.0f * s);
 
     ImU32 fg = iconCol;
     if (fg == 0)
@@ -348,6 +350,260 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
                     fg, label);
     ImGui::PopID();
     return pressed;
+}
+
+float numberPadWidth(float keySide) {
+    const float s = uiScale();
+    if (keySide <= 0.0f) keySide = 52.0f * s;
+    return 3.0f * keySide + 2.0f * 6.0f * s;
+}
+
+void valueReadout(const char* id, const char* text, bool dim, float width) {
+    const float s = uiScale();
+    if (width <= 0.0f) width = numberPadWidth();
+    const float h = 52.0f * s;
+    const float ts = 26.0f * s;   // ~2x body text — the value is the point
+
+    ImGui::PushID(id);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h),
+                      ImGui::GetColorU32(ImGuiCol_FrameBg), radius(8.0f * s));
+    ImFont* font = ImGui::GetFont();
+    ImVec2 sz = font->CalcTextSizeA(ts, FLT_MAX, 0.0f, text);
+    // Right-aligned like a calculator; clip long values on the left by
+    // nudging them right of the well's left padding at worst.
+    float tx = p.x + width - 12.0f * s - sz.x;
+    if (tx < p.x + 8.0f * s) tx = p.x + 8.0f * s;
+    dl->AddText(font, ts, ImVec2(tx, p.y + (h - sz.y) * 0.5f),
+                ImGui::GetColorU32(dim ? textDim() : accentFill()), text);
+    ImGui::Dummy(ImVec2(width, h));
+    ImGui::PopID();
+}
+
+bool numberPad(const char* id, char* buf, size_t bufSize, float keySide,
+               bool allowSign) {
+    const float s = uiScale();
+    if (keySide <= 0.0f) keySide = 52.0f * s;
+    bool changed = false;
+    ImGui::PushID(id);
+    static const char kRows[4][4] = {"789", "456", "123", ".0<"};
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            if (c) ImGui::SameLine(0.0f, 6.0f * s);
+            const char key = kRows[r][c];
+            char lbl[8];
+            if (key == '<') std::snprintf(lbl, sizeof(lbl), "%s", ICON_IC_ERASE);
+            else { lbl[0] = key; lbl[1] = '\0'; }
+            ImGui::PushID(r * 3 + c);
+            if (ImGui::Button(lbl, ImVec2(keySide, keySide))) {
+                size_t len = std::strlen(buf);
+                if (key == '<') {
+                    if (len > 0) { buf[len - 1] = '\0'; changed = true; }
+                } else if (key == '.') {
+                    if (!std::strchr(buf, '.') && len + 1 < bufSize) {
+                        buf[len] = '.'; buf[len + 1] = '\0'; changed = true;
+                    }
+                } else if (len + 1 < bufSize) {
+                    buf[len] = key; buf[len + 1] = '\0'; changed = true;
+                }
+            }
+            ImGui::PopID();
+        }
+    }
+    if (allowSign) {
+        // Full-width ± toggling a leading minus (push/pull: negative = cut).
+        if (ImGui::Button("+ / -", ImVec2(numberPadWidth(keySide), keySide))) {
+            const size_t len = std::strlen(buf);
+            if (buf[0] == '-') {
+                std::memmove(buf, buf + 1, len);   // includes the NUL
+            } else if (len + 1 < bufSize) {
+                std::memmove(buf + 1, buf, len + 1);
+                buf[0] = '-';
+            }
+            changed = true;
+        }
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+bool amountField(const char* id, const char* label, double* v,
+                 const char* suffix, int decimals, bool allowSign,
+                 double minV, double maxV, const ImVec2* padPos) {
+    const float s = uiScale();
+    bool changed = false;
+    // One pad is open at a time, so a single shared edit buffer suffices.
+    static char s_buf[32];
+
+    ImGui::PushID(id);
+    if (label && *label) ImGui::TextUnformatted(label);
+
+    // Tappable value well — valueReadout's look with a hit area.
+    const float wellW =
+        std::max(ImGui::GetContentRegionAvail().x, numberPadWidth(40.0f * s));
+    const float wellH = 46.0f * s;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton("##well", ImVec2(wellW, wellH));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + wellW, p.y + wellH),
+                      ImGui::GetColorU32(hovered ? hoverBg() : rowBg()),
+                      radius(8.0f * s));
+    char cur[48];
+    std::snprintf(cur, sizeof(cur), "%.*f %s", decimals, *v, suffix);
+    ImFont* font = ImGui::GetFont();
+    const float ts = 22.0f * s;
+    const ImVec2 sz = font->CalcTextSizeA(ts, FLT_MAX, 0.0f, cur);
+    float tx = p.x + wellW - 12.0f * s - sz.x;
+    if (tx < p.x + 8.0f * s) tx = p.x + 8.0f * s;
+    dl->AddText(font, ts, ImVec2(tx, p.y + (wellH - sz.y) * 0.5f),
+                ImGui::GetColorU32(textPrimary()), cur);
+
+    if (pressed) {
+        s_buf[0] = '\0';
+        ImGui::OpenPopup("##amountPad");
+    }
+    // Pin the pad: below this well, or at the caller's shared anchor —
+    // never at the tap point, so repeated edits (and sibling fields in a
+    // two-value dialog) always find the keypad in the same place.
+    ImGui::SetNextWindowPos(
+        padPos ? *padPos : ImVec2(p.x, p.y + wellH + 6.0f * s),
+        ImGuiCond_Appearing);
+    if (ImGui::BeginPopup("##amountPad")) {
+        const float keySide = 46.0f * s;
+        char readout[48];
+        if (s_buf[0] != '\0')
+            std::snprintf(readout, sizeof(readout), "%s %s", s_buf, suffix);
+        else
+            std::snprintf(readout, sizeof(readout), "%.*f %s", decimals, *v,
+                          suffix);
+        valueReadout("val", readout, s_buf[0] == '\0',
+                     numberPadWidth(keySide));
+        ImGui::Spacing();
+        numberPad("keys", s_buf, sizeof(s_buf), keySide, allowSign);
+        ImGui::Spacing();
+        if (iconButton("cancel", MZ_ICON_DISCARD, keySide))
+            ImGui::CloseCurrentPopup();
+        ImGui::SameLine(0.0f, 12.0f * s);
+        if (pillButton("ok", MZ_ICON_FINISH, nullptr, /*accent=*/true)) {
+            double nv = 0.0;
+            if (materializr::parseFinite(s_buf, nv)) {
+                if (minV < maxV) nv = nv < minV ? minV : (nv > maxV ? maxV : nv);
+                *v = nv;
+                changed = true;
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+bool amountField(const char* id, const char* label, float* v,
+                 const char* suffix, int decimals, bool allowSign,
+                 float minV, float maxV, const ImVec2* padPos) {
+    double d = static_cast<double>(*v);
+    const bool changed =
+        amountField(id, label, &d, suffix, decimals, allowSign,
+                    static_cast<double>(minV), static_cast<double>(maxV),
+                    padPos);
+    if (changed) *v = static_cast<float>(d);
+    return changed;
+}
+
+bool treeGroup(const char* id, const char* label, int count, bool open) {
+    const float s = uiScale();
+    const float h = 40.0f * s;
+    const float w = ImGui::GetContentRegionAvail().x;
+
+    ImGui::PushID(id);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool pressed = ImGui::InvisibleButton("##grp", ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (hovered)
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
+                          ImGui::GetColorU32(rowHoverBg()), radius(6.0f * s));
+
+    // Disclosure triangle, drawn (font glyphs for ▶/▼ look mismatched at
+    // this size). Open points down, closed points right.
+    const float tri = 5.0f * s;
+    const ImVec2 c(p.x + 14.0f * s, p.y + h * 0.5f);
+    const ImU32 fg = ImGui::GetColorU32(textPrimary());
+    if (open)
+        dl->AddTriangleFilled(ImVec2(c.x - tri, c.y - tri * 0.6f),
+                              ImVec2(c.x + tri, c.y - tri * 0.6f),
+                              ImVec2(c.x, c.y + tri), fg);
+    else
+        dl->AddTriangleFilled(ImVec2(c.x - tri * 0.6f, c.y - tri),
+                              ImVec2(c.x + tri, c.y),
+                              ImVec2(c.x - tri * 0.6f, c.y + tri), fg);
+
+    char buf[80];
+    std::snprintf(buf, sizeof(buf), "%s (%d)", label, count);
+    const ImVec2 ts = ImGui::CalcTextSize(buf);
+    dl->AddText(ImVec2(p.x + 28.0f * s, p.y + (h - ts.y) * 0.5f), fg, buf);
+    ImGui::PopID();
+    return pressed;
+}
+
+TreeLeafAction treeLeaf(const char* id, const char* icon, const char* label,
+                        bool* visible, bool selected) {
+    TreeLeafAction act;
+    const float s = uiScale();
+    const float h = 40.0f * s;
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float indent = 26.0f * s;   // children sit under the group text
+    const float eyeW = 34.0f * s;
+
+    ImGui::PushID(id);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // Eye first — its own exclusive hit area (a row button submitted before
+    // it would swallow the taps; same lesson as listRow's checkbox).
+    ImGui::SetCursorScreenPos(ImVec2(p.x + indent, p.y));
+    if (ImGui::InvisibleButton("##eye", ImVec2(eyeW, h))) {
+        if (visible) { *visible = !*visible; act.eyeToggled = true; }
+    }
+    const bool eyeHov = ImGui::IsItemHovered();
+
+    // Row body (select) — after the eye to the right edge.
+    ImGui::SetCursorScreenPos(ImVec2(p.x + indent + eyeW, p.y));
+    act.clicked = ImGui::InvisibleButton(
+        "##row", ImVec2(std::max(1.0f, w - indent - eyeW), h));
+    const bool rowHov = ImGui::IsItemHovered();
+
+    if (selected) {
+        ImVec4 selBg = accentFill();
+        selBg.w = 0.30f;   // soft fill — the tree stays see-through
+        dl->AddRectFilled(ImVec2(p.x + indent, p.y), ImVec2(p.x + w, p.y + h),
+                          ImGui::GetColorU32(selBg), radius(6.0f * s));
+    } else if (rowHov) {
+        dl->AddRectFilled(ImVec2(p.x + indent, p.y), ImVec2(p.x + w, p.y + h),
+                          ImGui::GetColorU32(rowHoverBg()), radius(6.0f * s));
+    }
+
+    const bool shown = !visible || *visible;
+    const ImU32 dimCol  = ImGui::GetColorU32(textDim());
+    const ImU32 mainCol = ImGui::GetColorU32(shown ? textPrimary() : textDim());
+    if (visible)
+        drawIconCentered(dl, ImVec2(p.x + indent + eyeW * 0.5f, p.y + h * 0.5f),
+                         15.0f * s, shown ? MZ_ICON_VISIBLE : MZ_ICON_HIDDEN,
+                         eyeHov ? ImGui::GetColorU32(textPrimary()) : dimCol);
+    // Type icon + name.
+    const float ix = p.x + indent + eyeW + 4.0f * s;
+    drawIconCentered(dl, ImVec2(ix + 9.0f * s, p.y + h * 0.5f), 15.0f * s,
+                     icon, mainCol);
+    const ImVec2 ts = ImGui::CalcTextSize(label);
+    dl->AddText(ImVec2(ix + 24.0f * s, p.y + (h - ts.y) * 0.5f), mainCol,
+                label);
+
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
+    ImGui::PopID();
+    return act;
 }
 
 ListRowAction listRow(const char* id, bool* checked, const char* label,
@@ -407,17 +663,17 @@ ListRowAction listRow(const char* id, bool* checked, const char* label,
 
     if (selected)
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
-                          ImGui::GetColorU32(rowBg()), 10.0f * s);
+                          ImGui::GetColorU32(rowBg()), radius(10.0f * s));
     else if (rowHov)
         dl->AddRectFilled(p, ImVec2(p.x + w - ovW, p.y + h),
                           ImGui::GetColorU32(rowHoverBg()),
-                          10.0f * s);
+                          radius(10.0f * s));
 
     if (checked) {
         const ImVec2 cb(p.x + pad, p.y + (h - box) * 0.5f);
         if (*checked) {
             dl->AddRectFilled(cb, ImVec2(cb.x + box, cb.y + box),
-                              ImGui::GetColorU32(accentFill()), 6.0f * s);
+                              ImGui::GetColorU32(accentFill()), radius(6.0f * s));
             ImFont* font = ImGui::GetFont();
             const float cs = 14.0f * s;
             const ImVec2 ts = font->CalcTextSizeA(cs, FLT_MAX, 0.0f, MZ_ICON_CHECK);
@@ -427,7 +683,7 @@ ListRowAction listRow(const char* id, bool* checked, const char* label,
         } else {
             dl->AddRect(cb, ImVec2(cb.x + box, cb.y + box),
                         ImGui::GetColorU32(chkHov ? textDim() : hairline()),
-                        6.0f * s, 0, 2.0f * s);
+                        radius(6.0f * s), 0, 2.0f * s);
         }
     }
 

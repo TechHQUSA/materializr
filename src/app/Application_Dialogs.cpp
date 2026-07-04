@@ -1,4 +1,5 @@
 #include "ui/UiTheme.h"
+#include "ui/TouchWidgets.h" // im-touch number-pad amount fields
 #include "ui_scale.h"
 #include "touch_mode.h"
 #include "gl_common.h"
@@ -882,14 +883,28 @@ void Application::renderResizeCylindricalPanel() {
     double*  val = m_resizeCylEditBottom ? &m_resizeCylNewBottomDiameter
                                          : &m_resizeCylNewTopDiameter;
 
-    ImGui::SetNextItemWidth(140);
-    bool entered = ImGui::InputText("##rcyldia", buf, 32,
-                                    ImGuiInputTextFlags_EnterReturnsTrue |
-                                    ImGuiInputTextFlags_CharsDecimal);
-
-    double parsed = *val; // parseFinite: garbage/inf keeps the previous value
-    bool changed = materializr::parseFinite(buf, parsed) &&
-                   std::abs(parsed - *val) > 0.001;
+    bool entered = false;
+    bool changed = false;
+    double parsed = *val;
+    if (imTouchLayout()) {
+        // im-touch: number-pad amount field — no InputText, no native
+        // keyboard (which froze the app on iOS).
+        double v = *val;
+        if (touchui::amountField("rcylAmt", nullptr, &v, "mm", 2,
+                                 /*allowSign=*/false)) {
+            parsed = v;
+            changed = std::abs(parsed - *val) > 0.001;
+            std::snprintf(buf, 32, "%.2f", v);
+        }
+    } else {
+        ImGui::SetNextItemWidth(140);
+        entered = ImGui::InputText("##rcyldia", buf, 32,
+                                   ImGuiInputTextFlags_EnterReturnsTrue |
+                                   ImGuiInputTextFlags_CharsDecimal);
+        // parseFinite: garbage/inf keeps the previous value
+        changed = materializr::parseFinite(buf, parsed) &&
+                  std::abs(parsed - *val) > 0.001;
+    }
     if (changed) {
         *val = parsed;
         if (both) {
@@ -915,12 +930,14 @@ void Application::renderResizeCylindricalPanel() {
                            "a hole can't exceed the surrounding wall.");
     }
 
-    ImGui::Spacing();
-    ImGui::BeginDisabled(m_resizeCylPreviewFailed);
-    if (ImGui::Button(materializr::btnConfirm(), ImVec2(115, 0))) commitResizeCylindrical();
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button(materializr::btnCancel(),    ImVec2(115, 0))) cancelResizeCylindrical();
+    if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+        ImGui::Spacing();
+        ImGui::BeginDisabled(m_resizeCylPreviewFailed);
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(115, 0))) commitResizeCylindrical();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(materializr::btnCancel(),    ImVec2(115, 0))) cancelResizeCylindrical();
+    }
 
     ImGui::End();
 }
@@ -1269,6 +1286,15 @@ void Application::renderSketchPatternPopup() {
                           "%.2f", m_sketchPatternDistance);
             changed = true;
         }
+        if (imTouchLayout() &&
+            touchui::amountField("spDistAmt", nullptr,
+                                 &m_sketchPatternDistance, "mm", 2,
+                                 /*allowSign=*/false, 0.1f, 100.0f)) {
+            std::snprintf(m_sketchPatternDistanceBuf,
+                          sizeof(m_sketchPatternDistanceBuf),
+                          "%.2f", m_sketchPatternDistance);
+            changed = true;
+        }
     } else {
         ImGui::Text("Sweep"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
@@ -1283,6 +1309,15 @@ void Application::renderSketchPatternPopup() {
         }
         if (ImGui::SliderFloat("##spangslider", &m_sketchPatternAngle,
                                5.0f, 360.0f, "%.1f°")) {
+            std::snprintf(m_sketchPatternAngleBuf,
+                          sizeof(m_sketchPatternAngleBuf),
+                          "%.1f", m_sketchPatternAngle);
+            changed = true;
+        }
+        if (imTouchLayout() &&
+            touchui::amountField("spAngAmt", nullptr,
+                                 &m_sketchPatternAngle, "deg", 1,
+                                 /*allowSign=*/false, 5.0f, 360.0f)) {
             std::snprintf(m_sketchPatternAngleBuf,
                           sizeof(m_sketchPatternAngleBuf),
                           "%.1f", m_sketchPatternAngle);
@@ -1425,6 +1460,13 @@ void Application::renderPatternPanel() {
                           "%.2f", m_patternDistance);
             distChanged = true;
         }
+        if (imTouchLayout() &&
+            touchui::amountField("patDistAmt", nullptr, &m_patternDistance,
+                                 "mm", 2, /*allowSign=*/false, 0.1f, 100.0f)) {
+            std::snprintf(m_patternDistanceBuf, sizeof(m_patternDistanceBuf),
+                          "%.2f", m_patternDistance);
+            distChanged = true;
+        }
     } else {
         ImGui::Text("Sweep"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
@@ -1438,6 +1480,13 @@ void Application::renderPatternPanel() {
             m_patternAngle = parsed; distChanged = true;
         }
         if (ImGui::SliderFloat("##patangleslider", &m_patternAngle, 5.0f, 360.0f, "%.1f°")) {
+            std::snprintf(m_patternAngleBuf, sizeof(m_patternAngleBuf),
+                          "%.1f", m_patternAngle);
+            distChanged = true;
+        }
+        if (imTouchLayout() &&
+            touchui::amountField("patAngAmt", nullptr, &m_patternAngle,
+                                 "deg", 1, /*allowSign=*/false, 5.0f, 360.0f)) {
             std::snprintf(m_patternAngleBuf, sizeof(m_patternAngleBuf),
                           "%.1f", m_patternAngle);
             distChanged = true;
@@ -1470,11 +1519,14 @@ void Application::renderPatternPanel() {
         }
     }
 
-    // ---- Apply / Cancel ----
-    ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
-    ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    // ---- Apply / Cancel ---- (im-touch hosts them as corner ✓/✗ FABs)
+    bool applyClicked = false, cancelClicked = false;
+    if (!imTouchActionCorner()) {
+        ImGui::Separator();
+        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (axisChanged || countChanged || distChanged) updatePattern();
@@ -1547,6 +1599,13 @@ void Application::renderThreadPanel() {
                 m_threadRadius * 2.0, m_threadLength);
     ImGui::Separator();
 
+    if (imTouchLayout()) {
+        // im-touch: number-pad amount fields (native keyboard froze iOS).
+        if (touchui::amountField("thrPitchAmt", "Pitch", &m_threadPitch,
+                                 "mm", 2, /*allowSign=*/false, 0.1f, 50.0f))
+            std::snprintf(m_threadPitchBuf, sizeof(m_threadPitchBuf), "%.2f",
+                          m_threadPitch);
+    } else {
     ImGui::Text("Pitch"); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
@@ -1556,7 +1615,14 @@ void Application::renderThreadPanel() {
             m_threadPitch = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
+    }
 
+    if (imTouchLayout()) {
+        if (touchui::amountField("thrDepthAmt", "Depth", &m_threadDepth,
+                                 "mm", 2, /*allowSign=*/false, 0.05f, 50.0f))
+            std::snprintf(m_threadDepthBuf, sizeof(m_threadDepthBuf), "%.2f",
+                          m_threadDepth);
+    } else {
     ImGui::Text("Depth"); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
@@ -1566,6 +1632,7 @@ void Application::renderThreadPanel() {
             m_threadDepth = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
+    }
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
     // beyond ~45% of the radius it eats the core. Clamp + say so.
     {
@@ -1595,10 +1662,14 @@ void Application::renderThreadPanel() {
                        "refused. To change a threaded part: delete the "
                        "Thread step in History, edit, then re-thread.");
 
-    ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
-    ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    // Apply / Cancel — im-touch hosts them as corner ✓/✗ FABs instead.
+    bool applyClicked = false, cancelClicked = false;
+    if (!imTouchActionCorner()) {
+        ImGui::Separator();
+        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (applyClicked && turns <= 300.0) {
@@ -1786,6 +1857,13 @@ void Application::applySketchMove() {
 }
 
 void Application::renderSnapWidget() {
+    // im-touch hosts snap in its top button cluster instead (next to Multi)
+    // — no corner widget there, and no hover latch keeping viewport picks
+    // away from a square that isn't drawn.
+    if (imTouchLayout()) {
+        m_snapWidgetHovered = false;
+        return;
+    }
     // The snap square tucks just under the ViewCube. Only the cases where the
     // cube itself moved need the cube-tracking anchor: TOUCH mode enlarges the
     // cube (1.5x) and im-touch-LITE drops it below the floating button cluster —
@@ -1865,6 +1943,12 @@ void Application::renderSnapWidget() {
 
     // Settings popup — checkbox + radio buttons. Each change saves to the
     // settings file immediately so the choice survives the next launch.
+    renderSnapSettingsPopup();
+
+    ImGui::PopID();
+}
+
+void Application::renderSnapSettingsPopup() {
     if (ImGui::BeginPopup("SnapSettings")) {
         ImGui::TextColored(materializr::accentText(), "Snap & Grid");
         ImGui::Separator();
@@ -1896,8 +1980,6 @@ void Application::renderSnapWidget() {
         ImGui::TextDisabled("Settings persist across launches.");
         ImGui::EndPopup();
     }
-
-    ImGui::PopID();
 }
 
 void Application::renderConstructionPlanePanel() {
@@ -3145,35 +3227,35 @@ void Application::renderPrimitivePopup() {
                  ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::TextColored(materializr::accentText(), "Dimensions");
+    // im-touch: number-pad amount fields (the native keyboard froze iOS);
+    // other layouts keep the typed InputDouble spinners.
+    auto dimField = [&](const char* label, double* v) {
+        if (imTouchLayout())
+            touchui::amountField(label, label, v, "mm", 3);
+        else
+            ImGui::InputDouble(label, v, 0.1, 1.0, "%.3f");
+    };
     switch (k) {
     case 0: // Box
-        ImGui::InputDouble("Width (X)",  &m_primitivePopupExtents[0],
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Depth (Y)",  &m_primitivePopupExtents[1],
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height (Z)", &m_primitivePopupExtents[2],
-                           0.1, 1.0, "%.3f");
+        dimField("Width (X)",  &m_primitivePopupExtents[0]);
+        dimField("Depth (Y)",  &m_primitivePopupExtents[1]);
+        dimField("Height (Z)", &m_primitivePopupExtents[2]);
         break;
     case 1: // Cylinder
-        ImGui::InputDouble("Radius", &m_primitivePopupRadius, 0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height", &m_primitivePopupHeight, 0.1, 1.0, "%.3f");
+        dimField("Radius", &m_primitivePopupRadius);
+        dimField("Height", &m_primitivePopupHeight);
         break;
     case 2: // Sphere
-        ImGui::InputDouble("Radius", &m_primitivePopupRadius, 0.1, 1.0, "%.3f");
+        dimField("Radius", &m_primitivePopupRadius);
         break;
     case 3: // Cone
-        ImGui::InputDouble("Bottom radius", &m_primitivePopupRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Top radius",    &m_primitivePopupTopRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height",        &m_primitivePopupHeight,
-                           0.1, 1.0, "%.3f");
+        dimField("Bottom radius", &m_primitivePopupRadius);
+        dimField("Top radius",    &m_primitivePopupTopRadius);
+        dimField("Height",        &m_primitivePopupHeight);
         break;
     case 4: // Torus
-        ImGui::InputDouble("Major radius",  &m_primitivePopupRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Minor radius",  &m_primitivePopupMinorRadius,
-                           0.1, 1.0, "%.3f");
+        dimField("Major radius",  &m_primitivePopupRadius);
+        dimField("Minor radius",  &m_primitivePopupMinorRadius);
         ImGui::TextDisabled("Major must exceed minor — equal radii are a "
                             "degenerate self-touching torus.");
         break;
