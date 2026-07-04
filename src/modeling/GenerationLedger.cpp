@@ -10,11 +10,16 @@ namespace topo {
 
 void GenerationLedger::capture(BRepBuilderAPI_MakeShape& mk,
                                const TopoDS_Shape& in, TopAbs_ShapeEnum t) {
-    input = in;
-    inType = t;
+    inputs.clear();
     generated.Clear();
     modified.Clear();
+    captureAdd(mk, in, t);
+}
+
+void GenerationLedger::captureAdd(BRepBuilderAPI_MakeShape& mk,
+                                  const TopoDS_Shape& in, TopAbs_ShapeEnum t) {
     if (in.IsNull()) return;
+    inputs.push_back({in, t});
 
     TopTools_IndexedMapOfShape subs;
     TopExp::MapShapes(in, t, subs);
@@ -29,6 +34,15 @@ void GenerationLedger::capture(BRepBuilderAPI_MakeShape& mk,
             if (!m.IsEmpty()) modified.Add(s, m);
         } catch (...) {}
     }
+}
+
+int GenerationLedger::inputOf(const TopoDS_Shape& sub) const {
+    for (size_t k = 0; k < inputs.size(); ++k) {
+        TopTools_IndexedMapOfShape subs;
+        TopExp::MapShapes(inputs[k].shape, inputs[k].type, subs);
+        if (subs.Contains(sub)) return static_cast<int>(k);
+    }
+    return -1;
 }
 
 } // namespace topo

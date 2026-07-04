@@ -260,3 +260,9 @@ target_link_libraries(probe_thread_chunk PRIVATE materializr_core)
 # probe_thread_hole — diagnostic: boolean-path cost for internal threads
 add_executable(probe_thread_hole probe_thread_hole.cpp)
 target_link_libraries(probe_thread_hole PRIVATE materializr_core)
+
+# test_topo_boolean_gen — boolean seam edge named by two-input gen lineage
+# survives an upstream sketch edit (the unnameable-seam breakthrough)
+add_executable(test_topo_boolean_gen test_topo_boolean_gen.cpp)
+target_link_libraries(test_topo_boolean_gen PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_boolean_gen COMMAND test_topo_boolean_gen)

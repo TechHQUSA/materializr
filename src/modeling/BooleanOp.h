@@ -1,5 +1,6 @@
 #pragma once
 #include "../core/Operation.h"
+#include "GenerationLedger.h"
 #include "../core/Document.h"
 #include <TopoDS_Shape.hxx>
 #include <string>
@@ -53,5 +54,14 @@ private:
     // For undo
     TopoDS_Shape m_previousTargetShape;
     TopoDS_Shape m_previousToolShape;
+    // Generation map of the last execute(): input FACES (of BOTH the target
+    // and the tool) -> the faces/edges they produced. Lets the "gen" naming
+    // strategy name a boolean SEAM sub-shape by the two faces that made it.
+    materializr::topo::GenerationLedger m_ledger;
+public:
+    const materializr::topo::GenerationLedger& generationLedger() const {
+        return m_ledger;
+    }
+private:
     int m_removedToolId = -1;
 };

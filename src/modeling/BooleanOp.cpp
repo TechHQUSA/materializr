@@ -49,6 +49,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         // Merge coplanar/tangent neighbours so the union has no seam.
                         try {
                             ShapeUpgrade_UnifySameDomain u(s, true, true, true);
@@ -64,6 +68,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         break;
                     }
                     case BooleanMode::Intersect: {
@@ -72,6 +80,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         break;
                     }
                 }

@@ -26,16 +26,34 @@ namespace materializr {
 namespace topo {
 
 struct GenerationLedger {
-    TopoDS_Shape     input;                 // the op's pre-op shape / profile
-    TopAbs_ShapeEnum inType = TopAbs_EDGE;  // type of the input sub-shapes tracked
-    // input sub-shape -> the output sub-shapes it produced.
+    // The op's input shape(s). One for extrude/fillet/chamfer; a BOOLEAN has
+    // TWO (target + tool) — a seam edge derives from a face of each. The gen
+    // strategy names an input sub-shape against WHICHEVER input it belongs to.
+    struct Input {
+        TopoDS_Shape     shape;
+        TopAbs_ShapeEnum type = TopAbs_EDGE;  // sub-shape type tracked
+    };
+    std::vector<Input> inputs;
+    // input sub-shape -> the output sub-shapes it produced (keys from any input).
     TopTools_IndexedDataMapOfShapeListOfShape generated;
     TopTools_IndexedDataMapOfShapeListOfShape modified;
+
+    // Back-compat single-input view (extrude/fillet/chamfer callers).
+    const TopoDS_Shape& firstInput() const {
+        static const TopoDS_Shape kNull;
+        return inputs.empty() ? kNull : inputs.front().shape;
+    }
 
     // Capture from any builder: for each sub-shape of `in` of type `t`, record
     // what it Generated / was Modified into. Clears any prior contents.
     void capture(BRepBuilderAPI_MakeShape& mk, const TopoDS_Shape& in,
                  TopAbs_ShapeEnum t);
+    // Append another input's maps WITHOUT clearing (booleans call capture for
+    // the target then captureAdd for the tool).
+    void captureAdd(BRepBuilderAPI_MakeShape& mk, const TopoDS_Shape& in,
+                    TopAbs_ShapeEnum t);
+    // Which input does this sub-shape belong to? -1 if none.
+    int inputOf(const TopoDS_Shape& sub) const;
 };
 
 } // namespace topo

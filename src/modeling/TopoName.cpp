@@ -221,6 +221,9 @@ Strategy genStrategy() {
     Strategy s;
     s.scheme = "gen";
     s.priority = 100;
+    // Payload: <role>|<outIdx>|<inputIdx>|<inputName>. inputIdx selects which
+    // of the op's inputs the deriving sub-shape belongs to (a boolean has two:
+    // target + tool; a seam edge derives from a face of each).
     s.mint = [](const TopoDS_Shape& sub, const Context& ctx) -> std::string {
         if (!ctx.gen) return "";
         auto search = [&](const TopTools_IndexedDataMapOfShapeListOfShape& map,
@@ -231,14 +234,18 @@ Strategy genStrategy() {
                 for (TopTools_ListIteratorOfListOfShape it(map.FindFromIndex(i));
                      it.More(); it.Next(), ++idx) {
                     if (!it.Value().IsSame(sub)) continue;
-                    // Name the INPUT sub-shape (recursively) against the pre-op
-                    // shape — sketch-anchored inputs make this edit-stable.
+                    const int which = ctx.gen->inputOf(inSub);
+                    if (which < 0) return "";
+                    // Name the INPUT sub-shape (recursively) against its own
+                    // input shape — sketch-anchored inputs are edit-stable.
                     Context ic;
-                    ic.doc = ctx.doc; ic.shape = ctx.gen->input; ic.type = ctx.gen->inType;
+                    ic.doc = ctx.doc;
+                    ic.shape = ctx.gen->inputs[which].shape;
+                    ic.type = ctx.gen->inputs[which].type;
                     Ref inRef = mint(inSub, ic);
                     if (inRef.empty()) return "";
                     return std::string(1, role) + "|" + std::to_string(idx) +
-                           "|" + inRef.serialize();
+                           "|" + std::to_string(which) + "|" + inRef.serialize();
                 }
             }
             return "";
@@ -250,13 +257,21 @@ Strategy genStrategy() {
     s.resolve = [](const std::string& payload, const Context& ctx) -> TopoDS_Shape {
         if (!ctx.gen) return {};
         const size_t p1 = payload.find('|');
-        const size_t p2 = payload.find('|', p1 == std::string::npos ? p1 : p1 + 1);
-        if (p1 == std::string::npos || p2 == std::string::npos) return {};
+        if (p1 == std::string::npos) return {};
+        const size_t p2 = payload.find('|', p1 + 1);
+        if (p2 == std::string::npos) return {};
+        const size_t p3 = payload.find('|', p2 + 1);
+        if (p3 == std::string::npos) return {};
         const char role = payload[0];
         const int idx = std::atoi(payload.substr(p1 + 1, p2 - p1 - 1).c_str());
-        const Ref inRef = Ref::parse(payload.substr(p2 + 1));   // rest = input name
+        const int which = std::atoi(payload.substr(p2 + 1, p3 - p2 - 1).c_str());
+        if (which < 0 || which >= static_cast<int>(ctx.gen->inputs.size()))
+            return {};
+        const Ref inRef = Ref::parse(payload.substr(p3 + 1));   // rest = input name
         Context ic;
-        ic.doc = ctx.doc; ic.shape = ctx.gen->input; ic.type = ctx.gen->inType;
+        ic.doc = ctx.doc;
+        ic.shape = ctx.gen->inputs[which].shape;
+        ic.type = ctx.gen->inputs[which].type;
         TopoDS_Shape inSub;
         if (!resolve(inRef, ic, inSub)) return {};
         const auto& map = (role == 'G') ? ctx.gen->generated : ctx.gen->modified;
