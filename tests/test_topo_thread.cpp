@@ -163,3 +163,23 @@ TEST(TopoThread, AsyncHookDefersRecompute) {
         << "body untouched — the hook owns the re-cut";
     ThreadOp::setAsyncRecutHook(nullptr);   // restore sync for other tests
 }
+
+// Long rods: >40 turns builds via phase-aligned chunked sweeps glued at
+// planar interfaces (a single MakePipeShell degrades past ~40 turns).
+TEST(TopoThread, LongRodChunkedSweep) {
+    Document doc;
+    auto sk = std::make_shared<Sketch>();
+    sk->setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0))));
+    int c = sk->addPoint({0.0f, 0.0f});
+    sk->addCircle(c, 5.0);
+    ExtrudeOp ext;
+    int body = makeCylinder(doc, sk, ext, 150.0);   // 75 turns at pitch 2
+    const double plain = volumeOf(doc.getBody(body));
+
+    ThreadOp thr;
+    configThread(thr, body, 5.0, 150.0);
+    ASSERT_TRUE(thr.execute(doc));
+    const double threaded = volumeOf(doc.getBody(body));
+    EXPECT_LT(threaded, plain * 0.95) << "grooves cut along the whole rod";
+    EXPECT_GT(threaded, plain * 0.75) << "not gouged";
+}

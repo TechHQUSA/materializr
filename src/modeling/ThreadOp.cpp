@@ -28,6 +28,8 @@
 #include <GCE2d_MakeSegment.hxx>
 #include <gp_Ax2d.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
+#include <BOPAlgo_GlueEnum.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
@@ -74,47 +76,92 @@ static TopoDS_Shape sweptRodThread(const gp_Ax3& ax3, double R, double len,
     try {
         OCC_CATCH_SIGNALS
         const double rr = R - depth;
+        const double uSign = rightHanded ? 1.0 : -1.0;
         auto polar = [&](double r, double phiDeg) {
             double a = phiDeg * M_PI / 180.0;
             return gp_Pnt(r * std::cos(a), r * std::sin(a), 0.0);
         };
-        gp_Pnt rootA = polar(rr, -45), rootM = polar(rr, 0), rootB = polar(rr, 45);
-        gp_Pnt crestA = polar(R, 135), crestM = polar(R, 180), crestB = polar(R, 225);
-        TopoDS_Edge eRoot = BRepBuilderAPI_MakeEdge(
-            GC_MakeArcOfCircle(rootA, rootM, rootB).Value()).Edge();
-        TopoDS_Edge eUp = BRepBuilderAPI_MakeEdge(
-            GC_MakeArcOfCircle(rootB, polar(0.5 * (rr + R), 90), crestA).Value()).Edge();
-        TopoDS_Edge eCrest = BRepBuilderAPI_MakeEdge(
-            GC_MakeArcOfCircle(crestA, crestM, crestB).Value()).Edge();
-        TopoDS_Edge eDown = BRepBuilderAPI_MakeEdge(
-            GC_MakeArcOfCircle(crestB, polar(0.5 * (rr + R), 270), rootA).Value()).Edge();
-        BRepBuilderAPI_MakeWire mkProfile(eRoot, eUp, eCrest, eDown);
-        if (!mkProfile.IsDone()) return {};
 
-        TopoDS_Edge eSpine =
-            BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(0, 0, len)).Edge();
-        TopoDS_Wire spine = BRepBuilderAPI_MakeWire(eSpine).Wire();
+        // One <=35-turn swept segment spanning z0..z0+lenZ, its notch PHASE
+        // already rotated to th0 = uSign*360*z0/pitch so consecutive segments
+        // continue the same helix seamlessly.
+        auto oneSegment = [&](double z0, double lenZ) -> TopoDS_Shape {
+            const double th0 = uSign * 360.0 * z0 / pitch;
+            gp_Pnt rootA = polar(rr, th0 - 45), rootM = polar(rr, th0),
+                   rootB = polar(rr, th0 + 45);
+            gp_Pnt crA = polar(R, th0 + 135), crM = polar(R, th0 + 180),
+                   crB = polar(R, th0 + 225);
+            TopoDS_Edge eRoot = BRepBuilderAPI_MakeEdge(
+                GC_MakeArcOfCircle(rootA, rootM, rootB).Value()).Edge();
+            TopoDS_Edge eUp = BRepBuilderAPI_MakeEdge(
+                GC_MakeArcOfCircle(rootB, polar(0.5 * (rr + R), th0 + 90),
+                                   crA).Value()).Edge();
+            TopoDS_Edge eCrest = BRepBuilderAPI_MakeEdge(
+                GC_MakeArcOfCircle(crA, crM, crB).Value()).Edge();
+            TopoDS_Edge eDown = BRepBuilderAPI_MakeEdge(
+                GC_MakeArcOfCircle(crB, polar(0.5 * (rr + R), th0 + 270),
+                                   rootA).Value()).Edge();
+            BRepBuilderAPI_MakeWire mkProfile(eRoot, eUp, eCrest, eDown);
+            if (!mkProfile.IsDone()) return {};
+            TopoDS_Edge eSpine = BRepBuilderAPI_MakeEdge(
+                gp_Pnt(0, 0, 0), gp_Pnt(0, 0, lenZ)).Edge();
+            TopoDS_Wire spine = BRepBuilderAPI_MakeWire(eSpine).Wire();
+            Handle(Geom_CylindricalSurface) cylSurf =
+                new Geom_CylindricalSurface(
+                    gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), R);
+            Handle(Geom2d_Line) l2d = new Geom2d_Line(
+                gp_Pnt2d(th0 * M_PI / 180.0, 0.0),
+                gp_Dir2d(uSign * 2.0 * M_PI, pitch));
+            const double segLen =
+                std::sqrt(4.0 * M_PI * M_PI + pitch * pitch) * (lenZ / pitch);
+            TopoDS_Edge eHelix =
+                BRepBuilderAPI_MakeEdge(l2d, cylSurf, 0.0, segLen).Edge();
+            BRepLib::BuildCurves3d(eHelix);
+            BRepOffsetAPI_MakePipeShell pipe(spine);
+            pipe.SetMode(BRepBuilderAPI_MakeWire(eHelix).Wire(),
+                         Standard_True);   // twist follows the helix
+            pipe.Add(mkProfile.Wire());
+            pipe.Build();
+            if (!pipe.IsDone() || !pipe.MakeSolid()) return {};
+            gp_Trsf up; up.SetTranslation(gp_Vec(0, 0, z0));
+            return BRepBuilderAPI_Transform(pipe.Shape(), up,
+                                            Standard_True).Shape();
+        };
 
-        // Helix on the crest cylinder (2D line in UV space → 3D curve).
-        Handle(Geom_CylindricalSurface) cylSurf = new Geom_CylindricalSurface(
-            gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), R);
-        const double uSign = rightHanded ? 1.0 : -1.0;
-        Handle(Geom2d_Line) l2d = new Geom2d_Line(
-            gp_Pnt2d(0.0, 0.0), gp_Dir2d(uSign * 2.0 * M_PI, pitch));
+        // MakePipeShell is exact through ~40 turns and degrades beyond, so
+        // long rods build as phase-aligned <=35-turn segments GLUED at their
+        // coincident planar interfaces (whole-pitch boundaries -> identical
+        // notched discs; BOPAlgo_GlueFull skips the face-face intersection
+        // machinery, so a 150-turn rod lands in ~1.6s where a plain fuse took
+        // 90s and the old boolean cut minutes).
         const double turns = len / pitch;
-        const double segLen =
-            std::sqrt(4.0 * M_PI * M_PI + pitch * pitch) * turns;
-        TopoDS_Edge eHelix =
-            BRepBuilderAPI_MakeEdge(l2d, cylSurf, 0.0, segLen).Edge();
-        BRepLib::BuildCurves3d(eHelix);
-        TopoDS_Wire helix = BRepBuilderAPI_MakeWire(eHelix).Wire();
-
-        BRepOffsetAPI_MakePipeShell pipe(spine);
-        pipe.SetMode(helix, Standard_True);  // twist follows the helix
-        pipe.Add(mkProfile.Wire());
-        pipe.Build();
-        if (!pipe.IsDone() || !pipe.MakeSolid()) return {};
-        TopoDS_Shape rod = pipe.Shape();
+        const int nSeg = std::max(1, (int)std::ceil(turns / 35.0));
+        TopoDS_Shape rod;
+        double z = 0.0;
+        for (int i = 0; i < nSeg; ++i) {
+            double zEnd = (i == nSeg - 1)
+                              ? len
+                              : pitch * std::floor((len * (i + 1) / nSeg) / pitch);
+            if (zEnd <= z) return {};
+            TopoDS_Shape seg = oneSegment(z, zEnd - z);
+            if (seg.IsNull()) return {};
+            if (rod.IsNull()) {
+                rod = seg;
+            } else {
+                BRepAlgoAPI_Fuse f;
+                TopTools_ListOfShape args, tools;
+                args.Append(rod);
+                tools.Append(seg);
+                f.SetArguments(args);
+                f.SetTools(tools);
+                f.SetFuzzyValue(1e-5);
+                f.SetGlue(BOPAlgo_GlueFull);
+                f.Build();
+                if (!f.IsDone() || f.Shape().IsNull()) return {};
+                rod = f.Shape();
+            }
+            z = zEnd;
+        }
 
         // Move the canonical (origin, +Z) rod onto the op's axis frame.
         gp_Trsf tr;
@@ -292,11 +339,9 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
             }
             const bool fullSpan = hMin > -0.55 * m_pitch &&
                                   std::abs(hMax - m_length) < 0.55 * m_pitch;
-            // MakePipeShell is exact through ~40 turns and degrades beyond
-            // (probe: 40 OK, 50 fails to build, 60+ builds garbage the
-            // volume guard rejects). Gate rather than waste the attempt.
-            const bool turnsOk = (hMax - hMin) / m_pitch <= 40.0;
-            if (nFaces == 3 && shapeOk && fullSpan && turnsOk && hMax > hMin) {
+            // Long rods chunk into <=35-turn glued segments inside
+            // sweptRodThread; the global 300-turn runaway guard still applies.
+            if (nFaces == 3 && shapeOk && fullSpan && hMax > hMin) {
                 gp_Ax3 base(gp_Pnt(loc.X() + zd.X() * hMin,
                                    loc.Y() + zd.Y() * hMin,
                                    loc.Z() + zd.Z() * hMin), zd, xd);

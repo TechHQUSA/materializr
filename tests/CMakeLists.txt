@@ -252,3 +252,7 @@ add_test(NAME test_moveface_hollow COMMAND test_moveface_hollow)
 # probe_thread_loft — diagnostic: native twist-loft thread build timing/quality
 add_executable(probe_thread_loft probe_thread_loft.cpp)
 target_link_libraries(probe_thread_loft PRIVATE materializr_core)
+
+# probe_thread_chunk — diagnostic: >40-turn rods as chunked swept segments
+add_executable(probe_thread_chunk probe_thread_chunk.cpp)
+target_link_libraries(probe_thread_chunk PRIVATE materializr_core)
