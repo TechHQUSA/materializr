@@ -61,6 +61,14 @@ public:
     // trailing Thread steps modified, returns the index those threads start
     // at (where the op should be inserted); -1 = no reflow needed.
     int reflowInsertionIndex(const Operation& op) const;
+    // Insertion index for the SHELL auto-reflow: a face transform (moveface)
+    // on a SHELLED body corrupts — the loft engine can't do cavities — but is
+    // perfectly computable the other way round: apply it to the pre-shell
+    // solid, then re-run the shell on the moved body ("the order flipped").
+    // Unlike threads (multi-second recompute → user-discipline refusal), a
+    // shell re-execute is sub-second, so it reflows automatically. -1 = no
+    // shell touches the op's bodies / op isn't a face transform.
+    int shellReflowIndex(const Operation& op) const;
     // True if a Thread step in the applied history modified this body.
     // Interactive ops (push/pull, resize, …) check this at BEGIN to refuse
     // up front — their per-frame preview would otherwise run a boolean

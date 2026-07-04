@@ -163,6 +163,9 @@ private:
     // Undo/redo with the sketch-edit cascade (shared by the Edit menu, the
     // touch shell's top bar, and nothing else — the Ctrl+Z shortcut has its
     // own copy in handleShortcuts pending a merge).
+    // Sketch id mutated by a history step (SketchTransformOp/SketchEditOp),
+    // or -1 — so undo/redo outside sketch mode can re-cascade the driven body.
+    int sketchIdEditedBy(const Operation* op) const;
     void undoWithCascade();
     void redoWithCascade();
     // Sketch-aware undo for the touch shell's top-bar Undo button: in sketch

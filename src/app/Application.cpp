@@ -1007,26 +1007,50 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
 // src/app/layout/LayoutCommon.cpp; the per-layout chrome is under
 // src/app/layout/{classic,modern,imtouch}/.
 
+// The sketch id a just-undone/redone step edited, or -1. Covers BOTH step
+// kinds that mutate a sketch: SketchTransformOp (stores its id) and
+// SketchEditOp (stores the live sketch pointer — matched back to its id).
+// Needed so undo/redo OUTSIDE sketch mode re-cascades the driven body; the
+// step's own undo only reverts sketch geometry, the cascade did the body.
+int Application::sketchIdEditedBy(const Operation* op) const {
+    if (!op || !m_document) return -1;
+    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op))
+        return st->getSketchId();
+    if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
+        auto target = se->getTarget();
+        if (target)
+            for (int sid : m_document->getAllSketchIds())
+                if (m_document->getSketch(sid) == target) return sid;
+    }
+    return -1;
+}
+
 void Application::undoWithCascade() {
     const Operation* undone = m_history->getStep(m_history->currentStep());
     m_history->undo(*m_document);
     // Keep a sketch-driven body in sync after undoing a sketch edit (the
     // SketchEditOp undo only reverts geometry; the cascade did the body).
     // Mirrors the keyboard Ctrl+Z path.
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
+    int cascaded = -1;
+    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
         cascadeFromSketchEdit(m_activeSketchId);
-    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
-        cascadeFromSketchEdit(st->getSketchId());
+        cascaded = m_activeSketchId;
+    }
+    if (int sid = sketchIdEditedBy(undone); sid >= 0 && sid != cascaded)
+        cascadeFromSketchEdit(sid);
     m_meshesDirty = true;
 }
 
 void Application::redoWithCascade() {
     m_history->redo(*m_document);
     const Operation* redone = m_history->getStep(m_history->currentStep());
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
+    int cascaded = -1;
+    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
         cascadeFromSketchEdit(m_activeSketchId);
-    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
-        cascadeFromSketchEdit(st->getSketchId());
+        cascaded = m_activeSketchId;
+    }
+    if (int sid = sketchIdEditedBy(redone); sid >= 0 && sid != cascaded)
+        cascadeFromSketchEdit(sid);
     m_meshesDirty = true;
 }
 
@@ -1979,11 +2003,14 @@ void Application::handleShortcuts() {
                 const Operation* undone =
                     m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
-                // A linked 3D sketch move (SketchTransformOp) updated its body via
-                // the cascade; re-cascade so the body follows the reverted plane.
-                // (No-op for detached sketches — the guard in cascade returns early.)
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
-                    cascadeFromSketchEdit(st->getSketchId());
+                // A sketch-mutating step (SketchTransformOp / SketchEditOp)
+                // updated its body via the cascade; re-cascade so the body
+                // follows the reverted sketch. (No-op for detached sketches —
+                // the guard in cascade returns early. In sketch mode the
+                // active-sketch branch below cascades instead.)
+                if (int sid = sketchIdEditedBy(undone);
+                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
+                    cascadeFromSketchEdit(sid);
                 // In sketch mode, the host face is the anchor for the whole
                 // sketch session — clearing the selection would drop its blue
                 // highlight even though the sketch is still active. Skip the
@@ -2022,8 +2049,9 @@ void Application::handleShortcuts() {
                     // re-applied sketch edit.
                     cascadeFromSketchEdit(m_activeSketchId);
                 }
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
-                    cascadeFromSketchEdit(st->getSketchId());
+                if (int sid = sketchIdEditedBy(redone);
+                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
+                    cascadeFromSketchEdit(sid);
                 m_meshesDirty = true;
             }
         }
