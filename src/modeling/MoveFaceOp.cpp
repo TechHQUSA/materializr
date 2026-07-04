@@ -122,6 +122,30 @@ bool MoveFaceOp::execute(Document& doc) {
         m_previousShape = doc.getBody(m_bodyId);
         if (m_previousShape.IsNull()) return false;
 
+        // Name the target face on the first run (while m_face is still valid),
+        // then re-resolve it whenever it's no longer a live sub-shape of the
+        // (possibly rebuilt) body — an upstream sketch edit that MOVED the face
+        // leaves m_face pointing at the old body. Sketch-anchored, so it
+        // follows; falls back to the stale handle if unnameable.
+        if (m_faceRef.empty()) {
+            materializr::topo::Context mc;
+            mc.doc = &doc; mc.shape = m_previousShape; mc.type = TopAbs_FACE;
+            m_faceRef = materializr::topo::mint(m_face, mc);
+        }
+        if (!m_faceRef.empty()) {
+            bool live = false;
+            for (TopExp_Explorer ex(m_previousShape, TopAbs_FACE); ex.More(); ex.Next())
+                if (ex.Current().IsSame(m_face)) { live = true; break; }
+            if (!live) {
+                materializr::topo::Context rc;
+                rc.doc = &doc; rc.shape = m_previousShape; rc.type = TopAbs_FACE;
+                TopoDS_Shape f;
+                if (materializr::topo::resolve(m_faceRef, rc, f) &&
+                    !f.IsNull() && f.ShapeType() == TopAbs_FACE)
+                    m_face = TopoDS::Face(f);
+            }
+        }
+
         // Outward face normal N and a point P0 on the face (BRepGProp_Face's
         // Normal is orientation-corrected, so it points out of the body).
         BRepGProp_Face prop(m_face);
@@ -523,6 +547,12 @@ std::string MoveFaceOp::serializeParams() const {
         std::string idx = SubShapeIndex::serialize(m_previousShape, faces, TopAbs_FACE);
         if (!idx.empty()) blob += ";face=" + idx;
     }
+    // Topological face name (additive, robust to a moving edit); written last as
+    // a single length-prefixed blob. Absent in old files.
+    if (!m_faceRef.empty()) {
+        std::string b = m_faceRef.serialize();
+        blob += ";faceref=" + std::to_string(b.size()) + ":" + b;
+    }
     return blob;
 }
 
@@ -535,6 +565,18 @@ bool MoveFaceOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // faceref is a length-prefixed opaque blob written last — read to end.
+        if (key == "faceref") {
+            std::string rest = blob.substr(eq + 1);
+            size_t c = rest.find(':');
+            if (c != std::string::npos) {
+                size_t n = static_cast<size_t>(std::atoll(rest.substr(0, c).c_str()));
+                if (c + 1 + n <= rest.size())
+                    m_faceRef = materializr::topo::Ref::parse(rest.substr(c + 1, n));
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "body") { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "k")    { int k = std::atoi(val.c_str());
