@@ -345,6 +345,19 @@ std::string ChamferOp::serializeParams() const {
     }
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
     if (!anc.empty()) blob += ";anchor=" + anc;
+    // Topological edge names (additive, LAST — length-prefixed opaque blobs
+    // read to end-of-string). Persisting them keeps a SEAM fillet/chamfer
+    // re-derivable after reload; absent in old files.
+    if (!m_edgeRefs.empty()) {
+        bool any = false;
+        std::string rb;
+        for (const auto& r : m_edgeRefs) {
+            std::string b = r.serialize();
+            rb += std::to_string(b.size()) + ":" + b;
+            if (!r.empty()) any = true;
+        }
+        if (any) blob += ";edgerefs=" + rb;
+    }
     return blob;
 }
 
@@ -357,6 +370,24 @@ bool ChamferOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // edgerefs holds length-prefixed opaque blobs, written last — read to
+        // end-of-string (not to the next ';').
+        if (key == "edgerefs") {
+            std::string rest = blob.substr(eq + 1);
+            m_edgeRefs.clear();
+            size_t p = 0;
+            while (p < rest.size()) {
+                size_t c = rest.find(':', p);
+                if (c == std::string::npos) break;
+                size_t n = (size_t)std::atoll(rest.substr(p, c - p).c_str());
+                if (c + 1 + n > rest.size()) break;
+                m_edgeRefs.push_back(
+                    materializr::topo::Ref::parse(rest.substr(c + 1, n)));
+                p = c + 1 + n;
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "distance") { m_distance = std::atof(val.c_str()); any = true; }
         else if (key == "distance2"){ m_distance2 = std::atof(val.c_str()); any = true; }

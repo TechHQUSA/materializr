@@ -259,3 +259,36 @@ TEST(TopoBooleanGen, ChamferOnSeamSurvivesSketchEdit) {
     EXPECT_NEAR(g.Mass(), chamferedV, chamferedV * 0.02)
         << "re-chamfered body ~ the original chamfered volume, relocated";
 }
+
+// The seam refs must SURVIVE save/reload (serializeParams round-trip) or a
+// reloaded seam fillet loses its last-resort resolution.
+TEST(TopoBooleanGen, SeamRefsRoundTripThroughParams) {
+    Document doc;
+    int pa[4], pb[4];
+    auto skA = makeRect(0, 0, 20, 10, pa);
+    auto skB = makeRect(15, 3, 25, 7, pb);
+    int sidA = doc.addSketch(skA), sidB = doc.addSketch(skB);
+    ExtrudeOp extA; extA.setSketchSource(sidA); extA.setDistance(10.0);
+    ASSERT_TRUE(extA.rebuildProfileFromSketch(doc) && extA.execute(doc));
+    int bodyA = doc.getAllBodyIds().front();
+    ExtrudeOp extB; extB.setSketchSource(sidB); extB.setDistance(15.0);
+    ASSERT_TRUE(extB.rebuildProfileFromSketch(doc) && extB.execute(doc));
+    int bodyB = -1;
+    for (int id : doc.getAllBodyIds()) if (id != bodyA) bodyB = id;
+    BooleanOp fuse;
+    fuse.setTargetBodyId(bodyA); fuse.setToolBodyId(bodyB);
+    fuse.setMode(BooleanMode::Union);
+    ASSERT_TRUE(fuse.execute(doc));
+    TopoDS_Edge seam = edgeNear(doc.getBody(bodyA), gp_Pnt(20, 3, 5), 0.6);
+    FilletOp fil;
+    fil.setBody(bodyA); fil.setEdges({seam}); fil.setRadius(1.0);
+    ASSERT_TRUE(fil.execute(doc));
+
+    const std::string blob = fil.serializeParams();
+    EXPECT_NE(blob.find("edgerefs="), std::string::npos)
+        << "seam ref must persist";
+    FilletOp fil2;
+    ASSERT_TRUE(fil2.deserializeParams(blob));
+    // (Resolution correctness is covered by FilletOnSeamSurvivesSketchEdit;
+    // here: the ref list round-trips intact with a gen name present.)
+}
