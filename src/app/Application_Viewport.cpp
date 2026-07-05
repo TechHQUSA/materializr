@@ -143,7 +143,7 @@ static bool axisParamAtCursor(const glm::vec3& origin, const glm::vec3& normal,
     glm::vec3 w = ro - origin;
     float d = glm::dot(axis, w);
     float e = glm::dot(rd, w);
-    float s = (b * e - d) / denom;
+    float s = (d - b * e) / denom;
     if (!std::isfinite(s)) return false;
     outS = s;
     return true;
