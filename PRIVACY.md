@@ -34,6 +34,11 @@ models and project files stay on your device.
   Apple ID; Apple's handling of that data is governed by
   [Apple's privacy policy](https://www.apple.com/legal/privacy/). The app
   stores only a local yes/no flag that a purchase was made or restored.
+- **Google Play (Android):** the optional Supporter purchase is processed
+  entirely by Google through Play Billing. We never see your name, payment
+  details, or Google account; Google's handling of that data is governed by
+  [Google's privacy policy](https://policies.google.com/privacy). The app
+  stores only a local yes/no flag that a purchase was made or restored.
 - **Donation links** (such as Buy Me a Coffee, opened from the app in your
   browser) take you to an external site with its own privacy policy; the app
   sends no data to it.
