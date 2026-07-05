@@ -186,6 +186,7 @@ bool PushPullOp::execute(Document& doc) {
     if (m_targets.empty() || std::abs(m_distance) < 1e-6) return false;
 
     bool anyChange = false;
+    m_generatedFaces.clear();
 
     std::unordered_set<int> savedBodies;
 
@@ -327,6 +328,8 @@ bool PushPullOp::execute(Document& doc) {
             // behind: "selection doesn't register"). Copying the prism
             // makes every face unique.
             prism = BRepBuilderAPI_Copy(mk.Shape()).Shape();
+            for (TopExp_Explorer fx(prism, TopAbs_FACE); fx.More(); fx.Next())
+                m_generatedFaces.push_back(fx.Current());
         } catch (...) { continue; }
 
         if (tgt.sourceBodyId >= 0) {
@@ -413,6 +416,35 @@ bool PushPullOp::execute(Document& doc) {
     // mutation makes the op a success — History::pushOperation rejects the
     // rest instead of committing a step that did nothing.
     return anyChange;
+}
+
+namespace {
+bool ppFaceCenter(const TopoDS_Face& face, gp_Pnt& out) {
+    try {
+        BRepGProp_Face gp(face);
+        Standard_Real u0, u1, v0, v1;
+        gp.Bounds(u0, u1, v0, v1);
+        gp_Vec n;
+        gp.Normal((u0 + u1) * 0.5, (v0 + v1) * 0.5, out, n);
+        return true;
+    } catch (...) { return false; }
+}
+} // namespace
+
+bool PushPullOp::ownsFace(const TopoDS_Shape& face) const {
+    if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return false;
+    for (const auto& f : m_generatedFaces) {
+        if (f.IsSame(face)) return true;
+    }
+    // Geometric fallback: the boolean/unify remakes faces, so stored TShapes
+    // may no longer match the body's — same contract as FilletOp::ownsFace.
+    gp_Pnt q;
+    if (!ppFaceCenter(TopoDS::Face(face), q)) return false;
+    for (const auto& f : m_generatedFaces) {
+        gp_Pnt p;
+        if (ppFaceCenter(TopoDS::Face(f), p) && p.Distance(q) < 1e-4) return true;
+    }
+    return false;
 }
 
 bool PushPullOp::undo(Document& doc) {

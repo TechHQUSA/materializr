@@ -52,6 +52,7 @@ public:
     bool getCutIntersecting() const { return m_cutIntersecting; }
 
     double getDistance() const { return m_distance; }
+    bool ownsFace(const TopoDS_Shape& face) const override;
 
     // Cascade plumbing: remember which sketch + region(s) each target came
     // from when Push/Pull was triggered from sketch regions. The two arrays
@@ -85,6 +86,11 @@ public:
 
 private:
     std::vector<Target> m_targets;
+    // Faces created by the last execute (each prism's own faces) — lets the
+    // viewport's click path trace a tapped face back to this step, same
+    // contract as FilletOp/ChamferOp. In-session only (not serialized;
+    // reloaded steps are frozen in the History editor anyway).
+    std::vector<TopoDS_Shape> m_generatedFaces;
     double m_distance = 1.0;
     bool m_cutIntersecting = false; // free-space prism cuts intersecting visible bodies
 

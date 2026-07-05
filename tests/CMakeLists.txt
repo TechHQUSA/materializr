@@ -125,6 +125,11 @@ add_executable(test_pushpull_through test_pushpull_through.cpp)
 target_link_libraries(test_pushpull_through PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_pushpull_through COMMAND test_pushpull_through)
 
+# test_pushpull_ownsface — extruded faces trace back to their history step
+add_executable(test_pushpull_ownsface test_pushpull_ownsface.cpp)
+target_link_libraries(test_pushpull_ownsface PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_pushpull_ownsface COMMAND test_pushpull_ownsface)
+
 # test_stl_import — STL triangle soup sews into a clean 6-face solid (parked feature)
 add_executable(test_stl_import test_stl_import.cpp)
 target_link_libraries(test_stl_import PRIVATE materializr_core gtest gtest_main)

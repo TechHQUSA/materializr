@@ -4479,8 +4479,9 @@ void Application::renderViewport() {
                                     entry.bodyId = result.bodyId;
                                     entry.subShapeIndex = result.faceIndex;
                                     entry.shape = result.pickedShape;
-                                    // Trace a clicked face back to the fillet/chamfer that
-                                    // produced it, so the user can re-edit it after the fact.
+                                    // Trace a clicked face back to the op that
+                                    // produced it (fillet, chamfer, push/pull),
+                                    // so the user can re-edit it after the fact.
                                     if (!entry.shape.IsNull()) {
                                         int upTo = m_history->currentStep();
                                         for (int s = 0; s <= upTo; ++s) {
