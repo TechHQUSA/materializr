@@ -5,17 +5,21 @@
 // mouse and the touch way of doing things, highlighting whichever input model
 // the current run is using (materializr::touchMode()).
 //
-// Built entirely as a plugin (no Application changes beyond the generic plugin
-// hooks): it registers a Help > Getting Started menu item to launch it, and an
-// OverlayContribution to draw the panel each frame. It auto-shows once on first
-// run, then writes a marker so it stays out of the way until the user reopens it.
+// The tour OPENS with a layout picker: three cards (Classic / Modern /
+// im-touch), each with a plain-language description. Tapping a card switches
+// the interface LIVE behind the modal — the running app is the preview, not a
+// screenshot — and every later step then points at the right place for the
+// layout the user picked (the highlighted "In this layout" line).
 //
-// Screenshots could be slotted in per step later (load a PNG from assets into a
-// GL texture and ImGui::Image it under the body); the step table is laid out to
-// make that a localized change.
+// Built entirely as a plugin (no Application changes beyond the generic plugin
+// hooks + the ui_layout_bridge): it registers a Help > Getting Started menu
+// item to launch it, and an OverlayContribution to draw the panel each frame.
+// It auto-shows once on first run, then writes a marker so it stays out of the
+// way until the user reopens it.
 
 #include "../plugin/PluginMacro.h"
 #include "../plugin/PluginContext.h"
+#include "../app/ui_layout_bridge.h"
 #include "../touch_mode.h"
 #include "../ui_scale.h"
 
@@ -28,14 +32,16 @@
 
 namespace {
 
-// One tour step. `mouse` / `touch` are optional input-specific lines shown under
-// the body (null = omit). Where the two inputs do the same thing, fold it into
-// `body` and leave both null.
+// One tour step. `mouse` / `touch` are optional input-specific lines shown
+// under the body (null = omit). `where[3]` are optional per-layout location
+// lines (Classic / Modern / im-touch): the one matching the CURRENT layout is
+// shown highlighted, so the instructions always match what's on screen.
 struct Step {
     const char* title;
     const char* body;
     const char* mouse;
     const char* touch;
+    const char* where[3];   // Classic, Modern, im-touch (null = omit)
 };
 
 const Step kSteps[] = {
@@ -44,17 +50,21 @@ const Step kSteps[] = {
         "Materializr is a parametric 3D CAD app: sketch a 2D shape, turn it into "
         "a solid, then keep refining it. This quick tour covers the essentials — "
         "it takes a minute. You can reopen it anytime from Help > Getting Started.",
-        nullptr, nullptr
+        nullptr, nullptr, {nullptr, nullptr, nullptr}
     },
     {
         "Moving the view",
-        "Orbit, pan and zoom to look at your model from any angle. The View menu "
-        "has Frame Selection (F) to zoom onto what's selected and Reset Camera "
-        "(Home). The cube in the top-right corner snaps to standard views.",
-        "Orbit, pan and zoom with the mouse buttons and wheel (set them in File > "
+        "Orbit, pan and zoom to look at your model from any angle. The cube in "
+        "the top-right corner snaps to standard views, and Frame Selection (F) "
+        "zooms onto whatever is selected.",
+        "Orbit, pan and zoom with the mouse buttons and wheel (set them in "
         "Settings). The Interactions panel always lists the current bindings.",
-        "Drag one finger to orbit; use two fingers to pan and pinch-zoom. The "
-        "Interactions panel lists every gesture."
+        "Drag one finger to orbit; use two fingers to pan and pinch-zoom.",
+        {
+            "View actions live in the View menu on the top menu bar.",
+            "View actions live under the \xE2\x80\xA6 menu (top-left) > View.",
+            "View actions live behind the \xE2\x98\xB0 menu in the top bar."
+        }
     },
     {
         "Selecting things",
@@ -63,63 +73,117 @@ const Step kSteps[] = {
         "pointing at.",
         "Click to select, Ctrl+click to add more. Right-click for the context menu.",
         "Tap to select; use the on-screen Multi toggle to add more. Press and hold "
-        "(long-press) for the context menu."
+        "(long-press) for the context menu.",
+        {nullptr, nullptr, nullptr}
     },
     {
         "Sketching a shape",
-        "Solids start as 2D sketches. From the Tools panel, start a sketch and pick "
-        "a flat face or a plane to draw on, then lay down lines, rectangles and "
-        "circles on the grid. Type a number while drawing to set an exact size, then "
-        "finish the sketch.",
+        "Solids start as 2D sketches: pick a plane or a flat face to draw on, "
+        "then lay down lines, rectangles and circles on the grid. Type a number "
+        "while drawing to set an exact size, then finish the sketch.",
         "Click to place points; press Enter to finish a shape, Esc to cancel.",
         "Tap to place points, or press-drag-release to draw a segment. Use the "
-        "Finish Sketch / Exit Sketch buttons."
+        "Finish Sketch / Exit Sketch buttons.",
+        {
+            "Start from the Tools panel on the left: Sketch on XY / XZ / YZ, or "
+            "select a flat face first.",
+            "Start from the left rail: tap \"Sketch on...\", or select a flat "
+            "face and choose Sketch.",
+            "Tap the + button (bottom-right) and choose New Sketch."
+        }
     },
     {
         "From sketch to solid",
-        "Turn a closed sketch into a 3D body: select it and use Push/Pull to give it "
-        "depth, or Revolve to spin it around an axis. On an existing solid, Push/Pull "
-        "a face to move it, or add a Fillet/Chamfer to round or bevel edges. Drag the "
-        "arrow — or type a distance — to set the amount.",
-        nullptr, nullptr
+        "Turn a closed sketch into a 3D body: select it and use Push/Pull to give "
+        "it depth, or Revolve to spin it around an axis. On an existing solid, "
+        "Push/Pull a face to move it, or add a Fillet/Chamfer to round or bevel "
+        "edges. Drag the arrow — or type a distance — to set the amount.",
+        nullptr, nullptr,
+        {
+            "The Tools panel lists what applies to your selection (Face "
+            "Operations, Push / Pull, Shell...).",
+            "Select something and the left rail fills with the tools that apply "
+            "(Push, Extrude, Shell...).",
+            "Select something and a floating tool dock appears along the left "
+            "edge."
+        }
     },
     {
         "History and undo",
-        "Every operation is recorded in the History panel. Materializr is "
-        "parametric, so you can go back and change an earlier step: double-click a "
-        "history entry to edit its parameters and the whole model rebuilds.",
+        "Every operation is recorded in the history. Materializr is parametric, "
+        "so you can go back and change an earlier step: double-click a history "
+        "entry to edit its parameters and the whole model rebuilds.",
         "Undo / redo with Ctrl+Z / Ctrl+Y, or from the Edit menu.",
-        "Undo / redo from the Edit menu (or with a keyboard, if one is attached)."
+        "Undo / redo with the arrows in the top bar (or a keyboard, if one is "
+        "attached).",
+        {
+            "The History panel sits on the right side.",
+            "History is the second tab of the right panel.",
+            "Tap the History button in the bottom-left corner."
+        }
     },
     {
         "Organize, save and export",
-        "The Items panel lists your bodies and sketches — group them into folders to "
-        "stay organized. Save your work as a project, or export to STL or STEP for "
-        "3D printing or other CAD tools.",
-        "Right-click an item to move it into a folder. Use File > Export for STL / "
-        "STEP.",
-        "Long-press an item to move it into a folder. Export offers Share (send to "
-        "another app) or save-to-file."
+        "Your bodies and sketches are listed so you can hide, rename and group "
+        "them into folders. Save your work as a project, or export to STL or "
+        "STEP for 3D printing or other CAD tools.",
+        "Right-click an item to move it into a folder. Export lives under "
+        "File > Export.",
+        "Long-press an item to move it into a folder. Export offers Share (send "
+        "to another app) or save-to-file.",
+        {
+            "The Items panel is on the right; saving and exporting live in the "
+            "File menu.",
+            "Items is the first tab of the right panel; saving and exporting "
+            "live under the \xE2\x80\xA6 menu > File.",
+            "Tap the list icon in the top bar for your items; saving and "
+            "exporting live behind the \xE2\x98\xB0 menu."
+        }
     },
     {
         "Need more room?",
-        "Short on screen space? Collapse the side panels to enlarge the 3D view. On "
-        "a keyboard press F9 (or View > Hide Panels). On a touch screen, tap the "
-        "small tabs on the left and right edges of the viewport to fold a column "
-        "away — tap again to bring it back. Drag a panel's list up or down to scroll.",
-        nullptr, nullptr
+        "Short on screen space? Enlarge the 3D view by folding the side panels "
+        "away, then bring them back when you need them.",
+        nullptr, nullptr,
+        {
+            "Press F9 (or View > Hide Panels) to collapse the side panels.",
+            "Tap the small chevron tabs on the left and right edges of the "
+            "viewport to fold a column away — tap again to bring it back. The "
+            "Focus button (top-right) cycles the same thing.",
+            "im-touch is already minimal: panels appear only when something "
+            "needs them and tuck away on their own."
+        }
     },
     {
         "You're ready",
-        "That's the basics. Explore the Tools panel, and see Help > User Guide and "
+        "That's the basics. Explore the tools, and see Help > User Guide and "
         "Keyboard Shortcuts for more detail. Have fun building.",
-        nullptr, nullptr
+        nullptr, nullptr, {nullptr, nullptr, nullptr}
     },
 };
 const int kStepCount = static_cast<int>(sizeof(kSteps) / sizeof(kSteps[0]));
 
+// The layout picker cards (page shown before step 1). Descriptions are for a
+// NEW user: what it looks like and who it suits, no jargon.
+struct LayoutCard {
+    const char* name;
+    const char* blurb;
+};
+const LayoutCard kLayouts[3] = {
+    { "Classic",
+      "Desktop-style. A menu bar on top and every panel visible at once. "
+      "Best with a mouse and keyboard." },
+    { "Modern",
+      "Clean and focused. A tool rail on the left, tabbed panels on the "
+      "right, everything else out of the way. Great on any screen." },
+    { "im-touch",
+      "Built for fingers. A full-screen model with floating buttons and "
+      "big touch targets. Made for tablets." },
+};
+
 // --- State (process-lifetime; the plugin is a singleton overlay) -------------
 bool g_open = false;
+bool g_onPicker = false;   // the layout-picker page (before step 1)
 int  g_step = 0;
 bool g_firstRunChecked = false;
 
@@ -145,13 +209,79 @@ void markSeen() {
     if (f) f << "1\n";
 }
 
+// The picker page: three selectable cards. Tapping one switches the layout
+// LIVE (the app behind the modal is the preview). Continue starts the tour.
+void renderLayoutPicker(bool& close) {
+    using namespace materializr;
+    ImGui::TextDisabled("First, make it yours");
+    ImGui::SeparatorText("Choose your workspace");
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(
+        "Materializr has three interface styles. Tap one to try it — the app "
+        "behind this window switches instantly, so you can see the real thing. "
+        "You can change your mind anytime in Settings > Appearance.");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+
+    const int current = currentUiLayoutIndex();
+    for (int i = 0; i < 3; ++i) {
+        const bool active = (current == i);
+        // A card = a full-width selectable region with title + wrapped blurb.
+        ImGui::PushID(i);
+        ImVec2 pad = ImGui::GetStyle().FramePadding;
+        const float wrapW = ImGui::GetContentRegionAvail().x - 2.0f * pad.x
+                            - uiW(28.0f);
+        ImVec2 blurbSz = ImGui::CalcTextSize(kLayouts[i].blurb, nullptr,
+                                             false, wrapW);
+        const float cardH = ImGui::GetTextLineHeightWithSpacing() +
+                            blurbSz.y + 3.0f * pad.y;
+        ImVec2 tl = ImGui::GetCursorScreenPos();
+        if (ImGui::Selectable("##card", active, 0, ImVec2(0, cardH)))
+            requestUiLayout(i);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 br(tl.x + ImGui::GetContentRegionAvail().x, tl.y + cardH);
+        if (active)
+            dl->AddRect(tl, br, ImGui::GetColorU32(ImGuiCol_CheckMark),
+                        4.0f, 0, 2.0f);
+        // Radio dot + title + blurb drawn over the selectable.
+        ImVec2 c(tl.x + pad.x + uiW(8.0f),
+                 tl.y + pad.y + ImGui::GetTextLineHeight() * 0.5f);
+        dl->AddCircle(c, uiW(6.0f), ImGui::GetColorU32(ImGuiCol_Text), 0, 1.5f);
+        if (active)
+            dl->AddCircleFilled(c, uiW(3.2f),
+                                ImGui::GetColorU32(ImGuiCol_CheckMark));
+        ImVec2 txt(tl.x + pad.x + uiW(22.0f), tl.y + pad.y);
+        dl->AddText(txt, ImGui::GetColorU32(ImGuiCol_Text), kLayouts[i].name);
+        ImVec2 blurbPos(txt.x + uiW(6.0f),
+                        txt.y + ImGui::GetTextLineHeightWithSpacing());
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(), blurbPos,
+                    ImGui::GetColorU32(ImGuiCol_TextDisabled),
+                    kLayouts[i].blurb, nullptr, wrapW);
+        ImGui::PopID();
+        ImGui::Spacing();
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    if (ImGui::Button("Continue", materializr::uiSz(110, 0))) {
+        g_onPicker = false;
+        g_step = 0;
+    }
+    const float skipW = uiW(80.0f);
+    const float rightX = ImGui::GetWindowContentRegionMax().x - skipW;
+    if (rightX > ImGui::GetCursorPosX()) ImGui::SameLine(rightX);
+    else                                 ImGui::SameLine();
+    if (ImGui::Button("Skip", materializr::uiSz(80, 0))) close = true;
+}
+
 void renderTutorial(materializr::PluginContext&) {
     using namespace materializr;
 
     // First overlay frame: auto-open on a fresh install, otherwise stay hidden.
     if (!g_firstRunChecked) {
         g_firstRunChecked = true;
-        if (!tutorialSeen()) { g_open = true; g_step = 0; }
+        if (!tutorialSeen()) { g_open = true; g_onPicker = true; g_step = 0; }
     }
     if (!g_open) return;
 
@@ -176,11 +306,34 @@ void renderTutorial(materializr::PluginContext&) {
     if (ImGui::Begin("Getting Started###Tutorial", &keepOpen,
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoMove)) {
+        if (g_onPicker) {
+            bool wantClose = false;
+            renderLayoutPicker(wantClose);
+            if (wantClose) { ImGui::End(); close(); return; }
+            ImGui::End();
+            if (!keepOpen) close();
+            return;
+        }
+
         ImGui::TextDisabled("Step %d of %d", g_step + 1, kStepCount);
         ImGui::SeparatorText(s.title);
 
         ImGui::PushTextWrapPos(0.0f); // wrap at the window's right edge
         ImGui::TextUnformatted(s.body);
+
+        // Layout-specific location line: where to find this in the layout the
+        // user picked on the first page. Highlighted — it's the line that makes
+        // the step actionable on THIS screen.
+        {
+            const int li = std::clamp(currentUiLayoutIndex(), 0, 2);
+            if (s.where[li]) {
+                ImGui::Spacing();
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                                      ImVec4(0.55f, 0.90f, 0.70f, 1.0f));
+                ImGui::TextWrapped("In this layout:  %s", s.where[li]);
+                ImGui::PopStyleColor();
+            }
+        }
 
         // Input-specific guidance: highlight the model this run is using, but
         // show both so the tour reads the same on every platform.
@@ -206,10 +359,11 @@ void renderTutorial(materializr::PluginContext&) {
         ImGui::Spacing();
 
         const bool last = (g_step == kStepCount - 1);
-        if (g_step > 0) {
-            if (ImGui::Button("Back", uiSz(80, 0))) g_step--;
-            ImGui::SameLine();
+        if (ImGui::Button("Back", uiSz(80, 0))) {
+            if (g_step > 0) g_step--;
+            else            g_onPicker = true;   // back to the layout picker
         }
+        ImGui::SameLine();
         if (ImGui::Button(last ? "Finish" : "Next", uiSz(80, 0))) {
             if (last) close();
             else      g_step++;
@@ -230,11 +384,16 @@ void renderTutorial(materializr::PluginContext&) {
 
 REGISTER_PLUGIN(Tutorial, [](materializr::PluginContext& ctx) {
     // Launcher: Help > Getting Started (rendered via Application's generic
-    // plugin-menu wiring).
+    // plugin-menu wiring). Reopening also starts at the layout picker — it
+    // shows the current choice and is the friendliest place to change it.
     materializr::MenuContribution menu;
     menu.path = "Help > Getting Started";
     menu.priority = 10;
-    menu.action = [](materializr::PluginContext&) { g_open = true; g_step = 0; };
+    menu.action = [](materializr::PluginContext&) {
+        g_open = true;
+        g_onPicker = true;
+        g_step = 0;
+    };
     ctx.registerMenuItem(std::move(menu));
 
     // The per-frame overlay that draws the panel.

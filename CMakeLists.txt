@@ -154,6 +154,7 @@ add_executable(materializr
     $<$<PLATFORM_ID:Windows>:packaging/windows/app.rc>
     src/main.cpp
     src/app/Application.cpp
+    src/app/ui_layout_bridge.cpp
     src/app/InteractiveOpController.cpp
     src/app/FaceOpControllers.cpp
     src/app/Application_Dialogs.cpp

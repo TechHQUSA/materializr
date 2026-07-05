@@ -63,6 +63,8 @@ inline void resetFpuForOcct() {
 #include "ui/PropertiesPanel.h"
 #include "ui/AboutDialog.h"
 #include "ui/WelcomeScreen.h"
+#include "ui_layout_bridge.h"
+#include <fstream>
 #include "ios_storekit.h"
 #include "ui/ShortcutsPanel.h"
 #include "ui/HelpPanel.h"
@@ -1206,10 +1208,31 @@ void Application::loadAppSettings() {
         });
     }
 
+    // Plugins (the Getting Started tour's layout picker) read and switch the
+    // interface layout through this bridge; the switch is live and persists.
+    materializr::bindUiLayoutBridge(
+        [this]() { return static_cast<int>(m_uiLayout); },
+        [this](int idx) {
+            m_uiLayout = static_cast<UiLayout>(idx);
+            saveAppSettings();
+        });
+
     // Welcome screen: every launch until the user becomes a Supporter.
     // Suppressed by --safe-mode — no asking for coffee while the user is
-    // recovering from a crash.
-    if (!m_supporter && !m_safeMode) m_welcomeScreen->setVisible(true);
+    // recovering from a crash — and on the VERY FIRST launch, where the
+    // Getting Started tour (layout picker first) owns the moment; the welcome
+    // starts recurring from the second launch. Same marker the tutorial
+    // plugin writes.
+    const bool firstRun = [] {
+        char* base = SDL_GetPrefPath("Materializr", "Materializr");
+        if (!base) return false;
+        std::string p = std::string(base) + "tutorial_seen";
+        SDL_free(base);
+        std::ifstream f(p);
+        return !f.good();
+    }();
+    if (!m_supporter && !m_safeMode && !firstRun)
+        m_welcomeScreen->setVisible(true);
 }
 
 void Application::applyRenderingSettings() {
