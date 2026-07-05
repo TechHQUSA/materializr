@@ -523,7 +523,12 @@ void SketchTool::updateHoverCharge(double tNow, glm::vec2 cursor) {
     // geometry without needing a sketch element there yet — they only
     // exist while the sketch is open, so the cyan ring is naturally
     // hidden in the regular 3D view.
-    const float band = std::max(0.4f, m_gridStep * 0.9f);
+    // Band scales with the grid but gently: the old 0.9x grid band plus a
+    // 0.6x linger tolerance meant a SLOW drive-by anywhere near a candidate
+    // charged it at coarse grid steps (zoomed out) — "latching to edges I
+    // never hovered". Charging is a deliberate act: tighter catch, and the
+    // linger tolerance below is a small fraction of a cell.
+    const float band = std::max(0.4f, m_gridStep * 0.6f);
     ChargedRef best;
     float bestD = band;
     for (const auto& pt : m_sketch->getPoints()) {
@@ -583,7 +588,7 @@ void SketchTool::updateHoverCharge(double tNow, glm::vec2 cursor) {
     // and same sourceId; FacePoint and FaceLineMid match by position
     // since they have no id.
     const double dwell = 0.30;
-    const float  moveTol = std::max(0.3f, m_gridStep * 0.6f);
+    const float  moveTol = std::max(0.25f, m_gridStep * 0.25f);
     bool sameCandidate =
         m_hoverCandidate.kind == best.kind &&
         ((best.sourceId >= 0 && m_hoverCandidate.sourceId == best.sourceId) ||
@@ -925,6 +930,64 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             glm::vec2 bestPos = pos, bestSrc(0);
             int bestSrcId = -1;
             bool found = false;
+            // DRAW-TIME symmetry, anchored at the LAST placed point of the
+            // in-progress chain: the useful suggestions while drawing are the
+            // previous point mirrored across the vertical/horizontal line
+            // through the anchor (a symmetric V / arch) and its point
+            // reflection through the anchor (a smooth S). The bbox-centreline
+            // mirrors below can't express these — with two points they only
+            // ever suggest the degenerate bbox corner.
+            {
+                glm::vec2 L(0), prev(0);
+                int prevId = -1;
+                bool haveChain = false;
+                if (m_mode == SketchToolMode::Spline &&
+                    m_splinePoints.size() >= 2) {
+                    const SketchPoint* pL =
+                        m_sketch->getPoint(m_splinePoints.back());
+                    const SketchPoint* pP =
+                        m_sketch->getPoint(m_splinePoints[m_splinePoints.size() - 2]);
+                    if (pL && pP) {
+                        L = pL->pos; prev = pP->pos;
+                        prevId = pP->id; haveChain = true;
+                    }
+                } else if (m_mode == SketchToolMode::Line && m_isPlacing &&
+                           m_lastPointId >= 0) {
+                    // The chain anchor is the current segment start; the
+                    // previous vertex is the other end of the newest line
+                    // ending there.
+                    const SketchPoint* pL = m_sketch->getPoint(m_lastPointId);
+                    if (pL) {
+                        const auto& lns = m_sketch->getLines();
+                        for (auto it = lns.rbegin(); it != lns.rend(); ++it) {
+                            int other = -1;
+                            if (it->endPointId == m_lastPointId) other = it->startPointId;
+                            else if (it->startPointId == m_lastPointId) other = it->endPointId;
+                            if (other < 0) continue;
+                            const SketchPoint* pP = m_sketch->getPoint(other);
+                            if (!pP) continue;
+                            L = pL->pos; prev = pP->pos;
+                            prevId = pP->id; haveChain = true;
+                            break;
+                        }
+                    }
+                }
+                if (haveChain) {
+                    const glm::vec2 cand[3] = {
+                        {2.0f * L.x - prev.x, prev.y},            // mirror across vertical through L
+                        {prev.x, 2.0f * L.y - prev.y},            // mirror across horizontal through L
+                        {2.0f * L.x - prev.x, 2.0f * L.y - prev.y} // point reflection through L (S)
+                    };
+                    for (const glm::vec2& m : cand) {
+                        if (glm::length(m - prev) < 1e-4f) continue; // degenerate
+                        float d = glm::length(pos - m);
+                        if (d < bestD) {
+                            bestD = d; bestPos = m; bestSrc = prev;
+                            bestSrcId = prevId; found = true;
+                        }
+                    }
+                }
+            }
             auto tryVertical = [&](float axisX) {
                 for (const SketchPoint* b : pv) {
                     if (std::abs(b->pos.x - axisX) < 1e-4f) continue; // on axis
@@ -947,9 +1010,13 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                     }
                 }
             };
-            // Bounding-box centrelines.
-            tryVertical((minX + maxX) * 0.5f);
-            tryHorizontal((minY + maxY) * 0.5f);
+            // Bounding-box centrelines — only with 3+ points; with two, the
+            // centreline mirror is ALWAYS the degenerate bbox corner (level
+            // with one point, above the other), which reads as noise.
+            if (pv.size() >= 3) {
+                tryVertical((minX + maxX) * 0.5f);
+                tryHorizontal((minY + maxY) * 0.5f);
+            }
             // Axis-aligned existing lines as mirror axes.
             for (const auto& ln : lines) {
                 if (ln.fromText) continue;
