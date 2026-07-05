@@ -1,3 +1,4 @@
+#include "ui/StepperRow.h"
 #include "ui_scale.h"
 #include "../touch_mode.h"
 #include "../plugin/PluginMacro.h"
@@ -138,7 +139,8 @@ public:
         ImGui::SameLine();
         ImGui::Text("mm");
 
-        if (ImGui::SliderFloat("##ppslider", &m_distance, -50.0f, 50.0f, "%.1f mm")) {
+        if (materializr::stepperRow("ppStep", &m_distance,
+                                    /*allowNegative=*/true, -50.0f, 50.0f)) {
             std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
             updatePreview(ctx);
         }

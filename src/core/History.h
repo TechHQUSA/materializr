@@ -61,12 +61,24 @@ public:
     // trailing Thread steps modified, returns the index those threads start
     // at (where the op should be inserted); -1 = no reflow needed.
     int reflowInsertionIndex(const Operation& op) const;
+    // Insertion index for the SHELL auto-reflow: a face transform (moveface)
+    // on a SHELLED body corrupts — the loft engine can't do cavities — but is
+    // perfectly computable the other way round: apply it to the pre-shell
+    // solid, then re-run the shell on the moved body ("the order flipped").
+    // Unlike threads (multi-second recompute → user-discipline refusal), a
+    // shell re-execute is sub-second, so it reflows automatically. -1 = no
+    // shell touches the op's bodies / op isn't a face transform.
+    int shellReflowIndex(const Operation& op) const;
     // True if a Thread step in the applied history modified this body.
     // Interactive ops (push/pull, resize, …) check this at BEGIN to refuse
     // up front — their per-frame preview would otherwise run a boolean
     // against the thread's thousands of faces every frame and freeze,
     // never reaching the commit-time refusal in pushOperation.
     bool isBodyThreaded(int bodyId) const;
+    // True if a Shell step in the applied history modified this body — the
+    // face-op UI uses it to explain that the drag preview stays put on a
+    // hollow body (the transform applies pre-shell on release).
+    bool isBodyShelled(int bodyId) const;
     // Insert `op` at `index`, executing it against the state rolled back to
     // just before `index`, then replay the displaced steps (the threads
     // re-cut parametrically on the new geometry). Returns false only if the
@@ -101,6 +113,10 @@ public:
     // sits above the current index). -1 = none. The UI uses this to explain
     // what happened instead of leaving steps silently missing.
     int lastReplayFailure() const { return m_failedReplayAt; }
+    // Mark a step as failed-to-recompute AFTER the replay returned — used by
+    // the async thread re-cut when the worker's result lands null (the new
+    // geometry can't take the thread). Shows the same explainer banner.
+    void suspendStep(int idx) { m_failedReplayAt = idx; }
 
     // Remove a step entirely (delete that operation), rebuilding the model in
     // place. Returns false and leaves the model unchanged if removing the step

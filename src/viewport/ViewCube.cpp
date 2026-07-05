@@ -55,12 +55,19 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
         // widget so the top accessories clear it.
         topOffset = 74.0f;
     }
+    topOffset += m_extraTop; // e.g. below the im-touch-lite floating buttons
     // Extra left inset in touch mode: the enlarged widget (and its Home button)
     // overhang further right, so nudge the whole thing ~10 px off the edge.
     const float rightInset = pad + widgetR + 26.0f +
-                             (materializr::touchMode() ? 10.0f : 0.0f);
+                             (materializr::touchMode() ? 10.0f : 0.0f) + m_extraLeft;
     ImVec2 center(wp.x + ws.x - rightInset,
                   wp.y + pad + widgetR + topOffset);
+
+    // Cache the widget's screen anchor for the snap widget to tuck beneath. The
+    // lowest accessory is the axis triad at center.y + widgetR + 22*ts; pad past
+    // its glyph so the snap square clears the whole widget at any scale/offset.
+    m_widgetCenterX = center.x;
+    m_widgetBottomY = center.y + widgetR + 42.0f * ts;
 
     // --- Camera view-rotation matrix (no translation), so the cube spins with
     //     the camera's orientation.

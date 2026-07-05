@@ -31,6 +31,11 @@ public:
     std::string description() const override { return m_description; }
     void renderProperties() override {}
     std::string typeId() const override { return "sketchtransform"; }
+    // Reload support (full history replay): every step must come back as a
+    // real editable op, never a frozen ReplayOp.
+    std::string serializeParams() const override;
+    bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
 private:
     int m_sketchId = -1;

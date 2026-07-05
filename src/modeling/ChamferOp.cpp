@@ -123,9 +123,43 @@ bool ChamferOp::execute(Document& doc) {
         if (!SubShapeIndex::rebindEdges(m_previousShape, m_edges)) {
             // Ordinal/carrier match failed (a sketch dimension edit moved the
             // edges) — re-find them by their sketch feature. See EdgeAnchor.
-            if (!resolveAnchors(doc, m_previousShape)) return false;
+            if (!resolveAnchors(doc, m_previousShape)) {
+                // LAST RESORT: topological names — the boolean-SEAM case,
+                // where anchors fail by construction. Mirrors FilletOp.
+                bool topoOk = false;
+                if (!m_edgeRefs.empty() &&
+                    m_edgeRefs.size() == m_edges.size()) {
+                    materializr::topo::Context rc;
+                    rc.doc = &doc;
+                    rc.shape = m_previousShape;
+                    rc.type = TopAbs_EDGE;
+                    rc.gen = doc.bodyLedger(m_bodyId);
+                    rc.crossRebuild = true;
+                    std::vector<TopoDS_Shape> out;
+                    if (materializr::topo::resolveSet(m_edgeRefs, rc, out) &&
+                        out.size() == m_edges.size()) {
+                        for (size_t i = 0; i < out.size(); ++i)
+                            m_edges[i] = TopoDS::Edge(out[i]);
+                        topoOk = true;
+                        std::fprintf(stderr, "[Chamfer] edges re-found by "
+                                             "topo refs (gen/seam path)\n");
+                    }
+                }
+                if (!topoOk) return false;
+            }
         }
         if (m_edgeAnchors.empty()) computeAnchors(doc);
+        // Topological names, minted with the body's producing ledger in
+        // context so a SEAM edge gets its gen-lineage name.
+        if (m_edgeRefs.empty() && !m_edges.empty()) {
+            materializr::topo::Context mc;
+            mc.doc = &doc;
+            mc.shape = m_previousShape;
+            mc.type = TopAbs_EDGE;
+            mc.gen = doc.bodyLedger(m_bodyId);
+            for (const auto& e : m_edges)
+                m_edgeRefs.push_back(materializr::topo::mint(e, mc));
+        }
 
         // Build an edge-face map so we can find a face adjacent to each edge
         TopTools_IndexedDataMapOfShapeListOfShape edgeFaceMap;
@@ -214,6 +248,10 @@ bool ChamferOp::execute(Document& doc) {
 
         // Record the chamfer faces generated from each input edge so a later
         // face click can be traced back to this op for re-editing.
+        // Publish the generation map so "gen" can name a bevel face by its
+        // generating edge (general-kernel path for op-produced faces).
+        m_ledger.capture(chamfer, m_previousShape, TopAbs_EDGE);
+
         m_generatedFaces.clear();
         for (const auto& edge : m_edges) {
             try {
@@ -231,6 +269,7 @@ bool ChamferOp::execute(Document& doc) {
         // serializeParams can index the generated faces against the result).
         m_resultShape = candidate;
         doc.updateBody(m_bodyId, m_resultShape);
+        doc.setBodyLedger(m_bodyId, &m_ledger);
         return true;
     } catch (...) {
         return false;
@@ -306,6 +345,19 @@ std::string ChamferOp::serializeParams() const {
     }
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
     if (!anc.empty()) blob += ";anchor=" + anc;
+    // Topological edge names (additive, LAST — length-prefixed opaque blobs
+    // read to end-of-string). Persisting them keeps a SEAM fillet/chamfer
+    // re-derivable after reload; absent in old files.
+    if (!m_edgeRefs.empty()) {
+        bool any = false;
+        std::string rb;
+        for (const auto& r : m_edgeRefs) {
+            std::string b = r.serialize();
+            rb += std::to_string(b.size()) + ":" + b;
+            if (!r.empty()) any = true;
+        }
+        if (any) blob += ";edgerefs=" + rb;
+    }
     return blob;
 }
 
@@ -318,6 +370,24 @@ bool ChamferOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // edgerefs holds length-prefixed opaque blobs, written last — read to
+        // end-of-string (not to the next ';').
+        if (key == "edgerefs") {
+            std::string rest = blob.substr(eq + 1);
+            m_edgeRefs.clear();
+            size_t p = 0;
+            while (p < rest.size()) {
+                size_t c = rest.find(':', p);
+                if (c == std::string::npos) break;
+                size_t n = (size_t)std::atoll(rest.substr(p, c - p).c_str());
+                if (c + 1 + n > rest.size()) break;
+                m_edgeRefs.push_back(
+                    materializr::topo::Ref::parse(rest.substr(c + 1, n)));
+                p = c + 1 + n;
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "distance") { m_distance = std::atof(val.c_str()); any = true; }
         else if (key == "distance2"){ m_distance2 = std::atof(val.c_str()); any = true; }

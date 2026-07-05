@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <string>
+#include <vector>
 
 class SelectionManager;
 class History;
@@ -54,6 +55,25 @@ public:
 
     ToolAction render();
 
+    // The modern/im-touch tool rail: the tools of the current selection
+    // context (mirrors render()'s dispatch — keep the two in sync). Icons are
+    // MZ_ICON_* strings, labels are short rail captions. Plugin toolbar
+    // contributions are included with pluginIndex >= 0 (an index into
+    // PluginRegistry::toolbarContributions()); the shells fire those through
+    // fireRailPlugin() instead of handleToolAction.
+    struct RailTool {
+        const char* icon;
+        const char* label;
+        ToolAction  action;
+        bool        active = false;   // highlight (current sketch tool)
+        const char* tip = nullptr;    // hover tooltip (im-touch shell)
+        int         pluginIndex = -1; // >= 0: plugin contribution, not a ToolAction
+    };
+    std::vector<RailTool> railTools() const;
+    // Fire a plugin RailTool (activate its tool / run its action) — the rail
+    // twin of renderPluginButtons' click handling.
+    void fireRailPlugin(int index);
+
     void setSketchMode(bool active);
     bool isSketchMode() const;
 
@@ -101,6 +121,10 @@ public:
     // Side count chosen from the Polygon popout; read by the app when it
     // handles the resulting ToolAction::Polygon.
     int  getRequestedPolygonSides() const { return m_requestedPolygonSides; }
+    // Lets the im-touch rail's Polygon sides popout set the count too (the
+    // classic toolbar sets m_requestedPolygonSides inline), so all three
+    // layouts drive the same polygon flow.
+    void setRequestedPolygonSides(int n) { m_requestedPolygonSides = n; }
     // Live rect/circle draw origin shown on the per-tool toggle. Ints mirror
     // SketchTool::RectMode (0=Corner,1=Center) and CircleMode (0=Center,1=2-Point).
     void setRectMode(int m) { m_rectMode = m; }

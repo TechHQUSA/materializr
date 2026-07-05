@@ -40,8 +40,27 @@ public:
     // this to suppress its own selection logic so cube clicks don't pass through.
     bool wasHovered() const { return m_lastHovered; }
 
+    // Extra offset (px) nudging the cube off its default top-right anchor:
+    // leftPx moves it left (toward the viewport), topPx moves it down (positive)
+    // or up (negative). The im-touch shells use it to clear their floating top
+    // chrome / centre the Home glyph in the corner. 0,0 everywhere else.
+    void setExtraOffset(float leftPx, float topPx) {
+        m_extraLeft = leftPx; m_extraTop = topPx;
+    }
+
+    // Screen-space anchor of the last-rendered widget (valid after render()):
+    // the horizontal centre and the y just below the lowest accessory. The snap
+    // widget tucks under these so it tracks the cube through touch scaling AND
+    // the im-touch vertical offsets, instead of overlapping it.
+    float widgetCenterX() const { return m_widgetCenterX; }
+    float widgetBottomY() const { return m_widgetBottomY; }
+
 private:
     float m_size = 120.0f;
+    float m_extraLeft = 0.0f;
+    float m_extraTop = 0.0f;
+    float m_widgetCenterX = 0.0f;
+    float m_widgetBottomY = 0.0f;
     bool  m_lastHovered = false;
     // Cube drag-to-orbit state: a press on a face arms a pending snap; if the
     // user drags before releasing, treat it as a free orbit instead and

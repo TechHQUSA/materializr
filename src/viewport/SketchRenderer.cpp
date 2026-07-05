@@ -85,7 +85,14 @@ const SketchPoint* SketchRenderer::lutPoint(const Sketch* sketch, int id) const 
         auto it = m_pointLut.find(id);
         return it != m_pointLut.end() ? it->second : nullptr;
     }
-    return lutPoint(sketch, id);
+    // LUT belongs to another sketch — authoritative linear lookup. (This was
+    // `return lutPoint(sketch, id);`: infinite self-recursion, tail-call
+    // compiled into a 100% CPU spin. Reached whenever a highlight draws a
+    // sketch the LUT wasn't built from — selecting a sketch from the im-touch
+    // lite tree, or the first frame of a brand-new sketch.)
+    for (const auto& p : sketch->getPoints())
+        if (p.id == id) return &p;
+    return nullptr;
 }
 
 std::uint64_t SketchRenderer::contentSignature(const Sketch* sketch) const {

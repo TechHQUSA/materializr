@@ -404,6 +404,25 @@ int Sketch::addSpline(const std::vector<int>& controlPointIds) {
     return spline.id;
 }
 
+bool Sketch::appendSplineControlPoint(int splineId, int pointId) {
+    for (auto& sp : m_splines)
+        if (sp.id == splineId) {
+            sp.controlPointIds.push_back(pointId);
+            return true;
+        }
+    return false;
+}
+
+bool Sketch::popSplineControlPoint(int splineId) {
+    for (auto& sp : m_splines)
+        if (sp.id == splineId) {
+            if (sp.controlPointIds.size() <= 2) return false;
+            sp.controlPointIds.pop_back();
+            return true;
+        }
+    return false;
+}
+
 int Sketch::addPolygon(int centerPtId, double radius, int sides, double rotationRad) {
     SketchPolygon polygon;
     polygon.id = nextId();
@@ -549,9 +568,14 @@ std::vector<glm::vec2> Sketch::sampleSpline2D(const SketchSpline& sp,
     size_t n = ids.size() - (closedSp ? 1 : 0);
     for (size_t k = 0; k < n; ++k) {
         const SketchPoint* p = getPoint(ids[k]);
-        if (!p) return ctrl;
+        // SKIP a dangling control-point id instead of truncating: returning
+        // the partial RAW control polygon (old behaviour) collapsed a whole
+        // spline to a tiny un-interpolated stub whenever one referenced point
+        // was gone — every classification against it then missed by miles.
+        if (!p) continue;
         ctrl.push_back(p->pos);
     }
+    if (ctrl.size() < 2) return {};
     return interpolate2D(ctrl, segsPerSpan, closedSp);
 }
 

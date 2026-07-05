@@ -28,6 +28,8 @@
 #include <TopTools_ListOfShape.hxx>
 #include "viewport/Gizmo.h"
 #include "viewport/SelectionHighlight.h"
+#include "ui/TouchIcons.h"   // im-touch circle-confirm bubble ✗/✓ glyphs
+#include "ui/TouchWidgets.h"
 #include "viewport/BoxSelect.h"
 #include "viewport/SectionView.h"
 #include "viewport/EdgeRenderer.h"
@@ -47,6 +49,7 @@
 #include "ui/ShortcutsPanel.h"
 #include "ui/HelpPanel.h"
 #include "ui/MeasureTool.h"
+#include "ui/StepperRow.h"
 #include "ui/UpdateChecker.h"
 #include "modeling/Sketch.h"
 #include "modeling/SketchSolver.h"
@@ -76,6 +79,7 @@
 namespace materializr { namespace force_link { void linkAll(); } }
 
 #include <imgui.h>
+#include <imgui_internal.h> // FindWindowByName/DockBuilder: viewport re-dock after im-touch
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -163,7 +167,35 @@ void Application::gizmoPreviewApply(const glm::mat4& m) {
 
 void Application::renderViewport() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("Viewport");
+    ImGuiWindowFlags vpFlags = 0;
+    if (!classicLayout()) {
+        // Modern/im-touch: pin the viewport (undocked, chrome-less) into the
+        // center rect the layout's renderer computed earlier this frame.
+        ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(m_touchVpX, m_touchVpY), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(m_touchVpW, m_touchVpH), ImGuiCond_Always);
+        vpFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                  ImGuiWindowFlags_NoDocking |
+                  ImGuiWindowFlags_NoBringToFrontOnFocus;
+    } else {
+        // Classic shell self-heal: the viewport always lives in the
+        // dockspace's central node (its tab bar is off, so the user can't
+        // re-dock it by hand). The touch shell actively UNDOCKS it every
+        // frame (SetNextWindowDockID(0) above) and that undocked state can
+        // even reach imgui.ini — so coming back from im-touch (or launching
+        // classic with such an ini) found the viewport floating over the
+        // Tools panel. If it's floating here, put it back.
+        if (ImGuiWindow* w = ImGui::FindWindowByName("Viewport")) {
+            if (w->DockId == 0) {
+                // 0x08BD597D = the dockspace id (see renderDockspace()).
+                if (const ImGuiDockNode* central =
+                        ImGui::DockBuilderGetCentralNode(0x08BD597Du))
+                    ImGui::SetNextWindowDockID(central->ID, ImGuiCond_Always);
+            }
+        }
+    }
+    ImGui::Begin("Viewport", nullptr, vpFlags);
 
     // Cache the viewport window's screen rect so the touch collapse handles can
     // anchor to the panel/viewport boundaries (which move as panels collapse).
@@ -1146,6 +1178,38 @@ void Application::renderViewport() {
             }
 
             char dbuf[40];
+            // im-touch: the distance input well (rendered later, different
+            // scope) anchors near the geometry being modified. The anchor is
+            // LATCHED in world space when the action starts — the well must
+            // not chase the growing arrow while values change (same rule as
+            // the sketch bubbles' frozen endpoints), but projecting the
+            // latched point each frame keeps it tracking camera pan/zoom.
+            {
+                const bool actionLive =
+                    m_extruding || (m_pushPullActive && m_pushPullHasArrow) ||
+                    m_edgeOpActive;
+                if (!actionLive) m_actionAnchorLatched = false;
+                m_actionAnchorValid = false;
+                if (actionLive) {
+                    if (!m_actionAnchorLatched) {
+                        m_actionAnchorW =
+                            m_extruding
+                                ? m_extrudeOrigin +
+                                      m_extrudeNormal * m_extrudeDistance
+                            : m_pushPullActive
+                                ? m_pushPullOrigin +
+                                      m_pushPullNormal * m_pushPullDistance
+                                : m_edgeOpMid;   // fillet/chamfer: edge midpoint
+                        m_actionAnchorLatched = true;
+                    }
+                    ImVec2 aS;
+                    if (toImg(m_actionAnchorW, aS)) {
+                        m_actionAnchorX = aS.x;
+                        m_actionAnchorY = aS.y;
+                        m_actionAnchorValid = true;
+                    }
+                }
+            }
             if (m_extruding) {
                 std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", std::abs(m_extrudeDistance));
                 drawDim(m_extrudeOrigin,
@@ -1153,10 +1217,57 @@ void Application::renderViewport() {
                         DimStyle::Bold);
             } else if (m_pushPullActive && m_pushPullHasArrow) {
                 // Arrow out of the face + signed-distance measurement.
-                std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_pushPullDistance);
-                drawDim(m_pushPullOrigin,
-                        m_pushPullOrigin + m_pushPullNormal * m_pushPullDistance, dbuf,
-                        DimStyle::Bold);
+                // Push/pull STARTS at 0 mm (no change), and drawDim draws
+                // nothing for a near-zero span — which left the face with no
+                // visible handle at all (extrude starts non-zero, so it
+                // always shows one). Until the distance moves, draw a
+                // STARTER handle instead: a double-headed arrow through the
+                // face centre along ±normal, in the Bold palette.
+                if (std::abs(m_pushPullDistance) > 0.05f) {
+                    std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_pushPullDistance);
+                    drawDim(m_pushPullOrigin,
+                            m_pushPullOrigin + m_pushPullNormal * m_pushPullDistance, dbuf,
+                            DimStyle::Bold);
+                } else {
+                    ImVec2 so, sn;
+                    if (toImg(m_pushPullOrigin, so) &&
+                        toImg(m_pushPullOrigin + m_pushPullNormal, sn)) {
+                        ImVec2 d(sn.x - so.x, sn.y - so.y);
+                        const float L = std::sqrt(d.x * d.x + d.y * d.y);
+                        if (L > 1e-3f) { d.x /= L; d.y /= L; }
+                        else           { d = ImVec2(0.0f, -1.0f); }
+                        const float s3   = uiScale();
+                        const float half = 40.0f * s3;
+                        const float ah   = 12.0f * s3;
+                        const ImVec2 a(so.x - d.x * half, so.y - d.y * half);
+                        const ImVec2 b(so.x + d.x * half, so.y + d.y * half);
+                        const ImU32 col     = IM_COL32(255, 200,  60, 255);
+                        const ImU32 outline = IM_COL32( 20,  20,  28, 230);
+                        const ImVec2 perp(-d.y, d.x);
+                        dl->AddLine(a, b, outline, 5.0f);
+                        dl->AddLine(a, b, col, 3.0f);
+                        auto head = [&](ImVec2 tip, float sign) {
+                            ImVec2 back(tip.x - d.x * ah * sign,
+                                        tip.y - d.y * ah * sign);
+                            ImVec2 w1(back.x + perp.x * ah * 0.5f,
+                                      back.y + perp.y * ah * 0.5f);
+                            ImVec2 w2(back.x - perp.x * ah * 0.5f,
+                                      back.y - perp.y * ah * 0.5f);
+                            dl->AddTriangleFilled(tip, w1, w2, col);
+                            dl->AddTriangle(tip, w1, w2, outline, 1.2f);
+                        };
+                        head(b,  1.0f);
+                        head(a, -1.0f);
+                        const char* hint = "0 mm — drag";
+                        ImVec2 ts = ImGui::CalcTextSize(hint);
+                        ImVec2 tp(so.x + perp.x * 18.0f * s3 - ts.x * 0.5f,
+                                  so.y + perp.y * 18.0f * s3 - ts.y * 0.5f);
+                        dl->AddRectFilled(ImVec2(tp.x - 5, tp.y - 3),
+                                          ImVec2(tp.x + ts.x + 5, tp.y + ts.y + 3),
+                                          outline, 3.0f);
+                        dl->AddText(tp, col, hint);
+                    }
+                }
             } else if (m_gizmoDragging && !m_planeGizmoDrag.empty()) {
                 // Construction-plane drag readout. The world-axis dim line
                 // from origin (used for body/sketch translate below) isn't
@@ -1580,6 +1691,149 @@ void Application::renderViewport() {
                                             IM_COL32(255, 235, 120, 255), dbuf);
                             }
                         }
+                    }
+                }
+            }
+
+            // im-touch confirm bubble: a circle or rectangle drawn by press-
+            // drag-release is HELD as a preview on lift (see the sketch
+            // release handler) — a small floating bar near the shape offers
+            // exact-value entry plus ✗/✓. Circle shows one readout + pad
+            // (typed diameter wins over the dragged size, matching
+            // applyDimension); rectangle shows TWO amount wells (Width /
+            // Height, seeded from the drag) and ✓ commits the exact corner
+            // computed from them. ✗ drops the shape (neither tool placed
+            // geometry on press, so onCancel is a clean reset). Tapping the
+            // canvas to draw the next shape auto-commits the held one via
+            // the press handler.
+            if (m_sketchShapeConfirmPending) {
+                const SketchToolMode holdMode =
+                    m_sketchTool ? m_sketchTool->getMode() : SketchToolMode::None;
+                const bool holdAlive = m_inSketchMode && m_sketchTool &&
+                    m_activeSketch &&
+                    (holdMode == SketchToolMode::Circle ||
+                     holdMode == SketchToolMode::Rectangle) &&
+                    m_sketchTool->isPlacing() && m_sketchTool->hasPreview();
+                if (!holdAlive) {
+                    // Undo / cancel / tool switch dissolved the hold.
+                    m_sketchShapeConfirmPending = false;
+                } else {
+                    const gp_Ax3& bax = m_activeSketch->getPlane().Position();
+                    glm::vec3 bO(bax.Location().X(), bax.Location().Y(), bax.Location().Z());
+                    glm::vec3 bX(bax.XDirection().X(), bax.XDirection().Y(), bax.XDirection().Z());
+                    glm::vec3 bY(bax.YDirection().X(), bax.YDirection().Y(), bax.YDirection().Z());
+                    // FROZEN endpoints from the lift — not the live preview:
+                    // stray motion twitching the held preview must not move
+                    // the input box (or flip the commit direction) mid-edit.
+                    const glm::vec2 ps = m_sketchShapeAnchorPs;
+                    const glm::vec2 pe = m_sketchShapeAnchorPe;
+                    const float diaNow = 2.0f * glm::length(pe - ps);
+                    ImVec2 at;
+                    if (toImg(bO + pe.x * bX + pe.y * bY, at)) {
+                        const float sc = uiScale();
+                        ImGui::SetNextWindowPos(
+                            ImVec2(at.x + 16.0f * sc, at.y + 12.0f * sc),
+                            ImGuiCond_Always);
+                        ImGui::SetNextWindowBgAlpha(0.95f);
+                        ImGui::Begin("##CircleConfirm", nullptr,
+                            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                            ImGuiWindowFlags_AlwaysAutoResize |
+                            ImGuiWindowFlags_NoSavedSettings |
+                            ImGuiWindowFlags_NoFocusOnAppearing);
+                        bool commit = false;
+                        const float keySide = 46.0f * sc;
+                        if (holdMode == SketchToolMode::Circle) {
+                            // Value readout: the typed value, or the dragged
+                            // diameter dimmed as the default. Edited by the
+                            // in-app number pad below — NOT an InputText: the
+                            // native mobile keyboard is what froze the app.
+                            char readout[48];
+                            if (m_sketchShapeDimBuf[0] != '\0')
+                                std::snprintf(readout, sizeof(readout), "%s mm",
+                                              m_sketchShapeDimBuf);
+                            else
+                                std::snprintf(readout, sizeof(readout),
+                                              "%.1f mm", diaNow);
+                            touchui::valueReadout("bubbleVal", readout,
+                                                  m_sketchShapeDimBuf[0] == '\0',
+                                                  touchui::numberPadWidth(keySide));
+                            ImGui::Spacing();
+                            touchui::numberPad("bubblePad", m_sketchShapeDimBuf,
+                                               sizeof(m_sketchShapeDimBuf),
+                                               keySide);
+                        } else {
+                            // Rectangle: two tappable wells, each opening its
+                            // own pad popup. Committing either well only
+                            // stages the value; ✓ places the rectangle. Both
+                            // pads share ONE pinned anchor beside the bubble
+                            // so the keypad doesn't jump between Width and
+                            // Height edits. (GetWindowSize is last frame's —
+                            // fine: the pad opens on a later frame's tap.)
+                            const ImVec2 bwin = ImGui::GetWindowPos();
+                            const ImVec2 bsz  = ImGui::GetWindowSize();
+                            const ImVec2 padAnchor(bwin.x + bsz.x + 8.0f * sc,
+                                                   bwin.y);
+                            touchui::amountField("bubbleW", "Width",
+                                                 &m_sketchShapeDimW, "mm", 1,
+                                                 /*allowSign=*/false,
+                                                 0.01f, 1.0e6f, &padAnchor);
+                            touchui::amountField("bubbleH", "Height",
+                                                 &m_sketchShapeDimH, "mm", 1,
+                                                 /*allowSign=*/false,
+                                                 0.01f, 1.0e6f, &padAnchor);
+                        }
+                        ImGui::Spacing();
+                        if (touchui::iconButton("bubbleDrop", MZ_ICON_DISCARD,
+                                                46.0f * sc)) {
+                            m_sketchTool->onCancel();
+                            m_sketchShapeConfirmPending = false;
+                        }
+                        ImGui::SameLine(0.0f, 12.0f * sc);
+                        if (touchui::pillButton("bubbleOk", MZ_ICON_FINISH,
+                                                nullptr, /*accent=*/true))
+                            commit = true;
+                        if (commit && m_sketchShapeConfirmPending) {
+                            if (holdMode == SketchToolMode::Circle) {
+                                float v = 0.0f;
+                                const bool useTyped =
+                                    materializr::parseFinite(m_sketchShapeDimBuf, v) &&
+                                    v > 0.0f;
+                                recordSketchMutation([&] {
+                                    if (useTyped)
+                                        m_sketchTool->applyDimension(v);
+                                    else
+                                        m_sketchTool->onMouseDown(
+                                            m_sketchShapePendingPos, false);
+                                });
+                            } else {
+                                // Commit the exact W×H through the second-
+                                // corner tap the drag would have made. ps is
+                                // the EFFECTIVE opposite corner for both draw
+                                // modes; Center mode sizes from the centre, so
+                                // the target sits half a side away from it.
+                                const glm::vec2 dir(
+                                    pe.x >= ps.x ? 1.0f : -1.0f,
+                                    pe.y >= ps.y ? 1.0f : -1.0f);
+                                glm::vec2 target;
+                                if (m_sketchTool->getRectMode() ==
+                                    SketchTool::RectMode::Center) {
+                                    const glm::vec2 ctr = 0.5f * (ps + pe);
+                                    target = ctr +
+                                        glm::vec2(dir.x * m_sketchShapeDimW * 0.5f,
+                                                  dir.y * m_sketchShapeDimH * 0.5f);
+                                } else {
+                                    target = ps +
+                                        glm::vec2(dir.x * m_sketchShapeDimW,
+                                                  dir.y * m_sketchShapeDimH);
+                                }
+                                recordSketchMutation([&] {
+                                    m_sketchTool->onMouseDown(target, false);
+                                });
+                            }
+                            m_sketchShapeConfirmPending = false;
+                        }
+                        ImGui::End();
                     }
                 }
             }
@@ -5439,6 +5693,16 @@ void Application::renderViewport() {
                         m_sketchDragBefore = std::make_shared<Sketch>(*m_activeSketch);
                         recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
                     } else if (materializr::touchMode()) {
+                        // A held circle awaiting its ✗/✓ bubble: drawing the
+                        // next shape auto-commits it as-released (the bubble
+                        // is an offer, not a gate).
+                        if (m_sketchShapeConfirmPending) {
+                            if (m_sketchTool->isPlacing())
+                                recordSketchMutation([&]{
+                                    m_sketchTool->onMouseDown(
+                                        m_sketchShapePendingPos, false); });
+                            m_sketchShapeConfirmPending = false;
+                        }
                         // Drawing tool, touch: press-drag-release. The point normally
                         // lands on release so the drag can preview the radius / bulge
                         // / segment (touch has no hover to preview between taps).
@@ -5615,8 +5879,34 @@ void Application::renderViewport() {
                             // no-drag tap leaves it placing, so a second tap sets
                             // the radius / corner / endpoint — a stationary tap
                             // mustn't commit a zero-size shape (tap-tap still works).
-                            if (moved)
-                                recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
+                            if (moved) {
+                                const SketchToolMode sm = m_sketchTool->getMode();
+                                if (imTouchLayout() &&
+                                    (sm == SketchToolMode::Circle ||
+                                     sm == SketchToolMode::Rectangle)) {
+                                    // im-touch: hold the shape as a preview and
+                                    // offer the ✗/✓ + exact-value bubble instead
+                                    // of committing on lift (see the confirm-
+                                    // bubble block in the dimension overlay).
+                                    m_sketchShapeConfirmPending = true;
+                                    m_sketchShapePendingPos = sketchCoord;
+                                    m_sketchShapeDimBuf[0] = '\0';
+                                    // Freeze the preview endpoints at lift —
+                                    // the bubble anchors to these so it can't
+                                    // move if the held preview twitches.
+                                    // (Preview start is the EFFECTIVE opposite
+                                    // corner in both rect draw modes, so
+                                    // |pe-ps| is the full side.)
+                                    const glm::vec2 ps = m_sketchTool->getPreviewStart();
+                                    const glm::vec2 pe = m_sketchTool->getPreviewEnd();
+                                    m_sketchShapeAnchorPs = ps;
+                                    m_sketchShapeAnchorPe = pe;
+                                    m_sketchShapeDimW = std::abs(pe.x - ps.x);
+                                    m_sketchShapeDimH = std::abs(pe.y - ps.y);
+                                } else {
+                                    recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
+                                }
+                            }
                         } else {
                             // Multi-point tool (incl. continuing a line chain), or
                             // a drag tool's second tap: place the point at release.
@@ -5692,7 +5982,15 @@ void Application::renderViewport() {
         }
     }
 
-    // ViewCube overlay
+    // ViewCube overlay. In im-touch-lite the top-right button cluster floats
+    // over the viewport corner where the cube lives — drop the cube below it.
+    const float uisVc = uiScale();
+    if (imTouchLayout())
+        m_viewCube->setExtraOffset(0.0f, 68.0f * uisVc); // clear the im-touch top-right cluster
+    else if (modernLayout())
+        m_viewCube->setExtraOffset(8.0f * uisVc, -8.0f * uisVc); // centre Home in the corner
+    else
+        m_viewCube->setExtraOffset(0.0f, 0.0f);
     ViewCubeAction vcAction = m_viewCube->render(
         m_viewport->getCamera(), m_invertCubeDrag,
         m_themeManager && m_themeManager->getTheme() == Theme::Light);
@@ -5728,33 +6026,81 @@ void Application::renderViewport() {
         bool selectionContext = !m_inSketchMode ||
             (m_sketchTool && m_sketchTool->getMode() == SketchToolMode::Select);
         bool placing = m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing();
-        if (selectionContext || placing) {
-            ImGui::SetNextWindowPos(ImVec2(vpMin.x + 6.0f, vpMin.y + vpSize.y - 6.0f),
+        // In the modern/im-touch layouts the Multi-Select toggle is hosted in
+        // their own chrome instead (down here it overlapped the FULL pill).
+        // Keep the rest of this bar — Delete, and the chain-tool Finish/Back —
+        // which those layouts don't replicate.
+        const bool multiInLegacy = classicLayout();
+        const bool deleteHere = m_inSketchMode && m_sketchTool &&
+                                m_sketchTool->hasElementSelection();
+        // Move (navigation lock) lives in this bar too. While on, a one-finger
+        // drag orbits and taps don't draw/select, so pan/zoom can't
+        // inadvertently start a drawing. Shown while a one-finger drag is
+        // reserved for a tool — sketch editing, or an interactive op whose
+        // arrow/handle owns the drag (push/pull, extrude, edge ops, move/scale
+        // face) — since that's exactly when orbit needs an escape hatch.
+        // Hidden (and forced off) elsewhere: a plain drag already orbits
+        // there, so the lock is redundant. (It used to sit bottom-RIGHT, but
+        // the im-touch layout parks its sketch Finish/Discard FABs in that
+        // corner, which buried it.)
+        const bool navLockRelevant = m_inSketchMode ||
+            m_pushPullActive || m_extruding || m_edgeOpActive ||
+            m_moveFaceActive || m_scaleFaceCtl.active() ||
+            m_resizeCylActive || anyIopActive();
+        if (!navLockRelevant) m_moveModeToggle = false;
+        if ((selectionContext && (multiInLegacy || deleteHere)) ||
+            (placing && classicLayout()) || navLockRelevant) {
+            // im-touch outside a sketch: the History toggle owns the very
+            // corner (its timeline strip stays visible during interactive
+            // ops), so sit just above it. Everywhere else, flush corner.
+            const float clearHist = (imTouchLayout() && !m_inSketchMode)
+                                        ? 78.0f * uiScale() : 0.0f;
+            ImGui::SetNextWindowPos(ImVec2(vpMin.x + 6.0f,
+                                           vpMin.y + vpSize.y - 6.0f - clearHist),
                                     ImGuiCond_Always, ImVec2(0.0f, 1.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
             ImGui::SetNextWindowBgAlpha(0.35f);
             ImGui::Begin("##ViewportBarLeft", nullptr, overlayFlags);
 
-            if (selectionContext) {
-                int pops = 0;
-                if (m_multiSelectToggle) {
-                    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
-                    pops = 3;
+            bool anyBtn = false;
+            if (navLockRelevant) {
+                if (m_moveModeToggle) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.85f, 0.55f, 0.15f, 0.97f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.65f, 0.25f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.75f, 0.48f, 0.12f, 1.0f));
                 }
-                if (wideButton(m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off"))
-                    m_multiSelectToggle = !m_multiSelectToggle;
+                bool clicked = wideButton(m_moveModeToggle ? "Move: On" : "Move: Off");
                 bool hov = ImGui::IsItemHovered();
-                if (pops) ImGui::PopStyleColor(pops);
-                if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
+                if (m_moveModeToggle) ImGui::PopStyleColor(3);
+                if (clicked) m_moveModeToggle = !m_moveModeToggle;
+                if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
+                anyBtn = true;
+            }
+
+            if (selectionContext) {
+                if (multiInLegacy) {
+                    if (anyBtn) ImGui::SameLine();
+                    anyBtn = true;
+                    int pops = 0;
+                    if (m_multiSelectToggle) {
+                        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.20f, 0.48f, 0.85f, 0.95f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.58f, 0.95f, 1.0f));
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.16f, 0.40f, 0.75f, 1.0f));
+                        pops = 3;
+                    }
+                    if (wideButton(m_multiSelectToggle ? "Multi-Select: On" : "Multi-Select: Off"))
+                        m_multiSelectToggle = !m_multiSelectToggle;
+                    bool hov = ImGui::IsItemHovered();
+                    if (pops) ImGui::PopStyleColor(pops);
+                    if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
+                }
 
                 // Delete the selected sketch elements — the touch twin of the
                 // Delete key (which a bare tablet doesn't have). Only shown in
                 // sketch Select mode with elements actually selected.
-                if (m_inSketchMode && m_sketchTool &&
-                    m_sketchTool->hasElementSelection()) {
-                    ImGui::SameLine();
+                if (deleteHere) {
+                    if (anyBtn) ImGui::SameLine();
+                    anyBtn = true;
                     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.68f, 0.24f, 0.24f, 0.97f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.82f, 0.34f, 0.34f, 1.0f));
                     bool del = wideButton("Delete");
@@ -5764,7 +6110,7 @@ void Application::renderViewport() {
                     if (dhov) ImGui::SetTooltip("Delete the selected sketch elements (undoable)");
                 }
             }
-            if (placing) {
+            if (placing && classicLayout()) {
                 SketchToolMode mode = m_sketchTool->getMode();
                 // Circle/Rectangle are a single press-drag-release gesture now,
                 // so their only "placing" window is mid-drag with the finger
@@ -5779,7 +6125,7 @@ void Application::renderViewport() {
                                   mode == SketchToolMode::Spline ||
                                   mode == SketchToolMode::Polygon);
                 if (!atomicGesture) {
-                    bool prev = selectionContext;
+                    bool prev = anyBtn;
                     if (chainTool) {
                         if (prev) ImGui::SameLine();
                         prev = true;
@@ -5828,39 +6174,6 @@ void Application::renderViewport() {
             ImGui::PopStyleVar();
         }
 
-        // Bottom-right: persistent Move (navigation lock). While on, a one-finger
-        // drag orbits and taps don't draw/select, so pan/zoom can't inadvertently
-        // start a drawing. UI buttons stay clickable (input still reaches ImGui).
-        // Shown while a one-finger drag is reserved for a tool — sketch editing,
-        // or an interactive op whose arrow/handle owns the drag (push/pull,
-        // extrude, edge ops, move/scale face) — since that's exactly when orbit
-        // needs an escape hatch. Hidden (and forced off) elsewhere: a plain drag
-        // already orbits there, so the lock is redundant.
-        const bool navLockRelevant = m_inSketchMode ||
-            m_pushPullActive || m_extruding || m_edgeOpActive ||
-            m_moveFaceActive || m_scaleFaceCtl.active() ||
-            m_resizeCylActive || anyIopActive();
-        if (navLockRelevant) {
-            ImGui::SetNextWindowPos(ImVec2(vpMin.x + vpSize.x - 6.0f, vpMin.y + vpSize.y - 6.0f),
-                                    ImGuiCond_Always, ImVec2(1.0f, 1.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
-            ImGui::SetNextWindowBgAlpha(0.35f);
-            ImGui::Begin("##ViewportBarRight", nullptr, overlayFlags);
-            if (m_moveModeToggle) {
-                ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.85f, 0.55f, 0.15f, 0.97f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.65f, 0.25f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.75f, 0.48f, 0.12f, 1.0f));
-            }
-            bool clicked = wideButton(m_moveModeToggle ? "Move: On" : "Move: Off");
-            bool hov = ImGui::IsItemHovered();
-            if (m_moveModeToggle) ImGui::PopStyleColor(3);
-            if (clicked) m_moveModeToggle = !m_moveModeToggle;
-            if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
-            ImGui::End();
-            ImGui::PopStyleVar();
-        } else {
-            m_moveModeToggle = false;
-        }
     }
 
     // Right-click face context menu
@@ -6149,19 +6462,36 @@ void Application::renderViewport() {
                     : "EXTRUDE - Drag in viewport or type distance. Enter to confirm, Escape to cancel.");
         ImGui::PopStyleColor();
 
-        // Floating distance input panel
-        ImGui::SetNextWindowPos(ImVec2(
-            std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
-            ImGui::GetWindowPos().y + 50));
+        // Floating distance input panel. im-touch: anchored just off the
+        // extrude arrow's tip, like the sketch bubbles; other layouts (or a
+        // tip behind the camera) keep the fixed top-right spot.
+        bool extAnchored = false;
+        if (imTouchLayout() && m_actionAnchorValid) {
+            const float s2 = uiScale();
+            const ImVec2 vwp = ImGui::GetWindowPos();
+            const float vww = ImGui::GetWindowWidth();
+            float ax = std::min(std::max(m_actionAnchorX + 24.0f * s2,
+                                         vwp.x + 8.0f),
+                                vwp.x + vww - 250.0f * s2);
+            float ay = std::max(m_actionAnchorY + 12.0f * s2, vwp.y + 8.0f);
+            ImGui::SetNextWindowPos(ImVec2(ax, ay), ImGuiCond_Always);
+            extAnchored = true;
+        }
+        if (!extAnchored)
+            ImGui::SetNextWindowPos(ImVec2(
+                std::max(ImGui::GetWindowPos().x + 6.0f,
+                         ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
+                ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##ExtrudeInput", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text("Extrude Distance (mm)");
-        ImGui::Separator();
+        if (!imTouchLayout()) {   // im-touch: just the value well below
+            ImGui::Text("Extrude Distance (mm)");
+            ImGui::Separator();
+        }
 
         if (m_extrudeInputFocus) {
             if (!materializr::touchMode())
@@ -6170,6 +6500,17 @@ void Application::renderViewport() {
         }
 
         bool valueChanged = false;
+        if (imTouchLayout()) {
+            // im-touch: the WHOLE panel is this one tappable value well —
+            // no header, hint or steppers (Steve: the full "distance
+            // dialog" kept showing up; drag for coarse, pad for exact).
+            if (touchui::amountField("extAmt", "Distance", &m_extrudeDistance,
+                                     "mm", 1, /*allowSign=*/true)) {
+                std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf),
+                              "%.1f", m_extrudeDistance);
+                updateInteractiveExtrude();
+            }
+        } else {
         if (ImGui::InputText("##dist", m_extrudeInputBuf, sizeof(m_extrudeInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             // Enter pressed — commit (parseFinite: keep last on garbage)
@@ -6188,20 +6529,27 @@ void Application::renderViewport() {
 
         ImGui::SameLine();
         ImGui::Text("mm");
+        }
 
-        // Slider for quick adjustment
-        if (ImGui::SliderFloat("##slider", &m_extrudeDistance, -50.0f, 50.0f, "%.1f mm")) {
+        // Quick-nudge stepper (replaces the slider): ±10/1/0.1, and 0 to
+        // clear the extrusion mid-preview. Desktop only — im-touch stays a
+        // single well.
+        if (!imTouchLayout() &&
+            materializr::stepperRow("extrudeStep", &m_extrudeDistance,
+                                    /*allowNegative=*/true, -50.0f, 50.0f)) {
             std::snprintf(m_extrudeInputBuf, sizeof(m_extrudeInputBuf), "%.1f", m_extrudeDistance);
             updateInteractiveExtrude();
         }
 
-        ImGui::Spacing();
-        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
-            commitInteractiveExtrude();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
-            cancelInteractiveExtrude();
+        if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+            ImGui::Spacing();
+            if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
+                commitInteractiveExtrude();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
+                cancelInteractiveExtrude();
+            }
         }
 
         ImGui::End();
@@ -6216,19 +6564,37 @@ void Application::renderViewport() {
                     : "PUSH/PULL - Positive = extrude, Negative = cut. Enter to confirm, Escape to cancel.");
         ImGui::PopStyleColor();
 
-        ImGui::SetNextWindowPos(ImVec2(
-            std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
-            ImGui::GetWindowPos().y + 50));
+        // im-touch: anchor the well just off the push/pull arrow's tip,
+        // like the sketch bubbles; other layouts (or a tip behind the
+        // camera) keep the fixed top-right spot.
+        bool ppAnchored = false;
+        if (imTouchLayout() && m_actionAnchorValid) {
+            const float s2 = uiScale();
+            const ImVec2 vwp = ImGui::GetWindowPos();
+            const float vww = ImGui::GetWindowWidth();
+            float ax = std::min(std::max(m_actionAnchorX + 24.0f * s2,
+                                         vwp.x + 8.0f),
+                                vwp.x + vww - 250.0f * s2);
+            float ay = std::max(m_actionAnchorY + 12.0f * s2, vwp.y + 8.0f);
+            ImGui::SetNextWindowPos(ImVec2(ax, ay), ImGuiCond_Always);
+            ppAnchored = true;
+        }
+        if (!ppAnchored)
+            ImGui::SetNextWindowPos(ImVec2(
+                std::max(ImGui::GetWindowPos().x + 6.0f,
+                         ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
+                ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##PushPullInput", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text(m_pushPullSymmetric ? "Distance per side (mm)"
-                                        : "Distance (mm) - signed");
-        ImGui::Separator();
+        if (!imTouchLayout()) {   // im-touch: just the value well below
+            ImGui::Text(m_pushPullSymmetric ? "Distance per side (mm)"
+                                            : "Distance (mm) - signed");
+            ImGui::Separator();
+        }
 
         if (m_pushPullInputFocus) {
             if (!materializr::touchMode())
@@ -6236,6 +6602,20 @@ void Application::renderViewport() {
             m_pushPullInputFocus = false;
         }
 
+        if (imTouchLayout()) {
+            // im-touch: the panel is the value well (+ the Symmetric toggle
+            // below when it applies) — no header, hint or steppers.
+            if (touchui::amountField(
+                    "ppAmt",
+                    m_pushPullSymmetric ? "Per side" : "Distance",
+                    &m_pushPullDistance, "mm", 1,
+                    /*allowSign=*/!m_pushPullSymmetric)) {
+                m_pushPullDistanceRaw = m_pushPullDistance;
+                std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf),
+                              "%.1f", m_pushPullDistance);
+                updatePushPull(/*applySnap=*/false);
+            }
+        } else {
         if (ImGui::InputText("##ppdist", m_pushPullInputBuf, sizeof(m_pushPullInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             (void)materializr::parseFinite(m_pushPullInputBuf, m_pushPullDistance);
@@ -6254,15 +6634,19 @@ void Application::renderViewport() {
 
         ImGui::SameLine();
         ImGui::Text("mm");
+        }
 
-        // Symmetric sweeps both ways, so a negative distance is just the
-        // positive one — clamp the range to positive while ticked.
-        if (ImGui::SliderFloat("##ppslider", &m_pushPullDistance,
-                               m_pushPullSymmetric ? 0.1f : -50.0f, 50.0f,
-                               "%.1f mm")) {
+        // Quick-nudge stepper (replaces the slider). Symmetric sweeps both
+        // ways, so a negative distance is meaningless there — drop the minus
+        // buttons and clamp positive while ticked. 0 clears the change.
+        // Desktop only — im-touch stays a single well.
+        if (!imTouchLayout() &&
+            materializr::stepperRow("ppStep", &m_pushPullDistance,
+                                    /*allowNegative=*/!m_pushPullSymmetric,
+                                    m_pushPullSymmetric ? 0.1f : -50.0f, 50.0f)) {
             m_pushPullDistanceRaw = m_pushPullDistance;
             std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
-            updatePushPull();
+            updatePushPull(/*applySnap=*/false);   // steppers override the grid
         }
 
         // Symmetric: one prism swept the distance to BOTH sides of the
@@ -6291,13 +6675,15 @@ void Application::renderViewport() {
             }
         }
 
-        ImGui::Spacing();
-        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
-            commitPushPull();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
-            cancelPushPull();
+        if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+            ImGui::Spacing();
+            if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
+                commitPushPull();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
+                cancelPushPull();
+            }
         }
 
         ImGui::End();
@@ -6315,18 +6701,36 @@ void Application::renderViewport() {
                     : "%s - Type value or use slider. Enter to confirm, Escape to cancel.", opName);
         ImGui::PopStyleColor();
 
-        ImGui::SetNextWindowPos(ImVec2(
-            std::max(ImGui::GetWindowPos().x + 6.0f,
-                     ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260.0f),
-            ImGui::GetWindowPos().y + 50));
+        // im-touch: anchor the well next to the edge being rounded/cut
+        // (latched midpoint — static while values change, same rule as the
+        // sketch fields); other layouts keep the fixed top-right spot.
+        bool edgeAnchored = false;
+        if (imTouchLayout() && m_actionAnchorValid) {
+            const float s2 = uiScale();
+            const ImVec2 vwp = ImGui::GetWindowPos();
+            const float vww = ImGui::GetWindowWidth();
+            float ax = std::min(std::max(m_actionAnchorX + 24.0f * s2,
+                                         vwp.x + 8.0f),
+                                vwp.x + vww - 250.0f * s2);
+            float ay = std::max(m_actionAnchorY + 12.0f * s2, vwp.y + 8.0f);
+            ImGui::SetNextWindowPos(ImVec2(ax, ay), ImGuiCond_Always);
+            edgeAnchored = true;
+        }
+        if (!edgeAnchored)
+            ImGui::SetNextWindowPos(ImVec2(
+                std::max(ImGui::GetWindowPos().x + 6.0f,
+                         ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale()),
+                ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##EdgeOpInput", nullptr,
             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text("%s", label);
-        ImGui::Separator();
+        if (!imTouchLayout()) {   // im-touch: just the value well below
+            ImGui::Text("%s", label);
+            ImGui::Separator();
+        }
 
         if (m_edgeOpInputFocus) {
             if (!materializr::touchMode())
@@ -6334,6 +6738,19 @@ void Application::renderViewport() {
             m_edgeOpInputFocus = false;
         }
 
+        if (imTouchLayout()) {
+            // im-touch: the panel is the value well (+ the chamfer's
+            // two-distance controls below) — no header, hint or steppers.
+            if (touchui::amountField(
+                    "edgeAmt",
+                    m_edgeOpType == EdgeOpType::Fillet ? "Radius" : "Distance",
+                    &m_edgeOpValue, "mm", 1, /*allowSign=*/false,
+                    0.1f, 20.0f)) {
+                std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf),
+                              "%.1f", m_edgeOpValue);
+                updateInteractiveEdgeOp();
+            }
+        } else {
         if (ImGui::InputText("##val", m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             (void)materializr::parseFinite(m_edgeOpInputBuf, m_edgeOpValue);
@@ -6350,8 +6767,15 @@ void Application::renderViewport() {
 
         ImGui::SameLine();
         ImGui::Text("mm");
+        }
 
-        if (ImGui::SliderFloat("##eslider", &m_edgeOpValue, 0.1f, 20.0f, "%.1f mm")) {
+        // Quick-nudge stepper (replaces the slider). Positive-only for a
+        // radius / setback; 0 shows the original body mid-preview (updateInter-
+        // activeEdgeOp restores it at ~0). Confirming at 0 still cancels — zero
+        // fillet = no fillet. Desktop only — im-touch stays a single well.
+        if (!imTouchLayout() &&
+            materializr::stepperRow("edgeStep", &m_edgeOpValue,
+                                    /*allowNegative=*/false, 0.1f, 20.0f)) {
             std::snprintf(m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf), "%.1f", m_edgeOpValue);
             updateInteractiveEdgeOp();
         }
@@ -6371,8 +6795,20 @@ void Application::renderViewport() {
                 updateInteractiveEdgeOp();
             }
             if (m_edgeOpTwoDist) {
-                ImGui::TextColored(materializr::accentText(),
-                                   "Distance B (other face)");
+                if (!imTouchLayout())
+                    ImGui::TextColored(materializr::accentText(),
+                                       "Distance B (other face)");
+                if (imTouchLayout()) {
+                    if (touchui::amountField("edgeAmt2", "Distance B",
+                                             &m_edgeOpValue2, "mm", 1,
+                                             /*allowSign=*/false,
+                                             0.1f, 20.0f)) {
+                        std::snprintf(m_edgeOpInputBuf2,
+                                      sizeof(m_edgeOpInputBuf2), "%.1f",
+                                      m_edgeOpValue2);
+                        updateInteractiveEdgeOp();
+                    }
+                } else {
                 if (ImGui::InputText("##val2", m_edgeOpInputBuf2,
                                      sizeof(m_edgeOpInputBuf2),
                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -6389,8 +6825,10 @@ void Application::renderViewport() {
                 }
                 ImGui::SameLine();
                 ImGui::Text("mm");
-                if (ImGui::SliderFloat("##eslider2", &m_edgeOpValue2, 0.1f, 20.0f,
-                                       "%.1f mm")) {
+                }
+                if (!imTouchLayout() &&
+                    materializr::stepperRow("edgeStep2", &m_edgeOpValue2,
+                                            /*allowNegative=*/false, 0.1f, 20.0f)) {
                     std::snprintf(m_edgeOpInputBuf2, sizeof(m_edgeOpInputBuf2),
                                   "%.1f", m_edgeOpValue2);
                     updateInteractiveEdgeOp();
@@ -6398,13 +6836,15 @@ void Application::renderViewport() {
             }
         }
 
-        ImGui::Spacing();
-        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
-            commitInteractiveEdgeOp();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
-            cancelInteractiveEdgeOp();
+        if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+            ImGui::Spacing();
+            if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) {
+                commitInteractiveEdgeOp();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) {
+                cancelInteractiveEdgeOp();
+            }
         }
 
         ImGui::End();
@@ -6425,7 +6865,7 @@ void Application::renderViewport() {
                                   : "MOVE FACE (slide in plane)");
         ImGui::PopStyleColor();
 
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260,
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale(),
                                        ImGui::GetWindowPos().y + 50));
         ImGui::SetNextWindowSize(uiSz(240, 0));
         ImGui::Begin("##MoveFaceInput", nullptr,
@@ -6440,7 +6880,10 @@ void Application::renderViewport() {
             float deg = m_moveFaceAngle * 57.2957795f;
             bool ch = false;
             ImGui::SetNextItemWidth(150);
-            if (ImGui::SliderFloat("##tilt", &deg, -90.0f, 90.0f, "%.1f")) ch = true;
+            ImGui::TextDisabled("%.1f deg", deg);
+            if (materializr::stepperRow("tiltStep", &deg,
+                                        /*allowNegative=*/true, -90.0f, 90.0f))
+                ch = true;
             ImGui::SetNextItemWidth(90);
             if (ImGui::InputFloat("deg", &deg, 1.0f, 5.0f, "%.1f")) ch = true;
             ImGui::Checkbox("Snap 1 deg", &m_moveFaceRotSnap);
@@ -6460,7 +6903,10 @@ void Application::renderViewport() {
             float twdeg = m_moveFaceTwist * 57.2957795f;
             bool twch = false;
             ImGui::SetNextItemWidth(150);
-            if (ImGui::SliderFloat("##twist", &twdeg, -180.0f, 180.0f, "%.1f")) twch = true;
+            ImGui::TextDisabled("%.1f deg", twdeg);
+            if (materializr::stepperRow("twistStep", &twdeg,
+                                        /*allowNegative=*/true, -180.0f, 180.0f))
+                twch = true;
             ImGui::SetNextItemWidth(90);
             if (ImGui::InputFloat("deg##tw", &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
             if (twch) {
@@ -6490,7 +6936,11 @@ void Application::renderViewport() {
             if (m_moveFaceScaleUniform) {
                 float pct = m_moveFaceScale * 100.0f;
                 ImGui::SetNextItemWidth(150);
-                if (ImGui::SliderFloat("##scl", &pct, 10.0f, 400.0f, "%.0f")) ch = true;
+                ImGui::TextDisabled("%.0f %%", pct);
+                if (materializr::stepperRow("sclStep", &pct,
+                                            /*allowNegative=*/true, 10.0f,
+                                            400.0f, /*zeroValue=*/100.0f))
+                    ch = true;
                 ImGui::SetNextItemWidth(90);
                 if (ImGui::InputFloat("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;
                 if (ch) m_moveFaceScale = std::max(0.1f, pct / 100.0f);
@@ -6498,12 +6948,20 @@ void Application::renderViewport() {
                 float a = m_moveFaceScaleA * 100.0f, b = m_moveFaceScaleB * 100.0f;
                 ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Axis A (red)");
                 ImGui::SetNextItemWidth(150);
-                if (ImGui::SliderFloat("##sclA", &a, 10.0f, 400.0f, "%.0f")) ch = true;
+                ImGui::TextDisabled("%.0f %%", a);
+                if (materializr::stepperRow("sclAStep", &a,
+                                            /*allowNegative=*/true, 10.0f,
+                                            400.0f, /*zeroValue=*/100.0f))
+                    ch = true;
                 ImGui::SetNextItemWidth(90);
                 if (ImGui::InputFloat("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;
                 ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.45f, 1.0f), "Axis B (green)");
                 ImGui::SetNextItemWidth(150);
-                if (ImGui::SliderFloat("##sclB", &b, 10.0f, 400.0f, "%.0f")) ch = true;
+                ImGui::TextDisabled("%.0f %%", b);
+                if (materializr::stepperRow("sclBStep", &b,
+                                            /*allowNegative=*/true, 10.0f,
+                                            400.0f, /*zeroValue=*/100.0f))
+                    ch = true;
                 ImGui::SetNextItemWidth(90);
                 if (ImGui::InputFloat("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;
                 if (ch) {
@@ -6534,10 +6992,12 @@ void Application::renderViewport() {
                                 "keep it a vertical tube.");
         }
 
-        ImGui::Spacing();
-        if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) commitMoveFace();
-        ImGui::SameLine();
-        if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) cancelMoveFace();
+        if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+            ImGui::Spacing();
+            if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0))) commitMoveFace();
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0))) cancelMoveFace();
+        }
         ImGui::End();
     }
 
@@ -6554,12 +7014,26 @@ void Application::renderViewport() {
         ImGui::PopStyleColor();
     }
 
-    // Inline dimension input while placing a sketch shape
-    if (m_inSketchMode && m_sketchTool && m_sketchTool->hasPreview()) {
+    // Inline dimension input while placing a sketch shape. Suppressed while
+    // the im-touch confirm bubble holds the shape — the bubble carries its
+    // own value field, and two live inputs for one dimension is confusing.
+    if (m_inSketchMode && m_sketchTool && m_sketchTool->hasPreview() &&
+        !m_sketchShapeConfirmPending) {
         SketchToolMode mode = m_sketchTool->getPreviewType();
+        // im-touch on touch: circles and rectangles get the near-shape
+        // confirm bubble on lift (their exact-value input) — the top-right
+        // dialog would be a SECOND diameter/size input flashing during the
+        // drag, so it doesn't show for them at all. Lines keep it (no
+        // bubble). Desktop im-touch (mouse, click-click placement) keeps it
+        // too — the bubble only exists on the touch release path.
+        const bool bubbleOwnsInput =
+            imTouchLayout() && materializr::touchMode() &&
+            (mode == SketchToolMode::Circle ||
+             mode == SketchToolMode::Rectangle);
         const char* dimLabel = nullptr;
         const char* dimHint  =
             "Type a value and press Enter. The shape extends from your first click toward the cursor.";
+        if (!bubbleOwnsInput)
         switch (mode) {
             case SketchToolMode::Line:      dimLabel = "Length (mm)"; break;
             case SketchToolMode::Circle:    dimLabel = "Diameter (mm)"; break;
@@ -6606,28 +7080,50 @@ void Application::renderViewport() {
             ImGui::TextUnformatted(dimHint);
             ImGui::PopTextWrapPos();
 
-            // Grab keyboard focus the first frame placement begins — desktop
-            // only. On touch this auto-raises the soft keyboard for every sketch
-            // element (with no easy dismiss), blocking tap-to-place. The field
-            // still shows; the user taps it when they actually want to type a
-            // dimension, and taps the viewport to dismiss the keyboard.
-            if (!m_sketchDimWasShown) {
-                if (!materializr::touchMode())
-                    ImGui::SetKeyboardFocusHere();
-                m_sketchDimWasShown = true;
-            }
-
-            ImGui::SetNextItemWidth(winW - uiW(16.0f)); // fill the fixed width, minus padding
-            if (ImGui::InputText("##sketchDim", m_sketchDimBuf, sizeof(m_sketchDimBuf),
-                                 ImGuiInputTextFlags_EnterReturnsTrue |
-                                 ImGuiInputTextFlags_CharsDecimal |
-                                 ImGuiInputTextFlags_AutoSelectAll)) {
-                float v = 0.0f;
-                if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
-                    recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
+            if (materializr::touchMode()) {
+                // Touch: in-app number pad instead of an InputText — focusing
+                // a real field raises the native mobile keyboard, which froze
+                // the app on iOS (see touchui::numberPad). Digits + dot is
+                // all a dimension needs.
+                char readout[48];
+                std::snprintf(readout, sizeof(readout), "%s mm",
+                              m_sketchDimBuf[0] ? m_sketchDimBuf : "--");
+                touchui::valueReadout("sketchDimVal", readout,
+                                      m_sketchDimBuf[0] == '\0',
+                                      touchui::numberPadWidth());
+                ImGui::Spacing();
+                touchui::numberPad("sketchDimPad", m_sketchDimBuf,
+                                   sizeof(m_sketchDimBuf));
+                ImGui::Spacing();
+                ImGui::BeginDisabled(m_sketchDimBuf[0] == '\0');
+                if (ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)))) {
+                    float v = 0.0f;
+                    if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
+                        recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
+                    }
+                    m_sketchDimBuf[0] = '\0';
                 }
-                m_sketchDimBuf[0] = '\0';
-                m_sketchDimWasShown = false; // re-focus on the next placement
+                ImGui::EndDisabled();
+            } else {
+                // Desktop: keyboard entry. Grab focus the first frame
+                // placement begins so typing works immediately.
+                if (!m_sketchDimWasShown) {
+                    ImGui::SetKeyboardFocusHere();
+                    m_sketchDimWasShown = true;
+                }
+
+                ImGui::SetNextItemWidth(winW - uiW(16.0f)); // fill the fixed width, minus padding
+                if (ImGui::InputText("##sketchDim", m_sketchDimBuf, sizeof(m_sketchDimBuf),
+                                     ImGuiInputTextFlags_EnterReturnsTrue |
+                                     ImGuiInputTextFlags_CharsDecimal |
+                                     ImGuiInputTextFlags_AutoSelectAll)) {
+                    float v = 0.0f;
+                    if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
+                        recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
+                    }
+                    m_sketchDimBuf[0] = '\0';
+                    m_sketchDimWasShown = false; // re-focus on the next placement
+                }
             }
 
             ImGui::End();

@@ -54,12 +54,18 @@ inline void resetFpuForOcct() {
 #include "core/History.h"
 #include "core/SelectionManager.h"
 #include "ui/Toolbar.h"
+#include "ui/TouchIcons.h"
+#include "ui/TouchTheme.h"
 #include "ui/HistoryPanel.h"
 #include "ui/ItemsPanel.h"
 #include "ui/StatusBar.h"
 #include "ui/ThemeManager.h"
 #include "ui/PropertiesPanel.h"
 #include "ui/AboutDialog.h"
+#include "ui/WelcomeScreen.h"
+#include "ui_layout_bridge.h"
+#include <fstream>
+#include "ios_storekit.h"
 #include "ui/ShortcutsPanel.h"
 #include "ui/HelpPanel.h"
 #include "ui/MeasureTool.h"
@@ -232,6 +238,13 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
     m_themeManager = std::make_unique<ThemeManager>();
     m_propertiesPanel = std::make_unique<PropertiesPanel>();
     m_aboutDialog = std::make_unique<AboutDialog>();
+    m_welcomeScreen = std::make_unique<WelcomeScreen>();
+#if defined(MZ_IOS)
+    // StoreKit observer must attach at launch (Apple requirement) so a
+    // Supporter purchase interrupted in a previous run is redelivered; the
+    // main loop consumes the entitlement next to the Welcome screen render.
+    iosStoreInit();
+#endif
     m_shortcutsPanel = std::make_unique<ShortcutsPanel>();
     m_helpPanel = std::make_unique<HelpPanel>();
     m_measureTool = std::make_unique<MeasureTool>();
@@ -260,6 +273,7 @@ Application::Application(bool safeMode) : m_safeMode(safeMode) {
         materializr::setUiScale(m_window->uiScale());
     }
     m_history->setThreadsLastDeclineCallback([this]{ showThreadsLastToast(); });
+    installThreadRecutHook();
     m_historyPanel->setHistory(m_history.get());
     m_historyPanel->setDocument(m_document.get());
     m_historyPanel->setEventBus(m_eventBus.get());
@@ -577,11 +591,28 @@ void Application::initImGui() {
     // present, so a font miss never bricks the UI.
     {
         std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
+        ImFont* fnt = nullptr;
         if (!path.empty()) {
-            ImFont* fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f * uiScale);
+            fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f * uiScale);
             if (fnt) std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
         }
         // If nothing loaded, ImGui will lazily fall back to its baked-in default.
+
+        // Merge the Iconoir glyphs (PUA E000..) into the text font so any
+        // string can inline an ICON_IC_* / MZ_ICON_* macro (im-touch shell
+        // chrome; later the tool catalogue). Merging only works onto an
+        // already-added font, so skip when JetBrains Mono itself is missing —
+        // icons then render as '?' rather than bricking the atlas.
+        std::string icons = resolveBundledFont(FONT_ICON_FILE_NAME_IC);
+        if (fnt && !icons.empty()) {
+            static const ImWchar kIconRange[] = { ICON_MIN_IC, ICON_MAX_IC, 0 };
+            ImFontConfig cfg;
+            cfg.MergeMode = true;
+            cfg.GlyphOffset.y = 2.0f * uiScale; // optical baseline alignment
+            if (io.Fonts->AddFontFromFileTTF(icons.c_str(), 15.0f * uiScale,
+                                             &cfg, kIconRange))
+                std::fprintf(stderr, "Loaded font: %s (icon merge)\n", icons.c_str());
+        }
     }
 
     ImGui_ImplSDL2_InitForOpenGL(m_window->handle(), m_window->glContext());
@@ -716,7 +747,10 @@ materializr::IopContext Application::iopContext() {
         *m_document, *m_history, *m_selection,
         [this] { m_meshesDirty = true; },
         [this](float f, const char* l) { return renderProgressFrame(f, l); },
-        [this](std::function<void()> t) { m_deferredHeavyTask = std::move(t); }};
+        [this](std::function<void()> t) { m_deferredHeavyTask = std::move(t); },
+        // im-touch hosts the Confirm/Cancel as corner FABs — the scaffold
+        // then skips its in-panel buttons (Enter/Esc still work).
+        imTouchLayout() && !m_inSketchMode};
 }
 
 // Seed the placement rotation (shared by the Text and SVG tools) so the
@@ -769,6 +803,51 @@ void Application::cancelAllInteractivePreviews() {
     // never committed gets a weird half-cancel I can't undo".)
     if (m_edgeOpActive) cancelInteractiveEdgeOp();
     if (m_moveFaceActive) cancelMoveFace();
+}
+
+// im-touch corner-hosted action commit UI — see Application.h. EdgeOp and
+// MoveFace previews aren't in anyInteractivePreviewActive(), so they're
+// listed explicitly here (same set cancelAllInteractivePreviews covers).
+bool Application::imTouchActionCorner() const {
+    return imTouchLayout() && !m_inSketchMode &&
+           (anyInteractivePreviewActive() || m_edgeOpActive || m_moveFaceActive);
+}
+
+void Application::confirmActiveAction() {
+    if (m_extruding)       { commitInteractiveExtrude(); return; }
+    if (m_pushPullActive)  { commitPushPull(); return; }
+    if (m_patternActive)   { commitPattern(); return; }
+    if (m_resizeCylActive) {
+        // Same gate as the panel's disabled Confirm: a failed preview
+        // means there's nothing valid to commit.
+        if (!m_resizeCylPreviewFailed) commitResizeCylindrical();
+        return;
+    }
+    if (m_threadActive) {
+        // Same guard as the thread panel's Apply: refuse absurd turn counts
+        // (the compute would run for minutes) instead of bypassing it.
+        if (m_threadLength / std::max(0.1f, m_threadPitch) <= 300.0)
+            commitThread();
+        return;
+    }
+    if (m_edgeOpActive)    { commitInteractiveEdgeOp(); return; }
+    if (m_moveFaceActive)  { commitMoveFace(); return; }
+    auto ctx = iopContext();
+    for (auto* c : m_iops)
+        if (c->active()) { c->commit(ctx); return; }
+}
+
+void Application::cancelActiveAction() {
+    if (m_extruding)       { cancelInteractiveExtrude(); return; }
+    if (m_pushPullActive)  { cancelPushPull(); return; }
+    if (m_patternActive)   { cancelPattern(); return; }
+    if (m_resizeCylActive) { cancelResizeCylindrical(); return; }
+    if (m_threadActive)    { cancelThread(); return; }
+    if (m_edgeOpActive)    { cancelInteractiveEdgeOp(); return; }
+    if (m_moveFaceActive)  { cancelMoveFace(); return; }
+    auto ctx = iopContext();
+    for (auto* c : m_iops)
+        if (c->active()) { c->cancel(ctx); return; }
 }
 
 void Application::beginIop(materializr::InteractiveOpController& ctl) {
@@ -984,245 +1063,55 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     return m_progressCancelled;
 }
 
-void Application::renderDockspace() {
-    // Host the dockspace in a window inset above the status bar so docked panels
-    // (e.g. the Tools window's bottom Delete button) aren't covered by the
-    // full-width status bar overlay. Reuse the original DockSpaceOverViewport
-    // dockspace id (0x08BD597D) so the saved imgui.ini layout still binds.
-    const float statusBarHeight = 24.0f;
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, vp->WorkSize.y - statusBarHeight));
-    ImGui::SetNextWindowViewport(vp->ID);
+// renderDockspace() and the shared menu-item lists live in
+// src/app/layout/LayoutCommon.cpp; the per-layout chrome is under
+// src/app/layout/{classic,modern,imtouch}/.
 
-    ImGuiWindowFlags hostFlags =
-        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-        ImGuiWindowFlags_NoNavFocus;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::Begin("DockHost", nullptr, hostFlags);
-    ImGui::PopStyleVar(3);
-    ImGui::DockSpace(0x08BD597Du, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
-
-    // Per-node tab-bar policy. The viewport's tab bar is permanently OFF
-    // (NoTabBar = no tab AND no re-show triangle) — it's the whole app, never
-    // something to label or hide. Every panel ALWAYS shows its tab (a label +
-    // drag handle) and loses the "Hide tab bar" menu, so panel visibility is
-    // owned solely by Settings > Panels. Applied to LocalFlags each frame so it
-    // overrides whatever the saved imgui.ini had (e.g. the central node and the
-    // Interactions node both shipped with HiddenTabBar=1).
-    auto setNodeFlags = [](const char* win, ImGuiDockNodeFlags set,
-                           ImGuiDockNodeFlags clear) {
-        if (ImGuiWindow* w = ImGui::FindWindowByName(win))
-            if (w->DockNode) {
-                w->DockNode->LocalFlags |= set;
-                w->DockNode->LocalFlags &= ~clear;
-            }
-    };
-    setNodeFlags("Viewport", ImGuiDockNodeFlags_NoTabBar, 0);
-    const ImGuiDockNodeFlags kPanelSet   = ImGuiDockNodeFlags_NoWindowMenuButton;
-    const ImGuiDockNodeFlags kPanelClear = ImGuiDockNodeFlags_HiddenTabBar |
-                                           ImGuiDockNodeFlags_AutoHideTabBar;
-    setNodeFlags("Tools",        kPanelSet, kPanelClear);
-    setNodeFlags("Interactions", kPanelSet, kPanelClear);
-    setNodeFlags("Items",        kPanelSet, kPanelClear);
-    setNodeFlags("History",      kPanelSet, kPanelClear);
-    setNodeFlags("Properties",   kPanelSet, kPanelClear);
-    ImGui::End();
+// The sketch id a just-undone/redone step edited, or -1. Covers BOTH step
+// kinds that mutate a sketch: SketchTransformOp (stores its id) and
+// SketchEditOp (stores the live sketch pointer — matched back to its id).
+// Needed so undo/redo OUTSIDE sketch mode re-cascades the driven body; the
+// step's own undo only reverts sketch geometry, the cascade did the body.
+int Application::sketchIdEditedBy(const Operation* op) const {
+    if (!op || !m_document) return -1;
+    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op))
+        return st->getSketchId();
+    if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
+        auto target = se->getTarget();
+        if (target)
+            for (int sid : m_document->getAllSketchIds())
+                if (m_document->getSketch(sid) == target) return sid;
+    }
+    return -1;
 }
 
-void Application::renderMenuBar() {
-    if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
-            // Open Recent — persisted, most-recent-first. Greyed when empty.
-            if (ImGui::BeginMenu("Open Recent", !m_recentProjects.empty())) {
-                // Snapshot: openRecentProject() mutates m_recentProjects.
-                std::vector<AppSettings::RecentProject> snapshot = m_recentProjects;
-                for (size_t i = 0; i < snapshot.size(); ++i) {
-                    ImGui::PushID(static_cast<int>(i));
-                    if (ImGui::MenuItem(snapshot[i].name.c_str()))
-                        openRecentProject(snapshot[i]);
-                    if (ImGui::IsItemHovered() && !snapshot[i].ref.empty())
-                        ImGui::SetTooltip("%s", snapshot[i].ref.c_str());
-                    ImGui::PopID();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Clear Recent")) {
-                    m_recentProjects.clear();
-                    saveAppSettings();
-                }
-                ImGui::EndMenu();
-            }
-            if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
-            if (ImGui::MenuItem("Save Project As...")) saveProject();
-            if (ImGui::MenuItem("New Project")) closeProject();
-            ImGui::Separator();
-
-            // Build Import submenu from IOFormat contributions
-            auto& formats = PluginRegistry::instance().ioFormats();
-            bool hasImporters = false;
-            for (auto& fmt : formats) { if (fmt.canImport) { hasImporters = true; break; } }
-            if (hasImporters && ImGui::BeginMenu("Import")) {
-                for (size_t i = 0; i < formats.size(); ++i) {
-                    auto& fmt = formats[i];
-                    if (!fmt.canImport || !fmt.importFn) continue;
-                    ImGui::PushID(static_cast<int>(i));
-                    std::string label = fmt.name + "...";
-                    if (ImGui::MenuItem(label.c_str())) {
-                        fmt.importFn(*m_pluginContext, "");
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndMenu();
-            }
-
-            // Build Export submenu from IOFormat contributions
-            bool hasExporters = false;
-            for (auto& fmt : formats) { if (fmt.canExport) { hasExporters = true; break; } }
-            if (hasExporters && ImGui::BeginMenu("Export")) {
-                for (size_t i = 0; i < formats.size(); ++i) {
-                    auto& fmt = formats[i];
-                    if (!fmt.canExport || !fmt.exportFn) continue;
-                    ImGui::PushID(static_cast<int>(i) + 1000);
-                    std::string label = fmt.name + "...";
-                    if (ImGui::MenuItem(label.c_str())) {
-                        fmt.exportFn(*m_pluginContext, "");
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::EndMenu();
-            }
-
-            ImGui::Separator();
-            if (ImGui::MenuItem("Settings...")) {
-                // Stage the current bindings so the dialog can Cancel cleanly.
-                m_settingsOrbitButton = m_orbitButton;
-                m_settingsPanButton = m_panButton;
-                m_showSettings = true;
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Exit", "Alt+F4")) m_window->requestClose(true);
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Edit")) {
-            // Disabled while a legacy preview is live: those previews
-            // undo/re-push their op per frame, and an outside undo pops the
-            // preview op so the preview's NEXT cycle pops the user's last
-            // COMMITTED op instead — which then gets erased for good when
-            // the preview pushes over the redo tail. (How "pull, confirm,
-            // pull the other way" ate the first body.)
-            const bool histLocked = anyInteractivePreviewActive();
-            if (ImGui::MenuItem("Undo", "Ctrl+Z", false,
-                                !histLocked && m_history->canUndo())) {
-                const Operation* undone =
-                    m_history->getStep(m_history->currentStep());
-                m_history->undo(*m_document);
-                // Keep a sketch-driven body in sync after undoing a sketch edit
-                // (the SketchEditOp undo only reverts geometry; the cascade did
-                // the body). Mirrors the keyboard Ctrl+Z path.
-                if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
-                    cascadeFromSketchEdit(m_activeSketchId);
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
-                    cascadeFromSketchEdit(st->getSketchId());
-                m_meshesDirty = true;
-            }
-            if (ImGui::MenuItem("Redo", "Ctrl+Y", false,
-                                !histLocked && m_history->canRedo())) {
-                m_history->redo(*m_document);
-                const Operation* redone =
-                    m_history->getStep(m_history->currentStep());
-                if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0)
-                    cascadeFromSketchEdit(m_activeSketchId);
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
-                    cascadeFromSketchEdit(st->getSketchId());
-                m_meshesDirty = true;
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("View")) {
-            if (ImGui::MenuItem("Reset Camera", "Home")) m_viewport->getCamera().reset();
-            // The F shortcut's menu twin — and the only way to frame on touch.
-            if (ImGui::MenuItem("Frame Selection", "F")) frameSelection();
-            if (ImGui::MenuItem("Section View", nullptr, &m_sectionEnabled)) {
-                m_sectionDirty = true;
-                if (m_sectionEnabled) {
-                    // Aim the plane through the middle of the visible
-                    // bodies so enabling it visibly halves the scene —
-                    // a zero-offset plane at the world origin can sit
-                    // entirely outside (or under) everything.
-                    try {
-                        Bnd_Box bb;
-                        for (int id : m_document->getAllBodyIds())
-                            if (m_document->isBodyVisible(id))
-                                BRepBndLib::Add(m_document->getBody(id), bb);
-                        if (!bb.IsVoid()) {
-                            double x0, y0, z0, x1, y1, z1;
-                            bb.Get(x0, y0, z0, x1, y1, z1);
-                            gp_Pnt c(0.5 * (x0 + x1), 0.5 * (y0 + y1),
-                                     0.5 * (z0 + z1));
-                            gp_Pln pl = sectionBasePlane();
-                            m_sectionOffset = static_cast<float>(
-                                gp_Vec(pl.Location(), c)
-                                    .Dot(gp_Vec(pl.Axis().Direction())));
-                        }
-                    } catch (...) {}
-                }
-            }
-            ImGui::Separator();
-            // Collapse the docked side panels to give the 3D view the whole
-            // window — a fallback for small screens (and a quick "maximize
-            // canvas" anywhere). The panels keep their docked widths and snap
-            // back on toggle. F9 on a keyboard; touch gets edge tabs. This menu
-            // item hides/shows BOTH columns at once; the checkmark = both hidden.
-            bool bothHidden = m_leftPanelHidden && m_rightPanelHidden;
-            if (ImGui::MenuItem("Hide Panels", "F9", bothHidden)) {
-                bool hide = !bothHidden;
-                m_leftPanelHidden = m_rightPanelHidden = hide;
-                saveAppSettings();
-            }
-            ImGui::Separator();
-            if (m_themeManager->renderSelector()) {
-                m_themeManager->apply();
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Help")) {
-            if (ImGui::MenuItem("User Guide")) m_helpPanel->setVisible(true);
-            if (ImGui::MenuItem("Keyboard Shortcuts")) m_shortcutsPanel->setVisible(true);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Check for Updates...")) {
-                m_showUpdatePopup = true;
-                m_updateChecked = false; // run the network call when the popup opens
-            }
-            // Plugin-contributed Help items (e.g. the Tutorial's "Getting
-            // Started"). Lets a plugin add a launcher without Application
-            // knowing about it. See renderPluginMenuItems.
-            renderPluginMenuItems("Help");
-            ImGui::Separator();
-            if (ImGui::MenuItem("About Materializr...")) m_aboutDialog->setVisible(true);
-            ImGui::EndMenu();
-        }
-        // Touch: soft-keyboard toggle, right-aligned. Forces the system keyboard
-        // up so you can type into the focused field (rename, save, dimensions);
-        // tap again to dismiss. Check mark shows when it's forced on. (Window mode
-        // — immersive vs. windowed in a desktop dock — is automatic; see
-        // MaterializrActivity, so there's no toggle here.)
-        if (materializr::touchMode()) {
-            const char* kb = "Keyboard";
-            float btnW = ImGui::CalcTextSize(kb).x + ImGui::GetFrameHeight() +
-                         ImGui::GetStyle().ItemSpacing.x * 2.0f;
-            float x = ImGui::GetWindowWidth() - btnW;
-            if (x > ImGui::GetCursorPosX()) ImGui::SameLine(x);
-            if (ImGui::MenuItem(kb, nullptr, m_softKeyboardForced))
-                m_softKeyboardForced = !m_softKeyboardForced;
-        }
-        ImGui::EndMainMenuBar();
+void Application::undoWithCascade() {
+    const Operation* undone = m_history->getStep(m_history->currentStep());
+    m_history->undo(*m_document);
+    // Keep a sketch-driven body in sync after undoing a sketch edit (the
+    // SketchEditOp undo only reverts geometry; the cascade did the body).
+    // Mirrors the keyboard Ctrl+Z path.
+    int cascaded = -1;
+    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
+        cascadeFromSketchEdit(m_activeSketchId);
+        cascaded = m_activeSketchId;
     }
+    if (int sid = sketchIdEditedBy(undone); sid >= 0 && sid != cascaded)
+        cascadeFromSketchEdit(sid);
+    m_meshesDirty = true;
+}
+
+void Application::redoWithCascade() {
+    m_history->redo(*m_document);
+    const Operation* redone = m_history->getStep(m_history->currentStep());
+    int cascaded = -1;
+    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
+        cascadeFromSketchEdit(m_activeSketchId);
+        cascaded = m_activeSketchId;
+    }
+    if (int sid = sketchIdEditedBy(redone); sid >= 0 && sid != cascaded)
+        cascadeFromSketchEdit(sid);
+    m_meshesDirty = true;
 }
 
 void Application::renderSmallScreenWarning() {
@@ -1256,84 +1145,6 @@ void Application::renderSmallScreenWarning() {
         }
         ImGui::EndPopup();
     }
-}
-
-void Application::renderPluginMenuItems(const char* menuName) {
-    // Render every plugin MenuContribution whose path is "<menuName> > Label"
-    // as a MenuItem in the current menu. Keeps the contribution type generic
-    // (a plugin says where it wants to live) without Application hardcoding it.
-    auto trim = [](std::string s) {
-        size_t a = s.find_first_not_of(" \t");
-        size_t b = s.find_last_not_of(" \t");
-        return (a == std::string::npos) ? std::string() : s.substr(a, b - a + 1);
-    };
-    for (auto& m : PluginRegistry::instance().menuContributions()) {
-        auto gt = m.path.find('>');
-        if (gt == std::string::npos) continue;
-        if (trim(m.path.substr(0, gt)) != menuName) continue;
-        std::string label = trim(m.path.substr(gt + 1));
-        const bool enabled = !m.enabled || m.enabled(*m_pluginContext);
-        const char* sc = m.shortcut.empty() ? nullptr : m.shortcut.c_str();
-        if (ImGui::MenuItem(label.c_str(), sc, false, enabled) && m.action)
-            m.action(*m_pluginContext);
-    }
-}
-
-void Application::renderPanelCollapseHandles() {
-    // Touch-only edge tabs that collapse/restore each docked side column. They
-    // anchor to the panel/viewport boundary, which slides to the screen edge
-    // once a side is collapsed — so a hidden panel still has a visible pull-tab.
-    // Desktop uses View > Hide Panels / F9 instead, so this is touch-gated.
-    if (!materializr::touchMode()) return;
-    if (m_viewportWinW <= 0.0f || m_viewportWinH <= 0.0f) return;
-
-    const float hw = uiW(22.0f);                          // tab width
-    const float hh = uiW(80.0f);                          // tab height (touch target)
-    const float cy = m_viewportWinY + m_viewportWinH * 0.5f - hh * 0.5f;
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-
-    const ImGuiWindowFlags flags =
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking |
-        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBackground;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-
-    // Left tab — flush against the viewport's left edge, sitting just INSIDE the
-    // viewport (not over the Tools panel, whose space is tight). When the panel
-    // is collapsed the viewport edge is the screen edge, so the tab hugs it.
-    // The arrow points the way the tap moves the panel: '<' collapses it toward
-    // the edge, '>' pulls it back out.
-    {
-        float x = m_viewportWinX;
-        if (x < vp->WorkPos.x) x = vp->WorkPos.x;
-        ImGui::SetNextWindowPos(ImVec2(x, cy));
-        ImGui::SetNextWindowSize(ImVec2(hw, hh));
-        ImGui::Begin("##collapseLeft", nullptr, flags);
-        if (ImGui::Button(m_leftPanelHidden ? ">" : "<", ImVec2(hw, hh))) {
-            m_leftPanelHidden = !m_leftPanelHidden;
-            saveAppSettings();
-        }
-        ImGui::End();
-    }
-    // Right tab — flush against the viewport's right edge, sitting just INSIDE
-    // the viewport (not over the Items/Properties column).
-    {
-        float x = m_viewportWinX + m_viewportWinW - hw;
-        const float maxX = vp->WorkPos.x + vp->WorkSize.x - hw;
-        if (x > maxX) x = maxX;
-        ImGui::SetNextWindowPos(ImVec2(x, cy));
-        ImGui::SetNextWindowSize(ImVec2(hw, hh));
-        ImGui::Begin("##collapseRight", nullptr, flags);
-        if (ImGui::Button(m_rightPanelHidden ? "<" : ">", ImVec2(hw, hh))) {
-            m_rightPanelHidden = !m_rightPanelHidden;
-            saveAppSettings();
-        }
-        ImGui::End();
-    }
-
-    ImGui::PopStyleVar();
 }
 
 void Application::loadAppSettings() {
@@ -1396,6 +1207,32 @@ void Application::loadAppSettings() {
             return r;
         });
     }
+
+    // Plugins (the Getting Started tour's layout picker) read and switch the
+    // interface layout through this bridge; the switch is live and persists.
+    materializr::bindUiLayoutBridge(
+        [this]() { return static_cast<int>(m_uiLayout); },
+        [this](int idx) {
+            m_uiLayout = static_cast<UiLayout>(idx);
+            saveAppSettings();
+        });
+
+    // Welcome screen: every launch until the user becomes a Supporter.
+    // Suppressed by --safe-mode — no asking for coffee while the user is
+    // recovering from a crash — and on the VERY FIRST launch, where the
+    // Getting Started tour (layout picker first) owns the moment; the welcome
+    // starts recurring from the second launch. Same marker the tutorial
+    // plugin writes.
+    const bool firstRun = [] {
+        char* base = SDL_GetPrefPath("Materializr", "Materializr");
+        if (!base) return false;
+        std::string p = std::string(base) + "tutorial_seen";
+        SDL_free(base);
+        std::ifstream f(p);
+        return !f.good();
+    }();
+    if (!m_supporter && !m_safeMode && !firstRun)
+        m_welcomeScreen->setVisible(true);
 }
 
 void Application::applyRenderingSettings() {
@@ -1425,6 +1262,12 @@ AppSettings Application::currentSettings() const {
     AppSettings s;
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
     s.touchMode = m_touchMode;
+    s.uiLayout = m_uiLayout;
+    s.imTouchTree = m_imTouchTree;
+    s.imTouchTimeline = m_imTouchTimeline;
+    s.touchRightTab = m_touchRightTab;
+    s.touchRightW = m_touchRightW;
+    s.touchRailW = m_touchRailW;
     s.orbitButton = m_orbitButton;
     s.panButton = m_panButton;
     s.levelOrbit = m_viewport->getCamera().isLevelOrbit();
@@ -1454,12 +1297,14 @@ AppSettings Application::currentSettings() const {
     s.touchPanSens = m_touchPanSens;
     s.touchZoomSens = m_touchZoomSens;
     s.showToolbarTooltips = m_showToolbarTooltips;
+    s.showFps = m_showFps;
     s.autoOpenLastProject = m_autoOpenLastProject;
     s.recentProjects = m_recentProjects;
     s.lastProjectPath = m_currentProjectPath; // empty after closeProject()
     s.lastFileDir = materializr::FileDialogs::getLastDir();
     s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
     s.includePrereleases = m_includePrereleases;
+    s.supporter = m_supporter;
     s.snapToGrid = m_snapToGrid;
     s.sketchGridStep = m_sketchGridStep;
     // Mirror the live sketch-tool inference level back into the saved settings
@@ -1486,6 +1331,17 @@ void Application::applyAppSettings(const AppSettings& s) {
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
+    m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
+    m_imTouchTree = s.imTouchTree;
+    m_imTouchTimeline = s.imTouchTimeline;
+    m_showFps = s.showFps;
+    m_touchRightTab = (s.touchRightTab == 1) ? 1 : 0;
+    m_touchRightW = s.touchRightW;
+    if (m_touchRightW < 200.0f) m_touchRightW = 200.0f;
+    if (m_touchRightW > 520.0f) m_touchRightW = 520.0f;
+    m_touchRailW = s.touchRailW;
+    if (m_touchRailW < 64.0f)  m_touchRailW = 64.0f;
+    if (m_touchRailW > 208.0f) m_touchRailW = 208.0f;   // 2-column rail range
     // Camera button bindings are honoured on every platform. Android defaults to
     // trackpad mode (AppSettings sets orbit/pan = Left there) so one-finger touch
     // orbits out of the box, but an attached mouse/trackpad can be rebound via the
@@ -1528,6 +1384,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_recentProjects = s.recentProjects;
     m_checkForUpdatesOnLaunch = s.checkForUpdatesOnLaunch;
     m_includePrereleases = s.includePrereleases;
+    m_supporter = s.supporter;
     m_snapToGrid = s.snapToGrid;
     m_sketchGridStep = s.sketchGridStep;
     m_showInferenceToolbarToggle = s.showInferenceToolbarToggle;
@@ -2234,11 +2091,14 @@ void Application::handleShortcuts() {
                 const Operation* undone =
                     m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
-                // A linked 3D sketch move (SketchTransformOp) updated its body via
-                // the cascade; re-cascade so the body follows the reverted plane.
-                // (No-op for detached sketches — the guard in cascade returns early.)
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(undone))
-                    cascadeFromSketchEdit(st->getSketchId());
+                // A sketch-mutating step (SketchTransformOp / SketchEditOp)
+                // updated its body via the cascade; re-cascade so the body
+                // follows the reverted sketch. (No-op for detached sketches —
+                // the guard in cascade returns early. In sketch mode the
+                // active-sketch branch below cascades instead.)
+                if (int sid = sketchIdEditedBy(undone);
+                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
+                    cascadeFromSketchEdit(sid);
                 // In sketch mode, the host face is the anchor for the whole
                 // sketch session — clearing the selection would drop its blue
                 // highlight even though the sketch is still active. Skip the
@@ -2277,8 +2137,9 @@ void Application::handleShortcuts() {
                     // re-applied sketch edit.
                     cascadeFromSketchEdit(m_activeSketchId);
                 }
-                if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(redone))
-                    cascadeFromSketchEdit(st->getSketchId());
+                if (int sid = sketchIdEditedBy(redone);
+                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
+                    cascadeFromSketchEdit(sid);
                 m_meshesDirty = true;
             }
         }
@@ -2950,6 +2811,9 @@ void Application::saveProjectQuick() {
 }
 
 ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
+    // A snapshot taken while an async thread re-cut is in flight would bake
+    // the UNTHREADED body under a Thread step. Drain first (rare, seconds).
+    flushThreadRecuts();
     // A live preview writes the previewed geometry straight into the document
     // body every frame. Since we seed the snapshot from the current body
     // (below), an uncommitted preview would leak into the last committed step's
@@ -4038,9 +3902,16 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             // each neighbouring face so the cursor can snap to the body's
             // nearby corners / edges (Fusion-style projected geometry).
             auto processFace = [&](const TopoDS_Face& f3d) {
-                // Vertices — the face's corner points.
+                // Vertices — the face's corner points. IN-PLANE ONLY: a
+                // neighbouring face's out-of-plane vertex (e.g. where two
+                // fillets meet ABOVE the sketch face) projected straight down
+                // becomes an invisible magnet inside the sketch area — it
+                // hover-charges and pulls clicks off the grid even though the
+                // cursor never went near the real 3D edge (Steve's report).
+                const double kPlaneTol = 1e-3;
                 for (TopExp_Explorer ex(f3d, TopAbs_VERTEX); ex.More(); ex.Next()) {
                     gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(ex.Current()));
+                    if (std::abs(planeDist(p)) > kPlaneTol) continue;
                     dedup(refs.points, project(p));
                 }
                 // Edges — straight edges become reference lines (+ midpoint);
@@ -4051,9 +3922,19 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                     BRepAdaptor_Curve curve(edge);
                     double f = curve.FirstParameter();
                     double l = curve.LastParameter();
-                    gp_Pnt pStart, pEnd;
+                    gp_Pnt pStart, pEnd, pMid;
                     curve.D0(f, pStart);
                     curve.D0(l, pEnd);
+                    curve.D0(0.5 * (f + l), pMid);
+                    // IN-PLANE ONLY (see the vertex gate above): out-of-plane
+                    // neighbour edges (walls, fillets rising off the face)
+                    // projected down are phantom snap geometry, not something
+                    // the user can see or aim at. Shared edges, the host
+                    // perimeter and in-plane rims all pass untouched.
+                    if (std::abs(planeDist(pStart)) > kPlaneTol ||
+                        std::abs(planeDist(pEnd))   > kPlaneTol ||
+                        std::abs(planeDist(pMid))   > kPlaneTol)
+                        continue;
                     glm::vec2 a = project(pStart);
                     glm::vec2 b = project(pEnd);
                     if (curve.GetType() == GeomAbs_Line) {
@@ -5063,6 +4944,9 @@ void Application::run() {
     const uint32_t runStartMs = SDL_GetTicks();
 
     while (true) {
+        // Apply/discard any landed async thread re-cuts before this frame.
+        pollThreadRecuts();
+
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
         auto hasActiveWork = [&]() -> bool {
@@ -5072,6 +4956,7 @@ void Application::run() {
             // extension tool that may animate on its own.
             if (m_deferredHeavyTask || m_showUpdatePopup || !m_toastText.empty())
                 return true;
+            if (!m_threadRecuts.empty()) return true; // async re-cut in flight
             if (PluginRegistry::instance().activeTool()) return true;
             // Interactive manipulation states (sketch + every live preview/op)
             // are INPUT-driven: they only need continuous frames while the user
@@ -5151,14 +5036,30 @@ void Application::run() {
         const bool foreground = m_window->isForeground() || launchGrace;
 #endif
 
-        // When idle (or backgrounded), block up to 500 ms for the next event.
-        // 500 ms is enough for autosave / update-check polling; anything
-        // interactive wakes us immediately via SDL events. Force the wait when
-        // backgrounded so an active preview can't busy-spin pollEvents(0). During
-        // the launch grace we never block — keep frames flowing for the handoff.
-        int waitMs = (!launchGrace &&
-                      (!foreground || (m_wakeFrames == 0 && !hasActiveWork()))) ? 500 : 0;
+        // Frame pacing. Active (recent input / live work): no wait — render at
+        // vsync rate. Idle in the FOREGROUND: render at a low FLOOR rate
+        // instead of stopping. The old hard 0 fps idle made every first tap
+        // pay a wake-up round trip and left system-side effects (the iOS
+        // soft-keyboard raise, whose request we can only issue at the end of
+        // a rendered frame) stranded between bursts — on the tablet the
+        // keyboard prompt felt seconds late no matter what counted as "active
+        // work". A ~15 fps floor keeps the first tap, the keyboard, and every
+        // overlay live at a quarter of the full-rate GPU cost; the wait still
+        // returns EARLY on any event, so activity ramps to full rate with no
+        // added latency. Backgrounded (desktop) still parks completely in
+        // 500 ms waits. During the launch grace we never block — keep frames
+        // flowing for the splash→UI handoff.
+        constexpr int kIdleFloorMs = 66;   // idle frame interval ≈ 15 fps
+        int waitMs = 0;
+        if (!launchGrace && !foreground)
+            waitMs = 500;
+        else if (!launchGrace && m_wakeFrames == 0 && !hasActiveWork())
+            waitMs = kIdleFloorMs;
         int eventLevel = m_window->pollEvents(waitMs);
+        // Start of this iteration's frame budget — read by the frame-rate cap
+        // at the bottom of the loop (measured after the event wait so the
+        // idle floor's own sleep doesn't count against the budget).
+        const Uint32 frameLoopStartMs = SDL_GetTicks();
         // Significant events (click, key, scroll, resize, focus): 5 frames.
         // Trivial events (mouse motion, expose): 25 frames — at 60 fps that is
         // ~416 ms, enough for ImGui's default 300 ms hover-tooltip delay to fire
@@ -5171,11 +5072,30 @@ void Application::run() {
         else if (eventLevel == 1)
             m_wakeFrames = std::max(m_wakeFrames, 25);
 
+#if defined(MZ_MOBILE)
+        // Multi-finger tap gestures (Android/iOS): two-finger tap = undo,
+        // three-finger tap = redo. Same guards as the Edit menu; both flags
+        // are consumed every frame so a blocked tap can't fire later.
+        {
+            const bool undoTap = m_window->consumeUndoTap();
+            const bool redoTap = m_window->consumeRedoTap();
+            if (!anyInteractivePreviewActive()) {
+                if (undoTap && m_history->canUndo()) {
+                    undoWithCascade();
+                    m_wakeFrames = std::max(m_wakeFrames, 5);
+                } else if (redoTap && m_history->canRedo()) {
+                    redoWithCascade();
+                    m_wakeFrames = std::max(m_wakeFrames, 5);
+                }
+            }
+        }
+#endif
+
         // Any input refreshes the interactive-state render grace (see
         // hasActiveWork): keep rendering for kGraceSec after the last event,
-        // then idle. 1s comfortably covers the ~0.3s sketch hover-dwell charge;
-        // rendering resumes instantly on the next event, so it feels snappy while
-        // keeping idle previews (sketch, push/pull, …) at ~0fps.
+        // then drop to the idle floor rate. 1s comfortably covers the ~0.3s
+        // sketch hover-dwell charge; rendering ramps back to full rate
+        // instantly on the next event.
         if (eventLevel > 0) {
             constexpr double kGraceSec = 1.0;
             m_interactiveGraceUntil = SDL_GetTicks() / 1000.0 + kGraceSec;
@@ -5276,21 +5196,54 @@ void Application::run() {
             m_lastAutosaveTime = SDL_GetTicks() / 1000.0;
         }
 
-        // Skip rendering entirely when nothing has changed — saves ~30 % idle
-        // GPU on a static viewport. hasActiveWork() is re-evaluated after the
-        // deferred task and close checks above may have changed state. The launch
-        // grace overrides the skip so the first real UI frame draws on its own.
-        if (!launchGrace && (!foreground || (m_wakeFrames == 0 && !hasActiveWork()))) continue;
+        // Only a BACKGROUNDED window skips rendering now — foreground idle
+        // renders at the floor rate above (see kIdleFloorMs; the old idle
+        // skip is what made first-taps and the mobile keyboard feel dead).
+        if (!launchGrace && !foreground) continue;
         if (m_wakeFrames > 0) m_wakeFrames--;
         ++perfRendered;   // passed the idle skip → this iteration renders a frame
 
         beginFrame();
+        // With the modern/im-touch layouts on, the touch theme wraps the WHOLE
+        // frame so every dialog / interactive-op popup matches the shell look
+        // (rounded, padded, dark) instead of the classic desktop style. Latched
+        // once per frame: the layout can flip mid-frame (Settings dropdown) and
+        // the pop below must match this push, not the new value.
+        const bool frameTouchTheme = !classicLayout();
+        // Palette follows ThemeManager (View → Theme / Settings → Appearance)
+        // so the modern/im-touch layouts have a live light mode like classic.
+        touchui::setLightMode(m_themeManager &&
+                              m_themeManager->getTheme() == Theme::Light);
+        // im-touch wears crisp 4 px corners kit-wide; the modern layout keeps
+        // the soft rounded look (each widget's own default).
+        touchui::setCornerRadius(imTouchLayout() ? 4.0f : -1.0f);
+        if (frameTouchTheme) touchui::pushChrome();
+        // Always submit the dockspace host — under every layout. ImGui only
+        // keeps a dock node alive while its DockSpace() is submitted each frame;
+        // skipping it (the old else-only path) dropped the classic nodes, so on
+        // switch-BACK the panels returned FLOATING at their last spot instead of
+        // docked. The viewport then spanned the full width UNDER them, drawing
+        // the ViewCube behind the panel. Kept alive here, the layout restores
+        // exactly. In modern/im-touch the host sits behind the shell + pinned
+        // viewport (NoBringToFrontOnFocus) and its panels aren't submitted, so
+        // it's invisible — it only preserves the node tree.
         renderDockspace();
-        renderMenuBar();
+        // Per-layout chrome (src/app/layout/<name>/). A new layout gets a case
+        // here; everything below this dispatch is layout-agnostic or gated on
+        // the layout helpers.
+        switch (m_uiLayout) {
+            case UiLayout::Classic: renderMenuBar();        break;
+            case UiLayout::Modern:  renderModernLayout();   break;
+            case UiLayout::ImTouch: renderImTouchLayout();  break;
+        }
         renderSmallScreenWarning();
 
         if (m_renderersReady) {
             renderViewport();
+            // Modern's panel pop-in/out edge tabs go on top of the viewport —
+            // submit them AFTER it (they'd otherwise render under the
+            // NoBringToFrontOnFocus Viewport window until a focus reorder).
+            if (m_uiLayout == UiLayout::Modern) renderModernEdgeTabs();
 
             m_toolbar->setGridStep(m_sketchGridStep);
             m_toolbar->setSnapToGrid(m_snapToGrid);
@@ -5410,7 +5363,7 @@ void Application::run() {
             // left edge handle (or Hide Panels). All the setters above are
             // harmless no-ops on an unsubmitted window.
             ToolAction action = ToolAction::None;
-            if (!m_leftPanelHidden && m_showTools) {
+            if (classicLayout() && !m_leftPanelHidden && m_showTools) {
                 action = m_toolbar->render();
                 m_sketchGridStep = m_toolbar->getGridStep();
                 m_snapToGrid = m_toolbar->getSnapToGrid();
@@ -5471,7 +5424,8 @@ void Application::run() {
 
             // The Interactions reference is docked in the RIGHT column (above
             // Items), so it collapses with the right edge handle too.
-            if (!m_rightPanelHidden && m_showInteractions) renderInteractionsPanel();
+            if (classicLayout() && !m_rightPanelHidden && m_showInteractions)
+                renderInteractionsPanel();
             renderSettings();
             renderMirrorPopup();
 
@@ -5535,6 +5489,20 @@ void Application::run() {
             m_helpPanel->render();
             m_shortcutsPanel->render();
             m_aboutDialog->render();
+            if (m_welcomeScreen->render() == WelcomeScreen::Action::MarkSupporter) {
+                m_supporter = true;
+                saveAppSettings();
+            }
+#if defined(MZ_IOS)
+            // A completed or restored Supporter purchase — from the Welcome
+            // screen, or an interrupted transaction redelivered at launch.
+            if (iosStoreConsumeEntitled() && !m_supporter) {
+                m_supporter = true;
+                saveAppSettings();
+                m_welcomeScreen->setVisible(false);
+                showToast("Thank you for supporting Materializr!", 6.0);
+            }
+#endif
             renderUpdatePopup();
             renderMultiTransformPanel();
             renderResizeCylindricalPanel();
@@ -5597,24 +5565,24 @@ void Application::run() {
                     }
                     m_historyPanel->setHighlightStep(hl);
                 }
-                if (m_showHistory && m_historyPanel->render()) {
+                if (classicLayout() && m_showHistory && m_historyPanel->render()) {
                     m_meshesDirty = true;
                 }
 
-                if (m_showItems && m_itemsPanel->render()) {
+                if (classicLayout() && m_showItems && m_itemsPanel->render()) {
                     m_hoveredBodyId = -1;
                     m_meshesDirty = true;
                 }
                 m_propertiesPanel->setSketchContext(
                     m_inSketchMode, m_activeSketch.get(), m_activeSketchId,
                     m_sketchTool.get());
-                if (m_showProperties && m_propertiesPanel->render()) {
+                if (classicLayout() && m_showProperties && m_propertiesPanel->render()) {
                     m_meshesDirty = true;
                 }
             }
             // Touch edge tabs to collapse/restore each side column (drawn on top
             // of the panels, and still visible when a side is collapsed).
-            renderPanelCollapseHandles();
+            if (classicLayout()) renderPanelCollapseHandles();
 
             // Plugin overlays — free-floating per-frame ImGui windows (e.g. the
             // Tutorial). Drawn after the panels so they float on top; non-modal,
@@ -5650,7 +5618,7 @@ void Application::run() {
             } else {
                 m_statusBar->setMessage("");
             }
-            m_statusBar->render();
+            if (classicLayout()) m_statusBar->render();
             renderTransientToast();
             FileDialogs::render();
             renderSavePrompt();
@@ -5662,12 +5630,29 @@ void Application::run() {
             handleShortcuts();
         }
 
+        if (frameTouchTheme) touchui::popChrome();
+
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
         endFrame();
 
         m_window->swapBuffers();
+
+        // Hard frame-rate cap. Desktop GL blocks in swapBuffers on vsync, but
+        // iOS's presentRenderbuffer returns immediately (no CADisplayLink in
+        // this loop) — so any continuously-"active" state (a focused text
+        // field, a live preview) spun this loop at uncapped rate, starving
+        // the UIKit main runloop that keyboard raise, keyboard animation and
+        // touch delivery all run on: focusing ANY field froze the app.
+        // Sleeping out the remainder of a 60 Hz budget yields the main
+        // thread to the OS every frame; where vsync already paces us the
+        // remainder is ~0 and this is a no-op.
+        {
+            constexpr Uint32 kMinFrameMs = 16;
+            const Uint32 spent = SDL_GetTicks() - frameLoopStartMs;
+            if (spent < kMinFrameMs) SDL_Delay(kMinFrameMs - spent);
+        }
     }
 
     // Persist preferences on a clean exit (in addition to saving on each change).

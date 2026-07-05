@@ -141,17 +141,54 @@ bool FilletOp::execute(Document& doc) {
             // DIMENSION edit relocated a filleted corner). Try re-finding them
             // by the sketch vertex they sit over (generative anchoring).
             if (!resolveAnchors(doc, m_previousShape)) {
-                std::fprintf(stderr,
-                    "[Fillet] rebindEdges + anchors failed (R=%.2f, %zu edges) — "
-                    "selected edge isn't in the current body's edge map.\n",
-                    m_radius, m_edges.size());
-                return false;
+                // LAST RESORT: topological names. Seam edges from a boolean
+                // sit over no sketch feature (anchors fail by construction);
+                // their gen-lineage refs resolve through the producing op's
+                // ledger, republished on the body by the upstream replay.
+                bool topoOk = false;
+                if (!m_edgeRefs.empty() &&
+                    m_edgeRefs.size() == m_edges.size()) {
+                    materializr::topo::Context rc;
+                    rc.doc = &doc;
+                    rc.shape = m_previousShape;
+                    rc.type = TopAbs_EDGE;
+                    rc.gen = doc.bodyLedger(m_bodyId);
+                    rc.crossRebuild = true;
+                    std::vector<TopoDS_Shape> out;
+                    if (materializr::topo::resolveSet(m_edgeRefs, rc, out) &&
+                        out.size() == m_edges.size()) {
+                        for (size_t i = 0; i < out.size(); ++i)
+                            m_edges[i] = TopoDS::Edge(out[i]);
+                        topoOk = true;
+                        std::fprintf(stderr, "[Fillet] edges re-found by "
+                                             "topo refs (gen/seam path)\n");
+                    }
+                }
+                if (!topoOk) {
+                    std::fprintf(stderr,
+                        "[Fillet] rebindEdges + anchors + topo refs failed "
+                        "(R=%.2f, %zu edges) — selected edge isn't in the "
+                        "current body's edge map.\n",
+                        m_radius, m_edges.size());
+                    return false;
+                }
             }
         }
 
         // Capture generative anchors from the (now-valid) edges the first time
         // we run — so a later dimension edit can re-find them by sketch feature.
         if (m_edgeAnchors.empty()) computeAnchors(doc);
+        // And topological names (with the body's producing ledger in context,
+        // so a SEAM edge gets its gen-lineage name).
+        if (m_edgeRefs.empty() && !m_edges.empty()) {
+            materializr::topo::Context mc;
+            mc.doc = &doc;
+            mc.shape = m_previousShape;
+            mc.type = TopAbs_EDGE;
+            mc.gen = doc.bodyLedger(m_bodyId);
+            for (const auto& e : m_edges)
+                m_edgeRefs.push_back(materializr::topo::mint(e, mc));
+        }
 
         // Create fillet on the body shape
         BRepFilletAPI_MakeFillet fillet(m_previousShape);
@@ -247,6 +284,12 @@ bool FilletOp::execute(Document& doc) {
             }
         }
 
+        // Publish the generation map (input edge -> blend faces) so the "gen"
+        // naming strategy can name a blend face by its generating edge — the
+        // general-kernel path for op-produced faces. Captured on every execute,
+        // so a rebuild's ledger reflects the current geometry.
+        m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
+
         // Record the blend faces generated from each input edge so a later face
         // click can be traced back to this fillet for re-editing.
         m_generatedFaces.clear();
@@ -266,6 +309,7 @@ bool FilletOp::execute(Document& doc) {
         // serializeParams can index the generated faces against the result).
         m_resultShape = candidate;
         doc.updateBody(m_bodyId, m_resultShape);
+        doc.setBodyLedger(m_bodyId, &m_ledger);
         return true;
     } catch (...) {
         return false;
@@ -331,6 +375,19 @@ std::string FilletOp::serializeParams() const {
     // Generative anchors (additive; old readers ignore the key). See EdgeAnchor.
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
     if (!anc.empty()) blob += ";anchor=" + anc;
+    // Topological edge names (additive, LAST — length-prefixed opaque blobs
+    // read to end-of-string). Persisting them keeps a SEAM fillet/chamfer
+    // re-derivable after reload; absent in old files.
+    if (!m_edgeRefs.empty()) {
+        bool any = false;
+        std::string rb;
+        for (const auto& r : m_edgeRefs) {
+            std::string b = r.serialize();
+            rb += std::to_string(b.size()) + ":" + b;
+            if (!r.empty()) any = true;
+        }
+        if (any) blob += ";edgerefs=" + rb;
+    }
     return blob;
 }
 
@@ -345,6 +402,24 @@ bool FilletOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // edgerefs holds length-prefixed opaque blobs, written last — read to
+        // end-of-string (not to the next ';').
+        if (key == "edgerefs") {
+            std::string rest = blob.substr(eq + 1);
+            m_edgeRefs.clear();
+            size_t p = 0;
+            while (p < rest.size()) {
+                size_t c = rest.find(':', p);
+                if (c == std::string::npos) break;
+                size_t n = (size_t)std::atoll(rest.substr(p, c - p).c_str());
+                if (c + 1 + n > rest.size()) break;
+                m_edgeRefs.push_back(
+                    materializr::topo::Ref::parse(rest.substr(c + 1, n)));
+                p = c + 1 + n;
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "radius") { m_radius = std::atof(val.c_str()); any = true; }
         else if (key == "body")   { m_bodyId = std::atoi(val.c_str()); any = true; }
@@ -437,6 +512,15 @@ void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
 
 bool FilletOp::ownsFace(const TopoDS_Shape& face) const {
     if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return false;
+    // A fillet blend is NEVER a plane (straight edges blend to cylinders,
+    // curved/corner cases to tori/spheres/bsplines). Rehydrated generated-face
+    // indices can mis-resolve after an old-save reload (ordinal drift) and
+    // claim a big planar neighbour — clicking the slab top then opened the
+    // fillet editor instead of the face's own properties.
+    try {
+        BRepAdaptor_Surface bs(TopoDS::Face(face));
+        if (bs.GetType() == GeomAbs_Plane) return false;
+    } catch (...) {}
     for (const auto& f : m_generatedFaces) {
         if (f.IsSame(face)) return true;
     }

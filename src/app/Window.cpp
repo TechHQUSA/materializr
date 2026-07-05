@@ -298,6 +298,13 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
     auto it = std::find_if(m_fingers.begin(), m_fingers.end(),
                            [&](const Finger& f) { return f.id == id; });
     if (type == SDL_FINGERDOWN) {
+        if (m_fingers.empty()) {
+            // New touch session (first finger of a fresh contact).
+            m_sessionStartTicks = SDL_GetTicks();
+            m_sessionMaxFingers = 0;
+            m_sessionPanNet = 0.0f;
+            m_sessionZoomNet = 0.0f;
+        }
         if (it == m_fingers.end()) m_fingers.push_back({id, x, y});
         else { it->x = x; it->y = y; }
     } else if (type == SDL_FINGERMOTION) {
@@ -308,6 +315,7 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
     }
 
     const int count = static_cast<int>(m_fingers.size());
+    if (count > m_sessionMaxFingers) m_sessionMaxFingers = count;
 
     if (count >= 2) {
         const float cx = (m_fingers[0].x + m_fingers[1].x) * 0.5f;
@@ -315,6 +323,14 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         const float sx = m_fingers[0].x - m_fingers[1].x;
         const float sy = m_fingers[0].y - m_fingers[1].y;
         const float dist = std::sqrt(sx * sx + sy * sy);
+        if (m_twoFinger && type == SDL_FINGERUP) {
+            // A finger lifted but 2+ remain: the tracked pair changed, so
+            // centroid/spacing jumped. Re-anchor instead of accumulating the
+            // jump as pan/zoom (which would also veto the multi-finger tap).
+            m_lastCentroidX = cx; m_lastCentroidY = cy; m_lastPinchDist = dist;
+            m_startCentroidX = cx; m_startCentroidY = cy; m_startPinchDist = dist;
+            return;
+        }
         if (!m_twoFinger) {
             // Two-finger gesture begins: cancel any in-progress orbit, set refs.
             if (m_leftDown) {
@@ -345,6 +361,10 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
                 const float panNet  = std::sqrt((cx - m_startCentroidX) * (cx - m_startCentroidX) +
                                                 (cy - m_startCentroidY) * (cy - m_startCentroidY));
                 const float zoomNet = std::fabs(dist - m_startPinchDist);
+                // Peak travel while undecided — the multi-finger tap check reads
+                // these at lift-off (fingers are gone by then).
+                if (panNet  > m_sessionPanNet)  m_sessionPanNet  = panNet;
+                if (zoomNet > m_sessionZoomNet) m_sessionZoomNet = zoomNet;
                 // Strong pan bias: pan is the gesture users struggle to land, so
                 // it commits on modest travel and only needs to edge out zoom,
                 // whereas zoom must clearly dominate AND clear a real-pinch floor
@@ -482,6 +502,21 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
 
     // count == 0: everything lifted — release and reset.
     if (m_leftDown) { io.AddMouseButtonEvent(0, false); m_leftDown = false; }
+    // Multi-finger tap: a short 2-/3-finger contact that never committed to
+    // pan/zoom and barely moved = undo/redo gesture (Application consumes the
+    // flags with the same guards as the Edit menu). Checked before the reset
+    // below wipes the session state.
+    {
+        const std::uint32_t nowT = SDL_GetTicks();
+        const bool shortTouch = (nowT - m_sessionStartTicks) < 300u;
+        const bool stationary = m_twoFingerMode == 0 &&
+                                m_sessionPanNet < 12.0f && m_sessionZoomNet < 16.0f;
+        if (shortTouch && stationary) {
+            if (m_sessionMaxFingers == 2) m_undoTapPending = true;
+            else if (m_sessionMaxFingers == 3) m_redoTapPending = true;
+        }
+        m_sessionMaxFingers = 0;
+    }
     // Genuine double-tap detection: this lift completes a quick tap (not a hold,
     // not a drag, not a 2-finger leftover). Two such taps at the same spot within
     // the double-click time → a touch "double-click" (escalates a face pick to its
@@ -580,6 +615,18 @@ bool Window::consumeTouchZoom(float& dz) {
 bool Window::consumeDoubleTap() {
     if (!m_doubleTapPending) return false;
     m_doubleTapPending = false;
+    return true;
+}
+
+bool Window::consumeUndoTap() {
+    if (!m_undoTapPending) return false;
+    m_undoTapPending = false;
+    return true;
+}
+
+bool Window::consumeRedoTap() {
+    if (!m_redoTapPending) return false;
+    m_redoTapPending = false;
     return true;
 }
 

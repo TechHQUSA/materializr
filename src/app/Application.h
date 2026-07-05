@@ -24,6 +24,7 @@
 #include "modeling/ExtrudeOp.h" // for ExtrudeMode
 #include "modeling/SketchConstraints.h" // for ConstraintType (applySketchConstraint)
 #include "modeling/Unfold.h" // for FlatPattern (m_unfoldPattern)
+#include "modeling/TopoName.h" // for topo::Ref (m_threadFaceRef)
 #include "core/SheetSpec.h" // for SheetMaterial (m_unfoldMaterial)
 #include "io/Settings.h" // for AppSettings::RecentProject (m_recentProjects)
 
@@ -49,6 +50,7 @@ class SectionView;
 class Toolbar;
 class HistoryPanel;
 class AboutDialog;
+class WelcomeScreen;
 class ShortcutsPanel;
 class HelpPanel;
 class MeasureTool;
@@ -137,6 +139,47 @@ private:
     void renderDockspace();
     void renderViewport();
     void renderMenuBar();
+    // Menu bodies shared by the desktop menu bar and the im-touch overflow.
+    // withSettings=false drops the nested "Settings..." item — the touch
+    // overflow exposes Settings at the top level, so it shouldn't also nest it
+    // under File. The desktop menu bar keeps it (default true).
+    void renderFileMenuItems(bool withSettings = true);
+    void renderEditMenuItems();
+    // Derived construction Plane/Axis items — the popup behind the touch rail's
+    // "Construct" group. Selection-aware (mirrors Toolbar's Add Plane/Axis).
+    void renderConstructionMenuItems();
+    void renderViewMenuItems();
+    void renderHelpMenuItems();
+    // Per-layout chrome (src/app/layout/<name>/). Modern: top app bar + tool
+    // rail + right panel (layout/modern/ModernLayout.cpp). im-touch: near-zero
+    // chrome, floating overlays (layout/imtouch/ImTouchLayout.cpp). Both
+    // compute the viewport rect renderViewport() pins to. Classic's menu bar
+    // is renderMenuBar() above (layout/classic/ClassicLayout.cpp).
+    void renderModernLayout();
+    // Modern panel/viewport pop-in/out edge tabs — submitted AFTER the
+    // viewport (see run()) so they sit on top of it, not under it.
+    void renderModernEdgeTabs();
+    void renderImTouchLayout();
+    // Polygon in the tool rail opens a side-count popout (matching the
+    // classic sketch toolbar). Shared by the modern rail and im-touch bar.
+    void renderRailPolygonSidesPopup(bool clicked);
+    void renderTouchOverflowPopup(); // shared ⋯/☰ menu popup (modern + im-touch)
+    // Undo/redo with the sketch-edit cascade (shared by the Edit menu, the
+    // touch shell's top bar, and nothing else — the Ctrl+Z shortcut has its
+    // own copy in handleShortcuts pending a merge).
+    // Sketch id mutated by a history step (SketchTransformOp/SketchEditOp),
+    // or -1 — so undo/redo outside sketch mode can re-cascade the driven body.
+    int sketchIdEditedBy(const Operation* op) const;
+    void undoWithCascade();
+    void redoWithCascade();
+    // Sketch-aware undo for the touch shell's top-bar Undo button: in sketch
+    // mode it mirrors the Ctrl+Z sketch behaviour (cancel an in-progress shape
+    // first, then undo committed sketch edits but NEVER past the sketch's own
+    // entry into history — rolling the host body back while the sketch renders
+    // against it crashes). Outside sketch mode it's plain undoWithCascade().
+    // touchCanUndo() is the matching enabled-state for the button.
+    void touchUndo();
+    bool touchCanUndo() const;
     void renderInteractionsPanel();
     void renderSettings();
     void loadAppSettings();   // restore persisted preferences at startup
@@ -286,7 +329,10 @@ private:
                                      float vpW, float vpH,
                                      bool buildIfCold = true) const;
     void beginPushPull();
-    void updatePushPull();
+    // applySnap=false bypasses the grid snap for that update — the stepper
+    // buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must
+    // actually move), so they call updatePushPull(false).
+    void updatePushPull(bool applySnap = true);
     void commitPushPull();
     void cancelPushPull();
     // ── Move Face (face transform → body follows via loft; see MoveFaceOp) ──
@@ -446,6 +492,7 @@ private:
     std::unique_ptr<ThemeManager> m_themeManager;
     std::unique_ptr<PropertiesPanel> m_propertiesPanel;
     std::unique_ptr<AboutDialog> m_aboutDialog;
+    std::unique_ptr<WelcomeScreen> m_welcomeScreen;
     std::unique_ptr<ShortcutsPanel> m_shortcutsPanel;
     std::unique_ptr<HelpPanel> m_helpPanel;
     std::unique_ptr<MeasureTool> m_measureTool;
@@ -682,6 +729,42 @@ private:
     bool m_touchMode = false;
 #endif
 
+    // Interface layout (see UiLayout in io/Settings.h and src/app/layout/).
+    // Live-switchable: read every frame by run()/renderViewport(); persisted
+    // on save. The helpers below are the preferred spelling at call sites.
+    UiLayout m_uiLayout = UiLayout::Classic;
+    bool classicLayout() const { return m_uiLayout == UiLayout::Classic; }
+    bool modernLayout()  const { return m_uiLayout == UiLayout::Modern;  }
+    bool imTouchLayout() const { return m_uiLayout == UiLayout::ImTouch; }
+    // im-touch only: the transparent model tree on the right edge.
+    bool m_imTouchTree = true;
+    // im-touch only: browser-tree group expansion (session-local; boots
+    // fully expanded like Fusion's browser). No other layout reads these.
+    bool m_imTouchTreeOpenBodies = true;
+    bool m_imTouchTreeOpenSketches = true;
+    bool m_imTouchTreeOpenConstruction = true;
+    // im-touch only: the Fusion-style history timeline along the bottom edge.
+    bool m_imTouchTimeline = true;
+    // im-touch timeline: step whose properties popup is open (-1 = none).
+    // Mirrored into m_historyPanel's editing step so the viewport's orange
+    // edited-element highlight follows. Session-local.
+    int m_imTouchHistoryEdit = -1;
+    // Center rect the modern/im-touch layouts leave for the viewport window
+    // this frame (screen coords, points). Written by renderModernLayout() /
+    // renderImTouchLayout(), read by renderViewport() to pin the undocked
+    // "Viewport" window.
+    float m_touchVpX = 0.0f, m_touchVpY = 0.0f, m_touchVpW = 0.0f, m_touchVpH = 0.0f;
+    // Active tab of the touch shell's right panel (0 = Items,
+    // 1 = History & Properties). Persisted.
+    int m_touchRightTab = 0;
+    // Right-panel width in logical px (× uiScale at use); dragged via the
+    // panel's left-edge splitter or edge tab, persisted, clamped at both ends.
+    float m_touchRightW = 300.0f;
+    // Tool-rail width, same convention (edge-tab drag, persisted).
+    float m_touchRailW = 92.0f;
+    // Edge-tab drag state (tap vs drag disambiguation).
+    bool m_railTabDragged = false, m_rightTabDragged = false;
+
     // Autosave: once the project has been saved at least once (has a path on
     // disk), periodically re-save dirty changes. Toggled in File > Settings.
     bool m_autosaveEnabled = false;
@@ -723,6 +806,7 @@ private:
     float  m_tipLastMouseY = -1e9f;
     double m_tipStationarySince = 0.0;
     bool  m_showToolbarTooltips = true; // hover description on each toolbar button
+    bool  m_showFps = true;             // small FPS readout (im-touch layout, top-centre)
     // Per-panel visibility (Settings > Panels), persisted. Default all on. These
     // gate each docked panel's render so it can be hidden to free screen space
     // and brought back from Settings — independent of the left/right column
@@ -1041,6 +1125,9 @@ private:
     bool   m_threadActive = false;
     int    m_threadBodyId = -1;
     bool   m_threadIsHole = false;
+    // Topological name of the picked cylinder face, minted at beginThread so
+    // the committed ThreadOp follows an upstream edit (see ThreadOp::setter).
+    materializr::topo::Ref m_threadFaceRef;
     double m_threadAxis[9] = {0, 0, 0, 0, 0, 1, 1, 0, 0}; // loc, dir, xdir
     double m_threadRadius = 5.0;
     double m_threadLength = 10.0;
@@ -1055,6 +1142,24 @@ private:
     // thread polls it each frame and pushes the op when ready.
     std::future<TopoDS_Shape> m_threadFuture;
     bool   m_threadComputing = false;
+    // Async thread RE-CUT (cascade/editStep recompute path — distinct from the
+    // popup's initial Apply worker above). ThreadOp::execute hands the heavy
+    // re-cut here via the hook installed in the constructor; the body stays at
+    // its pre-thread state until the worker's result lands (pollThreadRecuts,
+    // once per frame). See ThreadOp::setAsyncRecutHook.
+    struct PendingThreadRecut {
+        ThreadOp* op = nullptr;      // history-owned; re-validated on landing
+        int bodyId = -1;
+        TopoDS_Shape launchedFrom;   // doc body at launch — stale-guard
+        std::future<TopoDS_Shape> fut;
+        int attempts = 1;            // relaunch-on-stale counter (cap 3)
+    };
+    std::vector<PendingThreadRecut> m_threadRecuts;
+    void installThreadRecutHook();
+    // Launch (or relaunch) the worker for this op against the CURRENT body.
+    bool launchThreadRecut(ThreadOp& op, int attempts);
+    void pollThreadRecuts();   // per-frame: apply/relaunch/discard results
+    void flushThreadRecuts();  // block until drained (save path)
 
     // Section View — render-only clipping of the scene by a plane so the
     // user can inspect interiors (thread profiles, wall thickness) without
@@ -1117,6 +1222,47 @@ private:
     void cancelActiveIops(); // controller half, callable from legacy begins
     bool anyInteractivePreviewActive() const; // controllers + legacy previews
     void cancelAllInteractivePreviews();      // both halves; saves call this
+
+    // im-touch: while an action (interactive preview) is live, its Confirm/
+    // Cancel are hosted as corner FABs — the sketch Finish/Discard spot —
+    // instead of buttons inside each op panel (which hide themselves while
+    // this is true). One action at a time (single-flight), so the dispatch
+    // below is unambiguous.
+    bool imTouchActionCorner() const;
+    void confirmActiveAction();  // corner ✓ — commit whichever action is live
+    void cancelActiveAction();   // corner ✗ — cancel it
+
+    // im-touch, touch input: a circle or rectangle drawn by press-drag-
+    // release is HELD as a preview on lift instead of committing — a bubble
+    // near the shape offers exact-value fields plus ✗/✓ (renderViewport's
+    // confirm-bubble block). The pending pos is the lift point in sketch
+    // coords — ✓ commits through it when nothing was typed. Drawing the next
+    // shape auto-commits the held one (press handler consumes this state).
+    bool m_sketchShapeConfirmPending = false;
+    glm::vec2 m_sketchShapePendingPos{0.0f};
+    char m_sketchShapeDimBuf[32] = {};   // circle: typed diameter
+    // Rectangle: staged Width/Height, seeded from the dragged size at lift;
+    // each is edited by its own amountField well in the bubble.
+    float m_sketchShapeDimW = 0.0f;
+    float m_sketchShapeDimH = 0.0f;
+    // Preview endpoints FROZEN at lift (getPreviewStart/End at that moment).
+    // The bubble anchors and its commit math use these, not the live
+    // preview — stray hover/motion events that twitch the held preview must
+    // not move the input box under the user's finger.
+    glm::vec2 m_sketchShapeAnchorPs{0.0f};
+    glm::vec2 m_sketchShapeAnchorPe{0.0f};
+
+    // im-touch: anchor for the live action's distance well (extrude /
+    // push-pull), LATCHED in world space when the action starts — the well
+    // must not chase the growing arrow (the sketch bubbles' rule); the
+    // dimension overlay re-projects the latched point each frame so it
+    // still tracks camera pan/zoom. Valid = projected on-screen this frame;
+    // the well falls back to its fixed spot otherwise.
+    bool      m_actionAnchorLatched = false;
+    glm::vec3 m_actionAnchorW{0.0f};
+    bool  m_actionAnchorValid = false;
+    float m_actionAnchorX = 0.0f;
+    float m_actionAnchorY = 0.0f;
 
     // Last hover pick, reused by cursor-zoom so wheel ticks never ray-cast
     // the document themselves (see Application_Viewport zoom handler).
@@ -1451,6 +1597,10 @@ private:
     // opens a small popup with the snap toggle + step radios. Changes save
     // immediately so the choice persists across launches.
     void renderSnapWidget();
+    // The snap settings popup body (checkbox + step radios), shared by the
+    // viewport corner widget and the im-touch top cluster's Snap button.
+    // Caller does OpenPopup("SnapSettings") in its own window context.
+    void renderSnapSettingsPopup();
 
     // Sketch-mode Linear / Radial patterns. Simpler than body patterns: the
     // sketch is on a fixed 2D plane so there's no axis radio. Linear copies
@@ -1568,6 +1718,9 @@ private:
     bool m_checkForUpdatesOnLaunch = true;
     // Beta channel opt-in: update checks also consider GitHub pre-releases.
     bool m_includePrereleases = false;
+    // Supporter state: silences the every-launch support prompt (see
+    // AppSettings::supporter for how it gets set).
+    bool m_supporter = false;
 
     // Set by the --safe-mode CLI flag. When true, loadAppSettings stomps
     // rendering, autosave, and auto-open-last-project back to safe defaults

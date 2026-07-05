@@ -23,6 +23,9 @@ struct IopContext {
     // Defer a heavy task to run BETWEEN frames (so the progress reporter can
     // render its own frames without nesting ImGui frames).
     std::function<void(std::function<void()>)> deferHeavy;
+    // The layout hosts Confirm/Cancel outside the panel (im-touch corner
+    // FABs) — renderPanel skips its own buttons; Enter/Esc still work.
+    bool cornerCommitUi = false;
 };
 
 // Base for "popup with live preview" modeling operations (Shell, Taper,

@@ -1,5 +1,6 @@
 #include "UiTheme.h"
 #include "Toolbar.h"
+#include "TouchIcons.h"
 #include "../core/SelectionManager.h"
 #include "../core/History.h"
 #include "../core/Operation.h"
@@ -75,6 +76,274 @@ ToolAction Toolbar::render() {
 
     ImGui::End();
     return action;
+}
+
+// Primary tools of the current selection context, for the im-touch rail.
+// The dispatch mirrors render() above and each list is the head of the
+// matching render*Tools() — if you add a primary tool there, add it here
+// (full catalogue unification tracked in docs/im-touch-ui-plan.md Phase 3).
+std::vector<Toolbar::RailTool> Toolbar::railTools() const {
+    std::vector<RailTool> t;
+    auto add = [&](const char* icon, const char* label, ToolAction a,
+                   bool active = false, const char* tip = nullptr) {
+        t.push_back({icon, label, a, active, tip});
+    };
+
+    // Plugin toolbar contributions for the given context mask — the rail twin
+    // of renderPluginButtons, so Boolean / Delete / Duplicate / Pattern / Loft
+    // / Split / Construction reach every layout, and future plugins land here
+    // automatically. Icons/short labels are matched by contribution name
+    // (registry strings are long-lived, so the c_str()s stay valid).
+    auto addPlugins = [&](int contextMask) {
+        const auto& contribs = PluginRegistry::instance().toolbarContributions();
+        for (size_t i = 0; i < contribs.size(); ++i) {
+            const auto& c = contribs[i];
+            if (!((1 << static_cast<int>(c.context)) & contextMask)) continue;
+            // Base construction creation is covered by the shared Construct
+            // menu ("New Plane/Axis…", renderConstructionMenuItems) which the
+            // rail's Construct group and the im-touch + FAB both host — rail
+            // buttons for them just duplicated the + menu (Steve).
+            if (c.name == "Construction Plane" ||
+                c.name == "Construction Axis") continue;
+            const char* icon  = MZ_ICON_EDIT;
+            const char* label = c.name.c_str();
+            if      (c.name == "Union")              icon = MZ_ICON_UNION;
+            else if (c.name == "Subtract")           icon = MZ_ICON_SUBTRACT;
+            else if (c.name == "Intersect")          icon = MZ_ICON_INTERSECT;
+            else if (c.name == "Delete")             icon = MZ_ICON_DELETE;
+            else if (c.name == "Duplicate")          icon = MZ_ICON_COPY;
+            else if (c.name == "Loft")               icon = MZ_ICON_SPLINE;
+            else if (c.name == "Linear Pattern")   { icon = MZ_ICON_PATTERN_LINEAR;   label = "Linear"; }
+            else if (c.name == "Circular Pattern") { icon = MZ_ICON_PATTERN_CIRCULAR; label = "Circular"; }
+            else if (c.name.rfind("Split", 0) == 0)  icon = MZ_ICON_SPLIT;
+            t.push_back({icon, label, ToolAction::None, false,
+                         c.tooltip.empty() ? nullptr : c.tooltip.c_str(),
+                         static_cast<int>(i)});
+        }
+    };
+
+    if (m_sketchMode) {
+        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim.
+        add(MZ_ICON_SELECT,  "Select",  ToolAction::SelectSketch, m_activeSketchMode == 1,
+            "Pick sketch elements (points, lines, regions). Drag a selection to move it.");
+        add(MZ_ICON_LINE,    "Line",    ToolAction::Line,         m_activeSketchMode == 2,
+            "Draw straight line segments. Tap to add vertices; Finish ends the chain.");
+        add(MZ_ICON_CIRCLE,  "Circle",  ToolAction::Circle,       m_activeSketchMode == 3,
+            "Draw a circle: press the centre, drag to the radius.");
+        // Draw-origin toggle directly under the ACTIVE circle/rect tool, same
+        // as the classic toolbar — label shows the current mode.
+        if (m_activeSketchMode == 3)
+            add(MZ_ICON_CIRCLE, m_circleMode == 0 ? "Center" : "2-Point",
+                ToolAction::SketchToggleDrawOrigin, false,
+                "Circle origin: Center = tap the centre then drag the radius; "
+                "2-Point = the two taps are opposite ends of the diameter. "
+                "Tap to toggle.");
+        add(MZ_ICON_RECT,    "Rectangle", ToolAction::Rectangle,  m_activeSketchMode == 4,
+            "Draw a rectangle: press one corner, drag to the opposite.");
+        if (m_activeSketchMode == 4)
+            add(MZ_ICON_RECT, m_rectMode == 0 ? "Corner" : "Center",
+                ToolAction::SketchToggleDrawOrigin, false,
+                "Rectangle origin: Corner = tap a corner, drag to the opposite; "
+                "Center = tap the centre, drag to a corner. Tap to toggle.");
+        add(MZ_ICON_ARC,     "Arc",     ToolAction::Arc,          m_activeSketchMode == 5,
+            "Three-point arc: tap start, end, then a point on the curve.");
+        add(MZ_ICON_SPLINE,  "Spline",  ToolAction::Spline,       m_activeSketchMode == 6,
+            "Multi-point spline. Tap control points; Finish ends the curve.");
+        add(MZ_ICON_POLYGON, "Polygon", ToolAction::Polygon,      m_activeSketchMode == 7,
+            "Regular polygon: tap the centre, drag to size. Side count in properties.");
+        add(MZ_ICON_TEXT,    "Text",    ToolAction::SketchText,   m_activeSketchMode == 9,
+            "Insert text as real outline geometry: set string, font and letter "
+            "height in the popup, then tap to place.");
+        add(MZ_ICON_SVG,     "SVG",     ToolAction::SketchSvg,    m_activeSketchMode == 10,
+            "Import an SVG file as sketch outlines: pick the file, set the "
+            "width in the popup, tap to place.");
+        add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
+            "Trim a sketch segment at its nearest intersections.");
+        // Sketch-element transforms — mirror the classic sketch toolbar so all
+        // three layouts behave identically. Like classic, they're always here
+        // in a sketch and simply no-op if nothing is selected. (The rail
+        // renderer opens a sides popout for Polygon above; these fire directly.)
+        add(MZ_ICON_COPY,    "Copy",     ToolAction::SketchCopy, false,
+            "Duplicate the selected sketch elements at an offset.");
+        add(MZ_ICON_MIRROR,  "Mirror",   ToolAction::SketchMirror, false,
+            "Mirror selected elements across a sketch line you'll pick next.");
+        add(MZ_ICON_PATTERN_LINEAR,   "Linear",   ToolAction::SketchLinearPattern, false,
+            "Linear pattern: copy the selected sketch elements N times along the sketch X axis.");
+        add(MZ_ICON_PATTERN_CIRCULAR, "Circular", ToolAction::SketchRadialPattern, false,
+            "Circular pattern: copy the selected sketch elements around an origin you specify.");
+        // Live inference-level cycle (Full → Reduced → Off → Max) — the label
+        // shows the CURRENT level. Same Settings gate as the classic toolbar.
+        if (m_showInferenceToggle) {
+            const char* lvl = m_inferenceLevel == 0 ? "Full"
+                            : m_inferenceLevel == 1 ? "Reduced"
+                            : m_inferenceLevel == 2 ? "Off" : "Max";
+            add(MZ_ICON_GUIDES, lvl, ToolAction::SketchCycleInference, false,
+                "How many drawing guides to show, and how eagerly they snap. "
+                "Max = Full plus wider catch ranges tuned for fingertips. "
+                "Full = classic guides plus hover-to-charge references. "
+                "Reduced = classic guides only. Off = grid + endpoint only. "
+                "Tap to cycle.");
+        }
+        add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
+            "Measure distance / length between picked sketch elements.");
+        if (!m_cameraOrtho)
+            add(MZ_ICON_LOOK, "Look At", ToolAction::LookAtSketch, false,
+                "Snap the camera to look straight down the sketch plane "
+                "(orthographic).");
+        addPlugins(1 << static_cast<int>(SelectionContext::InSketchMode));
+    } else if (!m_selection || !m_selection->hasSelection()) {
+        // No bare "Sketch" here: with nothing selected it just duplicated
+        // "Sketch on… > XY plane". Sketch appears once a face or construction
+        // plane is picked (the branches below); world-plane starts live in
+        // the rail's "Sketch on…" group.
+        add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
+            "Measure distance, length, or angle between picked features.");
+        addPlugins((1 << static_cast<int>(SelectionContext::NoSelection)) |
+                   (1 << static_cast<int>(SelectionContext::Always)));
+    } else if (m_selection->hasSelectedSketchRegions()) {
+        add(MZ_ICON_PUSHPULL, "Push",     ToolAction::PushPull, false,
+            "Push/pull the region into or out of the host body.");
+        add(MZ_ICON_EXTRUDE,  "Extrude",  ToolAction::ExtrudeSketch, false,
+            "Extrude the region into a new solid body.");
+        add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
+            "Cut the region's shape out of the body beneath it.");
+        add(MZ_ICON_EDIT,     "Edit",     ToolAction::EditSketch, false,
+            "Reopen the sketch this region belongs to.");
+        add(MZ_ICON_MOVE,     "Move",     ToolAction::Move, false,
+            "Show the translate gizmo: drag axes or planes to move.");
+        add(MZ_ICON_ROTATE,   "Rotate",   ToolAction::Rotate, false,
+            "Show the rotate gizmo: drag rings to rotate around each axis.");
+        addPlugins(1 << static_cast<int>(SelectionContext::HasSketchRegions));
+    } else if (m_selection->primaryType() == SelectionType::Plane) {
+        add(MZ_ICON_SKETCH, "Sketch", ToolAction::SketchOnFace, false,
+            "Start a sketch on the selected construction plane.");
+        add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
+            "Move the construction plane along its normal.");
+        add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
+            "Rotate the construction plane.");
+    } else if (m_selection->primaryType() == SelectionType::Axis) {
+        add(MZ_ICON_MOVE, "Move", ToolAction::Move, false,
+            "Move the construction axis.");
+    } else if (m_selection->hasSelectedSketches()) {
+        add(MZ_ICON_EDIT,     "Edit",     ToolAction::EditSketch, false,
+            "Reopen the selected sketch for editing.");
+        add(MZ_ICON_EXTRUDE,  "Extrude",  ToolAction::ExtrudeSketch, false,
+            "Extrude the sketch's regions into a solid body.");
+        add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
+            "Cut the sketch's shape out of the body beneath it.");
+        add(MZ_ICON_LATHE,    "Lathe",    ToolAction::Revolve, false,
+            "Spin the sketch profile around an axis into a solid.");
+        add(MZ_ICON_MOVE,     "Move",     ToolAction::Move, false,
+            "Show the translate gizmo: drag axes or planes to move.");
+        add(MZ_ICON_ROTATE,   "Rotate",   ToolAction::Rotate, false,
+            "Show the rotate gizmo: drag rings to rotate around each axis.");
+        addPlugins(1 << static_cast<int>(SelectionContext::HasSketches));
+    } else if (m_selection->hasSelectedFaces()) {
+        add(MZ_ICON_SKETCH,   "Sketch",  ToolAction::SketchOnFace, false,
+            "Start a sketch on the selected face.");
+        add(MZ_ICON_PUSHPULL, "Push",    ToolAction::PushPull, false,
+            "Push/pull the face along its normal.");
+        add(MZ_ICON_EXTRUDE,  "Extrude", ToolAction::ExtrudeSketch, false,
+            "Extrude the face into new material.");
+        add(MZ_ICON_SHELL,    "Shell",   ToolAction::Shell, false,
+            "Hollow the body, leaving this face open.");
+        add(MZ_ICON_REPAIR,   "Repair",  ToolAction::RemoveFace, false,
+            "Delete the face and heal the body over it.");
+        add(MZ_ICON_PROJECT,  "Project", ToolAction::ProjectSketch, false,
+            "Project a sketch onto this face along the sketch's normal, then "
+            "engrave (cut in) or emboss (raise out) to a depth.");
+        if (m_canEditDiameter) {
+            add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
+                "Set the hole or boss to an exact diameter.");
+            add(MZ_ICON_ROTATE, "Thread", ToolAction::Thread, false,
+                "Cut a helical screw thread into the picked cylindrical face — "
+                "external on a boss, internal in a hole.");
+        }
+        // "Edit Fillet / Chamfer" when the picked face was produced by one —
+        // same ownsFace() probe as the classic Face Operations section.
+        if (m_selection && m_history) {
+            TopoDS_Shape pickedFace;
+            for (const auto& e : m_selection->getSelection())
+                if (e.type == SelectionType::Face && !e.shape.IsNull()) {
+                    pickedFace = e.shape; break;
+                }
+            if (!pickedFace.IsNull())
+                for (const auto& op : m_history->operations())
+                    if (op && op->isEnabled() && op->ownsFace(pickedFace)) {
+                        if (op->typeId() == "fillet")
+                            add(MZ_ICON_FILLET, "Edit Fillet",
+                                ToolAction::EditFilletChamfer, false,
+                                "Change this fillet's radius without re-picking edges.");
+                        else if (op->typeId() == "chamfer")
+                            add(MZ_ICON_CHAMFER, "Edit Chamfer",
+                                ToolAction::EditFilletChamfer, false,
+                                "Change this chamfer's distance without re-picking edges.");
+                        else continue;
+                        break;
+                    }
+        }
+        add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
+            "Move the face (its feature follows).");
+        add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
+            "Tilt the face — or twist it with the ring about its normal.");
+        add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
+            "Scale the face about its centre (uniform or per-axis).");
+        add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
+            "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
+        addPlugins(1 << static_cast<int>(SelectionContext::HasFaces));
+    } else if (m_selection->hasSelectedBodies()) {
+        add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
+            "Show the translate gizmo: drag axes or planes to move.");
+        add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
+            "Show the rotate gizmo: drag rings to rotate around each axis.");
+        add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
+            "Scale the body: uniform, or per-axis in properties.");
+        add(MZ_ICON_MIRROR, "Mirror", ToolAction::Mirror, false,
+            "Mirror the body across a plane you'll place next.");
+        add(MZ_ICON_LATHE,  "Revolve", ToolAction::Revolve, false,
+            "Rotate the body around an axis (watch a fan spin or a hinge open).");
+        if (m_selection->selectedBodyCount() == 1)
+            add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
+                "Flatten the body into a 2D cut pattern (SVG / tiled PDF).");
+        add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
+            "Measure distance, length, or angle between picked features.");
+        // Same gating as the classic body section: MultipleBodies plugins
+        // (Union / Subtract / Intersect) only once 2+ bodies are picked.
+        {
+            int mask = 1 << static_cast<int>(SelectionContext::HasBodies);
+            if (m_selection->selectedBodyCount() >= 2)
+                mask |= 1 << static_cast<int>(SelectionContext::MultipleBodies);
+            addPlugins(mask);
+        }
+    } else if (m_selection->hasSelectedEdges()) {
+        add(MZ_ICON_FILLET,  "Fillet",  ToolAction::Fillet, false,
+            "Round the selected edges with a radius.");
+        add(MZ_ICON_CHAMFER, "Chamfer", ToolAction::Chamfer, false,
+            "Cut the selected edges to a flat bevel.");
+        if (m_canEditDiameter)
+            add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
+                "Set the hole or boss to an exact diameter.");
+        addPlugins(1 << static_cast<int>(SelectionContext::HasEdges));
+    } else {
+        // Fallback (vertex or other selection): same rule as no-selection —
+        // no bare "Sketch" (it duplicated Sketch on… > world plane).
+        add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
+            "Measure distance, length, or angle between picked features.");
+        addPlugins((1 << static_cast<int>(SelectionContext::NoSelection)) |
+                   (1 << static_cast<int>(SelectionContext::Always)));
+    }
+    return t;
+}
+
+void Toolbar::fireRailPlugin(int index) {
+    if (!m_pluginCtx) return;
+    auto& contribs = PluginRegistry::instance().toolbarContributions();
+    if (index < 0 || index >= static_cast<int>(contribs.size())) return;
+    auto& c = contribs[index];
+    if (c.toolFactory)
+        PluginRegistry::instance().activateTool(c.toolFactory(), *m_pluginCtx);
+    else if (c.action)
+        c.action(*m_pluginCtx);
 }
 
 void Toolbar::setSketchMode(bool active) {
@@ -393,9 +662,7 @@ ToolAction Toolbar::renderSketchTools() {
             "hover-charging. Off = grid + endpoint only. Click to cycle.");
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Measure", ImVec2(-1, bh(28)))) action = ToolAction::Measure;
-    tip("Measure distance / length between picked sketch elements.");
+    // Measure moved to the View menu (unified across layouts).
 
     if (!m_cameraOrtho) {
         ImGui::Separator();
@@ -449,11 +716,7 @@ ToolAction Toolbar::renderNoSelectionTools() {
     // is the fallback context vertices land in; renders nothing otherwise.
     renderAddAxisMenu();
 
-    ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), "Inspect");
-    ImGui::Separator();
-    if (ImGui::Button("Measure", ImVec2(-1, bh(30)))) action = ToolAction::Measure;
-    tip("Measure distance, length, or angle between picked features.");
+    // Measure moved to the View menu (unified across layouts).
 
     // Plugin buttons: NoSelection + Always
     int mask = (1 << static_cast<int>(SelectionContext::NoSelection))

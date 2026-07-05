@@ -1,4 +1,5 @@
 #include "ui/UiTheme.h"
+#include "ui/TouchWidgets.h" // im-touch number-pad amount fields
 #include "ui_scale.h"
 #include "touch_mode.h"
 #include "gl_common.h"
@@ -136,49 +137,6 @@ void Application::renderSettings() {
 
                 // ── General ───────────────────────────────────────────────
                 if (ImGui::BeginTabItem("General")) {
-                    ImGui::SeparatorText("Interaction");
-                    // Touch mode: large UI + touch-gesture input. The whole UI
-                    // scale and input model branch on this, baked at startup, so
-                    // it takes full effect on the next launch.
-                    if (ImGui::Checkbox("Touch mode (large UI + touch gestures)", &m_touchMode)) {
-                        changed = true;
-                    }
-                    ImGui::TextWrapped("On: finger-sized UI, long-press menus, on-screen "
-                                       "toggles, trackpad navigation. Off: the desktop "
-                                       "mouse/keyboard layout — use it with an attached "
-                                       "mouse/keyboard. Takes full effect on restart.");
-                    if (materializr::touchMode() != m_touchMode) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                            "Restart Materializr to apply the new mode.");
-                    }
-
-                    ImGui::Spacing();
-                    ImGui::SeparatorText("Appearance");
-                    // Theme selector (the View menu mirrors this).
-                    if (m_themeManager->renderSelector()) {
-                        m_themeManager->apply();
-                        changed = true;
-                    }
-
-                    ImGui::Spacing();
-                    ImGui::SeparatorText("Panels");
-                    ImGui::TextWrapped("Show or hide the docked panels to free up "
-                                       "screen space. Re-enable any of them here.");
-                    if (ImGui::Checkbox("Tools",        &m_showTools))        changed = true;
-                    if (ImGui::Checkbox("Interactions", &m_showInteractions)) changed = true;
-                    if (ImGui::Checkbox("History",      &m_showHistory))      changed = true;
-                    if (ImGui::Checkbox("Items",        &m_showItems))        changed = true;
-                    if (ImGui::Checkbox("Properties",   &m_showProperties))   changed = true;
-
-                    ImGui::Spacing();
-                    ImGui::SeparatorText("Toolbar tooltips");
-                    if (ImGui::Checkbox("Show toolbar tooltips", &m_showToolbarTooltips)) {
-                        changed = true;
-                    }
-                    ImGui::TextWrapped("Hover any toolbar button for a short description of what it does. "
-                                       "Turn off if you already know the tools and find the pop-ups distracting.");
-
-                    ImGui::Spacing();
                     ImGui::SeparatorText("Autosave");
                     if (ImGui::Checkbox("Autosave saved projects", &m_autosaveEnabled)) changed = true;
                     ImGui::TextWrapped("Periodically re-saves the project once it has been "
@@ -221,6 +179,109 @@ void Application::renderSettings() {
                                        "pre-release builds (e.g. 1.3.0-beta.1) — early access to "
                                        "the next version's features, which may be rougher. Off "
                                        "keeps you on stable releases only.");
+                    ImGui::EndTabItem();
+                }
+
+                // ── Appearance (layout, theme, visuals) ───────────────────
+                // Everything that changes how the app LOOKS, gathered from the
+                // old General / Sketch / Rendering tabs into one place.
+                if (ImGui::BeginTabItem("Appearance")) {
+                    ImGui::SeparatorText("Layout");
+                    // Interface layout is ONE mutually-exclusive choice
+                    // (UiLayout in io/Settings.h) — a dropdown so the modes
+                    // can never combine into an inconsistent state. The combo
+                    // order matches the enum's numeric values.
+                    int layoutMode = static_cast<int>(m_uiLayout);
+                    const char* layoutNames[] = { "Classic", "Modern", "im-touch" };
+                    if (ImGui::Combo("Interface", &layoutMode, layoutNames, 3)) {
+                        m_uiLayout = static_cast<UiLayout>(layoutMode);
+                        changed = true;
+                    }
+                    ImGui::TextWrapped(
+                        "Classic: the traditional docked panels and menu bar. "
+                        "Modern: a top app bar, tool rail and side panel. "
+                        "im-touch: a near-zero-chrome full-screen viewport with "
+                        "floating controls only. Switches immediately; each "
+                        "layout keeps its own arrangement.");
+
+                    ImGui::Spacing();
+                    // Touch mode is a separate axis (input model), independent of
+                    // the layout above — it swaps mouse/keyboard for finger
+                    // gestures + larger targets and takes full effect on restart.
+                    if (ImGui::Checkbox("Touch mode (large UI + touch gestures)", &m_touchMode)) {
+                        changed = true;
+                    }
+                    ImGui::TextWrapped("On: finger-sized UI, long-press menus, on-screen "
+                                       "toggles, trackpad navigation. Off: the desktop "
+                                       "mouse/keyboard layout — use it with an attached "
+                                       "mouse/keyboard. Takes full effect on restart.");
+                    if (materializr::touchMode() != m_touchMode) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                            "Restart Materializr to apply the new mode.");
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Theme");
+                    // Theme selector (the View menu mirrors this).
+                    if (m_themeManager->renderSelector()) {
+                        m_themeManager->apply();
+                        changed = true;
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Toolbar tooltips");
+                    if (ImGui::Checkbox("Show toolbar tooltips", &m_showToolbarTooltips)) {
+                        changed = true;
+                    }
+                    ImGui::TextWrapped("Hover any toolbar button for a short description of what it does. "
+                                       "Turn off if you already know the tools and find the pop-ups distracting.");
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Overlays");
+                    if (ImGui::Checkbox("Show FPS counter", &m_showFps)) {
+                        changed = true;
+                    }
+                    ImGui::TextWrapped("Show a small frames-per-second readout at the top of the "
+                                       "screen (im-touch layout). Turn off to hide it entirely.");
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Selection");
+                    // Selection line width — how boldly picked edges/bodies are outlined.
+                    if (ImGui::SliderFloat("Selection line width", &m_selectionLineWidth, 1.0f, 10.0f, "%.1f px")) {
+                        if (m_selectionLineWidth < 1.0f) m_selectionLineWidth = 1.0f;
+                        if (m_selectionLineWidth > 10.0f) m_selectionLineWidth = 10.0f;
+                        applyRenderingSettings();
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip("Thickness of the highlight drawn over selected edges and bodies. "
+                                          "Increase to make selected edges easier to see.");
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Sketch");
+                    // Sketch line width — how boldly sketch geometry reads over the grid.
+                    if (ImGui::SliderFloat("Sketch line width", &m_sketchLineWidth, 1.0f, 6.0f, "%.1f px")) {
+                        if (m_sketchLineWidth < 1.0f) m_sketchLineWidth = 1.0f;
+                        if (m_sketchLineWidth > 6.0f) m_sketchLineWidth = 6.0f;
+                        applyRenderingSettings();
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip("Thickness of sketch lines, circles and arcs (and the vertex dots). "
+                                          "Increase if sketch geometry is too thin or blends into the grid.");
+                    if (ImGui::SliderFloat("Grid opacity", &m_sketchGridOpacity,
+                                           0.0f, 1.0f, "%.2f")) {
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip(
+                        "Opacity of the sketch-plane grid. Lower it if the grid "
+                        "competes with your sketch lines; 0 hides it.");
+                    if (ImGui::SliderFloat("Grid thickness", &m_sketchGridThickness,
+                                           0.1f, 2.0f, "%.2fx")) {
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip(
+                        "Sketch grid line width, as a multiplier of the default "
+                        "(1.0x). Raise it for a bolder grid, lower it for a finer "
+                        "one. Only affects the sketch-plane grid, not the ground.");
                     ImGui::EndTabItem();
                 }
 
@@ -286,25 +347,6 @@ void Application::renderSettings() {
                             "snap rays (15° is the classic CAD default); higher "
                             "= only the cardinal angles; Off = free angles.");
                     }
-
-                    ImGui::Spacing();
-                    ImGui::SeparatorText("Appearance");
-                    if (ImGui::SliderFloat("Grid opacity", &m_sketchGridOpacity,
-                                           0.0f, 1.0f, "%.2f")) {
-                        changed = true;
-                    }
-                    ImGui::SetItemTooltip(
-                        "Opacity of the sketch-plane grid. Lower it if the grid "
-                        "competes with your sketch lines; 0 hides it.");
-
-                    if (ImGui::SliderFloat("Grid thickness", &m_sketchGridThickness,
-                                           0.1f, 2.0f, "%.2fx")) {
-                        changed = true;
-                    }
-                    ImGui::SetItemTooltip(
-                        "Sketch grid line width, as a multiplier of the default "
-                        "(1.0x). Raise it for a bolder grid, lower it for a finer "
-                        "one. Only affects the sketch-plane grid, not the ground.");
 
                     ImGui::Spacing();
                     if (ImGui::Checkbox("Show level toggle in sketch toolbar",
@@ -418,6 +460,17 @@ void Application::renderSettings() {
                         if (ImGui::SliderFloat("Pan##touchSens",   &m_touchPanSens,   0.25f, 3.0f, "%.2fx")) changed = true;
                         if (ImGui::SliderFloat("Zoom##touchSens",  &m_touchZoomSens,  0.25f, 3.0f, "%.2fx")) changed = true;
                     }
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText("Panels (Materializr classic UI)");
+                    ImGui::TextWrapped("Show or hide the classic interface's docked "
+                                       "panels. Applies to the classic UI only — the "
+                                       "im-touch shell arranges its own panels.");
+                    if (ImGui::Checkbox("Tools",        &m_showTools))        changed = true;
+                    if (ImGui::Checkbox("Interactions", &m_showInteractions)) changed = true;
+                    if (ImGui::Checkbox("History",      &m_showHistory))      changed = true;
+                    if (ImGui::Checkbox("Items",        &m_showItems))        changed = true;
+                    if (ImGui::Checkbox("Properties",   &m_showProperties))   changed = true;
                     ImGui::EndTabItem();
                 }
 
@@ -466,28 +519,6 @@ void Application::renderSettings() {
                     ImGui::SetItemTooltip("Higher quality uses more polygons, smoothing curves and holes.");
 
                     ImGui::Spacing();
-                    ImGui::SeparatorText("Selection");
-                    // Selection line width — how boldly picked edges/bodies are outlined.
-                    if (ImGui::SliderFloat("Selection line width", &m_selectionLineWidth, 1.0f, 10.0f, "%.1f px")) {
-                        if (m_selectionLineWidth < 1.0f) m_selectionLineWidth = 1.0f;
-                        if (m_selectionLineWidth > 10.0f) m_selectionLineWidth = 10.0f;
-                        applyRenderingSettings();
-                        changed = true;
-                    }
-                    ImGui::SetItemTooltip("Thickness of the highlight drawn over selected edges and bodies. "
-                                          "Increase to make selected edges easier to see.");
-
-                    ImGui::SeparatorText("Sketch");
-                    // Sketch line width — how boldly sketch geometry reads over the grid.
-                    if (ImGui::SliderFloat("Sketch line width", &m_sketchLineWidth, 1.0f, 6.0f, "%.1f px")) {
-                        if (m_sketchLineWidth < 1.0f) m_sketchLineWidth = 1.0f;
-                        if (m_sketchLineWidth > 6.0f) m_sketchLineWidth = 6.0f;
-                        applyRenderingSettings();
-                        changed = true;
-                    }
-                    ImGui::SetItemTooltip("Thickness of sketch lines, circles and arcs (and the vertex dots). "
-                                          "Increase if sketch geometry is too thin or blends into the grid.");
-
                     ImGui::SeparatorText("Imported meshes (STL)");
                     // Wireframe of imported mesh bodies — toggling applies live by
                     // re-running just the mesh bodies' edge rebuild.
@@ -852,14 +883,28 @@ void Application::renderResizeCylindricalPanel() {
     double*  val = m_resizeCylEditBottom ? &m_resizeCylNewBottomDiameter
                                          : &m_resizeCylNewTopDiameter;
 
-    ImGui::SetNextItemWidth(140);
-    bool entered = ImGui::InputText("##rcyldia", buf, 32,
-                                    ImGuiInputTextFlags_EnterReturnsTrue |
-                                    ImGuiInputTextFlags_CharsDecimal);
-
-    double parsed = *val; // parseFinite: garbage/inf keeps the previous value
-    bool changed = materializr::parseFinite(buf, parsed) &&
-                   std::abs(parsed - *val) > 0.001;
+    bool entered = false;
+    bool changed = false;
+    double parsed = *val;
+    if (imTouchLayout()) {
+        // im-touch: number-pad amount field — no InputText, no native
+        // keyboard (which froze the app on iOS).
+        double v = *val;
+        if (touchui::amountField("rcylAmt", nullptr, &v, "mm", 2,
+                                 /*allowSign=*/false)) {
+            parsed = v;
+            changed = std::abs(parsed - *val) > 0.001;
+            std::snprintf(buf, 32, "%.2f", v);
+        }
+    } else {
+        ImGui::SetNextItemWidth(140);
+        entered = ImGui::InputText("##rcyldia", buf, 32,
+                                   ImGuiInputTextFlags_EnterReturnsTrue |
+                                   ImGuiInputTextFlags_CharsDecimal);
+        // parseFinite: garbage/inf keeps the previous value
+        changed = materializr::parseFinite(buf, parsed) &&
+                  std::abs(parsed - *val) > 0.001;
+    }
     if (changed) {
         *val = parsed;
         if (both) {
@@ -885,12 +930,14 @@ void Application::renderResizeCylindricalPanel() {
                            "a hole can't exceed the surrounding wall.");
     }
 
-    ImGui::Spacing();
-    ImGui::BeginDisabled(m_resizeCylPreviewFailed);
-    if (ImGui::Button(materializr::btnConfirm(), ImVec2(115, 0))) commitResizeCylindrical();
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button(materializr::btnCancel(),    ImVec2(115, 0))) cancelResizeCylindrical();
+    if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
+        ImGui::Spacing();
+        ImGui::BeginDisabled(m_resizeCylPreviewFailed);
+        if (ImGui::Button(materializr::btnConfirm(), ImVec2(115, 0))) commitResizeCylindrical();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(materializr::btnCancel(),    ImVec2(115, 0))) cancelResizeCylindrical();
+    }
 
     ImGui::End();
 }
@@ -1239,6 +1286,15 @@ void Application::renderSketchPatternPopup() {
                           "%.2f", m_sketchPatternDistance);
             changed = true;
         }
+        if (imTouchLayout() &&
+            touchui::amountField("spDistAmt", nullptr,
+                                 &m_sketchPatternDistance, "mm", 2,
+                                 /*allowSign=*/false, 0.1f, 100.0f)) {
+            std::snprintf(m_sketchPatternDistanceBuf,
+                          sizeof(m_sketchPatternDistanceBuf),
+                          "%.2f", m_sketchPatternDistance);
+            changed = true;
+        }
     } else {
         ImGui::Text("Sweep"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
@@ -1253,6 +1309,15 @@ void Application::renderSketchPatternPopup() {
         }
         if (ImGui::SliderFloat("##spangslider", &m_sketchPatternAngle,
                                5.0f, 360.0f, "%.1f°")) {
+            std::snprintf(m_sketchPatternAngleBuf,
+                          sizeof(m_sketchPatternAngleBuf),
+                          "%.1f", m_sketchPatternAngle);
+            changed = true;
+        }
+        if (imTouchLayout() &&
+            touchui::amountField("spAngAmt", nullptr,
+                                 &m_sketchPatternAngle, "deg", 1,
+                                 /*allowSign=*/false, 5.0f, 360.0f)) {
             std::snprintf(m_sketchPatternAngleBuf,
                           sizeof(m_sketchPatternAngleBuf),
                           "%.1f", m_sketchPatternAngle);
@@ -1395,6 +1460,13 @@ void Application::renderPatternPanel() {
                           "%.2f", m_patternDistance);
             distChanged = true;
         }
+        if (imTouchLayout() &&
+            touchui::amountField("patDistAmt", nullptr, &m_patternDistance,
+                                 "mm", 2, /*allowSign=*/false, 0.1f, 100.0f)) {
+            std::snprintf(m_patternDistanceBuf, sizeof(m_patternDistanceBuf),
+                          "%.2f", m_patternDistance);
+            distChanged = true;
+        }
     } else {
         ImGui::Text("Sweep"); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
@@ -1408,6 +1480,13 @@ void Application::renderPatternPanel() {
             m_patternAngle = parsed; distChanged = true;
         }
         if (ImGui::SliderFloat("##patangleslider", &m_patternAngle, 5.0f, 360.0f, "%.1f°")) {
+            std::snprintf(m_patternAngleBuf, sizeof(m_patternAngleBuf),
+                          "%.1f", m_patternAngle);
+            distChanged = true;
+        }
+        if (imTouchLayout() &&
+            touchui::amountField("patAngAmt", nullptr, &m_patternAngle,
+                                 "deg", 1, /*allowSign=*/false, 5.0f, 360.0f)) {
             std::snprintf(m_patternAngleBuf, sizeof(m_patternAngleBuf),
                           "%.1f", m_patternAngle);
             distChanged = true;
@@ -1440,11 +1519,14 @@ void Application::renderPatternPanel() {
         }
     }
 
-    // ---- Apply / Cancel ----
-    ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
-    ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    // ---- Apply / Cancel ---- (im-touch hosts them as corner ✓/✗ FABs)
+    bool applyClicked = false, cancelClicked = false;
+    if (!imTouchActionCorner()) {
+        ImGui::Separator();
+        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (axisChanged || countChanged || distChanged) updatePattern();
@@ -1517,6 +1599,13 @@ void Application::renderThreadPanel() {
                 m_threadRadius * 2.0, m_threadLength);
     ImGui::Separator();
 
+    if (imTouchLayout()) {
+        // im-touch: number-pad amount fields (native keyboard froze iOS).
+        if (touchui::amountField("thrPitchAmt", "Pitch", &m_threadPitch,
+                                 "mm", 2, /*allowSign=*/false, 0.1f, 50.0f))
+            std::snprintf(m_threadPitchBuf, sizeof(m_threadPitchBuf), "%.2f",
+                          m_threadPitch);
+    } else {
     ImGui::Text("Pitch"); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
@@ -1526,7 +1615,14 @@ void Application::renderThreadPanel() {
             m_threadPitch = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
+    }
 
+    if (imTouchLayout()) {
+        if (touchui::amountField("thrDepthAmt", "Depth", &m_threadDepth,
+                                 "mm", 2, /*allowSign=*/false, 0.05f, 50.0f))
+            std::snprintf(m_threadDepthBuf, sizeof(m_threadDepthBuf), "%.2f",
+                          m_threadDepth);
+    } else {
     ImGui::Text("Depth"); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
@@ -1536,6 +1632,7 @@ void Application::renderThreadPanel() {
             m_threadDepth = v;
     }
     ImGui::SameLine(); ImGui::Text("mm");
+    }
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
     // beyond ~45% of the radius it eats the core. Clamp + say so.
     {
@@ -1565,10 +1662,14 @@ void Application::renderThreadPanel() {
                        "refused. To change a threaded part: delete the "
                        "Thread step in History, edit, then re-thread.");
 
-    ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
-    ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    // Apply / Cancel — im-touch hosts them as corner ✓/✗ FABs instead.
+    bool applyClicked = false, cancelClicked = false;
+    if (!imTouchActionCorner()) {
+        ImGui::Separator();
+        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (applyClicked && turns <= 300.0) {
@@ -1756,20 +1857,37 @@ void Application::applySketchMove() {
 }
 
 void Application::renderSnapWidget() {
-    // Tucked just under the ViewCube. We borrow the ViewCube's window-anchor
-    // arithmetic (top-right of the viewport window) so the widget sits in a
-    // consistent spot regardless of dock layout.
+    // im-touch hosts snap in its top button cluster instead (next to Multi)
+    // — no corner widget there, and no hover latch keeping viewport picks
+    // away from a square that isn't drawn.
+    if (imTouchLayout()) {
+        m_snapWidgetHovered = false;
+        return;
+    }
+    // The snap square tucks just under the ViewCube. Only the cases where the
+    // cube itself moved need the cube-tracking anchor: TOUCH mode enlarges the
+    // cube (1.5x) and im-touch-LITE drops it below the floating button cluster —
+    // there the widget follows the cube's cached bottom, scaled to match. In
+    // classic and modern on desktop the cube is at its default size and spot, so
+    // keep the ORIGINAL fixed tuck (the position Steve is used to) unchanged.
     ImVec2 wp = ImGui::GetWindowPos();
     ImVec2 ws = ImGui::GetWindowSize();
-    const float pad     = 10.0f;
-    // Square shrunk ~25 % from its original 38 px (font stays the same — it
-    // was over-padded before). +20 px nudge right keeps it tucked under the
-    // ViewCube's accessory arc.
-    const float size    = 28.0f;
-    const float widgetR = 38.0f;
-    const float xNudge  = 20.0f;
-    ImVec2 widgetPos(wp.x + ws.x - pad - widgetR - 26.0f - size * 0.5f + xNudge,
-                     wp.y + pad + widgetR * 2.0f + 96.0f);
+    const bool anchorToCube =
+        materializr::touchMode() || imTouchLayout();
+    float  size;
+    ImVec2 widgetPos;
+    if (anchorToCube) {
+        const float tScale = materializr::touchMode() ? 1.5f : 1.0f;
+        size = 28.0f * tScale;
+        widgetPos = ImVec2(m_viewCube->widgetCenterX() - size * 0.5f,
+                           m_viewCube->widgetBottomY() + 10.0f * tScale);
+    } else {
+        const float pad = 10.0f, widgetR = 38.0f, xNudge = 20.0f;
+        size = 28.0f;
+        widgetPos = ImVec2(
+            wp.x + ws.x - pad - widgetR - 26.0f - size * 0.5f + xNudge,
+            wp.y + pad + widgetR * 2.0f + 96.0f);
+    }
     ImVec2 widgetEnd(widgetPos.x + size, widgetPos.y + size);
 
     // Manual hit-test — same pattern the ViewCube uses to anchor in a corner
@@ -1825,6 +1943,12 @@ void Application::renderSnapWidget() {
 
     // Settings popup — checkbox + radio buttons. Each change saves to the
     // settings file immediately so the choice survives the next launch.
+    renderSnapSettingsPopup();
+
+    ImGui::PopID();
+}
+
+void Application::renderSnapSettingsPopup() {
     if (ImGui::BeginPopup("SnapSettings")) {
         ImGui::TextColored(materializr::accentText(), "Snap & Grid");
         ImGui::Separator();
@@ -1856,8 +1980,6 @@ void Application::renderSnapWidget() {
         ImGui::TextDisabled("Settings persist across launches.");
         ImGui::EndPopup();
     }
-
-    ImGui::PopID();
 }
 
 void Application::renderConstructionPlanePanel() {
@@ -3105,35 +3227,35 @@ void Application::renderPrimitivePopup() {
                  ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::TextColored(materializr::accentText(), "Dimensions");
+    // im-touch: number-pad amount fields (the native keyboard froze iOS);
+    // other layouts keep the typed InputDouble spinners.
+    auto dimField = [&](const char* label, double* v) {
+        if (imTouchLayout())
+            touchui::amountField(label, label, v, "mm", 3);
+        else
+            ImGui::InputDouble(label, v, 0.1, 1.0, "%.3f");
+    };
     switch (k) {
     case 0: // Box
-        ImGui::InputDouble("Width (X)",  &m_primitivePopupExtents[0],
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Depth (Y)",  &m_primitivePopupExtents[1],
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height (Z)", &m_primitivePopupExtents[2],
-                           0.1, 1.0, "%.3f");
+        dimField("Width (X)",  &m_primitivePopupExtents[0]);
+        dimField("Depth (Y)",  &m_primitivePopupExtents[1]);
+        dimField("Height (Z)", &m_primitivePopupExtents[2]);
         break;
     case 1: // Cylinder
-        ImGui::InputDouble("Radius", &m_primitivePopupRadius, 0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height", &m_primitivePopupHeight, 0.1, 1.0, "%.3f");
+        dimField("Radius", &m_primitivePopupRadius);
+        dimField("Height", &m_primitivePopupHeight);
         break;
     case 2: // Sphere
-        ImGui::InputDouble("Radius", &m_primitivePopupRadius, 0.1, 1.0, "%.3f");
+        dimField("Radius", &m_primitivePopupRadius);
         break;
     case 3: // Cone
-        ImGui::InputDouble("Bottom radius", &m_primitivePopupRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Top radius",    &m_primitivePopupTopRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Height",        &m_primitivePopupHeight,
-                           0.1, 1.0, "%.3f");
+        dimField("Bottom radius", &m_primitivePopupRadius);
+        dimField("Top radius",    &m_primitivePopupTopRadius);
+        dimField("Height",        &m_primitivePopupHeight);
         break;
     case 4: // Torus
-        ImGui::InputDouble("Major radius",  &m_primitivePopupRadius,
-                           0.1, 1.0, "%.3f");
-        ImGui::InputDouble("Minor radius",  &m_primitivePopupMinorRadius,
-                           0.1, 1.0, "%.3f");
+        dimField("Major radius",  &m_primitivePopupRadius);
+        dimField("Minor radius",  &m_primitivePopupMinorRadius);
         ImGui::TextDisabled("Major must exceed minor — equal radii are a "
                             "degenerate self-touching torus.");
         break;

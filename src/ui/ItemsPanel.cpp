@@ -30,8 +30,17 @@ void ItemsPanel::setHistory(History* hist) {
 }
 
 bool ItemsPanel::render() {
-    m_bodyDeleted = false;
     ImGui::Begin("Items", nullptr, ImGuiWindowFlags_NoCollapse);
+    const bool changed = renderContent();
+    ImGui::End();
+    return changed;
+}
+
+// Panel body without the window wrapper — the desktop render() hosts it in
+// the docked "Items" window, the im-touch shell hosts it inside its right
+// panel. Same return contract as render().
+bool ItemsPanel::renderContent() {
+    m_bodyDeleted = false;
     // AllowWhenBlockedByActiveItem: a held body row is the "active item", which
     // would otherwise make IsWindowHovered() report false — exactly during the
     // long-press we need to detect to arm its context menu.
@@ -40,7 +49,6 @@ bool ItemsPanel::render() {
 
     if (!m_document) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No document loaded.");
-        ImGui::End();
         return false;
     }
 
@@ -58,20 +66,33 @@ bool ItemsPanel::render() {
     ImGui::TextColored(materializr::accentText(), "Filter");
     ImGui::Separator();
 
-    // Touch mode wraps the third toggle to a second row so the filter strip needs
-    // only the width of two buttons (the 2x font otherwise pushes the whole right
-    // panel wide). Desktop keeps all three on one line.
-    const bool filterWrap = materializr::touchMode();
-    if (ImGui::Button(m_showBodies ? "[Bodies]" : " Bodies ")) {
-        m_showBodies = !m_showBodies;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(m_showSketches ? "[Sketches]" : " Sketches ")) {
-        m_showSketches = !m_showSketches;
-    }
-    if (!filterWrap) ImGui::SameLine();
-    if (ImGui::Button(m_showPlanes ? "[Construction]" : " Construction ")) {
-        m_showPlanes = !m_showPlanes;
+    // The toggles wrap to fit whatever width the host panel has — each one
+    // stays on the current row only if it actually fits, so a narrow panel
+    // (the touch shell's is user-resizable) stacks them instead of pushing
+    // the panel wide. The width probe mirrors Button sizing (label +
+    // 2×FramePadding.x); the [x] on/off states are same-width by design.
+    {
+        const ImGuiStyle& st = ImGui::GetStyle();
+        // Measure from the PREVIOUS item's right edge (screen space) — after an
+        // item the cursor is already at the next line's start, so CursorPosX
+        // would always say "fits".
+        auto fits = [&](const char* label) {
+            const float w = ImGui::CalcTextSize(label).x + st.FramePadding.x * 2.0f;
+            const float rightEdge = ImGui::GetWindowPos().x +
+                                    ImGui::GetWindowContentRegionMax().x;
+            return ImGui::GetItemRectMax().x + st.ItemSpacing.x + w <= rightEdge;
+        };
+        if (ImGui::Button(m_showBodies ? "[Bodies]" : " Bodies ")) {
+            m_showBodies = !m_showBodies;
+        }
+        if (fits("[Sketches]")) ImGui::SameLine();
+        if (ImGui::Button(m_showSketches ? "[Sketches]" : " Sketches ")) {
+            m_showSketches = !m_showSketches;
+        }
+        if (fits("[Construction]")) ImGui::SameLine();
+        if (ImGui::Button(m_showPlanes ? "[Construction]" : " Construction ")) {
+            m_showPlanes = !m_showPlanes;
+        }
     }
 
     ImGui::Separator();
@@ -110,9 +131,13 @@ bool ItemsPanel::render() {
             ImGui::SetNextItemOpen(wantExpanded, ImGuiCond_Always);
 
             std::string fname = m_document->getFolderName(folderId);
-            // Reserve room for the colour swatch on the right.
+            // Reserve room for the colour swatch on the right. The gap must be
+            // the style's ItemSpacing.x — that's what SameLine() actually
+            // advances by — or the swatch overhangs the panel edge under a
+            // theme with wider spacing (the im-touch shell clipped it).
             float swatchW = ImGui::GetFrameHeight();
-            float nameW = ImGui::GetContentRegionAvail().x - swatchW - 6.0f;
+            float nameW = ImGui::GetContentRegionAvail().x - swatchW -
+                          ImGui::GetStyle().ItemSpacing.x;
             bool open = ImGui::TreeNodeEx(("##fnode" + std::to_string(folderId)).c_str(),
                                           fflags | (wantExpanded ? ImGuiTreeNodeFlags_DefaultOpen : 0));
             if (open != wantExpanded) {
@@ -560,7 +585,6 @@ bool ItemsPanel::render() {
         }
     }
 
-    ImGui::End();
     return m_bodyDeleted || colorChanged;
 }
 
@@ -598,8 +622,11 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
         return true;
     }
 
+    // Gap = ItemSpacing.x (what SameLine() advances by), not a hardcoded 6 —
+    // else the swatch overhangs the right edge under wider-spacing themes.
     float swatchW = ImGui::GetFrameHeight();
-    float nameW = ImGui::GetContentRegionAvail().x - swatchW - 6.0f;
+    float nameW = ImGui::GetContentRegionAvail().x - swatchW -
+                  ImGui::GetStyle().ItemSpacing.x;
     std::string name = m_document->getBodyName(id);
     // Auto-scroll into view ONLY when this is the lone selected body and it's
     // newly selected (typically a viewport pick changing selection). With

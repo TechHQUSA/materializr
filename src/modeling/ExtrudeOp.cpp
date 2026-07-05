@@ -1,4 +1,7 @@
 #include "ExtrudeOp.h"
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <sstream>
 #include "Sketch.h"
 #include <cstdio>
 #include <cstdlib>
@@ -255,27 +258,52 @@ bool ExtrudeOp::undo(Document& doc) {
 }
 
 std::string ExtrudeOp::serializeParams() const {
-    // Profile geometry is NOT stored — it is re-derived from the source sketch
-    // on reload. Only ops with a sketch source (m_sketchId >= 0) can rehydrate;
-    // a face-driven extrude serialises its scalars but declines rehydration.
+    // Sketch-sourced profiles are re-derived from the sketch on reload. A
+    // face-driven extrude has no sketch to rebuild from, so its picked
+    // profile persists as an ASCII BREP blob (length-prefixed, LAST — the
+    // PARAMS_LEN container is binary-safe) so the step still reloads
+    // editable instead of freezing the project.
     char buf[160];
     std::snprintf(buf, sizeof(buf),
         "sketch=%d;dist=%.6f;dir=%d;mode=%d;target=%d;draft=%.6f",
         m_sketchId, m_distance, static_cast<int>(m_direction),
         static_cast<int>(m_mode), m_targetBodyId, m_draftAngle);
-    return buf;
+    std::string blob = buf;
+    if (m_sketchId < 0 && !m_profile.IsNull()) {
+        std::ostringstream os;
+        BRepTools::Write(m_profile, os);
+        const std::string brep = os.str();
+        blob += ";brep=" + std::to_string(brep.size()) + ":" + brep;
+    }
+    return blob;
 }
 
 bool ExtrudeOp::deserializeParams(const std::string& blob) {
     bool any = false;
     size_t pos = 0;
-    while (pos < blob.size()) {
-        size_t eq = blob.find('=', pos);
+    // Optional trailing BREP blob (face-driven profile): "brep=<len>:<raw>".
+    size_t bkey = blob.find(";brep=");
+    std::string scalars = blob;
+    if (bkey != std::string::npos) {
+        size_t colon = blob.find(':', bkey + 6);
+        if (colon != std::string::npos) {
+            size_t n = static_cast<size_t>(
+                std::atoll(blob.substr(bkey + 6, colon - bkey - 6).c_str()));
+            if (colon + 1 + n <= blob.size()) {
+                std::istringstream is(blob.substr(colon + 1, n));
+                BRep_Builder bb;
+                try { BRepTools::Read(m_profile, is, bb); } catch (...) {}
+            }
+        }
+        scalars = blob.substr(0, bkey);
+    }
+    while (pos < scalars.size()) {
+        size_t eq = scalars.find('=', pos);
         if (eq == std::string::npos) break;
-        size_t end = blob.find(';', eq);
-        if (end == std::string::npos) end = blob.size();
-        std::string key = blob.substr(pos, eq - pos);
-        std::string val = blob.substr(eq + 1, end - eq - 1);
+        size_t end = scalars.find(';', eq);
+        if (end == std::string::npos) end = scalars.size();
+        std::string key = scalars.substr(pos, eq - pos);
+        std::string val = scalars.substr(eq + 1, end - eq - 1);
         double d = std::atof(val.c_str());
         int    i = std::atoi(val.c_str());
         if      (key == "sketch") { m_sketchId = i; any = true; }
@@ -290,11 +318,15 @@ bool ExtrudeOp::deserializeParams(const std::string& blob) {
 }
 
 bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
-    // Re-derive the profile from the persistent source sketch. Without a sketch
-    // source (e.g. a face-driven extrude) there's nothing to rebuild from, so
-    // decline and let the loader fall back to a baked ReplayOp.
-    if (m_sketchId < 0) return false;
-    if (!rebuildProfileFromSketch(doc)) return false;
+    // Re-derive the profile from the persistent source sketch; a face-driven
+    // extrude instead reloads the picked profile from its params BREP blob
+    // (a geometric snapshot — editable scalars, replayable, though it won't
+    // follow an upstream edit of the source face).
+    if (m_sketchId >= 0) {
+        if (!rebuildProfileFromSketch(doc)) return false;
+    } else {
+        if (m_profile.IsNull()) return false;   // pre-fix save: no blob
+    }
 
     if (m_mode == ExtrudeMode::NewBody) {
         // The body this step created is the extruded solid; adopt its id so

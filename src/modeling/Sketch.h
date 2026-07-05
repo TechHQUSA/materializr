@@ -87,6 +87,11 @@ public:
 
     // Spline and polygon creation
     int addSpline(const std::vector<int>& controlPointIds);
+    // Incremental spline drawing (the tool commits the spline at 2 points and
+    // GROWS it per click, so each undo snapshot holds the spline-so-far and
+    // undo shrinks it one point at a time instead of orphaning dots).
+    bool appendSplineControlPoint(int splineId, int pointId);
+    bool popSplineControlPoint(int splineId);   // false if <2 would remain
     int addPolygon(int centerPtId, double radius, int sides, double rotationRad = 0.0);
 
     // Element access

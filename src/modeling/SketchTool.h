@@ -384,6 +384,7 @@ private:
     std::set<int> m_selectedSplines;
 
     std::vector<int> m_splinePoints; // temp storage during spline creation
+    int m_activeSplineId = -1;       // committed-and-growing spline element
 
 public:
     // Control points of the spline currently being placed (live preview).

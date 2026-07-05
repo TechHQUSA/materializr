@@ -387,3 +387,33 @@ TEST(ChamferTest, ChamferViaHistory) {
     const TopoDS_Shape& restoredShape = doc.getBody(boxId);
     EXPECT_TRUE(restoredShape.IsEqual(originalShape));
 }
+
+#include "modeling/PlaneTransformOp.h"
+#include "modeling/AxisTransformOp.h"
+#include <gp_Ax3.hxx>
+
+// Plane/axis gizmo transforms must round-trip their params — without this a
+// BRAND-NEW file containing one plane move reloaded with frozen steps and the
+// misleading "restored from an older save" amber banner (Steve's mug).
+TEST(TransformOps, PlaneAndAxisTransformParamsRoundTrip) {
+    PlaneTransformOp::Entry pe;
+    pe.planeId = 7;
+    pe.before = gp_Pln(gp_Ax3(gp_Pnt(1, 2, 3), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)));
+    pe.after  = gp_Pln(gp_Ax3(gp_Pnt(4, 5, 6), gp_Dir(0, 1, 0), gp_Dir(0, 0, 1)));
+    PlaneTransformOp p("Rotate Plane", {pe});
+    PlaneTransformOp p2;
+    ASSERT_TRUE(p2.deserializeParams(p.serializeParams()));
+    EXPECT_EQ(p2.name(), "Rotate Plane");
+    Operation::ReloadState rs;
+    Document dummy;
+    EXPECT_TRUE(p2.rehydrateFromReload(rs, dummy)) << "must come back EDITABLE";
+
+    AxisTransformOp::Entry ae;
+    ae.axisId = 3;
+    ae.beforeOrigin = gp_Pnt(0, 0, 0); ae.beforeDir = gp_Dir(0, 0, 1);
+    ae.afterOrigin  = gp_Pnt(9, 8, 7); ae.afterDir  = gp_Dir(1, 0, 0);
+    AxisTransformOp a("Move Axis", {ae});
+    AxisTransformOp a2;
+    ASSERT_TRUE(a2.deserializeParams(a.serializeParams()));
+    EXPECT_TRUE(a2.rehydrateFromReload(rs, dummy));
+}

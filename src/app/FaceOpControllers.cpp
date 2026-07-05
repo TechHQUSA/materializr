@@ -1,8 +1,10 @@
+#include "ui/StepperRow.h"
 #include "FaceOpControllers.h"
 #include "UserAxes.h"
 #include "../core/Document.h"
 #include "../core/SelectionManager.h"
 #include "../core/NumParse.h"
+#include "../ui/TouchWidgets.h" // im-touch number-pad amount fields
 #include "../modeling/ShellOp.h"
 #include "../modeling/TaperOp.h"
 #include "../modeling/ScaleFaceOp.h"
@@ -58,6 +60,15 @@ std::unique_ptr<Operation> ShellController::buildOp(const IopContext&) {
 void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::TextDisabled("Hollows the body, opening a face.");
 
+    if (ctx.cornerCommitUi) {
+        // im-touch: number-pad amount field — no InputText, no native
+        // keyboard (which froze the app on iOS).
+        if (touchui::amountField("shellAmt", nullptr, &m_thickness, "mm", 2,
+                                 /*allowSign=*/false, 0.1f, 20.0f)) {
+            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.2f", m_thickness);
+            changed = true;
+        }
+    } else {
     if (m_inputFocus) {
         ImGui::SetKeyboardFocusHere();
         m_inputFocus = false;
@@ -80,9 +91,10 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     }
     ImGui::SameLine();
     ImGui::Text("mm");
+    }
 
-    if (ImGui::SliderFloat("##shellSlider", &m_thickness, 0.1f, 20.0f,
-                           "%.2f mm")) {
+    if (materializr::stepperRow("shellStep", &m_thickness,
+                                /*allowNegative=*/false, 0.1f, 20.0f)) {
         // Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a
         // free-floating 3.47 mm slider value is just noise.
         m_thickness = std::round(m_thickness * 10.0f) / 10.0f;
@@ -240,7 +252,7 @@ std::unique_ptr<Operation> TaperController::buildOp(const IopContext& ctx) {
     return op;
 }
 
-void TaperController::panelBody(const IopContext&, bool& changed) {
+void TaperController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::TextDisabled("%zu face(s) tilt about the body's base.",
                         m_faces.size());
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
@@ -270,7 +282,13 @@ void TaperController::panelBody(const IopContext&, bool& changed) {
         ImGui::PopTextWrapPos();
     }
 
-    if (ImGui::SliderFloat("Angle", &m_angle, -45.0f, 45.0f, "%.1f deg"))
+    ImGui::TextDisabled("Angle: %.1f deg", m_angle);
+    if (materializr::stepperRow("taperStep", &m_angle,
+                                /*allowNegative=*/true, -45.0f, 45.0f))
+        changed = true;
+    if (ctx.cornerCommitUi &&
+        touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,
+                             /*allowSign=*/true, -45.0f, 45.0f))
         changed = true;
 
     ImGui::Text("Pull axis");
@@ -539,10 +557,15 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     ImGui::SameLine();
     if (ImGui::RadioButton("Emboss", &m_mode, 1)) changed = true;
 
-    if (ImGui::SliderFloat("##projDepth", &m_depth, 0.1f, 10.0f,
-                           "%.2f mm")) {
+    ImGui::TextDisabled("Depth: %.2f mm", m_depth);
+    if (materializr::stepperRow("projDepthStep", &m_depth,
+                                /*allowNegative=*/false, 0.1f, 10.0f)) {
         changed = true;
     }
+    if (ctx.cornerCommitUi &&
+        touchui::amountField("projAmt", nullptr, &m_depth, "mm", 2,
+                             /*allowSign=*/false, 0.1f, 10.0f))
+        changed = true;
 
     if (!previewOk()) {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
@@ -686,7 +709,7 @@ void ScaleFaceController::applyHandleDrag(int axis, float dPct,
     update(ctx);
 }
 
-void ScaleFaceController::panelBody(const IopContext&, bool& changed) {
+void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
     ImGui::TextDisabled("Scale this face; the body re-slopes to follow. "
                         "Full length = sides follow from the base; shorter "
@@ -711,7 +734,16 @@ void ScaleFaceController::panelBody(const IopContext&, bool& changed) {
         changed = true;
     }
     if (m_uniform) {
-        if (ImGui::SliderFloat("Scale", &m_pctU, 5.0f, 200.0f, "%.0f %%")) {
+        ImGui::TextDisabled("Scale: %.0f %%", m_pctU);
+        if (materializr::stepperRow("scaleStep", &m_pctU,
+                                    /*allowNegative=*/true, 5.0f, 200.0f,
+                                    /*zeroValue=*/100.0f)) {
+            m_pctV = m_pctU;
+            changed = true;
+        }
+        if (ctx.cornerCommitUi &&
+            touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,
+                                 /*allowSign=*/false, 5.0f, 200.0f)) {
             m_pctV = m_pctU;
             changed = true;
         }
@@ -723,15 +755,35 @@ void ScaleFaceController::panelBody(const IopContext&, bool& changed) {
         const ImVec4 redCol (0.92f, 0.35f, 0.35f, 1.0f); // matches the red arrow
         const ImVec4 blueCol(0.35f, 0.59f, 0.92f, 1.0f); // matches the blue arrow
         ImGui::TextColored(redCol, "Red line");
-        if (ImGui::SliderFloat("##scaleU", &m_pctU, 5.0f, 200.0f, "%.0f %%"))
+        ImGui::SameLine(); ImGui::TextDisabled("%.0f %%", m_pctU);
+        if (materializr::stepperRow("scaleUStep", &m_pctU,
+                                    /*allowNegative=*/true, 5.0f, 200.0f,
+                                    /*zeroValue=*/100.0f))
+            changed = true;
+        if (ctx.cornerCommitUi &&
+            touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,
+                                 /*allowSign=*/false, 5.0f, 200.0f))
             changed = true;
         ImGui::TextColored(blueCol, "Blue line");
-        if (ImGui::SliderFloat("##scaleV", &m_pctV, 5.0f, 200.0f, "%.0f %%"))
+        ImGui::SameLine(); ImGui::TextDisabled("%.0f %%", m_pctV);
+        if (materializr::stepperRow("scaleVStep", &m_pctV,
+                                    /*allowNegative=*/true, 5.0f, 200.0f,
+                                    /*zeroValue=*/100.0f))
+            changed = true;
+        if (ctx.cornerCommitUi &&
+            touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,
+                                 /*allowSign=*/false, 5.0f, 200.0f))
             changed = true;
     }
     ImGui::TextDisabled("Or drag the two arrows on the face.");
-    if (ImGui::SliderFloat("Length", &m_len, 0.5f,
-                           std::max(m_lenMax, 1.0f), "%.1f mm"))
+    ImGui::TextDisabled("Length: %.1f mm", m_len);
+    if (materializr::stepperRow("lenStep", &m_len,
+                                /*allowNegative=*/false, 0.5f,
+                                std::max(m_lenMax, 1.0f)))
+        changed = true;
+    if (ctx.cornerCommitUi &&
+        touchui::amountField("lenAmt", nullptr, &m_len, "mm", 1,
+                             /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f)))
         changed = true;
     ImGui::Text("Mode");
     ImGui::SameLine();

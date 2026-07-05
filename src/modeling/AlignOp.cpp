@@ -103,3 +103,45 @@ OperationDiff AlignOp::captureDiff() const {
         d.modifiedBefore.push_back({m_bodyId, m_previousShape});
     return d;
 }
+
+std::string AlignOp::serializeParams() const {
+    char buf[220];
+    std::snprintf(buf, sizeof(buf),
+                  "body=%d;sx=%.9g;sy=%.9g;sz=%.9g;tx=%.9g;ty=%.9g;tz=%.9g",
+                  m_bodyId, m_source.X(), m_source.Y(), m_source.Z(),
+                  m_target.X(), m_target.Y(), m_target.Z());
+    return buf;
+}
+
+bool AlignOp::deserializeParams(const std::string& blob) {
+    double sx=0, sy=0, sz=0, tx=0, ty=0, tz=0;
+    bool any = false;
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string key = blob.substr(pos, eq - pos);
+        double d = std::atof(blob.substr(eq + 1, end - eq - 1).c_str());
+        if      (key == "body") { m_bodyId = static_cast<int>(d); any = true; }
+        else if (key == "sx") { sx = d; any = true; }
+        else if (key == "sy") { sy = d; any = true; }
+        else if (key == "sz") { sz = d; any = true; }
+        else if (key == "tx") { tx = d; any = true; }
+        else if (key == "ty") { ty = d; any = true; }
+        else if (key == "tz") { tz = d; any = true; }
+        pos = end + 1;
+    }
+    m_source = gp_Pnt(sx, sy, sz);
+    m_target = gp_Pnt(tx, ty, tz);
+    return any;
+}
+
+bool AlignOp::rehydrateFromReload(const ReloadState& state, Document&) {
+    if (m_bodyId < 0) return false;
+    m_previousShape.Nullify();
+    for (const auto& [id, shp] : state.modifiedBefore)
+        if (id == m_bodyId) { m_previousShape = shp; break; }
+    return !m_previousShape.IsNull();
+}

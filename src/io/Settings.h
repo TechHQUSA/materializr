@@ -5,6 +5,17 @@
 
 namespace materializr {
 
+// The three interface layouts (Settings → Appearance → Interface). One
+// mutually-exclusive choice; add future layouts to the end (the numeric
+// values line up with the Settings combo order). Each layout's chrome lives
+// in src/app/layout/<name>/ — see src/app/layout/LayoutCommon.h for the
+// keep-in-lockstep contract when adding features or plugin entry points.
+//   Classic — desktop menu bar + docked panels + status bar.
+//   Modern  — top app bar + tool rail + right side panel.
+//   ImTouch — near-zero chrome: full-bleed viewport, floating overlays
+//             (the name is an homage to ImGui).
+enum class UiLayout { Classic = 0, Modern = 1, ImTouch = 2 };
+
 // User-facing application preferences that persist between launches. Defaults
 // here are the out-of-the-box behaviour and are also the fallback whenever a
 // key is missing or unreadable in the settings file.
@@ -18,6 +29,31 @@ struct AppSettings {
 #else
     bool touchMode          = false;
 #endif
+    // Interface layout (see the UiLayout enum above). Orthogonal to touchMode
+    // (layout vs input model); switches live, no restart. Serialized as the
+    // string key `uiLayout = classic | modern | imtouch`; older builds' bool
+    // pair imTouchUi/imTouchLite is still read as a fallback. iPad ships
+    // touch-first, so it defaults to the im-touch shell; a saved setting
+    // still wins, so Settings → Appearance can switch back.
+#if defined(MZ_IOS)
+    UiLayout uiLayout       = UiLayout::ImTouch;
+#else
+    UiLayout uiLayout       = UiLayout::Classic;
+#endif
+    // im-touch layout only: the transparent model tree (Bodies/Sketches/
+    // Construction) floating on the right edge. Toggled by the list button
+    // in the top-right cluster.
+    bool imTouchTree        = true;
+    // im-touch layout only: the Fusion-style history timeline (one box per
+    // history step) floating along the bottom edge. Toggled by the clock
+    // button in the top-right cluster.
+    bool imTouchTimeline    = true;
+    int  touchRightTab      = 0;    // shell right panel: 0 = Items, 1 = History & Properties
+    // Shell right-panel width in logical px (× uiScale at use) — written by
+    // the panel's left-edge drag splitter / edge tab.
+    float touchRightW       = 300.0f;
+    // Shell tool-rail width, same convention (edge-tab drag).
+    float touchRailW        = 92.0f;
 #if defined(MZ_MOBILE)
     // Touch-first default: trackpad mode (one-finger drag = orbit, two-finger
     // pan/zoom). Just the first-run default — the Settings dialog can rebind to
@@ -67,6 +103,7 @@ struct AppSettings {
     float touchPanSens      = 1.0f;
     float touchZoomSens     = 1.0f;
     bool  showToolbarTooltips = true; // hover-tip describing each toolbar button
+    bool  showFps           = true;   // small FPS readout (im-touch layout, top-centre)
 
     // --- Session ---
     bool  autoOpenLastProject = false;     // re-open the most recent project on launch
@@ -99,6 +136,11 @@ struct AppSettings {
     // pre-releases (tags like 1.3.0-beta.1) instead of only final releases.
     // Off by default so stable users are never offered test builds.
     bool  includePrereleases      = false;
+    // The user supports the project (tapped "I already support" in the launch
+    // support prompt; store builds will later also set it from a completed or
+    // restored tip in-app purchase). Permanently silences the every-launch
+    // support prompt.
+    bool  supporter               = false;
 
     // --- Snap / grid (persisted) ---
     // Snap-to-grid toggle and step (mm) shared by the sketch grid and the

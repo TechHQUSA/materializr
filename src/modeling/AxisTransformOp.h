@@ -24,6 +24,7 @@ public:
 
     AxisTransformOp(std::string label, std::vector<Entry> entries)
         : m_label(std::move(label)), m_entries(std::move(entries)) {}
+    AxisTransformOp() = default;    // reload path (OperationFactory)
 
     bool execute(Document& doc) override;   // apply the "after" poses (redo)
     bool undo(Document& doc) override;       // restore the "before" poses
@@ -32,6 +33,10 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "axis_transform"; }
+    // Reload support — mirrors PlaneTransformOp.
+    std::string serializeParams() const override;
+    bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
 private:
     std::string        m_label;

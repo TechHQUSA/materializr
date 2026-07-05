@@ -109,12 +109,16 @@ void InteractiveOpController::cleanup() {
 void InteractiveOpController::renderPanel(const IopContext& ctx) {
     if (!m_active) return;
 
-    // Same pinned top-right anchor + flag set every hand-written panel
-    // used — known stable, no hover flicker.
+    // Pin the panel's RIGHT edge a fixed margin inside the viewport (pivot 1,0)
+    // and let it grow leftward. The panel is AlwaysAutoResize and, on touch, its
+    // padded content is wider than panelWidth() — anchoring the LEFT edge by a
+    // fixed offset (winWidth - w - 20) let that extra width run off the right
+    // edge on the tablet. Right-anchoring keeps it on-screen at any scale.
     const float w = panelWidth();
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x +
-                                       ImGui::GetWindowWidth() - w - 20.0f,
-                                   ImGui::GetWindowPos().y + 50.0f));
+                                       ImGui::GetWindowWidth() - 20.0f,
+                                   ImGui::GetWindowPos().y + 50.0f),
+                            ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(w, 0));
     char id[64];
     std::snprintf(id, sizeof(id), "##iop_%s", title());
@@ -133,11 +137,18 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
     ImGui::Spacing();
     bool enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
     bool esc   = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-    bool doCommit = m_commitRequested || enter ||
-                    ImGui::Button(materializr::btnConfirm(), ImVec2(120, 0));
-    if (!doCommit) ImGui::SameLine();
-    bool doCancel = !doCommit &&
-                    (esc || ImGui::Button(materializr::btnCancel(), ImVec2(120, 0)));
+    bool doCommit = m_commitRequested || enter;
+    bool doCancel = esc;
+    if (!ctx.cornerCommitUi) {
+        doCommit = doCommit ||
+                   ImGui::Button(materializr::btnConfirm(), ImVec2(120, 0));
+        if (!doCommit) {
+            ImGui::SameLine();
+            doCancel = doCancel ||
+                       ImGui::Button(materializr::btnCancel(), ImVec2(120, 0));
+        }
+    }
+    doCancel = doCancel && !doCommit;
     ImGui::End();
 
     if (doCommit) commit(ctx);

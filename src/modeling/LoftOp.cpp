@@ -131,3 +131,100 @@ OperationDiff LoftOp::captureDiff() const {
     if (m_createdBodyId >= 0) d.created.push_back(m_createdBodyId);
     return d;
 }
+
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS.hxx>
+#include <sstream>
+
+std::string LoftOp::serializeParams() const {
+    // Profiles are raw wires (picked from sketch regions / body loops at
+    // create time) — no persistent source ids exist, so they persist as an
+    // ASCII BREP compound embedded in the params. PARAMS_LEN stores raw
+    // bytes, so the multi-line BREP is safe; it goes LAST, length-prefixed.
+    // Compound order: profile0, its holes..., profile1, its holes..., etc.
+    std::string blob = "solid=" + std::to_string(m_solid ? 1 : 0) +
+                       ";ruled=" + std::to_string(m_ruled ? 1 : 0) +
+                       ";created=" + std::to_string(m_createdBodyId) +
+                       ";np=" + std::to_string(m_profiles.size());
+    BRep_Builder bb;
+    TopoDS_Compound comp;
+    bb.MakeCompound(comp);
+    for (size_t i = 0; i < m_profiles.size(); ++i) {
+        const size_t nh = i < m_holeProfiles.size() ? m_holeProfiles[i].size() : 0;
+        blob += ";h" + std::to_string(i) + "=" + std::to_string(nh);
+        bb.Add(comp, m_profiles[i]);
+        for (size_t j = 0; j < nh; ++j) bb.Add(comp, m_holeProfiles[i][j]);
+    }
+    std::ostringstream os;
+    BRepTools::Write(comp, os);
+    const std::string brep = os.str();
+    blob += ";brep=" + std::to_string(brep.size()) + ":" + brep;
+    return blob;
+}
+
+bool LoftOp::deserializeParams(const std::string& blob) {
+    m_profiles.clear();
+    m_holeProfiles.clear();
+    std::vector<int> holeCounts;
+    int np = 0;
+    bool any = false;
+    size_t pos = 0;
+    while (pos < blob.size()) {
+        size_t eq = blob.find('=', pos);
+        if (eq == std::string::npos) break;
+        std::string key = blob.substr(pos, eq - pos);
+        if (key == "brep") {
+            // <len>:<raw ascii brep>, runs to end.
+            size_t colon = blob.find(':', eq);
+            if (colon == std::string::npos) break;
+            size_t n = static_cast<size_t>(
+                std::atoll(blob.substr(eq + 1, colon - eq - 1).c_str()));
+            if (colon + 1 + n > blob.size()) break;
+            std::istringstream is(blob.substr(colon + 1, n));
+            TopoDS_Shape comp;
+            BRep_Builder bb;
+            try { BRepTools::Read(comp, is, bb); } catch (...) { return false; }
+            // Unpack: per profile i, one wire + holeCounts[i] hole wires.
+            TopoDS_Iterator it(comp);
+            for (int i = 0; i < np && it.More(); ++i) {
+                if (it.Value().ShapeType() != TopAbs_WIRE) return false;
+                m_profiles.push_back(TopoDS::Wire(it.Value()));
+                it.Next();
+                std::vector<TopoDS_Wire> holes;
+                int nh = i < static_cast<int>(holeCounts.size()) ? holeCounts[i] : 0;
+                for (int j = 0; j < nh && it.More(); ++j) {
+                    holes.push_back(TopoDS::Wire(it.Value()));
+                    it.Next();
+                }
+                m_holeProfiles.push_back(std::move(holes));
+            }
+            any = true;
+            break;
+        }
+        size_t end = blob.find(';', eq);
+        if (end == std::string::npos) end = blob.size();
+        std::string val = blob.substr(eq + 1, end - eq - 1);
+        if      (key == "solid")   { m_solid = val == "1"; any = true; }
+        else if (key == "ruled")   { m_ruled = val == "1"; any = true; }
+        else if (key == "created") { m_createdBodyId = std::atoi(val.c_str()); any = true; }
+        else if (key == "np")      { np = std::atoi(val.c_str()); any = true; }
+        else if (!key.empty() && key[0] == 'h') {
+            int idx = std::atoi(key.c_str() + 1);
+            if (idx >= static_cast<int>(holeCounts.size()))
+                holeCounts.resize(idx + 1, 0);
+            holeCounts[idx] = std::atoi(val.c_str());
+        }
+        pos = end + 1;
+    }
+    return any && static_cast<int>(m_profiles.size()) == np && np >= 2;
+}
+
+bool LoftOp::rehydrateFromReload(const ReloadState& state, Document&) {
+    if (m_profiles.size() < 2) return false;
+    if (m_createdBodyId < 0 && !state.created.empty())
+        m_createdBodyId = state.created.front();
+    return true;   // profiles are self-contained; execute() re-lofts them
+}

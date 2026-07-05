@@ -25,6 +25,7 @@ public:
 
     PlaneTransformOp(std::string label, std::vector<Entry> entries)
         : m_label(std::move(label)), m_entries(std::move(entries)) {}
+    PlaneTransformOp() = default;   // reload path (OperationFactory)
 
     bool execute(Document& doc) override;   // apply the "after" poses (redo)
     bool undo(Document& doc) override;      // restore the "before" poses
@@ -33,6 +34,13 @@ public:
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "plane_transform"; }
+    // Reload support: pure plane poses — everything serialises, so a plane
+    // move/rotate comes back EDITABLE instead of freezing the whole project
+    // into the amber "restored from an older save" state (which the banner
+    // wrongly claimed for brand-new files containing one of these steps).
+    std::string serializeParams() const override;
+    bool deserializeParams(const std::string& blob) override;
+    bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
 private:
     std::string        m_label;

@@ -49,6 +49,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         // Merge coplanar/tangent neighbours so the union has no seam.
                         try {
                             ShapeUpgrade_UnifySameDomain u(s, true, true, true);
@@ -64,6 +68,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         break;
                     }
                     case BooleanMode::Intersect: {
@@ -72,6 +80,10 @@ bool BooleanOp::execute(Document& doc) {
                         op.Build();
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
+                        // Publish face lineage from BOTH inputs so "gen" can
+                        // name seam faces/edges by their generating faces.
+                        m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
+                        m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         break;
                     }
                 }
@@ -119,6 +131,7 @@ bool BooleanOp::execute(Document& doc) {
 
         // Update target body with the result
         doc.updateBody(m_targetBodyId, resultShape);
+        doc.setBodyLedger(m_targetBodyId, &m_ledger);
 
         // Remove the tool body — unless we're keeping it (the "keep cutters"
         // option, or a cutter still needed by another target).

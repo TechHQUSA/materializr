@@ -48,12 +48,47 @@ void readBool(const std::map<std::string, std::string>& kv, const char* key, boo
     // anything else: keep default
 }
 
+// Serialized names for the UiLayout enum — what `uiLayout = ...` holds in
+// the settings file (readable, order-independent, extensible).
+const char* uiLayoutName(UiLayout l) {
+    switch (l) {
+        case UiLayout::Modern:  return "modern";
+        case UiLayout::ImTouch: return "imtouch";
+        case UiLayout::Classic: default: return "classic";
+    }
+}
+
 // Map a bag of string key/values onto the struct. Shared by the `.cfg` text
 // loader and the JSON importer so both honour the same keys and tolerance
 // rules (unknown keys ignored, missing keys keep their defaults).
 void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readInt (kv, "theme",                s.theme);
     readBool(kv, "touchMode",            s.touchMode);
+    // Interface layout. Legacy first (older builds wrote the coupled bool
+    // pair imTouchUi/imTouchLite, where "im-touch on + lite" is today's
+    // imtouch and "im-touch on" alone is today's modern), then the current
+    // string key so it wins whenever both are present.
+    {
+        bool legacyUi = false, legacyLite = false;
+        readBool(kv, "imTouchUi",   legacyUi);
+        readBool(kv, "imTouchLite", legacyLite);
+        if (legacyUi)
+            s.uiLayout = legacyLite ? UiLayout::ImTouch : UiLayout::Modern;
+        std::string v;
+        readString(kv, "uiLayout", v);
+        for (auto& c : v) c = static_cast<char>(::tolower(c));
+        if      (v == "classic") s.uiLayout = UiLayout::Classic;
+        else if (v == "modern")  s.uiLayout = UiLayout::Modern;
+        else if (v == "imtouch") s.uiLayout = UiLayout::ImTouch;
+        // unknown value: keep whatever legacy/default produced
+    }
+    readBool(kv, "imTouchLiteTree",      s.imTouchTree);      // legacy key
+    readBool(kv, "imTouchTree",          s.imTouchTree);
+    readBool(kv, "imTouchLiteTimeline",  s.imTouchTimeline);  // legacy key
+    readBool(kv, "imTouchTimeline",      s.imTouchTimeline);
+    readInt (kv, "touchRightTab",        s.touchRightTab);
+    readFloat(kv, "touchRightW",         s.touchRightW);
+    readFloat(kv, "touchRailW",          s.touchRailW);
     readInt (kv, "orbitButton",          s.orbitButton);
     readInt (kv, "panButton",            s.panButton);
     readBool(kv, "levelOrbit",           s.levelOrbit);
@@ -83,11 +118,13 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readFloat(kv, "touchPanSens",        s.touchPanSens);
     readFloat(kv, "touchZoomSens",       s.touchZoomSens);
     readBool(kv, "showToolbarTooltips",  s.showToolbarTooltips);
+    readBool(kv, "showFps",              s.showFps);
     readBool(kv, "autoOpenLastProject",  s.autoOpenLastProject);
     readString(kv, "lastProjectPath",    s.lastProjectPath);
     readString(kv, "lastFileDir",        s.lastFileDir);
     readBool(kv, "checkForUpdatesOnLaunch", s.checkForUpdatesOnLaunch);
     readBool(kv, "includePrereleases",   s.includePrereleases);
+    readBool(kv, "supporter",            s.supporter);
     readBool(kv, "snapToGrid",           s.snapToGrid);
     readFloat(kv, "sketchGridStep",      s.sketchGridStep); // was written but never read back
     readInt (kv, "inferenceLevel",       s.inferenceLevel);
@@ -233,15 +270,47 @@ AppSettings SettingsIO::load(const std::string& path) {
 }
 
 bool SettingsIO::save(const std::string& path, const AppSettings& s) {
-    ensureParentDir(path);
+    // Preserve keys written by OTHER builds: parse the existing file up front
+    // and re-emit any key this build doesn't itself write at the end. Without
+    // this, running two versions side by side silently drops the newer one's
+    // settings whenever the older one saves (e.g. a stable build erased the
+    // im-touch branch's imTouchUi flag on every recent-projects update).
+    std::map<std::string, std::string> oldKv;
+    {
+        std::ifstream in(path);
+        std::string line;
+        while (in.is_open() && std::getline(in, line)) {
+            std::string t = trim(line);
+            if (t.empty() || t[0] == '#' || t[0] == ';') continue;
+            auto eq = t.find('=');
+            if (eq == std::string::npos) continue;
+            std::string key = trim(t.substr(0, eq));
+            if (!key.empty()) oldKv[key] = trim(t.substr(eq + 1));
+        }
+        // Legacy layout keys this build superseded (read via applyKv's
+        // migration, re-written as uiLayout/imTouchTree/imTouchTimeline).
+        // Don't round-trip them as "another version's" keys — a stale
+        // imTouchUi=true would override a later uiLayout=classic in any
+        // pre-rename build still lying around.
+        oldKv.erase("imTouchUi");
+        oldKv.erase("imTouchLite");
+        oldKv.erase("imTouchLiteTree");
+        oldKv.erase("imTouchLiteTimeline");
+    }
 
-    std::ofstream ofs(path, std::ios::out | std::ios::trunc);
-    if (!ofs.is_open()) return false;
+    ensureParentDir(path);
+    std::ostringstream ofs;   // buffered; flushed to disk at the end
 
     ofs << "# Materializr settings. Unknown keys are ignored; missing keys use\n"
            "# defaults. Safe to edit by hand or to carry across versions.\n";
     ofs << "theme = "               << s.theme               << "\n";
     ofs << "touchMode = "           << (s.touchMode ? "true" : "false") << "\n";
+    ofs << "uiLayout = "            << uiLayoutName(s.uiLayout) << "\n";
+    ofs << "imTouchTree = "         << (s.imTouchTree ? "true" : "false") << "\n";
+    ofs << "imTouchTimeline = "     << (s.imTouchTimeline ? "true" : "false") << "\n";
+    ofs << "touchRightTab = "       << s.touchRightTab       << "\n";
+    ofs << "touchRightW = "         << s.touchRightW         << "\n";
+    ofs << "touchRailW = "          << s.touchRailW          << "\n";
     ofs << "orbitButton = "         << s.orbitButton         << "\n";
     ofs << "panButton = "           << s.panButton           << "\n";
     ofs << "levelOrbit = "          << (s.levelOrbit ? "true" : "false") << "\n";
@@ -271,6 +340,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "touchPanSens = "        << s.touchPanSens        << "\n";
     ofs << "touchZoomSens = "       << s.touchZoomSens       << "\n";
     ofs << "showToolbarTooltips = " << (s.showToolbarTooltips ? "true" : "false") << "\n";
+    ofs << "showFps = "             << (s.showFps ? "true" : "false") << "\n";
     ofs << "autoOpenLastProject = " << (s.autoOpenLastProject ? "true" : "false") << "\n";
     ofs << "lastProjectPath = "     << s.lastProjectPath     << "\n";
     ofs << "lastFileDir = "         << s.lastFileDir         << "\n";
@@ -280,6 +350,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     }
     ofs << "checkForUpdatesOnLaunch = " << (s.checkForUpdatesOnLaunch ? "true" : "false") << "\n";
     ofs << "includePrereleases = "      << (s.includePrereleases ? "true" : "false") << "\n";
+    ofs << "supporter = "               << (s.supporter ? "true" : "false") << "\n";
     ofs << "snapToGrid = "              << (s.snapToGrid ? "true" : "false") << "\n";
     ofs << "sketchGridStep = "          << s.sketchGridStep      << "\n";
     ofs << "inferenceLevel = "          << s.inferenceLevel      << "\n";
@@ -289,7 +360,31 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "stlImportAccuracy = "        << s.stlImportAccuracy   << "\n";
     ofs << "meshShowWireframe = "        << (s.meshShowWireframe ? "true" : "false") << "\n";
 
-    return ofs.good();
+    // Re-emit keys from the old file that this build didn't write (another
+    // version's settings) so they round-trip instead of vanishing.
+    {
+        std::map<std::string, bool> written;
+        std::istringstream body(ofs.str());
+        std::string line;
+        while (std::getline(body, line)) {
+            auto eq = line.find('=');
+            if (eq != std::string::npos) written[trim(line.substr(0, eq))] = true;
+        }
+        bool first = true;
+        for (const auto& kvp : oldKv) {
+            if (written.count(kvp.first)) continue;
+            if (first) {
+                ofs << "# preserved from another Materializr version\n";
+                first = false;
+            }
+            ofs << kvp.first << " = " << kvp.second << "\n";
+        }
+    }
+
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) return false;
+    out << ofs.str();
+    return out.good();
 }
 
 bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
@@ -306,6 +401,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "{\n";
     ofs << "  \"theme\": "                   << s.theme                 << ",\n";
     ofs << "  \"touchMode\": "               << (s.touchMode ? "true" : "false") << ",\n";
+    ofs << "  \"uiLayout\": \""              << uiLayoutName(s.uiLayout) << "\",\n";
     ofs << "  \"orbitButton\": "             << s.orbitButton           << ",\n";
     ofs << "  \"panButton\": "               << s.panButton             << ",\n";
     ofs << "  \"levelOrbit\": "              << b(s.levelOrbit)         << ",\n";
@@ -335,9 +431,11 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"touchPanSens\": "             << s.touchPanSens          << ",\n";
     ofs << "  \"touchZoomSens\": "            << s.touchZoomSens         << ",\n";
     ofs << "  \"showToolbarTooltips\": "     << b(s.showToolbarTooltips)<< ",\n";
+    ofs << "  \"showFps\": "                  << b(s.showFps)            << ",\n";
     ofs << "  \"autoOpenLastProject\": "     << b(s.autoOpenLastProject)<< ",\n";
     ofs << "  \"checkForUpdatesOnLaunch\": " << b(s.checkForUpdatesOnLaunch) << ",\n";
     ofs << "  \"includePrereleases\": " << b(s.includePrereleases) << ",\n";
+    ofs << "  \"supporter\": "               << b(s.supporter)          << ",\n";
     ofs << "  \"snapToGrid\": "              << b(s.snapToGrid)         << ",\n";
     ofs << "  \"sketchGridStep\": "          << s.sketchGridStep        << ",\n";
     ofs << "  \"inferenceLevel\": "          << s.inferenceLevel        << ",\n";

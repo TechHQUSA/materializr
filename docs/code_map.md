@@ -135,10 +135,14 @@ apply this conversion so parts stand up correctly for printing.
 ### `src/app/` — the application host
 | File | Purpose |
 |---|---|
-| `Application.{cpp,h}` | The host/god-class: lifecycle, the main run loop, render-on-demand gating, settings, panel ownership, font resolution. Split across the three files below (one class, multiple translation units). |
+| `Application.{cpp,h}` | The host/god-class: lifecycle, the main run loop, render-on-demand gating, settings, panel ownership, font resolution. Split across the files below (one class, multiple translation units). |
 | `Application_Viewport.cpp` | Viewport input: camera control, picking, gizmo handling, grid, box-select, sketch picking (largest TU). |
 | `Application_InteractiveOps.cpp` | Interactive-op orchestration: the sketch↔body **link model**, `cascadeFromSketchEdit`, re-derive vs rigid-move logic, relink. |
 | `Application_Dialogs.cpp` | Modal popups: Revolve/Lathe, Thread, Text, Subtract, dimension/scale, plus their progress frames. |
+| `layout/LayoutCommon.{cpp,h}` | Chrome shared by ALL interface layouts: dockspace host, the menu item lists (incl. plugin menu contributions), overflow popup, shared undo helpers. Add features/plugin entry points HERE so every layout gets them — see the header's contract comment. |
+| `layout/classic/ClassicLayout.cpp` | Classic layout (`UiLayout::Classic`): main menu bar + touch panel-collapse handles (the docked panels render from `run()`). |
+| `layout/modern/ModernLayout.cpp` | Modern layout (`UiLayout::Modern`): top app bar, left tool rail, right side panel; pins the viewport rect. |
+| `layout/imtouch/ImTouchLayout.cpp` | im-touch layout (`UiLayout::ImTouch`): full-bleed viewport with floating overlays — chip, tool bar, model tree, history timeline, create FAB. |
 | `InteractiveOpController.{cpp,h}` | Base class + `IopContext` for popup-driven interactive ops. |
 | `FaceOpControllers.{cpp,h}` | Concrete controllers — Shell, Taper, Scale-Face, Move-Face, etc. |
 | `UserAxes.h` | Helper for user-facing axis definitions. |

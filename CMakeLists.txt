@@ -154,10 +154,15 @@ add_executable(materializr
     $<$<PLATFORM_ID:Windows>:packaging/windows/app.rc>
     src/main.cpp
     src/app/Application.cpp
+    src/app/ui_layout_bridge.cpp
     src/app/InteractiveOpController.cpp
     src/app/FaceOpControllers.cpp
     src/app/Application_Dialogs.cpp
     src/app/Application_InteractiveOps.cpp
+    src/app/layout/LayoutCommon.cpp
+    src/app/layout/classic/ClassicLayout.cpp
+    src/app/layout/modern/ModernLayout.cpp
+    src/app/layout/imtouch/ImTouchLayout.cpp
     src/app/Application_Viewport.cpp
     src/app/Window.cpp
     src/plugin/PluginContext.cpp
@@ -207,6 +212,9 @@ add_executable(materializr
     src/modeling/OperationFactory.cpp
     src/modeling/SubShapeIndex.cpp
     src/modeling/EdgeAnchor.cpp
+    src/modeling/FaceAnchor.cpp
+    src/modeling/TopoName.cpp
+    src/modeling/GenerationLedger.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp
@@ -256,6 +264,7 @@ add_executable(materializr
     src/viewport/SectionView.cpp
     src/viewport/SelectionHighlight.cpp
     src/ui/Toolbar.cpp
+    src/ui/TouchWidgets.cpp
     src/ui/HistoryPanel.cpp
     src/ui/ItemsPanel.cpp
     src/ui/StatusBar.cpp
@@ -272,6 +281,7 @@ add_executable(materializr
     src/ui/ToastNotification.cpp
     src/ui/ShortcutsPanel.cpp
     src/ui/AboutDialog.cpp
+    src/ui/WelcomeScreen.cpp
     src/ui/UpdateChecker.cpp
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp

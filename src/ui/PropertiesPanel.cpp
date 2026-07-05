@@ -1,5 +1,12 @@
 #include "UiTheme.h"
 #include "PropertiesPanel.h"
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <BRep_Tool.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Vertex.hxx>
 #include "../core/History.h"
 #include "../core/Document.h"
 #include "../core/SelectionManager.h"
@@ -31,6 +38,116 @@
 #include <TopoDS.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 
+// Measurement-style readouts for selected FACES / EDGES / VERTICES — area,
+// length, surface/curve kind and dimensions, with totals across a
+// multi-select (doubles as a measure tool). Coordinates are shown in the
+// app's user Z-up convention (user Y = world Z, user Z = world Y), matching
+// the construction-plane panel.
+static void renderSubShapeProperties(const SelectionManager& sel) {
+    double totalArea = 0.0, totalLen = 0.0;
+    int nFaces = 0, nEdges = 0, nVerts = 0;
+    for (const auto& e : sel.getSelection()) {
+        if (e.shape.IsNull()) continue;
+        try {
+            if (e.type == SelectionType::Face &&
+                e.shape.ShapeType() == TopAbs_FACE) {
+                const TopoDS_Face f = TopoDS::Face(e.shape);
+                ++nFaces;
+                GProp_GProps g;
+                BRepGProp::SurfaceProperties(f, g);
+                totalArea += g.Mass();
+                gp_Pnt c = g.CentreOfMass();
+                BRepAdaptor_Surface surf(f);
+                const char* kind = "Face";
+                switch (surf.GetType()) {
+                    case GeomAbs_Plane:               kind = "Planar face"; break;
+                    case GeomAbs_Cylinder:            kind = "Cylindrical face"; break;
+                    case GeomAbs_Cone:                kind = "Conical face"; break;
+                    case GeomAbs_Sphere:              kind = "Spherical face"; break;
+                    case GeomAbs_Torus:               kind = "Toroidal face"; break;
+                    case GeomAbs_SurfaceOfExtrusion:  kind = "Extruded face"; break;
+                    case GeomAbs_SurfaceOfRevolution: kind = "Revolved face"; break;
+                    case GeomAbs_BSplineSurface:      kind = "Freeform face"; break;
+                    default: break;
+                }
+                ImGui::TextColored(materializr::accentText(), "%s", kind);
+                ImGui::Text("Area: %.2f mm^2", g.Mass());
+                ImGui::Text("Centre: %.2f, %.2f, %.2f mm", c.X(), c.Z(), c.Y());
+                if (surf.GetType() == GeomAbs_Plane) {
+                    gp_Dir n = surf.Plane().Axis().Direction();
+                    ImGui::Text("Normal: %.3f, %.3f, %.3f", n.X(), n.Z(), n.Y());
+                } else if (surf.GetType() == GeomAbs_Cylinder) {
+                    ImGui::Text("Radius: %.3f mm  (dia %.3f)",
+                                surf.Cylinder().Radius(),
+                                2.0 * surf.Cylinder().Radius());
+                } else if (surf.GetType() == GeomAbs_Sphere) {
+                    ImGui::Text("Radius: %.3f mm", surf.Sphere().Radius());
+                } else if (surf.GetType() == GeomAbs_Cone) {
+                    ImGui::Text("Half-angle: %.1f deg",
+                                surf.Cone().SemiAngle() * 180.0 / M_PI);
+                } else if (surf.GetType() == GeomAbs_Torus) {
+                    ImGui::Text("Radii: %.3f / %.3f mm",
+                                surf.Torus().MajorRadius(),
+                                surf.Torus().MinorRadius());
+                }
+                ImGui::Spacing();
+            } else if (e.type == SelectionType::Edge &&
+                       e.shape.ShapeType() == TopAbs_EDGE) {
+                const TopoDS_Edge ed = TopoDS::Edge(e.shape);
+                ++nEdges;
+                GProp_GProps g;
+                BRepGProp::LinearProperties(ed, g);
+                totalLen += g.Mass();
+                BRepAdaptor_Curve cu(ed);
+                const char* kind = "Edge";
+                switch (cu.GetType()) {
+                    case GeomAbs_Line:         kind = "Straight edge"; break;
+                    case GeomAbs_Circle:       kind = "Circular edge"; break;
+                    case GeomAbs_Ellipse:      kind = "Elliptical edge"; break;
+                    case GeomAbs_BSplineCurve: kind = "Curved edge"; break;
+                    default: break;
+                }
+                ImGui::TextColored(materializr::accentText(), "%s", kind);
+                ImGui::Text("Length: %.3f mm", g.Mass());
+                if (cu.GetType() == GeomAbs_Circle) {
+                    ImGui::Text("Radius: %.3f mm  (dia %.3f)",
+                                cu.Circle().Radius(),
+                                2.0 * cu.Circle().Radius());
+                    double sweep = (cu.LastParameter() - cu.FirstParameter())
+                                   * 180.0 / M_PI;
+                    if (sweep < 359.9)
+                        ImGui::Text("Arc sweep: %.1f deg", sweep);
+                }
+                gp_Pnt m = cu.Value(0.5 * (cu.FirstParameter() +
+                                           cu.LastParameter()));
+                ImGui::Text("Midpoint: %.2f, %.2f, %.2f mm",
+                            m.X(), m.Z(), m.Y());
+                ImGui::Spacing();
+            } else if (e.type == SelectionType::Vertex &&
+                       e.shape.ShapeType() == TopAbs_VERTEX) {
+                ++nVerts;
+                gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(e.shape));
+                ImGui::TextColored(materializr::accentText(), "Vertex");
+                ImGui::Text("At: %.3f, %.3f, %.3f mm", p.X(), p.Z(), p.Y());
+                ImGui::Spacing();
+            }
+        } catch (...) {}
+    }
+    // Multi-select totals = a quick measure tool.
+    if (nFaces > 1) {
+        ImGui::Separator();
+        ImGui::Text("Total area (%d faces): %.2f mm^2", nFaces, totalArea);
+    }
+    if (nEdges > 1) {
+        ImGui::Separator();
+        ImGui::Text("Total length (%d edges): %.3f mm", nEdges, totalLen);
+    }
+    if (nFaces + nEdges + nVerts == 0)
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+                           "No measurable sub-shapes selected.");
+}
+
+
 namespace materializr {
 
 PropertiesPanel::PropertiesPanel() = default;
@@ -56,16 +173,20 @@ int PropertiesPanel::getEditingStep() const {
 }
 
 bool PropertiesPanel::render() {
-    bool modified = false;
-
     ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse);
+    const bool modified = renderContent();
+    ImGui::End();
+    return modified;
+}
+
+bool PropertiesPanel::renderContent() {
+    bool modified = false;
 
     // Case 0: In sketch mode — show the editable size of the selected element.
     // Takes priority: while sketching, the panel is about the sketch, not the
     // history step or a 3D selection.
     if (m_inSketchMode && m_activeSketch && m_sketchTool) {
         renderSketchElementPanel(modified);
-        ImGui::End();
         return modified;
     }
 
@@ -335,12 +456,10 @@ bool PropertiesPanel::render() {
                 // Construction-plane CREATION actions (Midplane / Tangent /
                 // Normal-to-axis) live in the Tools panel, alongside the other
                 // create operations — see Toolbar's context renderers.
-                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
-                                   "Sub-shape properties not yet available.");
+                renderSubShapeProperties(*m_selection);
             }
         } else {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
-                               "Sub-shape properties not yet available.");
+            renderSubShapeProperties(*m_selection);
         }
     }
     // Case 4: Nothing selected
@@ -349,7 +468,6 @@ bool PropertiesPanel::render() {
                            "Select an object or operation");
     }
 
-    ImGui::End();
     return modified;
 }
 

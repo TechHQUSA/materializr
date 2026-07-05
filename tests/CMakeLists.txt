@@ -38,8 +38,34 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchSolver.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ShellOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveFaceOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ThreadOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SubShapeIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/PlaneTransformOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/AxisTransformOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/CopyOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/AlignOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/MirrorOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SplitBodyOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SketchTransformOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/LoftOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SweepOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ConstructionPlaneOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ConstructionAxisOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/OperationFactory.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/PatternOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/RevolveOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/TaperOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ScaleFaceOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/DefeatureOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ResizeCylindricalOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/CombineSketchesOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/PrimitiveOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ReplayOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/ProjectSketchOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/EdgeAnchor.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/FaceAnchor.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/TopoName.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/GenerationLedger.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/MeshDecimate.cpp
@@ -135,6 +161,30 @@ add_executable(test_generative_edges test_generative_edges.cpp)
 target_link_libraries(test_generative_edges PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_generative_edges COMMAND test_generative_edges)
 
+# test_topo_name — unified naming layer: best-first resolve, unknown-scheme
+# skip + preservation, ordinal round-trip (experiment/face-anchors)
+add_executable(test_topo_name test_topo_name.cpp)
+target_link_libraries(test_topo_name PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_name COMMAND test_topo_name)
+
+# test_topo_edge — EdgeAnchor migrated behind the registry ("sketchedge"):
+# resolveSet distinctness + survives-resize through the unified layer
+add_executable(test_topo_edge test_topo_edge.cpp)
+target_link_libraries(test_topo_edge PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_edge COMMAND test_topo_edge)
+
+# test_topo_thread — a live op (ThreadOp) follows an upstream cylinder move by
+# re-resolving its target-face topo::Ref and re-deriving axis/radius (rung 3)
+add_executable(test_topo_thread test_topo_thread.cpp)
+target_link_libraries(test_topo_thread PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_thread COMMAND test_topo_thread)
+
+# test_topo_gen — generation-map lineage naming: a prism side face named by its
+# generating profile edge resolves correctly after a profile edit (rung 4)
+add_executable(test_topo_gen test_topo_gen.cpp)
+target_link_libraries(test_topo_gen PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_gen COMMAND test_topo_gen)
+
 # bench_stl_import — manual stopwatch for STL import stages (not run by ctest)
 add_executable(bench_stl_import bench_stl_import.cpp)
 target_link_libraries(bench_stl_import PRIVATE materializr_core)
@@ -143,6 +193,11 @@ target_link_libraries(bench_stl_import PRIVATE materializr_core)
 # fillets against every sketch (experiment/generative-edges, not run by ctest)
 add_executable(probe_anchor_coverage probe_anchor_coverage.cpp)
 target_link_libraries(probe_anchor_coverage PRIVATE materializr_core)
+
+# probe_face_coverage — diagnostic: generative FACE naming coverage of a real
+# project's bodies against every sketch (experiment/face-anchors)
+add_executable(probe_face_coverage probe_face_coverage.cpp)
+target_link_libraries(probe_face_coverage PRIVATE materializr_core)
 
 # test_sketch_regions — multi-loop interior selection (wire-orientation fix)
 add_executable(test_sketch_regions test_sketch_regions.cpp)
@@ -180,3 +235,74 @@ target_link_libraries(probe_twist_face PRIVATE materializr_core)
 add_executable(test_twist_face test_twist_face.cpp)
 target_link_libraries(test_twist_face PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_twist_face COMMAND test_twist_face)
+
+
+# test_topo_fillet_gen — FilletOp publishes a generation ledger; a blend face
+# named by lineage survives a corner-moving resize (general-kernel on real op)
+add_executable(test_topo_fillet_gen test_topo_fillet_gen.cpp)
+target_link_libraries(test_topo_fillet_gen PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_fillet_gen COMMAND test_topo_fillet_gen)
+
+# test_topo_chamfer_gen — ChamferOp generation ledger; bevel face named by lineage
+add_executable(test_topo_chamfer_gen test_topo_chamfer_gen.cpp)
+target_link_libraries(test_topo_chamfer_gen PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_chamfer_gen COMMAND test_topo_chamfer_gen)
+
+
+# test_topo_pushpull — PushPullOp face-driven target via topo::Ref survives a resize
+add_executable(test_topo_pushpull test_topo_pushpull.cpp)
+target_link_libraries(test_topo_pushpull PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_pushpull COMMAND test_topo_pushpull)
+
+# test_topo_shell — ShellOp opened faces via topo::Ref through a REAL history
+# replay (stale-sketch rollback + cascade override) on an L-body where the
+# geometric fallback mis-picks
+add_executable(test_topo_shell test_topo_shell.cpp)
+target_link_libraries(test_topo_shell PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_shell COMMAND test_topo_shell)
+
+# probe_moveface_shell — diagnostic: does MoveFaceOp keep a shelled body's cavity?
+add_executable(probe_moveface_shell probe_moveface_shell.cpp)
+target_link_libraries(probe_moveface_shell PRIVATE materializr_core)
+
+# test_moveface_hollow — MoveFace on a shelled body refuses cleanly instead of
+# inverting the shell / silently filling the cavity (Steve's in-app corruption)
+add_executable(test_moveface_hollow test_moveface_hollow.cpp)
+target_link_libraries(test_moveface_hollow PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_moveface_hollow COMMAND test_moveface_hollow)
+
+# probe_thread_loft — diagnostic: native twist-loft thread build timing/quality
+add_executable(probe_thread_loft probe_thread_loft.cpp)
+target_link_libraries(probe_thread_loft PRIVATE materializr_core)
+
+# probe_thread_chunk — diagnostic: >40-turn rods as chunked swept segments
+add_executable(probe_thread_chunk probe_thread_chunk.cpp)
+target_link_libraries(probe_thread_chunk PRIVATE materializr_core)
+
+# probe_thread_hole — diagnostic: boolean-path cost for internal threads
+add_executable(probe_thread_hole probe_thread_hole.cpp)
+target_link_libraries(probe_thread_hole PRIVATE materializr_core)
+
+# test_topo_boolean_gen — boolean seam edge named by two-input gen lineage
+# survives an upstream sketch edit (the unnameable-seam breakthrough)
+add_executable(test_topo_boolean_gen test_topo_boolean_gen.cpp)
+target_link_libraries(test_topo_boolean_gen PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_boolean_gen COMMAND test_topo_boolean_gen)
+
+# probe_owns_face — diagnostic: which faces fillet/chamfer steps claim on reload
+add_executable(probe_owns_face probe_owns_face.cpp)
+target_link_libraries(probe_owns_face PRIVATE materializr_core)
+
+# test_full_replay — THE contract: every op type reloads editable through the
+# real ProjectIO and the whole chain replays from step 0 after a sketch edit
+add_executable(test_full_replay test_full_replay.cpp)
+target_link_libraries(test_full_replay PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_full_replay COMMAND test_full_replay)
+
+# test_svg_roundtrip — sketch -> SVG -> sketch: loops stay closed, corners
+# shared, circles native (Steve's re-import-the-logo breakage)
+add_executable(test_svg_roundtrip test_svg_roundtrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/SvgExport.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SvgImport.cpp)
+target_link_libraries(test_svg_roundtrip PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_svg_roundtrip COMMAND test_svg_roundtrip)
