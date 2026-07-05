@@ -608,13 +608,6 @@ private:
     // gizmoOwnsDrag suppresses orbit so the cursor isn't fighting the
     // camera. (Steve: "let click then click act like click and hold".)
     bool m_pushPullSticky = false;
-    // Direct face-drag gesture (story A.1): press on an ALREADY-selected face
-    // arms; crossing the drag slop begins push/pull; release commits. The
-    // toolbar flow never sets these, so its panel/Enter semantics survive.
-    bool m_faceDragArm = false;
-    bool m_faceDragCommit = false;
-    bool m_faceDragAxisOk = false;    // absolute-axis tracking valid this gesture
-    float m_faceDragAxisStart = 0.0f; // cursor's axis parameter at gesture start
     // Dense-body drag protection: when any target body has >250 faces (a
     // threaded rod), the per-frame preview shows a tinted GHOST of the tool
     // volume instead of running the real boolean (which would also trigger
