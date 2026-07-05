@@ -6,6 +6,7 @@
 
 #include "app/Application.h"
 #include "app/Window.h"
+#include "ui/MeasureTool.h"
 #include "app/layout/LayoutCommon.h"
 #include "core/Document.h"
 #include "core/History.h"
@@ -342,6 +343,12 @@ void Application::renderViewMenuItems() {
     if (ImGui::MenuItem("Reset Camera", "Home")) m_viewport->getCamera().reset();
     // The F shortcut's menu twin — and the only way to frame on touch.
     if (ImGui::MenuItem("Frame Selection", "F")) frameSelection();
+    // Measure lives here now — one home for it across layouts instead of a
+    // toolbar/rail button duplicated per context. Drops the user at the
+    // measure mode picker (Object / Edge / Point-to-Point).
+    if (ImGui::MenuItem("Measure...")) {
+        if (m_measureTool) m_measureTool->setMode(MeasureMode::PickMode);
+    }
     if (ImGui::MenuItem("Section View", nullptr, &m_sectionEnabled)) {
         m_sectionDirty = true;
         if (m_sectionEnabled) {

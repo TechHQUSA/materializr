@@ -11,6 +11,7 @@
 // Everything fundamental (menus, tool catalogue, panel content) is shared
 // code — see layout/LayoutCommon.h for the keep-in-lockstep contract.
 
+#include <cstring>
 #include "app/Application.h"
 #include "app/layout/LayoutCommon.h"
 #include "core/SelectionManager.h"
@@ -344,8 +345,75 @@ void Application::renderModernLayout() {
             }
 
             if (m_toolbar) {
+                const auto rail = m_toolbar->railTools();
+                // Fewer rail buttons = less scrolling (the point of this on a
+                // 1080 desktop / a tablet). Two collapses, MODERN ONLY (classic
+                // and im-touch keep their own layouts):
+                //   Transform = Copy + Mirror (+ Duplicate)   -> copy icon
+                //   Pattern   = Linear + Circular             -> circular icon
+                // And two entries move OUT of the rail entirely: Measure (now
+                // the View menu) and the inference level (now the top bar).
+                auto groupOf = [](const Toolbar::RailTool& t) -> int {
+                    if (t.pluginIndex >= 0) {
+                        if (t.label && std::strcmp(t.label, "Linear") == 0)   return 2;
+                        if (t.label && std::strcmp(t.label, "Circular") == 0) return 2;
+                        if (t.label && std::strcmp(t.label, "Duplicate") == 0) return 1;
+                        return 0;
+                    }
+                    switch (t.action) {
+                        case ToolAction::SketchCopy:
+                        case ToolAction::SketchMirror:
+                        case ToolAction::Mirror:               return 1;
+                        case ToolAction::SketchLinearPattern:
+                        case ToolAction::SketchRadialPattern:  return 2;
+                        default: return 0;
+                    }
+                };
+                auto skip = [](const Toolbar::RailTool& t) {
+                    return t.action == ToolAction::Measure ||           // -> View menu
+                           t.action == ToolAction::SketchCycleInference; // -> top bar
+                };
+                auto count = [&](int g) {
+                    int n = 0;
+                    for (const auto& t : rail)
+                        if (!skip(t) && groupOf(t) == g) ++n;
+                    return n;
+                };
+                auto fire = [&](const Toolbar::RailTool& t) {
+                    if (t.pluginIndex >= 0) m_toolbar->fireRailPlugin(t.pluginIndex);
+                    else handleToolAction(static_cast<int>(t.action));
+                };
+
+                bool done[3] = { false, false, false };
                 int railIdx = 0;
-                for (const auto& tool : m_toolbar->railTools()) {
+                for (const auto& tool : rail) {
+                    if (skip(tool)) continue;
+                    const int g = groupOf(tool);
+                    // Only collapse when the group actually has 2+ members in
+                    // this context; a lone Mirror stays a plain button.
+                    if (g != 0 && count(g) >= 2) {
+                        if (done[g]) continue;
+                        done[g] = true;
+                        const char* gIcon  = g == 1 ? MZ_ICON_COPY : MZ_ICON_PATTERN_CIRCULAR;
+                        const char* gLabel = g == 1 ? "Transform" : "Pattern";
+                        const char* gPopup = g == 1 ? "##railTransform" : "##railPattern";
+                        ImGui::PushID(2000 + g);
+                        if (touchui::railButton(gLabel, gIcon, gLabel, false))
+                            ImGui::OpenPopup(gPopup);
+                        tip(g == 1 ? "Copy or mirror the selection"
+                                   : "Linear or circular pattern of the selection");
+                        pushPopupPad();
+                        if (ImGui::BeginPopup(gPopup)) {
+                            for (const auto& m : rail) {
+                                if (skip(m) || groupOf(m) != g) continue;
+                                if (ImGui::MenuItem(m.label)) fire(m);
+                            }
+                            ImGui::EndPopup();
+                        }
+                        popPopupPad();
+                        ImGui::PopID();
+                        continue;
+                    }
                     ImGui::PushID(railIdx++); // labels can repeat across groups
                     const bool clicked = touchui::railButton(
                         tool.label, tool.icon, tool.label, tool.active);

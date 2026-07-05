@@ -662,9 +662,7 @@ ToolAction Toolbar::renderSketchTools() {
             "hover-charging. Off = grid + endpoint only. Click to cycle.");
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Measure", ImVec2(-1, bh(28)))) action = ToolAction::Measure;
-    tip("Measure distance / length between picked sketch elements.");
+    // Measure moved to the View menu (unified across layouts).
 
     if (!m_cameraOrtho) {
         ImGui::Separator();
@@ -718,11 +716,7 @@ ToolAction Toolbar::renderNoSelectionTools() {
     // is the fallback context vertices land in; renders nothing otherwise.
     renderAddAxisMenu();
 
-    ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), "Inspect");
-    ImGui::Separator();
-    if (ImGui::Button("Measure", ImVec2(-1, bh(30)))) action = ToolAction::Measure;
-    tip("Measure distance, length, or angle between picked features.");
+    // Measure moved to the View menu (unified across layouts).
 
     // Plugin buttons: NoSelection + Always
     int mask = (1 << static_cast<int>(SelectionContext::NoSelection))
