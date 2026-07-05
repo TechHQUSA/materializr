@@ -155,6 +155,9 @@ private:
     // compute the viewport rect renderViewport() pins to. Classic's menu bar
     // is renderMenuBar() above (layout/classic/ClassicLayout.cpp).
     void renderModernLayout();
+    // Modern panel/viewport pop-in/out edge tabs — submitted AFTER the
+    // viewport (see run()) so they sit on top of it, not under it.
+    void renderModernEdgeTabs();
     void renderImTouchLayout();
     // Polygon in the tool rail opens a side-count popout (matching the
     // classic sketch toolbar). Shared by the modern rail and im-touch bar.

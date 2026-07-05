@@ -5184,6 +5184,10 @@ void Application::run() {
 
         if (m_renderersReady) {
             renderViewport();
+            // Modern's panel pop-in/out edge tabs go on top of the viewport —
+            // submit them AFTER it (they'd otherwise render under the
+            // NoBringToFrontOnFocus Viewport window until a focus reorder).
+            if (m_uiLayout == UiLayout::Modern) renderModernEdgeTabs();
 
             m_toolbar->setGridStep(m_sketchGridStep);
             m_toolbar->setSnapToGrid(m_snapToGrid);

@@ -534,96 +534,99 @@ void Application::renderModernLayout() {
     }
 
     // (The old bottom-left FULL pill folded into the Focus cycle above.)
-
-    // ── Edge tabs: semicircular grips on the panel/viewport boundaries.
-    //    Tap = pop the panel out / back in; drag = resize it (no more hunting
-    //    for the hairline splitter). Drawn after the panels so they sit on top.
-    {
-        const float tabW = 16.0f * s, tabH = 72.0f * s;
-        const float midY = wp.y + topH + (ws.y - topH) * 0.5f;
-        // side: -1 = tab bulges rightward (left rail edge), +1 = leftward.
-        auto edgeTab = [&](const char* id, float edgeX, int side,
-                           bool* hiddenVar, float* widthVar, float minW,
-                           float maxW, bool* dragged) {
-            // Anchor by the window's LEFT edge (pivot 0) so the flat side lands
-            // exactly on the panel boundary. Two gotchas the earlier versions
-            // hit: (1) right-edge anchoring (pivot 1) offset the whole tab by
-            // the window's real width; (2) tabW (~25px) is below the default
-            // WindowMinSize (32), so ImGui clamped the window wider than tabW
-            // and GetWindowPos then disagreed with the requested pos. Fix: push
-            // WindowMinSize 0 AND derive geometry from our own winLeft, never
-            // GetWindowPos — so cx = winLeft(+tabW) is exactly edgeX.
-            const float winLeft = (side < 0) ? edgeX : edgeX - tabW;
-            ImGui::SetNextWindowPos(ImVec2(winLeft, midY), ImGuiCond_Always,
-                                    ImVec2(0.0f, 0.5f));
-            ImGui::SetNextWindowSize(ImVec2(tabW, tabH));
-            ImGui::SetNextWindowBgAlpha(0.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            if (ImGui::Begin(id, nullptr, kShellWindowFlags)) {
-                const ImVec2 p(winLeft, midY - tabH * 0.5f); // our exact rect
-                ImGui::SetCursorScreenPos(p);
-                ImGui::InvisibleButton("##grip", ImVec2(tabW, tabH));
-                const bool hov = ImGui::IsItemHovered();
-                const bool act = ImGui::IsItemActive();
-                if (hov || act)
-                    ImGui::SetMouseCursor(*hiddenVar ? ImGuiMouseCursor_Hand
-                                                     : ImGuiMouseCursor_ResizeEW);
-                // Drag = resize (visible panel only); a few px of slop
-                // separates a tap from a drag.
-                if (act && !*hiddenVar && ImGui::IsMouseDragging(0, 4.0f)) {
-                    *dragged = true;
-                    *widthVar += (side < 0 ? 1.0f : -1.0f) *
-                                 ImGui::GetIO().MouseDelta.x / s;
-                    if (*widthVar < minW) *widthVar = minW;
-                    if (*widthVar > maxW) *widthVar = maxW;
-                }
-                if (ImGui::IsItemDeactivated()) {
-                    if (*dragged) {
-                        saveAppSettings();          // resize ended
-                    } else {
-                        *hiddenVar = !*hiddenVar;   // tap: pop out / back in
-                        saveAppSettings();
-                    }
-                    *dragged = false;
-                }
-
-                ImDrawList* dl = ImGui::GetWindowDrawList();
-                // Semicircle bulging INTO the viewport.
-                const float cx = side < 0 ? p.x : p.x + tabW;
-                const ImVec2 c(cx, p.y + tabH * 0.5f);
-                const float pi = 3.1415926f;
-                dl->PathArcTo(c, tabW - 1.0f * s,
-                              side < 0 ? -pi * 0.5f : pi * 0.5f,
-                              side < 0 ? pi * 0.5f : pi * 1.5f, 24);
-                dl->PathFillConvex(ImGui::GetColorU32(
-                    (hov || act) ? touchui::rowBg() : touchui::panelBg()));
-                // Chevron points where the panel edge will MOVE on tap:
-                // hidden -> panel pops toward the viewport; visible -> away.
-                const float bulge = side < 0 ? 1.0f : -1.0f; // toward viewport
-                const float dir = *hiddenVar ? bulge : -bulge;
-                const float chw = 4.0f * s, chh = 5.0f * s;
-                const ImVec2 tipPt(c.x + bulge * 6.0f * s + dir * chw * 0.5f, c.y);
-                dl->AddLine(ImVec2(tipPt.x - dir * chw, c.y - chh), tipPt,
-                            ImGui::GetColorU32(touchui::textDim()), 2.0f * s);
-                dl->AddLine(ImVec2(tipPt.x - dir * chw, c.y + chh), tipPt,
-                            ImGui::GetColorU32(touchui::textDim()), 2.0f * s);
-            }
-            ImGui::End();
-            ImGui::PopStyleVar(3);
-        };
-        edgeTab("##railTab", wp.x + railW, -1, &m_leftPanelHidden,
-                &m_touchRailW, 64.0f, 160.0f, &m_railTabDragged);
-        edgeTab("##rightTab", wp.x + ws.x - rightW, +1, &m_rightPanelHidden,
-                &m_touchRightW, 200.0f, 520.0f, &m_rightTabDragged);
-    }
+    // The panel/viewport edge tabs (pop-in/out chevrons) render in
+    // renderModernEdgeTabs(), called AFTER renderViewport so their windows are
+    // submitted after the (NoBringToFrontOnFocus) Viewport window and sit ON
+    // TOP of it. Submitting them here — before the viewport — let the viewport
+    // cover them until a focus reorder (e.g. toggling Settings) surfaced them,
+    // which read as "no chevrons on first launch" on the tablet.
 
     // Center rect for renderViewport()'s pin.
     m_touchVpX = wp.x + railW;
     m_touchVpY = wp.y + topH;
     m_touchVpW = ws.x - railW - rightW;
     m_touchVpH = ws.y - topH;
+}
+
+// The panel/viewport pop-in/out edge tabs. Called AFTER renderViewport (see
+// the dispatch in run()) so these windows are submitted last and sit above the
+// Viewport window — otherwise the viewport covered them until a focus reorder.
+// Geometry comes from m_touchVp* (the panel/viewport boundaries), set by
+// renderModernLayout earlier this frame.
+void Application::renderModernEdgeTabs() {
+    const float s = uiScale();
+    const float tabW = 16.0f * s, tabH = 72.0f * s;
+    const float midY = m_touchVpY + m_touchVpH * 0.5f;
+    // side: -1 = tab bulges rightward (left rail edge), +1 = leftward.
+    auto edgeTab = [&](const char* id, float edgeX, int side,
+                       bool* hiddenVar, float* widthVar, float minW,
+                       float maxW, bool* dragged) {
+        // Anchor by the window's LEFT edge (pivot 0) so the flat side lands
+        // exactly on the panel boundary. Push WindowMinSize 0 (tabW is below
+        // the default 32) and derive geometry from our own winLeft, never
+        // GetWindowPos — so cx = winLeft(+tabW) is exactly edgeX.
+        const float winLeft = (side < 0) ? edgeX : edgeX - tabW;
+        ImGui::SetNextWindowPos(ImVec2(winLeft, midY), ImGuiCond_Always,
+                                ImVec2(0.0f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(tabW, tabH));
+        ImGui::SetNextWindowBgAlpha(0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        if (ImGui::Begin(id, nullptr, layoutui::kShellWindowFlags)) {
+            const ImVec2 p(winLeft, midY - tabH * 0.5f); // our exact rect
+            ImGui::SetCursorScreenPos(p);
+            ImGui::InvisibleButton("##grip", ImVec2(tabW, tabH));
+            const bool hov = ImGui::IsItemHovered();
+            const bool act = ImGui::IsItemActive();
+            if (hov || act)
+                ImGui::SetMouseCursor(*hiddenVar ? ImGuiMouseCursor_Hand
+                                                 : ImGuiMouseCursor_ResizeEW);
+            // Drag = resize (visible panel only); a few px of slop separates a
+            // tap from a drag.
+            if (act && !*hiddenVar && ImGui::IsMouseDragging(0, 4.0f)) {
+                *dragged = true;
+                *widthVar += (side < 0 ? 1.0f : -1.0f) *
+                             ImGui::GetIO().MouseDelta.x / s;
+                if (*widthVar < minW) *widthVar = minW;
+                if (*widthVar > maxW) *widthVar = maxW;
+            }
+            if (ImGui::IsItemDeactivated()) {
+                if (*dragged) {
+                    saveAppSettings();          // resize ended
+                } else {
+                    *hiddenVar = !*hiddenVar;   // tap: pop out / back in
+                    saveAppSettings();
+                }
+                *dragged = false;
+            }
+
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const float cx = side < 0 ? p.x : p.x + tabW;
+            const ImVec2 c(cx, p.y + tabH * 0.5f);
+            const float pi = 3.1415926f;
+            dl->PathArcTo(c, tabW - 1.0f * s,
+                          side < 0 ? -pi * 0.5f : pi * 0.5f,
+                          side < 0 ? pi * 0.5f : pi * 1.5f, 24);
+            dl->PathFillConvex(ImGui::GetColorU32(
+                (hov || act) ? touchui::rowBg() : touchui::panelBg()));
+            // Chevron points where the panel edge moves on tap.
+            const float bulge = side < 0 ? 1.0f : -1.0f;
+            const float dir = *hiddenVar ? bulge : -bulge;
+            const float chw = 4.0f * s, chh = 5.0f * s;
+            const ImVec2 tipPt(c.x + bulge * 6.0f * s + dir * chw * 0.5f, c.y);
+            dl->AddLine(ImVec2(tipPt.x - dir * chw, c.y - chh), tipPt,
+                        ImGui::GetColorU32(touchui::textDim()), 2.0f * s);
+            dl->AddLine(ImVec2(tipPt.x - dir * chw, c.y + chh), tipPt,
+                        ImGui::GetColorU32(touchui::textDim()), 2.0f * s);
+        }
+        ImGui::End();
+        ImGui::PopStyleVar(3);
+    };
+    edgeTab("##railTab", m_touchVpX, -1, &m_leftPanelHidden,
+            &m_touchRailW, 64.0f, 160.0f, &m_railTabDragged);
+    edgeTab("##rightTab", m_touchVpX + m_touchVpW, +1, &m_rightPanelHidden,
+            &m_touchRightW, 200.0f, 520.0f, &m_rightTabDragged);
 }
 
 } // namespace materializr
