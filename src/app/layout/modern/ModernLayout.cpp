@@ -402,11 +402,17 @@ void Application::renderModernLayout() {
                         m_meshesDirty = true;
                     }
                 } else {
-                    // History on top, Properties beneath — one tab hosts both
-                    // (the step list and the editor for the selected step /
-                    // selection live together). Properties rarely holds much,
-                    // so it gets the bottom third at most.
-                    const float histH = ImGui::GetContentRegionAvail().y * 0.667f;
+                    // History on top, Properties beneath — one tab hosts
+                    // both. When a history STEP is selected the History panel
+                    // shows the step's editor INLINE, so the bottom Properties
+                    // section would just duplicate an empty panel beneath it
+                    // ("two properties windows, the bottom one blank") — give
+                    // History the full height instead and skip the section.
+                    const bool stepEditing =
+                        m_historyPanel && m_historyPanel->getEditingStep() >= 0;
+                    const float histH = stepEditing
+                        ? 0.0f
+                        : ImGui::GetContentRegionAvail().y * 0.667f;
                     if (ImGui::BeginChild("##histHalf", ImVec2(0, histH), false)) {
                         if (m_historyPanel) {
                             // Undo/redo live in the shell's top bar; the panel
@@ -417,13 +423,15 @@ void Application::renderModernLayout() {
                         }
                     }
                     ImGui::EndChild();
-                    ImGui::Separator();
-                    touchui::sectionHeader("Properties");
-                    if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0), false)) {
-                        if (m_propertiesPanel && m_propertiesPanel->renderContent())
-                            m_meshesDirty = true;
+                    if (!stepEditing) {
+                        ImGui::Separator();
+                        touchui::sectionHeader("Properties");
+                        if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0), false)) {
+                            if (m_propertiesPanel && m_propertiesPanel->renderContent())
+                                m_meshesDirty = true;
+                        }
+                        ImGui::EndChild();
                     }
-                    ImGui::EndChild();
                 }
             }
             ImGui::EndChild();
