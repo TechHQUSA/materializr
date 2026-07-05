@@ -109,3 +109,25 @@ TEST(SketchBounds, SubtleArcCentreExcludedFromFraming) {
     // Sanity: overall box height is small, not ~100mm.
     EXPECT_LT(hi.y - lo.y, 3.0f);
 }
+
+// A point sitting exactly on a circle's perimeter (a line endpoint snapped to
+// the rim, or the circle's own drag-release point) must NOT dissolve the
+// circle's loop. Regression for Steve's report: a 12mm circle concentric in a
+// 20mm circle, with a point on the 20mm rim, made the annulus between them
+// unselectable (the outer loop never formed).
+TEST(SketchRegions, RimPointKeepsConcentricAnnulus) {
+    using materializr::Sketch;
+    Sketch sk;
+    sk.setPlane(gp_Pln(gp_Ax3(gp_Pnt(0,0,0), gp_Dir(0,0,1), gp_Dir(1,0,0))));
+    int c = sk.addPoint({4.0f, -4.0f});
+    sk.addCircle(c, 6.0);
+    sk.addCircle(c, 10.0499);
+    sk.addPoint({4.0f, -14.0499f});         // exactly on the outer rim
+    auto regions = sk.buildRegions();
+    ASSERT_EQ(regions.size(), 2u) << "inner disk + annulus must both survive";
+    // A click in the annular band (radius 8 from centre) must hit a region.
+    bool bandHit = false;
+    for (const auto& r : regions)
+        if (sk.isPointInRegion(r, glm::vec2(-4.0f, -4.0f))) bandHit = true;
+    EXPECT_TRUE(bandHit) << "the ring between the circles must be selectable";
+}

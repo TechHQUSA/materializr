@@ -161,6 +161,14 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
         m_currentPos = snapArcApex(m_firstClick, m_secondClick, m_currentPos);
     }
 
+    // Circle live preview: snap the radius/diameter to the grid so what's
+    // shown (and committed) is a clean whole-unit circle, not whatever
+    // irrational distance two grid-snapped endpoints happen to span. Same
+    // helper the commit uses, so preview == result.
+    if (m_mode == SketchToolMode::Circle && m_isPlacing && m_snapToGridEnabled) {
+        m_currentPos = snapRadialToGrid(m_firstClick, m_currentPos);
+    }
+
     if (m_mode == SketchToolMode::Trim) {
         computeTrimHover(pos);
     } else if (!m_trimHoverPoints.empty()) {
@@ -1854,6 +1862,9 @@ void SketchTool::handleCircleTool(glm::vec2 pos) {
         // radius. TwoPoint mode: the two clicks are opposite ends of the
         // diameter, so the centre is their midpoint and the rim passes through
         // the first click.
+        // Snap the radius/diameter onto the grid (same helper as the preview),
+        // so a grid-enabled sketch commits clean whole-unit circles.
+        if (m_snapToGridEnabled) pos = snapRadialToGrid(m_firstClick, pos);
         glm::vec2 center = (m_circleMode == CircleMode::TwoPoint)
                                ? 0.5f * (m_firstClick + pos) : m_firstClick;
         float radius = (m_circleMode == CircleMode::TwoPoint)
@@ -1892,6 +1903,16 @@ void SketchTool::handleRectangleTool(glm::vec2 pos) {
         m_isPlacing = false;
         m_clickCount = 0;
     }
+}
+
+glm::vec2 SketchTool::snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const {
+    if (!m_snapToGridEnabled || m_gridStep <= 0.0f) return moving;
+    glm::vec2 d = moving - fixed;
+    float L = glm::length(d);
+    if (L < 1e-6f) return moving;
+    float snapped = std::round(L / m_gridStep) * m_gridStep;
+    if (snapped < m_gridStep) snapped = m_gridStep;   // never collapse to a point
+    return fixed + d * (snapped / L);
 }
 
 glm::vec2 SketchTool::snapArcApex(glm::vec2 A, glm::vec2 B, glm::vec2 apex) const {

@@ -865,8 +865,14 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
             }
         }
 
-        if (onPerim.empty()) {
-            // Standalone circle: emit a full-circle wire directly
+        if (onPerim.size() < 2) {
+            // A circle needs at least TWO perimeter junctions to be split into
+            // arcs that route through them. With zero (a standalone circle) or
+            // ONE (a stray point sitting on the rim — e.g. a line's endpoint,
+            // or the circle's own drag-release point), splitting would emit a
+            // degenerate point->itself 360° arc that never closes into a wire,
+            // so the loop — and any region it bounds, like a concentric
+            // annulus — silently vanished. Emit the clean full-circle wire.
             gp_Pnt center3d = sketchToWorld(center->pos);
             gp_Dir normal = m_plane.Position().Direction();
             gp_Circ gpCircle(gp_Ax2(center3d, normal), circle.radius);

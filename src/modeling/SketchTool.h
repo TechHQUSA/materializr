@@ -362,6 +362,11 @@ private:
     // previously only the preview snapped, so the committed arc landed at the
     // raw cursor and its centre drifted off the intended (e.g. semicircle) one.
     glm::vec2 snapArcApex(glm::vec2 start, glm::vec2 end, glm::vec2 apex) const;
+    // Snap the radial distance from `fixed` to `moving` onto the grid step,
+    // keeping the direction. For a circle this snaps the radius (Center mode)
+    // or diameter (2-point mode) to whole grid units, so a 1 mm grid can't
+    // produce a 10.05 mm circle. No-op when grid snap is off.
+    glm::vec2 snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const;
     void handleSelectTool(glm::vec2 pos);
     void handleSplineTool(glm::vec2 pos);
     void handlePolygonTool(glm::vec2 pos);
