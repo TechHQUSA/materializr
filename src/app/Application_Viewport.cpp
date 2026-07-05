@@ -2409,7 +2409,8 @@ void Application::renderViewport() {
             bool gizmoOwnsDrag = m_gizmoDragging ||
                                  m_scaleFaceCtl.dragAxis() >= 0 ||
                                  m_edgeOpDragging ||
-                                 m_pushPullSticky;
+                                 m_pushPullSticky ||
+                                 m_faceDragArm; // armed face-pull owns the drag (A.1)
             if (materializr::touchMode()) {
                 // A one-finger press-and-hold drives box-select, not orbit/pan — so
                 // suppress the camera drag (and the two-finger consume below) while
@@ -2798,6 +2799,31 @@ void Application::renderViewport() {
             // suppressed above while push/pull is active) or a mouse left-drag.
             // Gated by the enclosing viewport-hovered block, so dragging the
             // distance slider (a separate overlay) doesn't reach here.
+            // Direct face-drag (A.1): crossing the slop begins push/pull on
+            // the armed (already-selected) face; the existing drag block
+            // below then drives the distance. Release semantics live here
+            // too: gesture-flow commits on release; a tap or ~zero drag
+            // cancels without touching history or leaving the panel open.
+            if (m_faceDragArm && !m_pushPullActive && !camDragging &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 8.0f)) {
+                beginPushPull();
+                if (m_pushPullActive) {
+                    m_faceDragCommit = true;
+                } // begin can refuse (threaded body etc.) — stderr explains
+                m_faceDragArm = false;
+            }
+            if (m_faceDragArm && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                m_faceDragArm = false; // tap: selection stays, nothing begins
+            }
+            if (m_faceDragCommit && m_pushPullActive &&
+                ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                if (std::abs(m_pushPullDistance) >= 0.1f) {
+                    commitPushPull();
+                } else {
+                    cancelPushPull();
+                }
+                m_faceDragCommit = false;
+            }
             if (m_pushPullActive && m_pushPullHasArrow && !camDragging &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
@@ -4492,7 +4518,24 @@ void Application::renderViewport() {
                                         }
                                     }
                                 }
-                                if (io.KeyCtrl) {
+                                // Direct face-drag (story A.1): pressing on a
+                                // face that is ALREADY selected arms the
+                                // pull gesture instead of re-selecting.
+                                // Ctrl (toggle) keeps its deselect meaning.
+                                bool alreadySelected = false;
+                                if (entry.type == SelectionType::Face && !io.KeyCtrl) {
+                                    for (const auto& se : m_selection->getSelection()) {
+                                        if (se.type == SelectionType::Face &&
+                                            se.bodyId == entry.bodyId &&
+                                            se.subShapeIndex == entry.subShapeIndex) {
+                                            alreadySelected = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (alreadySelected) {
+                                    m_faceDragArm = true;
+                                } else if (io.KeyCtrl) {
                                     // Toggle so a Ctrl+click on something
                                     // already selected deselects just that
                                     // one (matches the plane / axis paths
