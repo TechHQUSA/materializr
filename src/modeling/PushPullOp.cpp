@@ -157,6 +157,20 @@ bool PushPullOp::rebuildProfileFromSketch(Document& doc, int sketchId) {
     return any;
 }
 
+// A boolean result that keeps the document renderable: at least one real
+// solid with non-trivial volume. A cut deeper than its body returns an empty
+// (or solid-less) compound — storing that made the body untessellatable and
+// it vanished on commit (the pull-through-body bug).
+static bool keepsASolid(const TopoDS_Shape& s) {
+    if (s.IsNull()) return false;
+    if (!TopExp_Explorer(s, TopAbs_SOLID).More()) return false;
+    try {
+        GProp_GProps gp;
+        BRepGProp::VolumeProperties(s, gp);
+        return gp.Mass() > 1e-7;
+    } catch (...) { return false; }
+}
+
 bool PushPullOp::execute(Document& doc) {
     // Direct re-execute support (e.g. cascade after a sketch constraint
     // edit): fold the previously-created body ids back into the reuse pool
@@ -170,6 +184,8 @@ bool PushPullOp::execute(Document& doc) {
     m_createdBodyIds.clear();
     m_reuseIdx = 0; // walks m_reuseBodyIds as each free-floating output is emitted
     if (m_targets.empty() || std::abs(m_distance) < 1e-6) return false;
+
+    bool anyChange = false;
 
     std::unordered_set<int> savedBodies;
 
@@ -194,6 +210,11 @@ bool PushPullOp::execute(Document& doc) {
                 if (!cut.IsDone()) continue;
                 TopoDS_Shape result = cut.Shape();
                 if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) continue;
+                if (!keepsASolid(result)) {
+                    std::fprintf(stderr, "Push/Pull declined for body %d: the "
+                                 "cut would remove the entire body\n", bid);
+                    continue;
+                }
                 GProp_GProps gb; BRepGProp::VolumeProperties(body, gb);
                 GProp_GProps gr; BRepGProp::VolumeProperties(result, gr);
                 if (gb.Mass() - gr.Mass() < 1e-7) continue; // no real overlap
@@ -332,6 +353,12 @@ bool PushPullOp::execute(Document& doc) {
                     if (!cut.IsDone()) continue;
                     result = cut.Shape();
                 }
+                if (m_distance < 0 && !keepsASolid(result)) {
+                    std::fprintf(stderr, "Push/Pull declined for body %d: the "
+                                 "cut would remove the entire body\n",
+                                 tgt.sourceBodyId);
+                    continue;
+                }
                 try {
                     ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
                     unifier.Build();
@@ -339,6 +366,7 @@ bool PushPullOp::execute(Document& doc) {
                     if (!unified.IsNull()) result = unified;
                 } catch (...) {}
                 doc.updateBody(tgt.sourceBodyId, result);
+                anyChange = true;
             } catch (...) { continue; }
         } else {
             // Free-floating prism. Cut-intersecting subtracts it from every
@@ -359,6 +387,7 @@ bool PushPullOp::execute(Document& doc) {
             bool willReuse = m_reuseIdx < m_reuseBodyIds.size();
             bool cutAny = m_cutIntersecting && !willReuse &&
                           (cutVisibleBodies(prism, -1) > 0);
+            if (cutAny) anyChange = true;
             if (!cutAny) {
                 // Free-floating: create a new body. On redo, m_reuseBodyIds holds
                 // the ids from the previous execute so addOrPutBody picks the
@@ -368,6 +397,7 @@ bool PushPullOp::execute(Document& doc) {
                 doc.addOrPutBody(id, prism, m_distance > 0 ? "Push" : "Pull");
                 m_createdBodyIds.push_back(id);
                 ++m_reuseIdx;
+                anyChange = true;
             }
         }
 
@@ -376,10 +406,13 @@ bool PushPullOp::execute(Document& doc) {
         // path (hidden bodies skipped). Only for cut direction — an extrude
         // (add) still only affects its source body.
         if (m_cutIntersecting && tgt.sourceBodyId >= 0 && m_distance < 0.0)
-            cutVisibleBodies(prism, tgt.sourceBodyId);
+            if (cutVisibleBodies(prism, tgt.sourceBodyId) > 0) anyChange = true;
     }
 
-    return !m_previousBodies.empty() || !m_createdBodyIds.empty();
+    // Refused/no-op targets leave saved snapshots behind; only a real
+    // mutation makes the op a success — History::pushOperation rejects the
+    // rest instead of committing a step that did nothing.
+    return anyChange;
 }
 
 bool PushPullOp::undo(Document& doc) {
