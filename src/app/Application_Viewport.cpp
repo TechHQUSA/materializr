@@ -139,7 +139,7 @@ static bool axisParamAtCursor(const glm::vec3& origin, const glm::vec3& normal,
     // Closest point between two lines: axis(s) = O + s*axis, ray(t) = ro + t*rd.
     float b = glm::dot(axis, rd);
     float denom = 1.0f - b * b;
-    if (denom < 1e-4f) return false; // axis ~parallel to view ray
+    if (denom < 0.0625f) return false; // axis within ~14 deg of the view ray
     glm::vec3 w = ro - origin;
     float d = glm::dot(axis, w);
     float e = glm::dot(rd, w);
@@ -2880,11 +2880,20 @@ void Application::renderViewport() {
                         moved = true;
                     }
                 }
-                if (!moved) { // degenerate axis: legacy screen-delta feel
-                    glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
-                    m_pushPullDistanceRaw += projectDragOntoNormal(
-                        m_pushPullOrigin, m_pushPullNormal, md, proj * view,
-                        vpPx, viewDirW);
+                if (!moved) {
+                    // Head-on: the screen can't express motion along an axis
+                    // pointing at the camera, so vertical drag drives the
+                    // pull — up = toward the viewer, world-rate scaled by
+                    // camera distance so the feel is zoom-invariant.
+                    glm::vec3 eye = glm::vec3(glm::inverse(view)[3]);
+                    float camDist =
+                        std::max(1.0f, glm::length(eye - m_pushPullOrigin));
+                    float toward = glm::dot(glm::normalize(m_pushPullNormal),
+                                            glm::normalize(viewDirW)) < 0.0f
+                                       ? 1.0f
+                                       : -1.0f;
+                    m_pushPullDistanceRaw +=
+                        -io.MouseDelta.y * camDist * 0.002f * toward;
                 }
                 m_pushPullDistance = m_pushPullDistanceRaw; // snapped in updatePushPull
                 std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
