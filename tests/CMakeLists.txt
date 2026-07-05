@@ -298,3 +298,11 @@ target_link_libraries(probe_owns_face PRIVATE materializr_core)
 add_executable(test_full_replay test_full_replay.cpp)
 target_link_libraries(test_full_replay PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_full_replay COMMAND test_full_replay)
+
+# test_svg_roundtrip — sketch -> SVG -> sketch: loops stay closed, corners
+# shared, circles native (Steve's re-import-the-logo breakage)
+add_executable(test_svg_roundtrip test_svg_roundtrip.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/SvgExport.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SvgImport.cpp)
+target_link_libraries(test_svg_roundtrip PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_svg_roundtrip COMMAND test_svg_roundtrip)

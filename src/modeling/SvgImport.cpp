@@ -749,8 +749,14 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
 
             // Stroke-only path (a "line icon"): no fill area to emboss — offset
             // the centerline into a closed ribbon. Fall back to the centerline if
-            // the offset can't be built.
-            const bool strokeOnly = !filled &&
+            // the offset can't be built. EXCEPTION: a hairline stroke (tiny
+            // relative to the artwork) is the laser/CAM cut-line convention —
+            // including our own sketch export — and means "this IS the curve",
+            // not "draw me this thick". Ribboning those produced two parallel
+            // copies of every segment ("lines on top of each other") and turned
+            // closed loops into rings that never formed a region on re-import.
+            const bool hairline = sh->strokeWidth < 0.01f * ref;
+            const bool strokeOnly = !filled && !hairline &&
                 sh->stroke.type != NSVG_PAINT_NONE && sh->strokeWidth > 1e-4f;
             if (strokeOnly) {
                 std::vector<std::vector<glm::vec2>> ribbon;
