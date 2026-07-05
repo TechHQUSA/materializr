@@ -4,6 +4,9 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
+#include <cstdlib>
+#include <cstdio>
+#include <BRepTools.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_SurfaceOfLinearExtrusion.hxx>
@@ -106,7 +109,20 @@ std::vector<gp_Pnt> extrusionProfilePts(const TopoDS_Face& face) {
     Handle(Geom_Curve) bc = ext->BasisCurve();
     if (bc.IsNull()) return pts;
     GeomAdaptor_Curve ac(bc);
-    const double a = ac.FirstParameter(), b = ac.LastParameter();
+    double a = ac.FirstParameter(), b = ac.LastParameter();
+    // Sample over the FACE's trimmed U-range, not the basis curve's full
+    // parameter span. After the region walker splits a spline wall at an
+    // intersection, the basis curve extends past the face — full-range
+    // samples run off the sketch spline and the whole face was rejected
+    // (corvus body 532: 15 extr walls unclassified).
+    double u0, u1, v0, v1;
+    try {
+        BRepTools::UVBounds(face, u0, u1, v0, v1);
+        if (std::isfinite(u0) && std::isfinite(u1) && u1 > u0) {
+            a = std::max(a, u0);
+            b = std::min(b, u1);
+        }
+    } catch (...) {}
     if (!std::isfinite(a) || !std::isfinite(b) || b <= a) return pts;
     const int N = 24;
     for (int i = 0; i <= N; ++i) {
@@ -181,12 +197,28 @@ Anchor classify(const TopoDS_Face& face, int sketchId,
         if (prof.empty()) return a;
         const double ctol = std::max(tol, 0.02);
         for (const auto& sp : sk.getSplines()) {
-            const auto poly = sk.sampleSpline2D(sp, 32);
+            const auto poly = sk.sampleSpline2D(sp, 48);
             if (poly.size() < 2) continue;
-            bool onAll = true;
-            for (const auto& p : prof)
-                if (distToPolyline(f.u(p), f.v(p), poly) > ctol) { onAll = false; break; }
-            if (onAll) return { Anchor::CurveWall, sketchId, sp.id, ch, cu, cv };
+            int miss = 0;
+            double worst = 0.0;
+            for (const auto& p : prof) {
+                double d = distToPolyline(f.u(p), f.v(p), poly);
+                if (d > ctol) ++miss;
+                worst = std::max(worst, d);
+            }
+            if (std::getenv("MZR_CWALL_DEBUG") && miss > 0 && worst < 20.0) {
+                gp_Pnt p0 = prof.front();
+                std::fprintf(stderr, "[cwall] sk %d spline %d: miss %d/%zu "
+                             "worst %.3f prof0 (%.2f,%.2f) poly0 (%.2f,%.2f) "
+                             "polyN (%.2f,%.2f)\n",
+                             sketchId, sp.id, miss, prof.size(), worst,
+                             f.u(p0), f.v(p0), poly.front().x, poly.front().y,
+                             poly.back().x, poly.back().y);
+            }
+            // Allow ~10% strays (interpolated-basis wiggle at trim ends);
+            // resolve-side distinctness still rejects collisions.
+            if (miss * 10 <= static_cast<int>(prof.size()))
+                return { Anchor::CurveWall, sketchId, sp.id, ch, cu, cv };
         }
         return a;
     }

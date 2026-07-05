@@ -549,9 +549,14 @@ std::vector<glm::vec2> Sketch::sampleSpline2D(const SketchSpline& sp,
     size_t n = ids.size() - (closedSp ? 1 : 0);
     for (size_t k = 0; k < n; ++k) {
         const SketchPoint* p = getPoint(ids[k]);
-        if (!p) return ctrl;
+        // SKIP a dangling control-point id instead of truncating: returning
+        // the partial RAW control polygon (old behaviour) collapsed a whole
+        // spline to a tiny un-interpolated stub whenever one referenced point
+        // was gone — every classification against it then missed by miles.
+        if (!p) continue;
         ctrl.push_back(p->pos);
     }
+    if (ctrl.size() < 2) return {};
     return interpolate2D(ctrl, segsPerSpan, closedSp);
 }
 
