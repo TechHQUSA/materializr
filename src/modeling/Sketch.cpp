@@ -105,10 +105,22 @@ bool Sketch::getWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
         lo = glm::min(lo, v);
         hi = glm::max(hi, v);
     };
-    for (const auto& pt : m_points) addPt(sketchToWorld(pt.pos));
+    // An arc's centre is the centre of the (possibly enormous) circle the arc
+    // lies on — for a subtle, nearly-flat arc it sits far from the drawn
+    // geometry. Including it here made "frame sketch" and sketch-entry zoom
+    // right out to nothing. Exclude arc centres from the framing bounds (the
+    // point itself stays visible and interactive — this only affects the
+    // camera box) and enclose the arc's actual swept rim instead. Circle
+    // centres are kept: their rim expansion below brackets the centre exactly.
+    std::unordered_set<int> arcCentres;
+    for (const auto& a : m_arcs) arcCentres.insert(a.centerPointId);
+
+    for (const auto& pt : m_points) {
+        if (arcCentres.count(pt.id)) continue;
+        addPt(sketchToWorld(pt.pos));
+    }
     // Points only capture circle centres; expand by radius along the plane axes
-    // so the rim is enclosed too (arc/polygon extents are covered by their
-    // generated endpoints/vertices).
+    // so the rim is enclosed too.
     for (const auto& c : m_circles) {
         const SketchPoint* ctr = getPoint(c.centerPointId);
         if (!ctr) continue;
@@ -117,6 +129,28 @@ bool Sketch::getWorldBounds(glm::vec3& outMin, glm::vec3& outMax) const {
         addPt(sketchToWorld(ctr->pos + glm::vec2(-r, 0)));
         addPt(sketchToWorld(ctr->pos + glm::vec2( 0, r)));
         addPt(sketchToWorld(ctr->pos + glm::vec2( 0,-r)));
+    }
+    // Arc rim: sample the swept span (start->end CCW, the buildWires
+    // convention) so the drawn arc — including any bulge past its endpoints —
+    // is enclosed without dragging in the far centre.
+    for (const auto& a : m_arcs) {
+        const SketchPoint* c = getPoint(a.centerPointId);
+        const SketchPoint* s = getPoint(a.startPointId);
+        const SketchPoint* e = getPoint(a.endPointId);
+        if (!c || !s || !e) continue;
+        const glm::vec2 cp = c->pos;
+        const double r = glm::length(s->pos - cp);   // actual, not stored
+        double a0 = std::atan2(s->pos.y - cp.y, s->pos.x - cp.x);
+        double sweep = std::atan2(e->pos.y - cp.y, e->pos.x - cp.x) - a0;
+        while (sweep <= 0.0)          sweep += 2.0 * M_PI;
+        while (sweep > 2.0 * M_PI)    sweep -= 2.0 * M_PI;
+        const int N = 16;
+        for (int i = 0; i <= N; ++i) {
+            double ang = a0 + sweep * (static_cast<double>(i) / N);
+            addPt(sketchToWorld(cp + glm::vec2(
+                static_cast<float>(r * std::cos(ang)),
+                static_cast<float>(r * std::sin(ang)))));
+        }
     }
     outMin = lo;
     outMax = hi;

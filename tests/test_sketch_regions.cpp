@@ -76,3 +76,36 @@ TEST(SketchRegions, SingleTriangleInterior) {
     EXPECT_TRUE(sk.isPointInRegion(regions[0], centroid(a, b, c)));
     EXPECT_FALSE(sk.isPointInRegion(regions[0], glm::vec2(50, 35))); // outside hypotenuse
 }
+
+// Framing bounds must NOT include an arc's far centre. A subtle (nearly flat)
+// arc lies on a huge circle whose centre is far from the drawn geometry;
+// including it made "frame sketch" / sketch-entry zoom out to nothing
+// (Steve's report). The centre POINT still exists and stays interactive —
+// this only governs the camera box.
+TEST(SketchBounds, SubtleArcCentreExcludedFromFraming) {
+    using materializr::Sketch;
+    Sketch sk;
+    sk.setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0))));
+    // A shallow arc from (-10,0) to (10,0) bulging up ~0.5mm: radius ~100mm,
+    // so the circle centre sits ~99.5mm BELOW the chord.
+    const double r = 100.25;
+    const double cy = 0.5 - r;                 // centre far below
+    int cId = sk.addPoint({0.0f, (float)cy});
+    // Start on the RIGHT, end on the LEFT: the buildWires CCW start->end
+    // convention then traces the SHORT way over the top (the shallow bulge),
+    // which is what a drawn subtle arc actually is.
+    int sId = sk.addPoint({10.0f, 0.0f});
+    int eId = sk.addPoint({-10.0f, 0.0f});
+    sk.addArc(cId, sId, eId, r);
+
+    glm::vec3 lo, hi;
+    ASSERT_TRUE(sk.getWorldBounds(lo, hi));
+    // The drawn arc spans x in [-10,10], y in [0, ~0.5]. The bounds must hug
+    // that, NOT stretch ~100mm down to the centre.
+    EXPECT_NEAR(lo.x, -10.0f, 0.5f);
+    EXPECT_NEAR(hi.x,  10.0f, 0.5f);
+    EXPECT_GT(lo.y, -2.0f) << "bounds must not reach the far arc centre";
+    EXPECT_NEAR(hi.y, 0.5f, 0.2f) << "arc bulge enclosed";
+    // Sanity: overall box height is small, not ~100mm.
+    EXPECT_LT(hi.y - lo.y, 3.0f);
+}
