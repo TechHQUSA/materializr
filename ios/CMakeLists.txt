@@ -128,7 +128,13 @@ set_target_properties(materializr PROPERTIES
     XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
     XCODE_ATTRIBUTE_ENABLE_BITCODE "NO"
     XCODE_ATTRIBUTE_DEAD_CODE_STRIPPING "YES"
-    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+    # Product → Archive marks the result an "iOS App Archive" (uploadable to
+    # App Store Connect) only if the .app is installed into the archive at
+    # Applications/. CMake-generated targets default to SKIP_INSTALL=YES,
+    # which yields a useless "Generic Xcode Archive" instead.
+    XCODE_ATTRIBUTE_SKIP_INSTALL "NO"
+    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)")
 if(DEFINED MZ_DEVELOPMENT_TEAM)
     set_target_properties(materializr PROPERTIES
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${MZ_DEVELOPMENT_TEAM}")
