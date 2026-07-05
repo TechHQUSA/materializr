@@ -116,39 +116,6 @@ namespace materializr {
 // Near head-on the axis's screen footprint collapses and exact tracking would
 // turn one pixel into metres, so the sensitivity gain over a screen-parallel
 // axis at the same depth is clamped (÷ max(|sin θ|, 0.25) worth).
-// Parameter s of the closest point on the pull axis (origin + s*normal) to
-// the cursor's view ray. Absolute positioning for the face-drag gesture:
-// unlike per-frame screen-delta projection this is direction-agnostic and
-// stays 1:1 under the cursor even when the axis is foreshortened (a face
-// pointing at the camera made screen-delta pulls crawl — "stuck at 1mm").
-// Returns false when the axis is near-parallel to the ray (degenerate).
-static bool axisParamAtCursor(const glm::vec3& origin, const glm::vec3& normal,
-                              const ImVec2& mousePx, const ImVec2& viewportOrigin,
-                              const ImVec2& viewportSize, const glm::mat4& invVP,
-                              float& outS) {
-    float nx = ((mousePx.x - viewportOrigin.x) / viewportSize.x) * 2.0f - 1.0f;
-    float ny = 1.0f - ((mousePx.y - viewportOrigin.y) / viewportSize.y) * 2.0f;
-    glm::vec4 np = invVP * glm::vec4(nx, ny, -1.0f, 1.0f);
-    glm::vec4 fp = invVP * glm::vec4(nx, ny, 1.0f, 1.0f);
-    if (std::abs(np.w) <= 1e-9f || std::abs(fp.w) <= 1e-9f) return false;
-    glm::vec3 ro(np / np.w);
-    glm::vec3 rd = glm::vec3(fp / fp.w) - ro;
-    if (glm::length(rd) <= 1e-9f || glm::length(normal) <= 1e-9f) return false;
-    rd = glm::normalize(rd);
-    glm::vec3 axis = glm::normalize(normal);
-    // Closest point between two lines: axis(s) = O + s*axis, ray(t) = ro + t*rd.
-    float b = glm::dot(axis, rd);
-    float denom = 1.0f - b * b;
-    if (denom < 0.0625f) return false; // axis within ~14 deg of the view ray
-    glm::vec3 w = ro - origin;
-    float d = glm::dot(axis, w);
-    float e = glm::dot(rd, w);
-    float s = (d - b * e) / denom;
-    if (!std::isfinite(s)) return false;
-    outS = s;
-    return true;
-}
-
 static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& normal,
                                    const glm::vec2& mouseDelta, const glm::mat4& vp,
                                    const glm::vec2& viewportPx,
@@ -2442,8 +2409,7 @@ void Application::renderViewport() {
             bool gizmoOwnsDrag = m_gizmoDragging ||
                                  m_scaleFaceCtl.dragAxis() >= 0 ||
                                  m_edgeOpDragging ||
-                                 m_pushPullSticky ||
-                                 m_faceDragArm; // armed face-pull owns the drag (A.1)
+                                 m_pushPullSticky;
             if (materializr::touchMode()) {
                 // A one-finger press-and-hold drives box-select, not orbit/pan — so
                 // suppress the camera drag (and the two-finger consume below) while
@@ -2832,75 +2798,7 @@ void Application::renderViewport() {
             // suppressed above while push/pull is active) or a mouse left-drag.
             // Gated by the enclosing viewport-hovered block, so dragging the
             // distance slider (a separate overlay) doesn't reach here.
-            // Direct face-drag (A.1): crossing the slop begins push/pull on
-            // the armed (already-selected) face; the existing drag block
-            // below then drives the distance. Release semantics live here
-            // too: gesture-flow commits on release; a tap or ~zero drag
-            // cancels without touching history or leaving the panel open.
-            if (m_faceDragArm && !m_pushPullActive && !camDragging &&
-                ImGui::IsMouseDragging(ImGuiMouseButton_Left, 8.0f)) {
-                beginPushPull();
-                if (m_pushPullActive) {
-                    m_faceDragCommit = true;
-                    // Latch where the cursor sits along the pull axis; each
-                    // drag frame re-derives the ABSOLUTE distance from the
-                    // current cursor ray (see axisParamAtCursor).
-                    glm::mat4 invVP = glm::inverse(proj * view);
-                    ImVec2 wp = ImGui::GetItemRectMin();
-                    m_faceDragAxisOk = m_pushPullHasArrow &&
-                        axisParamAtCursor(m_pushPullOrigin, m_pushPullNormal,
-                                          ImGui::GetMousePos(), wp, contentSize,
-                                          invVP, m_faceDragAxisStart);
-                } // begin can refuse (threaded body etc.) — stderr explains
-                m_faceDragArm = false;
-            }
-            if (m_faceDragArm && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-                m_faceDragArm = false; // tap: selection stays, nothing begins
-            }
-            if (m_faceDragCommit && m_pushPullActive &&
-                ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-                if (std::abs(m_pushPullDistance) >= 0.1f) {
-                    commitPushPull();
-                } else {
-                    cancelPushPull();
-                }
-                m_faceDragCommit = false;
-            }
-            if (m_faceDragCommit && m_pushPullActive && !camDragging &&
-                ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                bool moved = false;
-                if (m_faceDragAxisOk) {
-                    glm::mat4 invVP = glm::inverse(proj * view);
-                    ImVec2 wp = ImGui::GetItemRectMin();
-                    float sNow = 0.0f;
-                    if (axisParamAtCursor(m_pushPullOrigin, m_pushPullNormal,
-                                          ImGui::GetMousePos(), wp, contentSize,
-                                          invVP, sNow)) {
-                        m_pushPullDistanceRaw = sNow - m_faceDragAxisStart;
-                        moved = true;
-                    }
-                }
-                if (!moved) {
-                    // Head-on: the screen can't express motion along an axis
-                    // pointing at the camera, so vertical drag drives the
-                    // pull — up = toward the viewer, world-rate scaled by
-                    // camera distance so the feel is zoom-invariant.
-                    glm::vec3 eye = glm::vec3(glm::inverse(view)[3]);
-                    float camDist =
-                        std::max(1.0f, glm::length(eye - m_pushPullOrigin));
-                    float toward = glm::dot(glm::normalize(m_pushPullNormal),
-                                            glm::normalize(viewDirW)) < 0.0f
-                                       ? 1.0f
-                                       : -1.0f;
-                    m_pushPullDistanceRaw +=
-                        -io.MouseDelta.y * camDist * 0.002f * toward;
-                }
-                m_pushPullDistance = m_pushPullDistanceRaw; // snapped in updatePushPull
-                std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
-                updatePushPull();
-            }
             if (m_pushPullActive && m_pushPullHasArrow && !camDragging &&
-                !m_faceDragCommit &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
                 m_pushPullDistanceRaw += projectDragOntoNormal(
@@ -4271,10 +4169,6 @@ void Application::renderViewport() {
                             m_selection->toggleSelection(entry);
                         } else {
                             m_selection->select(entry);
-                            // One-touch pull: press-drag on a sketch region
-                            // extrudes it directly (the FIRST pull of a new
-                            // sketch). Toggle/multi paths never arm.
-                            m_faceDragArm = true;
                         }
                         {
                             ImVec2 mp2 = ImGui::GetMousePos();
@@ -4597,15 +4491,6 @@ void Application::renderViewport() {
                                             }
                                         }
                                     }
-                                }
-                                // One-touch pull (story A.1 v2): a plain press
-                                // on a body face selects it AND arms the pull
-                                // in the same touch — drag past slop begins
-                                // push/pull, release early = it was a tap-
-                                // select. Ctrl (toggle / multi-select) never
-                                // arms; edge-promoted picks never reach here.
-                                if (entry.type == SelectionType::Face && !io.KeyCtrl) {
-                                    m_faceDragArm = true;
                                 }
                                 if (io.KeyCtrl) {
                                     // Toggle so a Ctrl+click on something
