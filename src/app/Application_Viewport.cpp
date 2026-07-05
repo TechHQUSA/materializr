@@ -116,6 +116,39 @@ namespace materializr {
 // Near head-on the axis's screen footprint collapses and exact tracking would
 // turn one pixel into metres, so the sensitivity gain over a screen-parallel
 // axis at the same depth is clamped (÷ max(|sin θ|, 0.25) worth).
+// Parameter s of the closest point on the pull axis (origin + s*normal) to
+// the cursor's view ray. Absolute positioning for the face-drag gesture:
+// unlike per-frame screen-delta projection this is direction-agnostic and
+// stays 1:1 under the cursor even when the axis is foreshortened (a face
+// pointing at the camera made screen-delta pulls crawl — "stuck at 1mm").
+// Returns false when the axis is near-parallel to the ray (degenerate).
+static bool axisParamAtCursor(const glm::vec3& origin, const glm::vec3& normal,
+                              const ImVec2& mousePx, const ImVec2& viewportOrigin,
+                              const ImVec2& viewportSize, const glm::mat4& invVP,
+                              float& outS) {
+    float nx = ((mousePx.x - viewportOrigin.x) / viewportSize.x) * 2.0f - 1.0f;
+    float ny = 1.0f - ((mousePx.y - viewportOrigin.y) / viewportSize.y) * 2.0f;
+    glm::vec4 np = invVP * glm::vec4(nx, ny, -1.0f, 1.0f);
+    glm::vec4 fp = invVP * glm::vec4(nx, ny, 1.0f, 1.0f);
+    if (std::abs(np.w) <= 1e-9f || std::abs(fp.w) <= 1e-9f) return false;
+    glm::vec3 ro(np / np.w);
+    glm::vec3 rd = glm::vec3(fp / fp.w) - ro;
+    if (glm::length(rd) <= 1e-9f || glm::length(normal) <= 1e-9f) return false;
+    rd = glm::normalize(rd);
+    glm::vec3 axis = glm::normalize(normal);
+    // Closest point between two lines: axis(s) = O + s*axis, ray(t) = ro + t*rd.
+    float b = glm::dot(axis, rd);
+    float denom = 1.0f - b * b;
+    if (denom < 1e-4f) return false; // axis ~parallel to view ray
+    glm::vec3 w = ro - origin;
+    float d = glm::dot(axis, w);
+    float e = glm::dot(rd, w);
+    float s = (b * e - d) / denom;
+    if (!std::isfinite(s)) return false;
+    outS = s;
+    return true;
+}
+
 static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& normal,
                                    const glm::vec2& mouseDelta, const glm::mat4& vp,
                                    const glm::vec2& viewportPx,
@@ -2809,6 +2842,15 @@ void Application::renderViewport() {
                 beginPushPull();
                 if (m_pushPullActive) {
                     m_faceDragCommit = true;
+                    // Latch where the cursor sits along the pull axis; each
+                    // drag frame re-derives the ABSOLUTE distance from the
+                    // current cursor ray (see axisParamAtCursor).
+                    glm::mat4 invVP = glm::inverse(proj * view);
+                    ImVec2 wp = ImGui::GetItemRectMin();
+                    m_faceDragAxisOk = m_pushPullHasArrow &&
+                        axisParamAtCursor(m_pushPullOrigin, m_pushPullNormal,
+                                          ImGui::GetMousePos(), wp, contentSize,
+                                          invVP, m_faceDragAxisStart);
                 } // begin can refuse (threaded body etc.) — stderr explains
                 m_faceDragArm = false;
             }
@@ -2824,7 +2866,32 @@ void Application::renderViewport() {
                 }
                 m_faceDragCommit = false;
             }
+            if (m_faceDragCommit && m_pushPullActive && !camDragging &&
+                ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+                bool moved = false;
+                if (m_faceDragAxisOk) {
+                    glm::mat4 invVP = glm::inverse(proj * view);
+                    ImVec2 wp = ImGui::GetItemRectMin();
+                    float sNow = 0.0f;
+                    if (axisParamAtCursor(m_pushPullOrigin, m_pushPullNormal,
+                                          ImGui::GetMousePos(), wp, contentSize,
+                                          invVP, sNow)) {
+                        m_pushPullDistanceRaw = sNow - m_faceDragAxisStart;
+                        moved = true;
+                    }
+                }
+                if (!moved) { // degenerate axis: legacy screen-delta feel
+                    glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
+                    m_pushPullDistanceRaw += projectDragOntoNormal(
+                        m_pushPullOrigin, m_pushPullNormal, md, proj * view,
+                        vpPx, viewDirW);
+                }
+                m_pushPullDistance = m_pushPullDistanceRaw; // snapped in updatePushPull
+                std::snprintf(m_pushPullInputBuf, sizeof(m_pushPullInputBuf), "%.1f", m_pushPullDistance);
+                updatePushPull();
+            }
             if (m_pushPullActive && m_pushPullHasArrow && !camDragging &&
+                !m_faceDragCommit &&
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 glm::vec2 md(io.MouseDelta.x, io.MouseDelta.y);
                 m_pushPullDistanceRaw += projectDragOntoNormal(

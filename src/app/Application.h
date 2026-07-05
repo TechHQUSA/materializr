@@ -613,6 +613,8 @@ private:
     // toolbar flow never sets these, so its panel/Enter semantics survive.
     bool m_faceDragArm = false;
     bool m_faceDragCommit = false;
+    bool m_faceDragAxisOk = false;    // absolute-axis tracking valid this gesture
+    float m_faceDragAxisStart = 0.0f; // cursor's axis parameter at gesture start
     // Dense-body drag protection: when any target body has >250 faces (a
     // threaded rod), the per-frame preview shows a tinted GHOST of the tool
     // volume instead of running the real boolean (which would also trigger
