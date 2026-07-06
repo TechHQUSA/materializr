@@ -371,6 +371,8 @@ void Application::renderModernLayout() {
                         if (t.label && std::strcmp(t.label, "Linear") == 0)   return 2;
                         if (t.label && std::strcmp(t.label, "Circular") == 0) return 2;
                         if (t.label && std::strcmp(t.label, "Duplicate") == 0) return 1;
+                        // Split X/Y/Z -> one "Split" flyout.
+                        if (t.label && std::strncmp(t.label, "Split", 5) == 0) return 3;
                         return 0;
                     }
                     switch (t.action) {
@@ -397,7 +399,7 @@ void Application::renderModernLayout() {
                     else handleToolAction(static_cast<int>(t.action));
                 };
 
-                bool done[3] = { false, false, false };
+                bool done[4] = { false, false, false, false };
                 int railIdx = 0;
                 for (const auto& tool : rail) {
                     if (skip(tool)) continue;
@@ -407,14 +409,21 @@ void Application::renderModernLayout() {
                     if (g != 0 && count(g) >= 2) {
                         if (done[g]) continue;
                         done[g] = true;
-                        const char* gIcon  = g == 1 ? MZ_ICON_COPY : MZ_ICON_PATTERN_CIRCULAR;
-                        const char* gLabel = g == 1 ? "Transform" : "Pattern";
-                        const char* gPopup = g == 1 ? "##railTransform" : "##railPattern";
+                        const char* gIcon  = g == 1 ? MZ_ICON_COPY
+                                           : g == 2 ? MZ_ICON_PATTERN_CIRCULAR
+                                                    : MZ_ICON_SPLIT;
+                        const char* gLabel = g == 1 ? "Transform"
+                                           : g == 2 ? "Pattern"
+                                                    : "Split";
+                        const char* gPopup = g == 1 ? "##railTransform"
+                                           : g == 2 ? "##railPattern"
+                                                    : "##railSplit";
                         ImGui::PushID(2000 + g);
                         if (touchui::railButton(gLabel, gIcon, gLabel, false, cell()))
                             ImGui::OpenPopup(gPopup);
                         tip(g == 1 ? "Copy or mirror the selection"
-                                   : "Linear or circular pattern of the selection");
+                            : g == 2 ? "Linear or circular pattern of the selection"
+                                     : "Split the selected body along an axis");
                         pushPopupPad();
                         if (ImGui::BeginPopup(gPopup)) {
                             for (const auto& m : rail) {

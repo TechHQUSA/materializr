@@ -746,8 +746,30 @@ void Application::renderImTouchLayout() {
             };
 
             if (!m_inSketchMode) {
+                // Body/feature context: most tools stay flat, but the three
+                // Split axes fold into one "Split" flyout and Linear+Circular
+                // into a "Pattern" flyout (matching modern's rail). Everything
+                // else — including unrecognised future plugins — renders in
+                // catalogue order so nothing silently vanishes.
+                std::vector<const Toolbar::RailTool*> split, pattern;
                 int railIdx = 0;
-                for (const auto& tool : tools) flatButton(tool, railIdx++);
+                for (const auto& t : tools) {
+                    if (t.pluginIndex >= 0 && t.label) {
+                        if (std::strncmp(t.label, "Split", 5) == 0) {
+                            split.push_back(&t); continue;
+                        }
+                        if (std::strcmp(t.label, "Linear") == 0 ||
+                            std::strcmp(t.label, "Circular") == 0) {
+                            pattern.push_back(&t); continue;
+                        }
+                    }
+                    flatButton(t, railIdx++);
+                }
+                group("splitGroup", "##bodySplit", MZ_ICON_SPLIT, "Split",
+                      "Split the selected body along an axis", split);
+                group("patternGroup", "##bodyPattern",
+                      MZ_ICON_PATTERN_CIRCULAR, "Pattern",
+                      "Linear or circular pattern of the selection", pattern);
             } else {
                 // Sketch mode: the flat catalogue is ~19 buttons — a screen
                 // and a half of scrolling. The DRAWING tools stay flat (they're
