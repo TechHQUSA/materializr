@@ -844,7 +844,16 @@ void Application::renderResizeCylindricalPanel() {
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 280,
                                     ImGui::GetWindowPos().y + 50),
                             ImGuiCond_Appearing);
-    ImGui::SetNextWindowSize(uiSz(260, 0), ImGuiCond_Appearing);
+    // im-touch: the amount field sizes itself to GetContentRegionAvail(); in an
+    // AlwaysAutoResize window with no per-frame width that feeds back into the
+    // auto-resize and the panel creeps wider every frame. Pin the width each
+    // frame (height still auto) exactly like InteractiveOpController::renderPanel
+    // does for the other touch face-op panels. Desktop keeps the appearing-only
+    // size — its fixed-width InputText doesn't drive the loop.
+    if (imTouchLayout())
+        ImGui::SetNextWindowSize(uiSz(300, 0), ImGuiCond_Always);
+    else
+        ImGui::SetNextWindowSize(uiSz(260, 0), ImGuiCond_Appearing);
     ImGui::Begin("Edit Diameter", nullptr,
         ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoSavedSettings |
