@@ -4,6 +4,8 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <Poly_Triangulation.hxx>
@@ -30,8 +32,34 @@ bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
         // solid it keeps is the -normal half-space. Intersect the body with
         // that half-space and fill the new planar faces sitting on the cut
         // plane, otherwise a solid body reads as a hollow shell.
-        gp_Dir n = cuttingPlane.Axis().Direction();
-        gp_Pnt loc = cuttingPlane.Location();
+        const gp_Dir n = cuttingPlane.Axis().Direction();
+        const gp_Pnt loc = cuttingPlane.Location();
+
+        // Cheap reject: only proceed when the plane strictly cuts the body
+        // (material on BOTH sides). This skips the Common+mesh for bodies the
+        // plane never touches (avoids per-frame cost while dragging the offset
+        // slider) and, since it demands material on the removed side too, stops
+        // a plane that merely grazes a boundary face from drawing a spurious
+        // cap over that untouched face.
+        Bnd_Box bbox;
+        BRepBndLib::Add(shape, bbox);
+        if (bbox.IsVoid()) return false;
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        const gp_Pnt corners[8] = {
+            gp_Pnt(xmin, ymin, zmin), gp_Pnt(xmax, ymin, zmin),
+            gp_Pnt(xmin, ymax, zmin), gp_Pnt(xmax, ymax, zmin),
+            gp_Pnt(xmin, ymin, zmax), gp_Pnt(xmax, ymin, zmax),
+            gp_Pnt(xmin, ymax, zmax), gp_Pnt(xmax, ymax, zmax)};
+        double dLo = 1e300, dHi = -1e300;
+        for (const gp_Pnt& c : corners) {
+            const double d = gp_Vec(loc, c).Dot(gp_Vec(n));
+            if (d < dLo) dLo = d;
+            if (d > dHi) dHi = d;
+        }
+        const double straddleEps = 1e-6;
+        if (!(dLo < -straddleEps && dHi > straddleEps)) return false;
+
         const double L = 1.0e5; // plane extent; must bisect any body
         TopoDS_Face planeFace =
             BRepBuilderAPI_MakeFace(cuttingPlane, -L, L, -L, L).Face();
@@ -78,7 +106,10 @@ bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
             }
         }
     } catch (...) {
-        return outPositions.size() > startSize;
+        // Never hand back a half-built cap: roll back any partial append so a
+        // failure renders as "no cap" rather than broken geometry.
+        outPositions.resize(startSize);
+        return false;
     }
 
     return outPositions.size() > startSize;

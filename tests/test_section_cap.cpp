@@ -73,3 +73,23 @@ TEST(SectionCap, NoIntersectionNoCap) {
     EXPECT_FALSE(computeSectionCap(box, plane, pos));
     EXPECT_TRUE(pos.empty());
 }
+
+// Plane grazing a boundary face (no material removed) must NOT cap: the body
+// [0,20] on z sits entirely on one side of z=0 and z=20. Without the strict
+// straddle check the coplanar base/top face would be filled as a false cap
+// that z-fights the real face.
+TEST(SectionCap, TangentPlaneNoCap) {
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
+    std::vector<float> pos;
+
+    EXPECT_FALSE(computeSectionCap(box, gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), pos));
+    EXPECT_TRUE(pos.empty());
+    EXPECT_FALSE(computeSectionCap(box, gp_Pln(gp_Pnt(0, 0, 20), gp_Dir(0, 0, 1)), pos));
+    EXPECT_TRUE(pos.empty());
+}
+
+// NOTE: these area assertions cannot detect a kept-side sign flip. The cut face
+// is congruent for either half-space, so keeping +normal instead of -normal
+// yields the identical cap geometry (same area, same plane). The kept-side
+// convention is guarded by construction (refPnt = loc - normal) and reviewed
+// against the shader's discard sign, not by these tests.

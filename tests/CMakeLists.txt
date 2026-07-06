@@ -123,7 +123,7 @@ add_executable(test_document test_document.cpp)
 target_link_libraries(test_document PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_document COMMAND test_document)
 
-# test_section_cap — section-view cross-section cap geometry (issue #15)
+# test_section_cap - section-view cross-section cap geometry (issue #15)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)

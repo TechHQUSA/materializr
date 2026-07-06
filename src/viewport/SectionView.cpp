@@ -252,22 +252,24 @@ void SectionView::render(const glm::mat4& view, const glm::mat4& projection) {
         glUniformMatrix4fv(m_capLocMVP, 1, GL_FALSE, glm::value_ptr(mvpCap));
         glUniform3fv(m_capLocNormal, 1, glm::value_ptr(m_capNormal));
 
+        const GLboolean cullWas = glIsEnabled(GL_CULL_FACE);
         glEnable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE); // cap winding is not guaranteed toward camera
 
         glBindVertexArray(m_capVao);
         glBindBuffer(GL_ARRAY_BUFFER, m_capVbo);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(0);
         for (const auto& cap : m_caps) {
             glBufferData(GL_ARRAY_BUFFER,
                          static_cast<GLsizeiptr>(cap.positions.size() * sizeof(float)),
                          cap.positions.data(), GL_DYNAMIC_DRAW);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
-            glEnableVertexAttribArray(0);
             glUniform3fv(m_capLocColor, 1, glm::value_ptr(cap.color));
             glDrawArrays(GL_TRIANGLES, 0,
                          static_cast<GLsizei>(cap.positions.size() / 3));
         }
         glBindVertexArray(0);
+        if (cullWas) glEnable(GL_CULL_FACE); // restore; do not leak state
     }
 
     if (m_lines.empty() || !m_program) {
