@@ -478,71 +478,34 @@ bool amountField(const char* id, const char* label, double* v,
                  double minV, double maxV, const ImVec2* padPos) {
     const float s = uiScale();
     bool changed = false;
-    // One pad is open at a time, so a single shared edit buffer suffices.
-    static char s_buf[32];
 
     ImGui::PushID(id);
-    if (label && *label) ImGui::TextUnformatted(label);
-
-    // Tappable value well — valueReadout's look with a hit area.
-    const float wellW =
-        std::max(ImGui::GetContentRegionAvail().x, numberPadWidth(40.0f * s));
-    const float wellH = 46.0f * s;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::InvisibleButton("##well", ImVec2(wellW, wellH));
-    const bool hovered = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + wellW, p.y + wellH),
-                      ImGui::GetColorU32(hovered ? hoverBg() : rowBg()),
-                      radius(8.0f * s));
-    char cur[48];
-    std::snprintf(cur, sizeof(cur), "%.*f %s", decimals, *v, suffix);
-    ImFont* font = ImGui::GetFont();
-    const float ts = 22.0f * s;
-    const ImVec2 sz = font->CalcTextSizeA(ts, FLT_MAX, 0.0f, cur);
-    float tx = p.x + wellW - 12.0f * s - sz.x;
-    if (tx < p.x + 8.0f * s) tx = p.x + 8.0f * s;
-    dl->AddText(font, ts, ImVec2(tx, p.y + (wellH - sz.y) * 0.5f),
-                ImGui::GetColorU32(textPrimary()), cur);
-
-    if (pressed) {
-        s_buf[0] = '\0';
-        ImGui::OpenPopup("##amountPad");
+    if (label && *label) {
+        if (suffix && *suffix) ImGui::Text("%s (%s)", label, suffix);
+        else                   ImGui::TextUnformatted(label);
     }
-    // Pin the pad: below this well, or at the caller's shared anchor —
-    // never at the tap point, so repeated edits (and sibling fields in a
-    // two-value dialog) always find the keypad in the same place.
-    ImGui::SetNextWindowPos(
-        padPos ? *padPos : ImVec2(p.x, p.y + wellH + 6.0f * s),
-        ImGuiCond_Appearing);
-    if (ImGui::BeginPopup("##amountPad")) {
-        const float keySide = 46.0f * s;
-        char readout[48];
-        if (s_buf[0] != '\0')
-            std::snprintf(readout, sizeof(readout), "%s %s", s_buf, suffix);
-        else
-            std::snprintf(readout, sizeof(readout), "%.*f %s", decimals, *v,
-                          suffix);
-        valueReadout("val", readout, s_buf[0] == '\0',
-                     numberPadWidth(keySide));
-        ImGui::Spacing();
-        numberPad("keys", s_buf, sizeof(s_buf), keySide, allowSign);
-        ImGui::Spacing();
-        if (iconButton("cancel", MZ_ICON_DISCARD, keySide))
-            ImGui::CloseCurrentPopup();
-        ImGui::SameLine(0.0f, 12.0f * s);
-        if (pillButton("ok", MZ_ICON_FINISH, nullptr, /*accent=*/true)) {
-            double nv = 0.0;
-            if (materializr::parseFinite(s_buf, nv)) {
-                if (minV < maxV) nv = nv < minV ? minV : (nv > maxV ? maxV : nv);
-                *v = nv;
-                changed = true;
-            }
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
+
+    // Native keyboard field (tap to focus) — replaces the in-app number pad on
+    // the face-op panels (push/pull, extrude, fillet, chamfer). FIXED item
+    // width so the field can't grow off-screen as digits are typed; the text
+    // scrolls inside it instead.
+    char fmt[8];
+    std::snprintf(fmt, sizeof(fmt), "%%.%df", decimals < 0 ? 0 : decimals);
+    ImGui::SetNextItemWidth(
+        std::max(ImGui::GetContentRegionAvail().x, numberPadWidth(40.0f * s)));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * s, 10.0f * s));
+    double nv = *v;
+    if (ImGui::InputDouble("##amt", &nv, 0.0, 0.0, fmt,
+                           ImGuiInputTextFlags_CharsDecimal |
+                           ImGuiInputTextFlags_AutoSelectAll)) {
+        if (!allowSign && nv < 0.0) nv = 0.0;
+        if (minV < maxV) nv = nv < minV ? minV : (nv > maxV ? maxV : nv);
+        *v = nv;
+        changed = true;
     }
+    ImGui::PopStyleVar();
     ImGui::PopID();
+    (void)padPos;   // pad-anchor no longer used (native keyboard)
     return changed;
 }
 

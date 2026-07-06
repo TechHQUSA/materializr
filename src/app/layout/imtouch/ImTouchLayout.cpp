@@ -401,8 +401,15 @@ void Application::renderImTouchLayout() {
     //    height and let the bar scroll rather than run off-screen.
     ImGui::SetNextWindowPos(ImVec2(wp.x + m, wp.y + ws.y * 0.5f),
                             ImGuiCond_Always, ImVec2(0.0f, 0.5f));
+    // The dock is vertically CENTRED, so it grows symmetrically from the
+    // middle. Reserve the top-left (menu chip) and bottom-left (History
+    // button) zones so a tall catalogue can't expand over them — cap the max
+    // height to twice the smaller half-gap. Beyond that it scrolls.
+    const float leftReserve = 96.0f * s; // History / chip button + margin
+    const float dockMaxH = std::max(120.0f * s,
+                                    ws.y - 2.0f * m - 2.0f * leftReserve);
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0),
-                                        ImVec2(FLT_MAX, ws.y - 2.0f * m));
+                                        ImVec2(FLT_MAX, dockMaxH));
     ImGui::SetNextWindowBgAlpha(0.92f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, touchui::panelBg());
     if (ImGui::Begin("##LiteToolBar", nullptr,

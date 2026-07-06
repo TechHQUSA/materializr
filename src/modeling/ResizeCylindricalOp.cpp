@@ -648,17 +648,24 @@ void ResizeCylindricalOp::renderProperties() {
     // Directly editable — Apply (or Enter) re-executes the op with the new
     // diameters (m_old* stays the original cylinder, so the change volume is
     // rebuilt correctly). A uniform cylinder edits one Ø; a cone edits both.
+    // FIXED item width: without it, the field grows with every typed digit in
+    // an auto-resize panel and runs off the right edge (Steve's report). The
+    // font scale already sizes it up on touch.
+    const float diaW = 200.0f;
     if (std::abs(m_newTopR - m_newBottomR) < 1e-5) {
         double dia = m_newTopR * 2.0;
+        ImGui::SetNextItemWidth(diaW);
         if (ImGui::InputDouble("Diameter (mm)", &dia, 0.1, 1.0, "%.2f")) {
             if (dia > 0.01) { m_newTopR = dia * 0.5; m_newBottomR = dia * 0.5; }
         }
     } else {
         double db = m_newBottomR * 2.0;
         double dt = m_newTopR * 2.0;
+        ImGui::SetNextItemWidth(diaW);
         if (ImGui::InputDouble("Bottom Ø (mm)", &db, 0.1, 1.0, "%.2f")) {
             if (db > 0.01) m_newBottomR = db * 0.5;
         }
+        ImGui::SetNextItemWidth(diaW);
         if (ImGui::InputDouble("Top Ø (mm)", &dt, 0.1, 1.0, "%.2f")) {
             if (dt > 0.01) m_newTopR = dt * 0.5;
         }
