@@ -327,3 +327,14 @@ add_executable(test_svg_roundtrip test_svg_roundtrip.cpp
 target_link_libraries(test_svg_roundtrip PRIVATE materializr_core gtest gtest_main
     TKV3d TKService)
 add_test(NAME test_svg_roundtrip COMMAND test_svg_roundtrip)
+
+# probe_kernel_matrix — one-line-per-case battery of kernel-sensitive modeling
+# ops for diffing behavior across OCCT versions (7.6.x apt vs 7.9.3 vs 8.0.0);
+# fork-isolated cases so crashes/hangs report instead of killing the battery.
+add_executable(probe_kernel_matrix probe_kernel_matrix.cpp)
+target_link_libraries(probe_kernel_matrix PRIVATE materializr_core)
+
+# probe_validity_fuzz — deterministic randomized validity sweep (same seed =>
+# identical case stream on every OCCT version, for cross-kernel diffing).
+add_executable(probe_validity_fuzz probe_validity_fuzz.cpp)
+target_link_libraries(probe_validity_fuzz PRIVATE materializr_core)
