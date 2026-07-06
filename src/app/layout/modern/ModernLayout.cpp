@@ -287,6 +287,15 @@ void Application::renderModernLayout() {
                 ++railCellIdx;
                 return railCellW;
             };
+            // A full-width row (own line, spans both columns). Used for the
+            // circle/rectangle draw-origin sub-toggle so it never lands split
+            // off in the other column of the two-column grid. Rounds the grid
+            // up to the next even cell so the following tool starts fresh at
+            // column 0.
+            auto fullRow = [&]() -> float {
+                railCellIdx = (railCellIdx + 1) & ~1;   // next even
+                return 0.0f;                            // 0 = full content width
+            };
 
             // Grouped popups for the create tools the contextual rail omits —
             // one tap away (not buried in the ⋯ menu). On a touch screen they
@@ -429,9 +438,16 @@ void Application::renderModernLayout() {
                         continue;
                     }
                     ImGui::PushID(railIdx++); // labels can repeat across groups
+                    // Draw-origin sub-toggle (Corner/Center, Center/2-Point):
+                    // full width on its own row so it stays visually tied to
+                    // its tool, and forced-active so it highlights BLUE and
+                    // draws the eye to the option (Steve).
+                    const bool isDrawOrigin =
+                        tool.action == ToolAction::SketchToggleDrawOrigin;
                     const bool clicked = touchui::railButton(
-                        tool.label, tool.icon, tool.label, tool.active,
-                        cell());
+                        tool.label, tool.icon, tool.label,
+                        isDrawOrigin ? true : tool.active,
+                        isDrawOrigin ? fullRow() : cell());
                     tip(tool.tip);
                     if (tool.pluginIndex >= 0) {
                         if (clicked) m_toolbar->fireRailPlugin(tool.pluginIndex);
