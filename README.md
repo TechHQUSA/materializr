@@ -93,42 +93,55 @@ editing: **taper** (draft), **scale face** (pinch a wing tip into a winglet),
 an exact diameter.
 
 **Detail** — validated **screw threads** (internal & external, standard
-coarse defaults from the diameter), and **Projection**: engrave or emboss
-any sketch onto a flat *or curved* face — wrap a logo around a cylinder in
-three clicks.
+coarse defaults from the diameter — and fast: a full rod threads in a
+fraction of a second), and **Projection**: engrave or emboss any sketch
+onto a flat *or curved* face — wrap a logo around a cylinder in three
+clicks.
 
-**Stay in control** — every operation is an editable history step;
-projects reload with the history still editable. Construction planes &
-axes, **Section View** with any cutting plane, version snapshots with
-auto-save, undo everywhere.
+**Unfold** — flatten a 3D body into a 2D cut pattern (bends, cones and even
+doubly-curved surfaces) and export it as 1:1 SVG or tiled, printable PDF
+with registration marks — sheet-metal and EVA-foam workflows without
+leaving the app.
 
-**Exchange** — STEP and IGES import/export, STL and glTF export
-(Z-up corrected for printing), **sketch → SVG export** (1:1 mm, for laser
-cutters and 2.5D CNC), SVG import, PNG viewport export, and a
-compact native `.materializr` format that stores bodies, sketches, and
-the full history.
+**Stay in control** — every operation is an editable history step, and
+projects reload with the FULL history editable: open a saved part, change
+step 1, and everything downstream replays. Fillets and chamfers placed on
+boolean seam edges follow upstream edits (topological naming). Construction
+planes & axes, **Section View** with any cutting plane, version snapshots
+with auto-save, crash/hang recovery, undo everywhere.
+
+**Fits you** — three interface layouts (Classic desktop, Modern rail, and
+the near-zero-chrome im-touch for tablets), chosen on first launch with a
+live preview and a tour that teaches the app in the layout you picked.
+Select any face, edge or vertex for instant measurement readouts (area,
+radius, length, centre — with totals across a multi-selection).
+
+**Exchange** — STEP and IGES import/export, **STL import** (with accuracy
+control — sketch directly on a scanned part's flat faces) and STL/glTF
+export (Z-up corrected for printing), **sketch → SVG export** (1:1 mm, for
+laser cutters and 2.5D CNC) that round-trips cleanly back into sketches,
+SVG import, PNG viewport export, and a compact native `.materializr`
+format that stores bodies, sketches, and the full history.
 
 ## Known limitations
 
 A few rough edges are deliberate trade-offs for now, not bugs — worth knowing
 up front:
 
-- **Editing a body *after* you move it works only if it has no fillets,
-  chamfers, or booleans.** Move a plain extruded body and its sketch stays
-  linked, so you can keep tweaking dimensions. Move one that's been filleted or
-  cut, and the link is dropped (the move is still fine — you just can't
-  re-derive it from the sketch afterward). *Why:* re-deriving means re-applying
-  those features to the moved shape, and that needs stable face/edge IDs that
-  survive the move (the classic "topological naming" problem). Until that
-  subsystem lands, a featured body de-links on move rather than risk a wrong or
-  broken result.
+- **Editing a body *after* you move it can drop the sketch link.** Move a
+  plain extruded body and its sketch stays linked, so you can keep tweaking
+  dimensions; a heavily-featured body may de-link on move (the move itself is
+  always fine). *Why:* re-deriving means re-applying every feature to the
+  moved shape. 1.4.0's topological-naming layer already keeps fillets,
+  chamfers and boolean-seam features following upstream *sketch* edits — the
+  move case is the remaining frontier and keeps narrowing.
 
 - **Threads have to be the last thing you do to a body.** Once a part is
   threaded, further operations on it are refused with a prompt to delete the
-  thread, make your change, and re-apply it. *Why:* a thread is heavy,
-  per-turn geometry; re-running cuts or fillets across it is unreliable, so
-  threading is treated as a terminal finishing step rather than something you
-  build on top of.
+  thread, make your change, and re-apply it. *Why:* threads are dense
+  geometry; re-running cuts or fillets across them is unreliable, so
+  threading is a terminal finishing step. (Re-threading is cheap now — the
+  1.4.0 swept engine builds threads near-instantly.)
 
 - **Chamfering an edge that meets a fillet fails.** If a chamfer's edge runs
   into a rounded (filleted) edge, the operation is refused where the chamfer and
@@ -137,9 +150,9 @@ up front:
   something a knob fixes. *Workaround:* cut the chamfer with a sketch instead, or
   chamfer the edge before you fillet its neighbour.
 
-The first two ease once topological naming lands; the chamfer/fillet case is an
-upstream OpenCASCADE limit we're tracking for a cut-based fallback. All three
-are on the roadmap.
+Topological naming landed in 1.4.0 and keeps shrinking the first case; the
+chamfer/fillet case is an upstream OpenCASCADE limit we're tracking for a
+cut-based fallback. All three are on the roadmap.
 
 ## Documentation
 
