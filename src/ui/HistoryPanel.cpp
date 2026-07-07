@@ -73,7 +73,8 @@ bool HistoryPanel::renderContent() {
         // old file.)
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f),
-            "Amber (frozen) steps reloaded without editable parameters.");
+            "Amber (frozen) steps reloaded without editable parameters. "
+            "(hover for more)");
         ImGui::PopTextWrapPos();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip(
