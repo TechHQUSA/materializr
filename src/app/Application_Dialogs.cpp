@@ -2,6 +2,7 @@
 #include "ui/TouchWidgets.h" // im-touch number-pad amount fields
 #include "ui_scale.h"
 #include "touch_mode.h"
+#include "eink_mode.h"
 #include "gl_common.h"
 #include "url_open.h"
 
@@ -218,6 +219,31 @@ void Application::renderSettings() {
                     if (materializr::touchMode() != m_touchMode) {
                         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
                             "Restart Materializr to apply the new mode.");
+                    }
+
+                    ImGui::Spacing();
+                    // eInk mode: e-paper Android tablets (Boox and similar).
+                    // Stops the idle-frame redraw loop and, combined with the
+                    // eInk theme below, avoids gradients — both fight ghosting
+                    // on e-ink hardware. Manual opt-in only; no auto-detect.
+                    if (ImGui::Checkbox("eInk mode (Boox / e-paper tablets)", &m_einkMode)) {
+                        changed = true;
+                    }
+                    ImGui::TextWrapped("On: stops redrawing once idle instead of holding a "
+                                       "steady frame rate — e-ink panels ghost under continuous "
+                                       "redraw and gain nothing from it. Pair with the eInk theme "
+                                       "below. Takes full effect on restart.");
+                    if (materializr::einkMode() != m_einkMode) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                            "Restart Materializr to apply the new mode.");
+                    }
+                    if (materializr::einkMode()) {
+                        if (ImGui::Button("Flash screen (clear ghosting)")) {
+                            m_einkFlashFrames = std::max(m_einkFlashFrames, 5);
+                        }
+                        ImGui::TextWrapped("Forces a handful of full redraws right now, "
+                                           "even though nothing changed — use it if the "
+                                           "screen looks smeared.");
                     }
 
                     ImGui::Spacing();

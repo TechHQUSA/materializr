@@ -23,18 +23,19 @@ void ThemeManager::toggle() {
 }
 
 void ThemeManager::apply() {
-    if (m_theme == Theme::Dark) {
-        applyDark();
-    } else {
-        applyLight();
+    switch (m_theme) {
+        case Theme::Light: applyLight(); break;
+        case Theme::Eink:  applyEink();  break;
+        case Theme::Dark:
+        default:           applyDark();  break;
     }
 }
 
 bool ThemeManager::renderSelector() {
     int current = static_cast<int>(m_theme);
-    const char* items[] = { "Dark", "Light" };
+    const char* items[] = { "Dark", "Light", "eInk (High Contrast)" };
 
-    if (ImGui::Combo("Theme", &current, items, 2)) {
+    if (ImGui::Combo("Theme", &current, items, 3)) {
         setTheme(static_cast<Theme>(current));
         return true;
     }
@@ -49,6 +50,9 @@ void ThemeManager::applyDark() {
     style.WindowRounding = 4.0f;
     style.FrameRounding = 2.0f;
     style.GrabRounding = 2.0f;
+    // Reset the eInk theme's hard borders (theme switches are live).
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
 
     ImVec4* colors = style.Colors;
 
@@ -113,6 +117,9 @@ void ThemeManager::applyLight() {
     style.WindowRounding = 4.0f;
     style.FrameRounding = 2.0f;
     style.GrabRounding = 2.0f;
+    // Reset the eInk theme's hard borders (theme switches are live).
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
 
     ImVec4* colors = style.Colors;
 
@@ -171,6 +178,79 @@ void ThemeManager::applyLight() {
 
     colors[ImGuiCol_DockingPreview]   = ImVec4(0.20f, 0.45f, 0.75f, 0.70f);
     colors[ImGuiCol_DockingEmptyBg]   = ImVec4(0.94f, 0.94f, 0.94f, 1.0f);
+}
+
+void ThemeManager::applyEink() {
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    // Flat: no rounding, no soft gradients — e-ink can't render anti-aliased
+    // curves or subtle shading cleanly, and rounded corners just add ghosting-
+    // prone edges.
+    style.WindowRounding = 0.0f;
+    style.FrameRounding = 0.0f;
+    style.GrabRounding = 0.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 1.0f;
+
+    ImVec4* colors = style.Colors;
+    const ImVec4 white  (1.00f, 1.00f, 1.00f, 1.0f);
+    const ImVec4 black  (0.00f, 0.00f, 0.00f, 1.0f);
+    const ImVec4 ltGray (0.85f, 0.85f, 0.85f, 1.0f);
+    const ImVec4 midGray(0.65f, 0.65f, 0.65f, 1.0f);
+    const ImVec4 dkGray (0.35f, 0.35f, 0.35f, 1.0f);
+
+    colors[ImGuiCol_WindowBg]         = white;
+    colors[ImGuiCol_ChildBg]          = ImVec4(1.0f, 1.0f, 1.0f, 0.0f);
+    colors[ImGuiCol_PopupBg]          = white;
+    colors[ImGuiCol_Border]           = black;
+    colors[ImGuiCol_BorderShadow]     = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    colors[ImGuiCol_TitleBg]          = ltGray;
+    colors[ImGuiCol_TitleBgActive]    = ltGray;
+    colors[ImGuiCol_TitleBgCollapsed] = ltGray;
+
+    colors[ImGuiCol_MenuBarBg]        = ltGray;
+
+    colors[ImGuiCol_FrameBg]          = white;
+    colors[ImGuiCol_FrameBgHovered]   = ltGray;
+    colors[ImGuiCol_FrameBgActive]    = midGray;
+
+    colors[ImGuiCol_Button]           = ltGray;
+    colors[ImGuiCol_ButtonHovered]    = midGray;
+    colors[ImGuiCol_ButtonActive]     = dkGray;
+
+    colors[ImGuiCol_Header]           = ltGray;
+    colors[ImGuiCol_HeaderHovered]    = midGray;
+    colors[ImGuiCol_HeaderActive]     = dkGray;
+
+    colors[ImGuiCol_Tab]              = ltGray;
+    colors[ImGuiCol_TabHovered]       = midGray;
+    colors[ImGuiCol_TabSelected]      = midGray;
+    colors[ImGuiCol_TabDimmed]        = ltGray;
+    colors[ImGuiCol_TabDimmedSelected]= midGray;
+
+    colors[ImGuiCol_ScrollbarBg]      = white;
+    colors[ImGuiCol_ScrollbarGrab]    = midGray;
+    colors[ImGuiCol_ScrollbarGrabHovered] = dkGray;
+    colors[ImGuiCol_ScrollbarGrabActive]  = black;
+
+    colors[ImGuiCol_Separator]        = black;
+    colors[ImGuiCol_SeparatorHovered] = dkGray;
+    colors[ImGuiCol_SeparatorActive]  = black;
+
+    colors[ImGuiCol_ResizeGrip]       = midGray;
+    colors[ImGuiCol_ResizeGripHovered]= dkGray;
+    colors[ImGuiCol_ResizeGripActive] = black;
+
+    colors[ImGuiCol_CheckMark]        = black;
+    colors[ImGuiCol_SliderGrab]       = dkGray;
+    colors[ImGuiCol_SliderGrabActive] = black;
+
+    colors[ImGuiCol_Text]             = black;
+    colors[ImGuiCol_TextDisabled]     = midGray;
+
+    colors[ImGuiCol_DockingPreview]   = midGray;
+    colors[ImGuiCol_DockingEmptyBg]   = white;
 }
 
 } // namespace materializr

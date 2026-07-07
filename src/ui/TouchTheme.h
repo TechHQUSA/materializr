@@ -22,6 +22,14 @@ inline bool g_lightMode = false;
 inline void setLightMode(bool light) { g_lightMode = light; }
 inline bool lightMode() { return g_lightMode; }
 
+// eInk override (Theme::Eink) — checked first in every color function below,
+// ahead of the light/dark ternary, so it doesn't disturb that pairing. Flat
+// black/white/gray only: e-ink panels gain nothing from the accent blues and
+// ghost worse under anything but pure high-contrast fills.
+inline bool g_einkMode = false;
+inline void setEinkMode(bool eink) { g_einkMode = eink; }
+inline bool einkMode() { return g_einkMode; }
+
 // Corner-radius override, set from Application each frame next to
 // setLightMode. -1 = every caller's soft rounded default (the modern
 // layout's look); >= 0 = a flat radius in unscaled px applied across the
@@ -36,31 +44,43 @@ inline float radius(float softScaled) {
 
 // Palette. Exposed for the widget kit's custom draws. Each colour has a
 // dark (mockup) and light counterpart, matched for the same role/contrast.
-inline ImVec4 chromeBg()     { return g_lightMode ? ImVec4(0.937f, 0.945f, 0.957f, 1.0f)   // #EFF1F4
+inline ImVec4 chromeBg()     { if (g_einkMode) return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                               return g_lightMode ? ImVec4(0.937f, 0.945f, 0.957f, 1.0f)   // #EFF1F4
                                                   : ImVec4(0.043f, 0.051f, 0.067f, 1.0f); } // #0B0D11
-inline ImVec4 panelBg()      { return g_lightMode ? ImVec4(0.973f, 0.978f, 0.984f, 1.0f)   // #F8F9FB
+inline ImVec4 panelBg()      { if (g_einkMode) return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                               return g_lightMode ? ImVec4(0.973f, 0.978f, 0.984f, 1.0f)   // #F8F9FB
                                                   : ImVec4(0.063f, 0.075f, 0.094f, 1.0f); } // #101318
-inline ImVec4 rowBg()        { return g_lightMode ? ImVec4(0.886f, 0.902f, 0.925f, 1.0f)   // #E2E6EC
+inline ImVec4 rowBg()        { if (g_einkMode) return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
+                               return g_lightMode ? ImVec4(0.886f, 0.902f, 0.925f, 1.0f)   // #E2E6EC
                                                   : ImVec4(0.102f, 0.118f, 0.145f, 1.0f); } // #1A1E25
-inline ImVec4 hairline()     { return g_lightMode ? ImVec4(0.812f, 0.831f, 0.859f, 1.0f)   // #CFD4DB
+inline ImVec4 hairline()     { if (g_einkMode) return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                               return g_lightMode ? ImVec4(0.812f, 0.831f, 0.859f, 1.0f)   // #CFD4DB
                                                   : ImVec4(0.133f, 0.145f, 0.169f, 1.0f); } // #22252B
-inline ImVec4 accentFill()   { return g_lightMode ? ImVec4(0.475f, 0.635f, 0.910f, 1.0f)   // #79A2E8
+inline ImVec4 accentFill()   { if (g_einkMode) return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                               return g_lightMode ? ImVec4(0.475f, 0.635f, 0.910f, 1.0f)   // #79A2E8
                                                   : ImVec4(0.561f, 0.706f, 0.949f, 1.0f); } // #8FB4F2
-inline ImVec4 accentDeep()   { return ImVec4(0.239f, 0.435f, 0.851f, 1.0f); }               // #3D6FD9
-inline ImVec4 textPrimary()  { return g_lightMode ? ImVec4(0.110f, 0.125f, 0.153f, 1.0f)   // #1C2027
+inline ImVec4 accentDeep()   { if (g_einkMode) return ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+                               return ImVec4(0.239f, 0.435f, 0.851f, 1.0f); }               // #3D6FD9
+inline ImVec4 textPrimary()  { if (g_einkMode) return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+                               return g_lightMode ? ImVec4(0.110f, 0.125f, 0.153f, 1.0f)   // #1C2027
                                                   : ImVec4(0.933f, 0.941f, 0.953f, 1.0f); } // #EEF0F3
-inline ImVec4 textDim()      { return g_lightMode ? ImVec4(0.400f, 0.424f, 0.459f, 1.0f)   // #666C75
+inline ImVec4 textDim()      { if (g_einkMode) return ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+                               return g_lightMode ? ImVec4(0.400f, 0.424f, 0.459f, 1.0f)   // #666C75
                                                   : ImVec4(0.541f, 0.561f, 0.596f, 1.0f); } // #8A8F98
-inline ImVec4 onAccent()     { return g_lightMode ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f)
+inline ImVec4 onAccent()     { if (g_einkMode) return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+                               return g_lightMode ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f)
                                                   : ImVec4(0.051f, 0.075f, 0.125f, 1.0f); } // text on accent
 // Interactive-state fills (rowBg's hover/press neighbours) — shared by
 // pushChrome and the widget kit's custom draws so the two can't drift.
-inline ImVec4 hoverBg()      { return g_lightMode ? ImVec4(0.855f, 0.875f, 0.902f, 1.0f)
+inline ImVec4 hoverBg()      { if (g_einkMode) return ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
+                               return g_lightMode ? ImVec4(0.855f, 0.875f, 0.902f, 1.0f)
                                                   : ImVec4(0.16f, 0.19f, 0.24f, 1.0f); }
-inline ImVec4 pressBg()      { return g_lightMode ? ImVec4(0.808f, 0.835f, 0.871f, 1.0f)
+inline ImVec4 pressBg()      { if (g_einkMode) return ImVec4(0.65f, 0.65f, 0.65f, 1.0f);
+                               return g_lightMode ? ImVec4(0.808f, 0.835f, 0.871f, 1.0f)
                                                   : ImVec4(0.20f, 0.24f, 0.31f, 1.0f); }
 // Subtle full-row hover (listRow) — between panelBg and rowBg.
-inline ImVec4 rowHoverBg()   { return g_lightMode ? ImVec4(0.918f, 0.929f, 0.945f, 1.0f)
+inline ImVec4 rowHoverBg()   { if (g_einkMode) return ImVec4(0.9f, 0.9f, 0.9f, 1.0f);
+                               return g_lightMode ? ImVec4(0.918f, 0.929f, 0.945f, 1.0f)
                                                   : ImVec4(0.09f, 0.10f, 0.13f, 1.0f); }
 
 // Chrome-only subset: colors + rounding + window padding, but NOT the

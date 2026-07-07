@@ -20,7 +20,7 @@ enum class UiLayout { Classic = 0, Modern = 1, ImTouch = 2 };
 // here are the out-of-the-box behaviour and are also the fallback whenever a
 // key is missing or unreadable in the settings file.
 struct AppSettings {
-    int  theme              = 0;    // 0 = Dark, 1 = Light
+    int  theme              = 0;    // 0 = Dark, 1 = Light, 2 = Eink (High Contrast)
     // Touch mode: large UI + touch-gesture interaction. Defaults on for Android,
     // off elsewhere; a saved setting so a tablet with a mouse/keyboard can run
     // the desktop model. Drives materializr::setTouchMode() at startup.
@@ -29,6 +29,11 @@ struct AppSettings {
 #else
     bool touchMode          = false;
 #endif
+    // eInk mode: e-paper Android tablets (Boox and similar). No per-platform
+    // default (unlike touchMode) — there's no reliable way to auto-detect
+    // e-ink hardware, so this is manual opt-in only. Drives
+    // materializr::setEinkMode() at startup; see src/eink_mode.h.
+    bool einkMode           = false;
     // Interface layout (see the UiLayout enum above). Orthogonal to touchMode
     // (layout vs input model); switches live, no restart. Serialized as the
     // string key `uiLayout = classic | modern | imtouch`; older builds' bool

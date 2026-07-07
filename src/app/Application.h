@@ -742,6 +742,15 @@ private:
     bool m_touchMode = false;
 #endif
 
+    // eInk mode (e-paper Android tablets) staged value for the Settings
+    // dialog, same mirror-and-sync relationship with materializr::einkMode()
+    // as m_touchMode above. No per-platform default — see AppSettings::einkMode.
+    bool m_einkMode = false;
+    // Number of remaining frames to force-render regardless of idle state,
+    // set by the Settings dialog's "Flash screen" button (eInk ghost-clear).
+    // Consumed/decremented once per frame in run()'s idle-throttle check.
+    int m_einkFlashFrames = 0;
+
     // Interface layout (see UiLayout in io/Settings.h and src/app/layout/).
     // Live-switchable: read every frame by run()/renderViewport(); persisted
     // on save. The helpers below are the preferred spelling at call sites.

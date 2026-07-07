@@ -38,6 +38,7 @@ inline void resetFpuForOcct() {
 #include "app/Window.h"
 #include "ui_scale.h"
 #include "touch_mode.h"
+#include "eink_mode.h"
 #include "viewport/Viewport.h"
 #include "viewport/Grid.h"
 #include "viewport/ShapeRenderer.h"
@@ -1296,8 +1297,9 @@ void Application::meshQualityParams(float& deflection, float& angularDeflection)
 
 AppSettings Application::currentSettings() const {
     AppSettings s;
-    s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
+    s.theme = static_cast<int>(m_themeManager->getTheme());
     s.touchMode = m_touchMode;
+    s.einkMode = m_einkMode;
     s.uiLayout = m_uiLayout;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
@@ -1360,13 +1362,17 @@ AppSettings Application::currentSettings() const {
 // layer those on top as appropriate. Camera buttons land on both the active
 // and the Settings-dialog "staged" copies so an import takes effect at once.
 void Application::applyAppSettings(const AppSettings& s) {
-    m_themeManager->setTheme(s.theme == 1 ? Theme::Light : Theme::Dark);
+    m_themeManager->setTheme(s.theme == 1 ? Theme::Light
+                            : s.theme == 2 ? Theme::Eink
+                                           : Theme::Dark);
     // Touch mode drives the UI scale and input/UX model. The scale + fonts are
     // baked at startup (resolved early in the ctor), so a change here fully
     // applies on the next launch; keeping the global in sync means everything
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
+    materializr::setEinkMode(s.einkMode);
+    m_einkMode = s.einkMode;     // staged value for the Settings dialog
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
@@ -2178,6 +2184,31 @@ void Application::handleShortcuts() {
                     cascadeFromSketchEdit(sid);
                 m_meshesDirty = true;
             }
+        }
+    }
+    // Boox / e-paper tablet hardware page-turn buttons -> Undo/Redo. These
+    // tablets have no Ctrl key, so the buttons are the only physical-input
+    // affordance available; Undo/Redo is chosen because it's safe and useful
+    // regardless of what the button was originally printed for. TODO: PageUp/
+    // PageDown are a guess — SDL's reported ImGuiKey for Boox's physical
+    // buttons needs confirming on real hardware and this mapping may need to
+    // change once that's known (e.g. if they arrive as unmapped scancodes,
+    // see Window::isCtrlDown()'s SDL_GetKeyboardState/SDL_SCANCODE_* pattern
+    // instead of ImGui::IsKeyPressed).
+    if (materializr::einkMode() && !anyInteractivePreviewActive() &&
+        // anyInteractivePreviewActive() excludes edge-op and move-face (see
+        // imTouchActionCorner) — guard them explicitly, like the Ctrl+Z path.
+        !m_edgeOpActive && !m_moveFaceActive &&
+        // Never fire while typing: PageUp/PageDown are also text-navigation.
+        !io.WantTextInput) {
+        if (ImGui::IsKeyPressed(ImGuiKey_PageUp, false) && m_history->canUndo() &&
+            // Same sketch-entry floor as Ctrl+Z: never undo the host body out
+            // from under a live sketch (crashed before).
+            (!m_inSketchMode ||
+             m_history->currentStep() > m_sketchEntryHistoryStep)) {
+            undoWithCascade();
+        } else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, false) && m_history->canRedo()) {
+            redoWithCascade();
         }
     }
     // Ctrl+A: context-aware select-all. Skipped when ImGui has text-input focus
@@ -5229,8 +5260,14 @@ void Application::run() {
         int waitMs = 0;
         if (!launchGrace && !foreground)
             waitMs = 500;
-        else if (!launchGrace && m_wakeFrames == 0 && !hasActiveWork())
-            waitMs = kIdleFloorMs;
+        else if (!launchGrace && m_wakeFrames == 0 && !hasActiveWork() &&
+                 m_einkFlashFrames == 0) {
+            // eInk: the 15fps idle floor is exactly what e-ink hardware
+            // doesn't want (ghosting for no visual benefit, since nothing is
+            // changing) — park like a backgrounded window instead. The wait
+            // still returns early on any real event via pollEvents.
+            waitMs = materializr::einkMode() ? 500 : kIdleFloorMs;
+        }
         int eventLevel = m_window->pollEvents(waitMs);
         // Start of this iteration's frame budget — read by the frame-rate cap
         // at the bottom of the loop (measured after the event wait so the
@@ -5376,6 +5413,18 @@ void Application::run() {
         // renders at the floor rate above (see kIdleFloorMs; the old idle
         // skip is what made first-taps and the mobile keyboard feel dead).
         if (!launchGrace && !foreground) continue;
+        // eInk: unlike the desktop/mobile idle floor above, truly stop
+        // rendering once idle — a continuous repaint (even at 15fps) is pure
+        // ghosting on e-ink hardware with nothing to show for it, and the
+        // wake-up latency this trades away is irrelevant next to the
+        // panel's own refresh time. m_einkFlashFrames (Settings → Appearance
+        // → "Flash screen") forces a few redraws through regardless, to
+        // clear ghosting on demand.
+        if (materializr::einkMode() && !launchGrace && m_wakeFrames == 0 &&
+            !hasActiveWork() && m_einkFlashFrames == 0) {
+            continue;
+        }
+        if (m_einkFlashFrames > 0) --m_einkFlashFrames;
         if (m_wakeFrames > 0) m_wakeFrames--;
         ++perfRendered;   // passed the idle skip → this iteration renders a frame
 
@@ -5390,6 +5439,8 @@ void Application::run() {
         // so the modern/im-touch layouts have a live light mode like classic.
         touchui::setLightMode(m_themeManager &&
                               m_themeManager->getTheme() == Theme::Light);
+        touchui::setEinkMode(m_themeManager &&
+                             m_themeManager->getTheme() == Theme::Eink);
         // im-touch wears crisp 4 px corners kit-wide; the modern layout keeps
         // the soft rounded look (each widget's own default).
         touchui::setCornerRadius(imTouchLayout() ? 4.0f : -1.0f);

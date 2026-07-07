@@ -2,7 +2,9 @@
 
 namespace materializr {
 
-enum class Theme { Dark, Light };
+// Eink: flat, pure black/white/gray, no gradients or rounded corners — for
+// e-paper Android tablets (Boox and similar). Pair with materializr::einkMode().
+enum class Theme { Dark, Light, Eink };
 
 class ThemeManager {
 public:
@@ -24,6 +26,7 @@ private:
 
     void applyDark();
     void applyLight();
+    void applyEink();
 };
 
 } // namespace materializr
