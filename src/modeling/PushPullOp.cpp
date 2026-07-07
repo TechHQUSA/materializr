@@ -162,7 +162,16 @@ void PushPullOp::refreshFaceTargets(Document& doc) {
         m_targetRefs.resize(m_targets.size());
     for (size_t i = 0; i < m_targets.size(); ++i) {
         Target& t = m_targets[i];
-        if (t.sourceBodyId < 0) continue;            // sketch / free-floating
+        if (t.sourceBodyId < 0) continue;            // free-floating
+        // SKETCH-sourced target on a body: the profile is a sketch-region
+        // face, which is NEVER a face of the source body — the liveness scan
+        // below always fails and resolve() swaps in the closest BODY face
+        // (the host face), silently replacing the drawn region with the whole
+        // face ("push a hole" moved the face and ignored the sketch). Sketch
+        // profiles rebuild via rebuildProfileFromSketch instead; only pure
+        // face-driven targets belong to this ref machinery.
+        if (i < m_sketchSourceIds.size() && m_sketchSourceIds[i] >= 0)
+            continue;
         TopoDS_Shape src;
         try { src = doc.getBody(t.sourceBodyId); } catch (...) { continue; }
         if (src.IsNull()) continue;
