@@ -244,9 +244,17 @@ void Application::renderViewport() {
         // Viewport background tracks the UI theme: a soft light gradient in light
         // mode, the dark gradient otherwise. (The grid switches to a dark-on-light
         // line palette below so it stays readable on the light background.)
-        const bool lightBg = m_themeManager &&
-                             m_themeManager->getTheme() == Theme::Light;
-        if (lightBg) {
+        // eInk gets its own flat case — no gradient, no color, since it's a GL
+        // draw the ImGui theme swap doesn't touch on its own (this was the gap
+        // that left the grid stuck on the dark palette under the eInk theme).
+        const bool einkBg = m_themeManager &&
+                            m_themeManager->getTheme() == Theme::Eink;
+        const bool lightBg = einkBg || (m_themeManager &&
+                             m_themeManager->getTheme() == Theme::Light);
+        if (einkBg) {
+            m_backgroundRenderer->setTopColor(glm::vec3(1.0f, 1.0f, 1.0f));
+            m_backgroundRenderer->setBottomColor(glm::vec3(1.0f, 1.0f, 1.0f));
+        } else if (lightBg) {
             m_backgroundRenderer->setTopColor(glm::vec3(0.92f, 0.93f, 0.96f));
             m_backgroundRenderer->setBottomColor(glm::vec3(0.78f, 0.80f, 0.85f));
         } else {
