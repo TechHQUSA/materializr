@@ -750,6 +750,10 @@ private:
     // set by the Settings dialog's "Flash screen" button (eInk ghost-clear).
     // Consumed/decremented once per frame in run()'s idle-throttle check.
     int m_einkFlashFrames = 0;
+    // Finger count for the eInk flash double-tap gesture (3 or 4). Staged
+    // value mirrors AppSettings::einkFlashFingerCount; pushed to Window each
+    // frame (Window owns gesture recognition, see Window::pollEvents).
+    int m_einkFlashFingerCount = 4;
 
     // Interface layout (see UiLayout in io/Settings.h and src/app/layout/).
     // Live-switchable: read every frame by run()/renderViewport(); persisted

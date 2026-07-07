@@ -101,6 +101,10 @@ public:
     // drag-to-scroll: a vertical drag over any panel scrolls it, but a drag over
     // the canvas must stay an orbit.
     void setTouchOnCanvas(bool v) { m_touchOnCanvas = v; }
+    // Finger count (3 or 4) the eInk flash double-tap gesture requires (see
+    // AppSettings::einkFlashFingerCount). 3 repurposes the existing 3-finger
+    // single-tap Redo gesture — see the guard in the tap-recognition code.
+    void setEinkFlashFingerCount(int n) { m_einkFlashFingerCount = n; }
 
 private:
     SDL_Window* m_window = nullptr;
@@ -147,6 +151,7 @@ private:
     // more than a 1-finger tap and this gesture doesn't need to be precise.
     std::uint32_t m_lastFourFingerTapTick = 0;
     bool  m_einkFlashTapPending = false;
+    int   m_einkFlashFingerCount = 4;   // 3 or 4, see setEinkFlashFingerCount
 
     // One-finger press-and-hold tracking (-> box/drag-select).
     std::uint32_t m_downTicks = 0;        // SDL_GetTicks at single-finger down

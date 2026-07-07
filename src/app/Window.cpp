@@ -512,13 +512,19 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         const bool stationary = m_twoFingerMode == 0 &&
                                 m_sessionPanNet < 12.0f && m_sessionZoomNet < 16.0f;
         if (shortTouch && stationary) {
-            if (m_sessionMaxFingers == 2) m_undoTapPending = true;
-            else if (m_sessionMaxFingers == 3) m_redoTapPending = true;
-            else if (m_sessionMaxFingers == 4) {
+            if (m_sessionMaxFingers == 2) {
+                m_undoTapPending = true;
+            } else if (m_sessionMaxFingers == 3 && m_einkFlashFingerCount != 3) {
+                m_redoTapPending = true;
+            } else if (m_sessionMaxFingers == m_einkFlashFingerCount) {
+                // Configurable 3 or 4 fingers (Settings -> Appearance -> eInk
+                // mode). Picking 3 repurposes the Redo gesture above (a single
+                // 3-finger tap no longer redoes) — deliberate trade so the two
+                // gestures never both fire off the same lift.
                 // Same double-tap timing window as consumeDoubleTap, keyed to
                 // a separate last-tap tick so the two gestures can't pair
-                // across finger counts (a 1-finger tap then a 4-finger tap
-                // in quick succession must not fire this).
+                // across finger counts (a 1-finger tap then a flash-finger-
+                // count tap in quick succession must not fire this).
                 const std::uint32_t dblMs =
                     static_cast<std::uint32_t>(io.MouseDoubleClickTime * 1000.0f);
                 if (m_lastFourFingerTapTick != 0 &&

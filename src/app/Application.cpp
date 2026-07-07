@@ -1300,6 +1300,7 @@ AppSettings Application::currentSettings() const {
     s.theme = static_cast<int>(m_themeManager->getTheme());
     s.touchMode = m_touchMode;
     s.einkMode = m_einkMode;
+    s.einkFlashFingerCount = m_einkFlashFingerCount;
     s.uiLayout = m_uiLayout;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
@@ -1373,6 +1374,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
     materializr::setEinkMode(s.einkMode);
     m_einkMode = s.einkMode;     // staged value for the Settings dialog
+    m_einkFlashFingerCount = s.einkFlashFingerCount; // live, no restart needed
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
@@ -5268,6 +5270,7 @@ void Application::run() {
             // still returns early on any real event via pollEvents.
             waitMs = materializr::einkMode() ? 500 : kIdleFloorMs;
         }
+        m_window->setEinkFlashFingerCount(m_einkFlashFingerCount);
         int eventLevel = m_window->pollEvents(waitMs);
         // Start of this iteration's frame budget — read by the frame-rate cap
         // at the bottom of the loop (measured after the event wait so the
@@ -5280,9 +5283,14 @@ void Application::run() {
         // timer freezes the moment we stop rendering (ImGui time only advances
         // inside NewFrame). The idle timeout (eventLevel == 0) is not a trigger:
         // we skip rendering until a real event or active work wakes us.
+        // eInk: skip the trivial-event tail entirely. A stray SDL_WINDOWEVENT_
+        // EXPOSED or motion-noise event (observed periodically even with no
+        // touch) was burning a full 25-frame render burst every time — hover-
+        // tooltip continuity isn't worth that on e-ink, so only a genuinely
+        // significant event (tap, key) wakes the loop.
         if (eventLevel >= 2)
             m_wakeFrames = 5;
-        else if (eventLevel == 1)
+        else if (eventLevel == 1 && !materializr::einkMode())
             m_wakeFrames = std::max(m_wakeFrames, 25);
 
 #if defined(MZ_MOBILE)

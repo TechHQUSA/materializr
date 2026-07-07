@@ -34,6 +34,11 @@ struct AppSettings {
     // e-ink hardware, so this is manual opt-in only. Drives
     // materializr::setEinkMode() at startup; see src/eink_mode.h.
     bool einkMode           = false;
+    // Finger count for the eInk "flash screen" double-tap gesture (see
+    // Window.cpp). 4 (default) never collides with anything; 3 repurposes
+    // the existing 3-finger-tap Redo gesture (a single 3-finger tap no
+    // longer redoes when this is 3 — see the guard in Window.cpp).
+    int  einkFlashFingerCount = 4;
     // Interface layout (see the UiLayout enum above). Orthogonal to touchMode
     // (layout vs input model); switches live, no restart. Serialized as the
     // string key `uiLayout = classic | modern | imtouch`; older builds' bool

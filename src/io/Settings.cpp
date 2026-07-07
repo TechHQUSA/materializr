@@ -65,6 +65,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readInt (kv, "theme",                s.theme);
     readBool(kv, "touchMode",            s.touchMode);
     readBool(kv, "einkMode",             s.einkMode);
+    readInt (kv, "einkFlashFingerCount", s.einkFlashFingerCount);
     // Interface layout. Legacy first (older builds wrote the coupled bool
     // pair imTouchUi/imTouchLite, where "im-touch on + lite" is today's
     // imtouch and "im-touch on" alone is today's modern), then the current
@@ -307,6 +308,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "theme = "               << s.theme               << "\n";
     ofs << "touchMode = "           << (s.touchMode ? "true" : "false") << "\n";
     ofs << "einkMode = "            << (s.einkMode ? "true" : "false") << "\n";
+    ofs << "einkFlashFingerCount = " << s.einkFlashFingerCount << "\n";
     ofs << "uiLayout = "            << uiLayoutName(s.uiLayout) << "\n";
     ofs << "imTouchTree = "         << (s.imTouchTree ? "true" : "false") << "\n";
     ofs << "imTouchTimeline = "     << (s.imTouchTimeline ? "true" : "false") << "\n";
@@ -404,6 +406,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"theme\": "                   << s.theme                 << ",\n";
     ofs << "  \"touchMode\": "               << (s.touchMode ? "true" : "false") << ",\n";
     ofs << "  \"einkMode\": "                << (s.einkMode ? "true" : "false") << ",\n";
+    ofs << "  \"einkFlashFingerCount\": "    << s.einkFlashFingerCount  << ",\n";
     ofs << "  \"uiLayout\": \""              << uiLayoutName(s.uiLayout) << "\",\n";
     ofs << "  \"orbitButton\": "             << s.orbitButton           << ",\n";
     ofs << "  \"panButton\": "               << s.panButton             << ",\n";

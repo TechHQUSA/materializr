@@ -243,8 +243,17 @@ void Application::renderSettings() {
                         }
                         ImGui::TextWrapped("Forces a handful of full redraws right now, "
                                            "even though nothing changed — use it if the "
-                                           "screen looks smeared. Same as a four-finger "
-                                           "double-tap anywhere in the app.");
+                                           "screen looks smeared.");
+                        int flashFingers = m_einkFlashFingerCount == 3 ? 1 : 0;
+                        const char* fingerNames[] = { "4 fingers", "3 fingers" };
+                        if (ImGui::Combo("Flash gesture", &flashFingers, fingerNames, 2)) {
+                            m_einkFlashFingerCount = flashFingers == 1 ? 3 : 4;
+                            changed = true;
+                        }
+                        ImGui::TextWrapped("Double-tap with this many fingers anywhere in "
+                                           "the app to flash the screen. 3 fingers repurposes "
+                                           "the 3-finger Redo tap — a single 3-finger tap no "
+                                           "longer redoes when this is set to 3.");
                     }
 
                     ImGui::Spacing();
