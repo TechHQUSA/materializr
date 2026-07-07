@@ -72,6 +72,7 @@ public:
     bool consumeDoubleTap();                      // true once after two quick taps (touch "double-click")
     bool consumeUndoTap();                        // true once after a two-finger tap (mobile undo gesture)
     bool consumeRedoTap();                        // true once after a three-finger tap (mobile redo gesture)
+    bool consumeEinkFlashTap();                   // true once after a four-finger double-tap (eInk ghost-clear gesture)
 
     // True if the most recent left-button release was NOT a genuine single-finger
     // lift but a two-finger gesture taking over (the second finger landing forces
@@ -138,6 +139,14 @@ private:
     float m_sessionZoomNet = 0.0f;  // peak net spacing change while undecided
     bool  m_undoTapPending = false;
     bool  m_redoTapPending = false;
+    // Four-finger DOUBLE tap -> eInk "flash screen" ghost-clear (see
+    // Application::run()'s m_einkFlashFrames). Double, not single, because a
+    // resting hand/palm can incidentally land 4 fingers; requiring two quick
+    // taps in the same touch-session-lift window makes it deliberate. No
+    // position check (unlike consumeDoubleTap) — a 4-finger centroid drifts
+    // more than a 1-finger tap and this gesture doesn't need to be precise.
+    std::uint32_t m_lastFourFingerTapTick = 0;
+    bool  m_einkFlashTapPending = false;
 
     // One-finger press-and-hold tracking (-> box/drag-select).
     std::uint32_t m_downTicks = 0;        // SDL_GetTicks at single-finger down

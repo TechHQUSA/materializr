@@ -5302,6 +5302,13 @@ void Application::run() {
                 }
             }
         }
+        // Four-finger double-tap: eInk ghost-clear, same effect as Settings ->
+        // Appearance -> "Flash screen". Consumed unconditionally (like the
+        // undo/redo taps above) so a tap while eInk mode is off can't queue up
+        // and fire later after it's turned on.
+        if (m_window->consumeEinkFlashTap() && materializr::einkMode()) {
+            m_einkFlashFrames = std::max(m_einkFlashFrames, 5);
+        }
 #endif
 
         // Any input refreshes the interactive-state render grace (see

@@ -514,6 +514,21 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         if (shortTouch && stationary) {
             if (m_sessionMaxFingers == 2) m_undoTapPending = true;
             else if (m_sessionMaxFingers == 3) m_redoTapPending = true;
+            else if (m_sessionMaxFingers == 4) {
+                // Same double-tap timing window as consumeDoubleTap, keyed to
+                // a separate last-tap tick so the two gestures can't pair
+                // across finger counts (a 1-finger tap then a 4-finger tap
+                // in quick succession must not fire this).
+                const std::uint32_t dblMs =
+                    static_cast<std::uint32_t>(io.MouseDoubleClickTime * 1000.0f);
+                if (m_lastFourFingerTapTick != 0 &&
+                    (nowT - m_lastFourFingerTapTick) <= dblMs) {
+                    m_einkFlashTapPending = true;
+                    m_lastFourFingerTapTick = 0; // consumed; a 3rd tap starts fresh
+                } else {
+                    m_lastFourFingerTapTick = nowT;
+                }
+            }
         }
         m_sessionMaxFingers = 0;
     }
@@ -627,6 +642,12 @@ bool Window::consumeUndoTap() {
 bool Window::consumeRedoTap() {
     if (!m_redoTapPending) return false;
     m_redoTapPending = false;
+    return true;
+}
+
+bool Window::consumeEinkFlashTap() {
+    if (!m_einkFlashTapPending) return false;
+    m_einkFlashTapPending = false;
     return true;
 }
 

@@ -243,7 +243,8 @@ void Application::renderSettings() {
                         }
                         ImGui::TextWrapped("Forces a handful of full redraws right now, "
                                            "even though nothing changed — use it if the "
-                                           "screen looks smeared.");
+                                           "screen looks smeared. Same as a four-finger "
+                                           "double-tap anywhere in the app.");
                     }
 
                     ImGui::Spacing();
