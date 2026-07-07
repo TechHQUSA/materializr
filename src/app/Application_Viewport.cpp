@@ -6541,6 +6541,12 @@ void Application::renderViewport() {
                               "%.1f", m_extrudeDistance);
                 updateInteractiveExtrude();
             }
+            // touch: raise the soft keyboard only when the field is TAPPED (not
+            // on open, which would cover the drag handle). ImGui's own
+            // click-activation doesn't focus the field in this transient overlay
+            // popup, so re-assert focus on the tap (issue #22).
+            if (materializr::touchMode() && ImGui::IsItemClicked())
+                ImGui::SetKeyboardFocusHere(-1);
         } else {
         if (ImGui::InputText("##dist", m_extrudeInputBuf, sizeof(m_extrudeInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -6646,6 +6652,10 @@ void Application::renderViewport() {
                               "%.1f", m_pushPullDistance);
                 updatePushPull(/*applySnap=*/false);
             }
+            // touch: raise the keyboard on TAP, not on open (see the Extrude
+            // field, issue #22).
+            if (materializr::touchMode() && ImGui::IsItemClicked())
+                ImGui::SetKeyboardFocusHere(-1);
         } else {
         if (ImGui::InputText("##ppdist", m_pushPullInputBuf, sizeof(m_pushPullInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -6781,6 +6791,10 @@ void Application::renderViewport() {
                               "%.1f", m_edgeOpValue);
                 updateInteractiveEdgeOp();
             }
+            // touch: raise the keyboard on TAP, not on open (see the Extrude
+            // field, issue #22).
+            if (materializr::touchMode() && ImGui::IsItemClicked())
+                ImGui::SetKeyboardFocusHere(-1);
         } else {
         if (ImGui::InputText("##val", m_edgeOpInputBuf, sizeof(m_edgeOpInputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
