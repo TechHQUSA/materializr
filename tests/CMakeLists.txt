@@ -116,6 +116,12 @@ target_link_libraries(materializr_core PUBLIC
     ZLIB::ZLIB
 )
 
+# ─── Fuzz harnesses (opt-in, see root CMakeLists' BUILD_FUZZERS option) ──────
+
+if(BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()
+
 # ─── Test executables ────────────────────────────────────────────────────────
 
 # test_document
@@ -344,8 +350,28 @@ add_test(NAME test_svg_roundtrip COMMAND test_svg_roundtrip)
 # fork-isolated cases so crashes/hangs report instead of killing the battery.
 add_executable(probe_kernel_matrix probe_kernel_matrix.cpp)
 target_link_libraries(probe_kernel_matrix PRIVATE materializr_core)
+# main() always returns 0 regardless of per-case outcome (the battery is meant
+# to keep going and print every case even after one dies) — a bare add_test
+# would therefore never fail no matter what regresses. Gate on the one thing
+# that means "the process actually died": a fork-isolated case reporting
+# "DIED signal=N". Known non-fatal case annotations (e.g. bugA-copy-edit-
+# follow's "REPLAY-BREAKS", a documented pre-existing replay defect) don't
+# match this and stay green.
+add_test(NAME probe_kernel_matrix COMMAND probe_kernel_matrix)
+set_tests_properties(probe_kernel_matrix PROPERTIES
+    FAIL_REGULAR_EXPRESSION "DIED signal=")
 
 # probe_validity_fuzz — deterministic randomized validity sweep (same seed =>
 # identical case stream on every OCCT version, for cross-kernel diffing).
 add_executable(probe_validity_fuzz probe_validity_fuzz.cpp)
 target_link_libraries(probe_validity_fuzz PRIVATE materializr_core)
+# N=300/seed=1 chosen so the run finishes quickly in CI. The probe's own exit
+# code is 2 whenever invalid+crash+hang > 0, but "invalid" (an op producing
+# geometrically-invalid output on some random dimension combo) is common
+# baseline noise at every seed tried locally (seeds 1/2/3/42/100, N=100-300
+# all landed a few invalid cases with crash=0 hang=0) — not a regression
+# signal. Override to PASS_REGULAR_EXPRESSION so ctest only cares about the
+# actual "something crashed or hung" signal, ignoring the exit code.
+add_test(NAME probe_validity_fuzz COMMAND probe_validity_fuzz 300 1)
+set_tests_properties(probe_validity_fuzz PROPERTIES
+    PASS_REGULAR_EXPRESSION "crash=0 hang=0")

@@ -23,6 +23,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    # Native (non-Docker) configure+build+ctest, mirroring macos.yml's shape —
+    # the AppImage job below builds with -DBUILD_TESTS=OFF (Dockerfile:52), so
+    # this is the only place the gtest suite + the ctest-registered probes
+    # (probe_kernel_matrix, probe_validity_fuzz) actually run on Linux.
+    name: Test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same OCCT-from-source recipe as the Dockerfile (V7_9_3, identical deps
+      # list minus the AppImage-packaging-only tools: fuse/patchelf/imagemagick/
+      # zsync) — every platform runs the same kernel, and this job wants a
+      # native (non-container) prefix cmake can point MZR_OCCT_PREFIX at.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake git wget ca-certificates \
+            libfreetype-dev libfontconfig1-dev \
+            libgl-dev libglu1-mesa-dev \
+            libx11-dev libxext-dev libxmu-dev libxt-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev pkg-config \
+            libsdl2-dev libcurl4-openssl-dev zlib1g-dev
+
+      # OCCT source build is ~30 min cold (Dockerfile comment) — cache the
+      # install prefix keyed on the pinned tag so only a tag bump pays that
+      # cost again.
+      - name: Cache OpenCASCADE 7.9.3 build
+        id: occt-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/occt-7.9.3
+          key: occt-7.9.3-linux-x86_64-v1
+
+      - name: Build OpenCASCADE 7.9.3 from source
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        run: |
+          OCCT_TAG=V7_9_3
+          OCCT_SHA256=5ecf094ec6b12d5413dfb851d8c3590c354058aee556e32e408bdfbf8c357d57
+          wget -q "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" -O /tmp/occt.tar.gz
+          echo "${OCCT_SHA256}  /tmp/occt.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/occt && tar -xzf /tmp/occt.tar.gz -C /tmp/occt --strip-components=1
+          cmake -S /tmp/occt -B /tmp/occt-build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/occt-7.9.3 \
+            -DBUILD_LIBRARY_TYPE=Shared \
+            -DBUILD_MODULE_Draw=OFF -DBUILD_DOC_Overview=OFF -DBUILD_SAMPLES_QT=OFF \
+            -DUSE_FREETYPE=ON -DUSE_TK=OFF -DUSE_TCL=OFF \
+            -DUSE_FREEIMAGE=OFF -DUSE_TBB=OFF -DUSE_VTK=OFF -DUSE_RAPIDJSON=OFF \
+            -DUSE_OPENVR=OFF -DUSE_DRACO=OFF -DUSE_FFMPEG=OFF
+          cmake --build /tmp/occt-build --target install -j"$(nproc)"
+          rm -rf /tmp/occt /tmp/occt-build /tmp/occt.tar.gz
+
+      - name: Configure
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON \
+            -DMZR_OCCT_PREFIX=/usr/local/occt-7.9.3
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      # LD_LIBRARY_PATH rather than relying on rpath/ldconfig: the source-built
+      # OCCT prefix isn't a system path, and the test/probe binaries aren't
+      # patchelf'd like the packaged AppImage output is.
+      - name: Test
+        env:
+          LD_LIBRARY_PATH: /usr/local/occt-7.9.3/lib
+        run: ctest --test-dir build --output-on-failure
+
   appimage:
     name: AppImage (${{ matrix.arch }})
     # `contents: write` lets action-gh-release attach the AppImages to a

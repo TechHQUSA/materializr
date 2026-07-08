@@ -487,10 +487,27 @@ std::string svgTextRuns(const std::string& inner) {
 }
 
 void expandSvgText(std::string& svg) {
+    // Absolute caps, same shape as expandSvgUses' maxOutput / inlineSvgCss's
+    // byte budget: a single <text> run feeds straight into Font_BRepTextBuilder,
+    // which generates real wire/path geometry per character, so an unbounded
+    // content string (one giant <text>, or many of them) turns into unbounded
+    // BRep work and an unbounded "d" attribute in the rewritten output — unlike
+    // <use> expansion this pass is linear (not exponential), so a byte-for-byte
+    // input/output ratio bound is enough rather than needing an iteration cap.
+    constexpr size_t maxTextLen = 4096;      // per-element rendered content length
+    const size_t maxOutput = std::min<size_t>(
+        std::max<size_t>(8u * 1024 * 1024, svg.size() * 32), 256u * 1024 * 1024);
     std::string result;
     size_t pos = 0;
     int rendered = 0;
+    int skippedOversize = 0;
     while (true) {
+        if (result.size() > maxOutput) {
+            std::fprintf(stderr,
+                "[SVG] <text> expansion exceeded %zu-byte cap — aborting, "
+                "original text left un-rendered\n", maxOutput);
+            return;
+        }
         size_t lt = svg.find("<text", pos);
         if (lt == std::string::npos) { result += svg.substr(pos); break; }
         // Must be the <text element, not <textPath/<textArea: next char breaks it.
@@ -511,6 +528,10 @@ void expandSvgText(std::string& svg) {
         // trim leading/trailing whitespace from the run
         content = cssTrim(content);
         if (content.empty()) continue; // nothing to render
+        if (content.size() > maxTextLen) {
+            ++skippedOversize;
+            continue; // drop — see maxTextLen comment above
+        }
 
         std::string sx, sy, sfs, fam, weight, style, anchor, fill, transform;
         findAttr(openTag, "x", 0, &sx);
@@ -589,6 +610,11 @@ void expandSvgText(std::string& svg) {
             pathEl = "<g transform=\"" + transform + "\">" + pathEl + "</g>";
         result += pathEl;
         ++rendered;
+    }
+    if (skippedOversize > 0) {
+        std::fprintf(stderr,
+            "[SVG] skipped %d <text> element(s) over the %zu-char cap\n",
+            skippedOversize, maxTextLen);
     }
     if (rendered > 0) {
         std::fprintf(stderr, "[SVG] rendered %d <text> element(s) to outlines\n", rendered);

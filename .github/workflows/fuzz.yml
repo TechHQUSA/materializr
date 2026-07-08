@@ -1,0 +1,124 @@
+name: Fuzzing
+
+# Coverage-guided libFuzzer harnesses over the file-format parsers (ProjectIO,
+# SvgImport, StepIO, IgesIO) and Settings — see tests/fuzz/. Linux/Clang only
+# (BUILD_FUZZERS's CMake guard rejects AppleClang/GCC); the fuzzed code is
+# platform-generic parsing logic, not GUI code, so this is representative
+# without needing a macOS/Windows fuzz job too.
+
+on:
+  pull_request:
+    paths:
+      - 'src/io/**'
+      - 'src/modeling/SvgImport.cpp'
+      - 'src/modeling/SvgImport.h'
+      - 'tests/fuzz/**'
+      - 'CMakeLists.txt'
+      - 'tests/CMakeLists.txt'
+  schedule:
+    - cron: '0 3 * * *'   # nightly long run
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        harness:
+          - fuzz_projectio_load
+          - fuzz_projectio_sketchbody
+          - fuzz_svgimport
+          - fuzz_stepio
+          - fuzz_igesio
+          - fuzz_settings_roundtrip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang + build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang build-essential cmake git wget ca-certificates \
+            libfreetype-dev libfontconfig1-dev \
+            libgl-dev libglu1-mesa-dev \
+            libx11-dev libxext-dev libxmu-dev libxt-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev pkg-config \
+            libsdl2-dev libcurl4-openssl-dev zlib1g-dev
+
+      # Same source-built OCCT 7.9.3 as linux.yml's native test job — same
+      # cache key, so this job piggybacks on that job's cache when warm rather
+      # than paying the ~30 min cold-build cost separately.
+      - name: Cache OpenCASCADE 7.9.3 build
+        id: occt-cache
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/occt-7.9.3
+          key: occt-7.9.3-linux-x86_64-v1
+
+      - name: Build OpenCASCADE 7.9.3 from source
+        if: steps.occt-cache.outputs.cache-hit != 'true'
+        run: |
+          OCCT_TAG=V7_9_3
+          OCCT_SHA256=5ecf094ec6b12d5413dfb851d8c3590c354058aee556e32e408bdfbf8c357d57
+          wget -q "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" -O /tmp/occt.tar.gz
+          echo "${OCCT_SHA256}  /tmp/occt.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/occt && tar -xzf /tmp/occt.tar.gz -C /tmp/occt --strip-components=1
+          cmake -S /tmp/occt -B /tmp/occt-build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local/occt-7.9.3 \
+            -DBUILD_LIBRARY_TYPE=Shared \
+            -DBUILD_MODULE_Draw=OFF -DBUILD_DOC_Overview=OFF -DBUILD_SAMPLES_QT=OFF \
+            -DUSE_FREETYPE=ON -DUSE_TK=OFF -DUSE_TCL=OFF \
+            -DUSE_FREEIMAGE=OFF -DUSE_TBB=OFF -DUSE_VTK=OFF -DUSE_RAPIDJSON=OFF \
+            -DUSE_OPENVR=OFF -DUSE_DRACO=OFF -DUSE_FFMPEG=OFF
+          cmake --build /tmp/occt-build --target install -j"$(nproc)"
+          rm -rf /tmp/occt /tmp/occt-build /tmp/occt.tar.gz
+
+      # Corpus persistence across runs: always save under this run's id,
+      # restore-keys falls back to the latest prior save for this harness.
+      - name: Restore fuzz corpus cache
+        uses: actions/cache@v4
+        with:
+          path: tests/fuzz/corpus/${{ matrix.harness }}
+          key: fuzz-corpus-v1-${{ matrix.harness }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-v1-${{ matrix.harness }}-
+
+      - name: Configure
+        run: |
+          cmake -B build -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTS=ON -DBUILD_FUZZERS=ON \
+            -DMZR_OCCT_PREFIX=/usr/local/occt-7.9.3
+
+      - name: Build harness
+        run: cmake --build build -j$(nproc) --target ${{ matrix.harness }}
+
+      # ASAN_OPTIONS matters for fuzz_stepio/fuzz_igesio specifically — see the
+      # comment at the top of each harness .cpp — but set unconditionally so
+      # every harness in the matrix gets the same environment.
+      - name: Fuzz (PR: 60s, nightly/manual: 600s)
+        env:
+          ASAN_OPTIONS: allow_user_segv_handler=1:handle_segv=1
+        run: |
+          DURATION=60
+          if [ "${{ github.event_name }}" != "pull_request" ]; then DURATION=600; fi
+          mkdir -p tests/fuzz/corpus/${{ matrix.harness }}
+          LD_LIBRARY_PATH=/usr/local/occt-7.9.3/lib \
+            ./build/tests/fuzz/${{ matrix.harness }} \
+            -max_total_time=$DURATION -print_final_stats=1 \
+            tests/fuzz/corpus/${{ matrix.harness }}
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.harness }}-crashes
+          path: |
+            crash-*
+            timeout-*
+            oom-*
