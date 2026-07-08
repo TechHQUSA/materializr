@@ -487,17 +487,28 @@ std::string svgTextRuns(const std::string& inner) {
 }
 
 void expandSvgText(std::string& svg) {
-    // DoS budget: <text> content goes through OCCT glyph tessellation
+    // DoS budgets: <text> content goes through OCCT glyph tessellation
     // (Font_BRepTextBuilder), which is heavy per character — an adversarial
     // file with megabytes of text (or thousands of elements) would otherwise
     // pin the CPU and balloon the heap while every neighbouring stage
-    // (inlineSvgCss, expandSvgUses) is already budgeted.
+    // (inlineSvgCss, expandSvgUses) is already budgeted. Three caps:
+    // per-element content length (truncate), rendered element count (drop the
+    // rest), and — same shape as expandSvgUses' maxOutput — a bound on the
+    // rewritten output buffer, since every glyph adds real "d" path bytes.
     const size_t kMaxTextChars = 4096; // per <text> element
     const int    kMaxTextElems = 256;  // rendered elements per file
+    const size_t maxOutput = std::min<size_t>(
+        std::max<size_t>(8u * 1024 * 1024, svg.size() * 32), 256u * 1024 * 1024);
     std::string result;
     size_t pos = 0;
     int rendered = 0;
     while (true) {
+        if (result.size() > maxOutput) {
+            std::fprintf(stderr,
+                "[SVG] <text> expansion exceeded %zu-byte cap — aborting, "
+                "original text left un-rendered\n", maxOutput);
+            return;
+        }
         size_t lt = svg.find("<text", pos);
         if (lt == std::string::npos) { result += svg.substr(pos); break; }
         // Must be the <text element, not <textPath/<textArea: next char breaks it.

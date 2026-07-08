@@ -452,6 +452,19 @@ target_link_libraries(materializr PRIVATE CURL::libcurl)
 # ─── Tests ───────────────────────────────────────────────────────────────────
 
 option(BUILD_TESTS "Build unit tests" ON)
+# Coverage-guided libFuzzer harnesses over the file-format parsers (ProjectIO,
+# SvgImport, StepIO, IgesIO) and Settings — see tests/fuzz/. Off by default:
+# needs upstream Clang (not AppleClang/GCC — -fsanitize=fuzzer is bundled with
+# clang's compiler-rt) and is meant for the dedicated fuzz CI job / manual
+# local runs, not every ordinary build.
+option(BUILD_FUZZERS "Build libFuzzer harnesses (Clang only, needs BUILD_TESTS=ON)" OFF)
+if(BUILD_FUZZERS AND NOT BUILD_TESTS)
+    message(FATAL_ERROR "BUILD_FUZZERS requires BUILD_TESTS=ON (fuzz targets link against materializr_core, defined under tests/)")
+endif()
+if(BUILD_FUZZERS AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    message(FATAL_ERROR "BUILD_FUZZERS requires upstream Clang (-fsanitize=fuzzer is bundled with clang's compiler-rt; AppleClang/GCC are not supported). Configure with -DCMAKE_CXX_COMPILER=clang++.")
+endif()
+
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

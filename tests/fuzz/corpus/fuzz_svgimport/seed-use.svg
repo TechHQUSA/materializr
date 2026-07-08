@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+  <defs>
+    <rect id="tile" x="0" y="0" width="10" height="10"/>
+  </defs>
+  <use href="#tile" x="0" y="0"/>
+  <use href="#tile" x="20" y="0"/>
+  <use href="#tile" x="40" y="0"/>
+</svg>
