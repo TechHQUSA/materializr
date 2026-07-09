@@ -62,6 +62,19 @@ TopoDS_Shape filletedBox(Document& doc, int& bodyId) {
     return doc.getBody(bodyId);
 }
 
+// A 20mm box with ALL 12 edges filleted to radius R — the opened face ends up
+// ringed by fillets on every side, the case that used to no-op silently (#30).
+TopoDS_Shape allFilletedBox(Document& doc, int& bodyId, double R) {
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 20, 20, 20).Shape();
+    bodyId = doc.addBody(box, "box");
+    std::vector<TopoDS_Edge> edges;
+    for (TopExp_Explorer ex(box, TopAbs_EDGE); ex.More(); ex.Next())
+        edges.push_back(TopoDS::Edge(ex.Current()));
+    FilletOp f; f.setBody(bodyId); f.setEdges(edges); f.setRadius(R);
+    f.execute(doc);
+    return doc.getBody(bodyId);
+}
+
 } // namespace
 
 // An over-thick wall fails cleanly and quickly — never hangs.
@@ -99,6 +112,38 @@ TEST(Shell, ReasonableWallShells) {
     ASSERT_TRUE(op.execute(doc));
     EXPECT_LT(vol(doc.getBody(body)), vol(solid)) << "shell removes material";
     EXPECT_GT(vol(doc.getBody(body)), 0.0);
+}
+
+// A box filleted on ALL edges shells for real below the fillet radius. The arc
+// join builds the correct hollow but trips BRepCheck on a face/shell near the
+// ringed opening; ShellOp now repairs it with ShapeFix instead of discarding it
+// and committing the intersection join's untouched-solid no-op (#30).
+TEST(Shell, AllEdgesFilletedShellsBelowRadius) {
+    Document doc;
+    int body; TopoDS_Shape solid = allFilletedBox(doc, body, 2.0);
+    ShellOp op;
+    op.setBody(body);
+    op.setThickness(1.0);            // well under the 2mm fillet radius
+    op.addFaceToRemove(bottomFace(solid));
+    ASSERT_TRUE(op.execute(doc)) << "a sub-radius wall must actually shell";
+    // A genuine hollow removes most of the interior — nothing near a no-op.
+    EXPECT_LT(vol(doc.getBody(body)), vol(solid) * 0.5)
+        << "must be a real hollow, not the silent no-op that kept full volume";
+}
+
+// A wall at/over the fillet radius on an all-filleted body genuinely cannot be
+// offset — it must fail HONESTLY (return false, body untouched), never report
+// success while leaving the solid unchanged.
+TEST(Shell, AllEdgesFilletedOverRadiusFailsNotNoOp) {
+    Document doc;
+    int body; TopoDS_Shape solid = allFilletedBox(doc, body, 2.0);
+    double before = vol(solid);
+    ShellOp op;
+    op.setBody(body);
+    op.setThickness(2.5);            // over the 2mm fillet radius
+    op.addFaceToRemove(bottomFace(solid));
+    EXPECT_FALSE(op.execute(doc)) << "an un-shellable wall must fail, not no-op";
+    EXPECT_NEAR(vol(doc.getBody(body)), before, 1e-6) << "body untouched on fail";
 }
 
 // The rounded-face radius detector finds the R3 fillet, so the panel can name

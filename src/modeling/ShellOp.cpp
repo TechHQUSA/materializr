@@ -8,6 +8,9 @@
 #include <BRepOffset_Mode.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <ShapeFix_Shape.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <GeomAbs_JoinType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -19,6 +22,15 @@
 #include <imgui.h>
 
 namespace {
+
+// Signed volume of a shape (net of any inner void), used to tell a real hollow
+// from a no-op result MakeThickSolid sometimes hands back (see execute()).
+double shapeVolume(const TopoDS_Shape& s) {
+    if (s.IsNull()) return 0.0;
+    GProp_GProps g;
+    BRepGProp::VolumeProperties(s, g);
+    return g.Mass();
+}
 
 // A face's outward normal and a point on it, sampled at its parametric centre.
 bool faceNormalPoint(const TopoDS_Face& f, gp_Dir& outN, gp_Pnt& outP) {
@@ -205,9 +217,27 @@ bool ShellOp::execute(Document& doc) {
         // capacity), do NOT fall through to Intersection — that's the hang.
         // Only try Intersection when Arc failed *cleanly* (produced an invalid
         // or null result without throwing), i.e. the lofted-wall case.
+        // Volume of the solid going in. A genuine shell removes a cavity, so its
+        // net volume drops well below this; a result that keeps (nearly) the full
+        // volume is a NO-OP that MakeThickSolid can hand back marked valid — most
+        // often on a body whose opened face is ringed by fillets, where the
+        // intersection join silently returns the untouched solid. We must reject
+        // those, or the op reports success while doing nothing.
+        const double solidVol = shapeVolume(m_previousShape);
+        auto hollowed = [&](const TopoDS_Shape& s) {
+            return !s.IsNull() && shapeVolume(s) < solidVol * 0.99;
+        };
+
         enum Outcome { Ok, CleanFail, Threw };
+        // allowFix: repair a hollowed-but-invalid result with ShapeFix. Enabled
+        // ONLY for the arc join, which produces the geometrically-correct hollow
+        // and merely trips BRepCheck on a face/shell near a fillet-ringed opening
+        // (issue #30). The intersection join is the desperate lofted-wall
+        // fallback and its over-thick results are genuinely degenerate, so it
+        // stays strict — repairing those would resurrect the "impossible wall"
+        // no-op that OverThickWallFailsFastNotHang guards against.
         auto tryShell = [&](Standard_Boolean inter, GeomAbs_JoinType join,
-                            TopoDS_Shape& out) -> Outcome {
+                            Standard_Boolean allowFix, TopoDS_Shape& out) -> Outcome {
             try {
                 // A thick-solid that exceeds the body's available wall space can
                 // SIGSEGV deep in BRepOffset. With OCC_CONVERT_SIGNALS enabled,
@@ -219,10 +249,23 @@ bool ShellOp::execute(Document& doc) {
                                         -m_thickness, 1.0e-3, BRepOffset_Skin,
                                         inter, Standard_False, join);
                 mk.Build();
-                if (mk.IsDone() && !mk.Shape().IsNull() &&
-                    BRepCheck_Analyzer(mk.Shape()).IsValid()) {
-                    out = mk.Shape();
-                    return Ok;
+                if (!mk.IsDone() || mk.Shape().IsNull()) return CleanFail;
+                TopoDS_Shape s = mk.Shape();
+                // A result that didn't actually hollow the body is a no-op — never
+                // accept it, however "valid" OCCT calls it. This is the silent
+                // no-op the intersection join hands back on a fillet-ringed
+                // opening.
+                if (!hollowed(s)) return CleanFail;
+                if (BRepCheck_Analyzer(s).IsValid()) { out = s; return Ok; }
+                if (allowFix) {
+                    ShapeFix_Shape fix(s);
+                    fix.Perform();
+                    TopoDS_Shape fixed = fix.Shape();
+                    if (!fixed.IsNull() && hollowed(fixed) &&
+                        BRepCheck_Analyzer(fixed).IsValid()) {
+                        out = fixed;
+                        return Ok;
+                    }
                 }
             } catch (...) {
                 return Threw;
@@ -231,13 +274,14 @@ bool ShellOp::execute(Document& doc) {
         };
 
         TopoDS_Shape result;
-        Outcome arc = tryShell(Standard_False, GeomAbs_Arc, result);
+        Outcome arc = tryShell(Standard_False, GeomAbs_Arc, Standard_True, result);
         if (arc != Ok) {
             // Only the clean-fail (lofted-wall) case earns the intersection
             // retry; a throw means the wall is too thick for the geometry, and
             // the intersection join would hang instead of refusing.
             if (arc == Threw ||
-                tryShell(Standard_True, GeomAbs_Intersection, result) != Ok) {
+                tryShell(Standard_True, GeomAbs_Intersection, Standard_False,
+                         result) != Ok) {
                 std::fprintf(stderr,
                     "[Shell] failed at thickness %.3f mm — the wall is too thick "
                     "for the body (it must stay below the smallest inner fillet "
