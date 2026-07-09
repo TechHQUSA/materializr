@@ -130,7 +130,7 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
     std::snprintf(id, sizeof(id), "##iop_%s", title());
     ImGui::Begin(id, nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
                  ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::TextColored(materializr::accentText(), "%s", title());
