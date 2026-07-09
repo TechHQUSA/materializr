@@ -11,6 +11,9 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Ax2.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <GeomAbs_JoinType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -273,15 +276,79 @@ bool ShellOp::execute(Document& doc) {
             return CleanFail;
         };
 
+        // Last-resort workaround for a MakeThickSolid quirk: some box faces
+        // (notably the +X / +Y faces of a BRepPrimAPI box) make the offset
+        // silently return the untouched solid — a no-op — purely because of the
+        // face's parameterisation handedness, NOT the geometry (the mirror-image
+        // face on the same body shells fine). Mirroring the whole body flips that
+        // handedness, so we shell the mirror and mirror the hollow back. This is
+        // Steve's case: fillet a face's edges, then shell that face (#30).
+        auto tryShellMirrored = [&](TopoDS_Shape& out) -> bool {
+            gp_Trsf M;
+            M.SetMirror(gp_Ax2(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(1.0, 0.0, 0.0)));
+            TopoDS_Shape mbody =
+                BRepBuilderAPI_Transform(m_previousShape, M, Standard_True).Shape();
+            if (mbody.IsNull()) return false;
+            // Re-find each opened face on the mirrored body by its mirrored
+            // normal + point (a fresh transform makes new sub-shapes, so the
+            // stored faces aren't IsSame with the mirror's faces).
+            TopTools_ListOfShape mfaces;
+            for (const TopoDS_Shape& s : m_facesToRemove) {
+                gp_Dir n; gp_Pnt p;
+                if (!faceNormalPoint(TopoDS::Face(s), n, p)) return false;
+                gp_Pnt mp = p.Transformed(M);
+                gp_Dir mn = n.Transformed(M);
+                TopoDS_Face best; double bestScore = -1e18;
+                for (TopExp_Explorer ex(mbody, TopAbs_FACE); ex.More(); ex.Next()) {
+                    TopoDS_Face f = TopoDS::Face(ex.Current());
+                    gp_Dir fn; gp_Pnt fp;
+                    if (!faceNormalPoint(f, fn, fp)) continue;
+                    if (fn.Dot(mn) < 0.9) continue;
+                    double score = fn.Dot(mn) - 0.01 * fp.Distance(mp);
+                    if (score > bestScore) { bestScore = score; best = f; }
+                }
+                if (best.IsNull()) return false;
+                mfaces.Append(best);
+            }
+            try {
+                OCC_CATCH_SIGNALS
+                BRepOffsetAPI_MakeThickSolid mk;
+                mk.MakeThickSolidByJoin(mbody, mfaces, -m_thickness, 1.0e-3,
+                                        BRepOffset_Skin, Standard_False,
+                                        Standard_False, GeomAbs_Arc);
+                mk.Build();
+                if (!mk.IsDone() || mk.Shape().IsNull()) return false;
+                // Mirror the result back (a mirror is its own inverse).
+                TopoDS_Shape sb =
+                    BRepBuilderAPI_Transform(mk.Shape(), M, Standard_True).Shape();
+                if (sb.IsNull() || !hollowed(sb)) return false;
+                if (BRepCheck_Analyzer(sb).IsValid()) { out = sb; return true; }
+                ShapeFix_Shape fix(sb);
+                fix.Perform();
+                TopoDS_Shape fixed = fix.Shape();
+                if (!fixed.IsNull() && hollowed(fixed) &&
+                    BRepCheck_Analyzer(fixed).IsValid()) {
+                    out = fixed;
+                    return true;
+                }
+            } catch (...) { return false; }
+            return false;
+        };
+
         TopoDS_Shape result;
         Outcome arc = tryShell(Standard_False, GeomAbs_Arc, Standard_True, result);
         if (arc != Ok) {
-            // Only the clean-fail (lofted-wall) case earns the intersection
-            // retry; a throw means the wall is too thick for the geometry, and
-            // the intersection join would hang instead of refusing.
-            if (arc == Threw ||
-                tryShell(Standard_True, GeomAbs_Intersection, Standard_False,
-                         result) != Ok) {
+            // A throw means the wall is too thick for the geometry — do NOT try
+            // the intersection join (it hangs) or the mirror (it can't help an
+            // impossible wall, and skipping it keeps the failure fast). Only a
+            // clean fail earns the intersection retry (lofted walls) and then the
+            // mirror workaround (the box-face no-op).
+            bool recovered =
+                arc != Threw &&
+                (tryShell(Standard_True, GeomAbs_Intersection, Standard_False,
+                          result) == Ok ||
+                 tryShellMirrored(result));
+            if (!recovered) {
                 std::fprintf(stderr,
                     "[Shell] failed at thickness %.3f mm — the wall is too thick "
                     "for the body (it must stay below the smallest inner fillet "

@@ -18,6 +18,8 @@
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <gp_Trsf.hxx>
@@ -144,6 +146,44 @@ TEST(Shell, AllEdgesFilletedOverRadiusFailsNotNoOp) {
     op.addFaceToRemove(bottomFace(solid));
     EXPECT_FALSE(op.execute(doc)) << "an un-shellable wall must fail, not no-op";
     EXPECT_NEAR(vol(doc.getBody(body)), before, 1e-6) << "body untouched on fail";
+}
+
+// Steve's #30 repro: fillet ONE face's 4 edges, then shell THAT face. The +X
+// face of a BRepPrimAPI box makes MakeThickSolid silently no-op on the offset
+// (a face-parameterisation quirk — the mirror-image face shells fine), so
+// ShellOp mirrors the body, shells, and mirrors the hollow back.
+TEST(Shell, FilletedFaceThenShellThatFace_PlusX) {
+    // The planar face whose outward normal points ~+X.
+    auto plusXFace = [](const TopoDS_Shape& b) {
+        for (TopExp_Explorer ex(b, TopAbs_FACE); ex.More(); ex.Next()) {
+            TopoDS_Face f = TopoDS::Face(ex.Current());
+            BRepAdaptor_Surface sa(f);
+            if (sa.GetType() != GeomAbs_Plane) continue;
+            BRepGProp_Face gf(f);
+            Standard_Real u0,u1,v0,v1; gf.Bounds(u0,u1,v0,v1);
+            gp_Pnt p; gp_Vec n; gf.Normal((u0+u1)/2,(v0+v1)/2,p,n);
+            if (n.Magnitude()<1e-9) continue; n.Normalize();
+            if (n.X() > 0.9) return f;
+        }
+        return TopoDS_Face();
+    };
+    Document doc;
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(gp_Pnt(0,0,0), 20, 20, 20).Shape();
+    int body = doc.addBody(box, "box");
+    TopoDS_Face pf = plusXFace(box);
+    std::vector<TopoDS_Edge> es;
+    for (TopExp_Explorer ex(pf, TopAbs_EDGE); ex.More(); ex.Next())
+        es.push_back(TopoDS::Edge(ex.Current()));
+    FilletOp f; f.setBody(body); f.setEdges(es); f.setRadius(2.0); f.execute(doc);
+    TopoDS_Shape solid = doc.getBody(body);
+
+    ShellOp op;
+    op.setBody(body);
+    op.setThickness(1.0);
+    op.addFaceToRemove(plusXFace(solid));
+    ASSERT_TRUE(op.execute(doc)) << "the +X filleted face must shell (mirror path)";
+    EXPECT_LT(vol(doc.getBody(body)), vol(solid) * 0.5) << "a real hollow";
+    EXPECT_TRUE(BRepCheck_Analyzer(doc.getBody(body)).IsValid());
 }
 
 // The rounded-face radius detector finds the R3 fillet, so the panel can name
