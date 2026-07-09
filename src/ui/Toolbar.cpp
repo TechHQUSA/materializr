@@ -252,15 +252,17 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
     } else if (m_selection->hasSelectedFaces()) {
         add(MZ_ICON_SKETCH,   "Sketch",  ToolAction::SketchOnFace, false,
             "Start a sketch on the selected face.");
-        // Push/Pull only on FLAT faces — a curved/fillet face makes the boolean
-        // freak out, so don't offer it there (like Diameter only on rounds). #28
-        if (m_selFacePlanar)
+        // These only make sense on a FLAT face: Push/Pull and Extrude freak the
+        // boolean out on a curved/fillet face, and Shell is a no-op there. Hide
+        // them (like Diameter only on rounds) rather than fail on use. #28
+        if (m_selFacePlanar) {
             add(MZ_ICON_PUSHPULL, "Push",    ToolAction::PushPull, false,
                 "Push/pull the face along its normal.");
-        add(MZ_ICON_EXTRUDE,  "Extrude", ToolAction::ExtrudeSketch, false,
-            "Extrude the face into new material.");
-        add(MZ_ICON_SHELL,    "Shell",   ToolAction::Shell, false,
-            "Hollow the body, leaving this face open.");
+            add(MZ_ICON_EXTRUDE,  "Extrude", ToolAction::ExtrudeSketch, false,
+                "Extrude the face into new material.");
+            add(MZ_ICON_SHELL,    "Shell",   ToolAction::Shell, false,
+                "Hollow the body, leaving this face open.");
+        }
         add(MZ_ICON_REPAIR,   "Repair",  ToolAction::RemoveFace, false,
             "Delete the face and heal the body over it.");
         add(MZ_ICON_PROJECT,  "Project", ToolAction::ProjectSketch, false,
@@ -296,12 +298,16 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                         break;
                     }
         }
-        add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
-            "Move the face (its feature follows).");
-        add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
-            "Tilt the face — or twist it with the ring about its normal.");
-        add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
-            "Scale the face about its centre (uniform or per-axis).");
+        // Move/Rotate/Scale transform a flat face (its feature follows); on a
+        // curved/fillet face they freak out or do nothing — hide them. #28
+        if (m_selFacePlanar) {
+            add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
+                "Move the face (its feature follows).");
+            add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
+                "Tilt the face — or twist it with the ring about its normal.");
+            add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
+                "Scale the face about its centre (uniform or per-axis).");
+        }
         add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
             "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
         addPlugins(1 << static_cast<int>(SelectionContext::HasFaces));
