@@ -10,6 +10,7 @@
 #include <BRepGProp_Face.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
+#include <ShapeFix_Shape.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -253,10 +254,17 @@ bool ShellOp::execute(Document& doc) {
                                         -m_thickness, 1.0e-3, BRepOffset_Skin,
                                         inter, Standard_False, join);
                 mk.Build();
-                if (mk.IsDone() && isOpenHollow(mk.Shape())) {
-                    out = mk.Shape();
-                    return Ok;
-                }
+                if (!mk.IsDone() || mk.Shape().IsNull()) return CleanFail;
+                TopoDS_Shape s = mk.Shape();
+                if (isOpenHollow(s)) { out = s; return Ok; }
+                // Repair a near-valid OPEN cup: the arc join on a concave /
+                // interior-curve body often opens the face correctly but trips
+                // BRepCheck on a face or two, which a single ShapeFix pass mends.
+                // A SEALED hollow stays 2-shell after ShapeFix, so isOpenHollow
+                // still rejects it — this only rescues genuine open cups.
+                ShapeFix_Shape fix(s);
+                fix.Perform();
+                if (isOpenHollow(fix.Shape())) { out = fix.Shape(); return Ok; }
             } catch (...) {
                 return Threw;
             }
