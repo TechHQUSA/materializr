@@ -21,7 +21,8 @@ ViewCube::ViewCube() {}
 // orthographic views) wrapped in a horizon ring (drag to rotate the camera
 // around its target). Drawn with ImDrawList so it shares ImGui's window state.
 
-ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
+ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode,
+                                bool releaseIsGesture)
 {
     ViewCubeAction action = ViewCubeAction::None;
 
@@ -305,7 +306,8 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
             if (hover) {
                 cubeHover = true;
                 if (cubeClicked()) {
-                    action = ar.act;
+                    m_pendingClick = ar.act;
+                    m_cubeDragging = false;
                 }
             }
         }
@@ -373,7 +375,8 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
             if (hover) {
                 cubeHover = true;
                 if (cubeClicked()) {
-                    action = rb.act;
+                    m_pendingClick = rb.act;
+                    m_cubeDragging = false;
                 }
             }
         }
@@ -398,7 +401,8 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
         if (hover) {
             cubeHover = true;
             if (cubeClicked()) {
-                action = ViewCubeAction::Home;
+                m_pendingClick = ViewCubeAction::Home;
+                m_cubeDragging = false;
             }
         }
     }
@@ -433,7 +437,8 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
     }
 
     // --- Drag the cube body itself to free-orbit (yaw + pitch). Click without
-    //     drag snaps to the pressed face.
+    //     drag snaps to the pressed face / accessory (arrows, roll, Home commit
+    //     on release too, so a gesture can cancel them like any face).
     if (m_pendingClick != ViewCubeAction::None) {
         if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, 4.0f)) {
             m_cubeDragging = true;
@@ -445,7 +450,11 @@ ViewCubeAction ViewCube::render(Camera& camera, bool invertDrag, bool lightMode)
             camera.rotateAroundTarget(d.x * k, d.y * k);
         }
         if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-            if (!m_cubeDragging) action = m_pendingClick; // commit the snap
+            // A release synthesized by a two-finger takeover is not a click —
+            // the finger is mid-pinch, not lifting. Cancel instead of commit
+            // (the "pinch with one finger on the cube snaps the view" bug, #38).
+            if (!m_cubeDragging && !releaseIsGesture)
+                action = m_pendingClick; // commit the snap
             m_pendingClick = ViewCubeAction::None;
             m_cubeDragging = false;
         }

@@ -6113,7 +6113,8 @@ void Application::renderViewport() {
         m_viewCube->setExtraOffset(0.0f, 0.0f);
     ViewCubeAction vcAction = m_viewCube->render(
         m_viewport->getCamera(), m_invertCubeDrag,
-        m_themeManager && m_themeManager->getTheme() == Theme::Light);
+        m_themeManager && m_themeManager->getTheme() == Theme::Light,
+        m_window && m_window->lastLeftReleaseWasGesture());
     if (vcAction != ViewCubeAction::None) {
         handleViewCubeAction(static_cast<int>(vcAction));
     }

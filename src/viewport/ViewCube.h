@@ -33,8 +33,13 @@ public:
     // user drags the cube body (configurable in Settings). `lightMode` flips the
     // "ink" (labels/borders/arrows/home) from light to dark for the light theme;
     // the blue/grey cube faces and the yellow hover are unchanged.
+    // `releaseIsGesture`: the current left-release was synthesized by a
+    // two-finger gesture takeover (Window::lastLeftReleaseWasGesture), not a
+    // deliberate lift — treat it as a CANCEL of any armed click instead of a
+    // commit, so a pinch whose first finger lands on the cube can't snap the
+    // view (issue #38).
     ViewCubeAction render(Camera& camera, bool invertDrag = false,
-                          bool lightMode = false);
+                          bool lightMode = false, bool releaseIsGesture = false);
 
     // True while the mouse is over the cube/ring widget — the viewport uses
     // this to suppress its own selection logic so cube clicks don't pass through.
