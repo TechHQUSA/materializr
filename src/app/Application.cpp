@@ -3612,6 +3612,10 @@ bool Application::isDirty() const {
 
 void Application::markDirty() {
     m_unsavedNonHistoryChanges = true;
+    // Recovery debounce: remember WHEN the newest change landed so the
+    // crash-recovery writer can snapshot once things settle (see
+    // writeProjectRecoveryIfDue), instead of re-gzipping on a timer.
+    m_lastChangeSeenAt = SDL_GetTicks() / 1000.0;
 }
 
 void Application::markSaved() {
@@ -5163,9 +5167,33 @@ void Application::writeProjectRecoveryIfDue() {
     if (bodies == 0 && curStep < 0) return;    // empty new document: nothing to lose
 
     const double now = SDL_GetTicks() / 1000.0;
-    const bool newStep = (curStep != m_lastRecoveryStep);
-    const double kThrottleSec = 5.0;
-    if (!newStep && now - m_lastRecoveryWrite < kThrottleSec) return;
+
+    // Debounce, not a metronome (Steve's call, #48): snapshot once ~5 s AFTER
+    // the last committed change settles — "time to save a good copy in case
+    // the NEXT change crashes the program" — then go quiet until something
+    // changes again. The old scheme re-serialized + re-gzipped the whole
+    // project every 5 s for as long as it sat dirty (a periodic multi-MB
+    // CPU/disk hit forever, even backgrounded).
+    if (curStep != m_lastSeenStepForRecovery) {
+        m_lastSeenStepForRecovery = curStep;   // history moved = a change
+        m_lastChangeSeenAt = now;              // (markDirty stamps the rest)
+    }
+    // Nothing new since the last snapshot → nothing to protect; stay quiet.
+    if (m_lastRecoveryWrite >= m_lastChangeSeenAt) return;
+    // First change of a new episode: remember when the oldest UNSNAPSHOTTED
+    // change landed — the burst backstop below is measured from here, not
+    // from the last write, or the first change after a long quiet spell
+    // would trip it instantly instead of settling for 5 s.
+    if (m_pendingChangeSince <= m_lastRecoveryWrite)
+        m_pendingChangeSince = m_lastChangeSeenAt;
+    if (now - m_lastChangeSeenAt < 5.0) {
+        // Still inside the settle window. Backstop: during a long BURST of
+        // rapid changes (each < 5 s apart) a pure debounce would never fire
+        // and a crash mid-burst would lose the whole run — strictly worse
+        // than the old metronome. Write anyway once the oldest pending
+        // change has waited a minute.
+        if (now - m_pendingChangeSince < 60.0) return;
+    }
 
     // Don't cancel a live preview on a background recovery tick — that would
     // revert the user's in-progress drag. The recovery file may then capture a

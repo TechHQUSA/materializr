@@ -612,6 +612,12 @@ private:
     // prompt. Snapshots immediately on each new committed step, else throttled.
     double m_lastRecoveryWrite = 0.0;    // wall-clock secs of last recovery write
     int    m_lastRecoveryStep = -2;      // history currentStep at last write
+    // Debounce inputs for the recovery writer: when the newest change landed
+    // (markDirty stamps non-history changes; the writer itself stamps history
+    // step movement) — the snapshot fires once ~5 s AFTER this settles.
+    double m_lastChangeSeenAt = 0.0;
+    int    m_lastSeenStepForRecovery = -2;
+    double m_pendingChangeSince = 0.0;   // oldest unsnapshotted change (burst backstop)
     bool   m_pendingProjectRecovery = false;
     void writeProjectRecoveryIfDue();    // per-frame crash-recovery snapshot
     void renderProjectRecoveryPrompt();  // startup "restore unsaved project?" modal
