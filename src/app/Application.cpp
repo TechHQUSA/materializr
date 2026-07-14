@@ -3100,6 +3100,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         for (const auto& [id, shape] : st.changed) {
             if (running.find(id) == running.end()) {
                 reload.created.push_back(id);
+                reload.createdAfter.push_back({id, shape});
             } else {
                 reload.modifiedBefore.push_back({id, running[id]});
                 reload.modifiedAfter.push_back({id, shape});

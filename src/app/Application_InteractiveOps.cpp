@@ -2944,13 +2944,56 @@ void Application::cascadeFromSketchEdit(int sketchId) {
         m_document->setCascadeSketchOverride(
             sketchId, std::make_shared<materializr::Sketch>(*sk));
     bool ok = m_history->editStep(earliest, *m_document, /*transactional=*/true);
+    // A step that can't follow the change (its geometry no longer exists on
+    // the re-derived body) used to revert the WHOLE edit behind a message
+    // that guessed at the culprit. Instead: disable the failing step, retry,
+    // and tell the user exactly which feature to re-apply (#53). Bounded —
+    // if several steps fail we stop rather than gut the history.
+    std::vector<int> disabledSteps;
+    while (!ok && m_history->lastEditFailStep() >= 0 &&
+           disabledSteps.size() < 3) {
+        const int bad = m_history->lastEditFailStep();
+        const Operation* op = m_history->getStep(bad);
+        if (!op) break;
+        std::fprintf(stderr, "[Cascade] disabling step %d (%s) and retrying\n",
+                     bad, op->name().c_str());
+        m_history->setStepEnabled(bad, false, *m_document);
+        disabledSteps.push_back(bad);
+        ok = m_history->editStep(earliest, *m_document, /*transactional=*/true);
+    }
+    if (!ok && !disabledSteps.empty()) {
+        // Still failing — restore what we disabled and fall back to a clean
+        // full revert (never leave the history silently gutted).
+        for (int i : disabledSteps)
+            m_history->setStepEnabled(i, true, *m_document);
+        disabledSteps.clear();
+    }
     m_document->clearCascadeSketchOverrides();
     std::fprintf(stderr, "[Cascade] sketchId=%d replay from step %d: %s\n",
                  sketchId, earliest, ok ? "applied" : "reverted");
     if (!ok) {
+        std::string culprit;
+        if (m_history->lastEditFailStep() >= 0) {
+            if (const Operation* op =
+                    m_history->getStep(m_history->lastEditFailStep()))
+                culprit = " (step " +
+                          std::to_string(m_history->lastEditFailStep() + 1) +
+                          ": " + op->description() + ")";
+        }
         showToast("Couldn't update the model for that sketch change \xE2\x80\x94 a "
-                  "downstream feature (e.g. a fillet) couldn't follow it, so the "
-                  "model was left unchanged.");
+                  "downstream feature" + culprit + " couldn't follow it, so "
+                  "the model was left unchanged.");
+    } else if (!disabledSteps.empty()) {
+        std::string names;
+        for (size_t i = 0; i < disabledSteps.size(); ++i) {
+            const Operation* op = m_history->getStep(disabledSteps[i]);
+            names += (i ? ", " : "") + std::string("step ") +
+                     std::to_string(disabledSteps[i] + 1) +
+                     (op ? " (" + op->description() + ")" : "");
+        }
+        showToast("Model updated \xE2\x80\x94 but " + names +
+                  " couldn't follow the change and was DISABLED. Re-apply or "
+                  "re-enable it from the History panel.", 8.0);
     }
 
     // Partial remesh: mark only bodies whose shape changed, plus any that were

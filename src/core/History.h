@@ -40,6 +40,11 @@ public:
     // body — undoing the body while the live sketch renders against it crashes
     // (SIGABRT, heap corruption). canUndo() honours it, so the Undo buttons also
     // grey out at the floor. -1 = no floor.
+    // The step editStep() last hard-failed on (reset to -1 at each call) —
+    // lets the sketch-edit cascade DISABLE the un-followable step, retry, and
+    // tell the user WHICH feature needs re-applying instead of reverting the
+    // whole edit with a guess of a message (#53).
+    int lastEditFailStep() const { return m_lastEditFailStep; }
     void setUndoFloor(int step) { m_undoFloor = step; }
     void clearUndoFloor() { m_undoFloor = -1; }
 
@@ -155,6 +160,7 @@ private:
     int m_currentIndex = -1;
     int m_breakpoint = -1;
     int m_undoFloor = -1;   // see setUndoFloor(): floor for in-sketch undo
+    int m_lastEditFailStep = -1; // see lastEditFailStep()
     unsigned m_revision = 0; // see revision()
     // Step that failed to recompute during the last editStep/redo replay;
     // cleared by manual undo, by a successful retry, or by clear().

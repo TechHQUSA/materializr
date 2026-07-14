@@ -84,6 +84,10 @@ public:
     // restore them.
     struct ReloadState {
         std::vector<int> created;
+        // The created bodies' shapes AFTER this step — lets a sketch-driven
+        // extrude derive WHICH regions it originally used from its own saved
+        // result's footprint on the sketch plane (#53, old-file recovery).
+        std::vector<std::pair<int, TopoDS_Shape>> createdAfter;
         std::vector<std::pair<int, TopoDS_Shape>> modifiedBefore;
         // The same modified bodies AFTER this step — sub-shape-referencing ops
         // resolve their generated-geometry indices (e.g. fillet blend faces

@@ -213,6 +213,7 @@ void History::propagateSketchValueEdits(int editedStep, Document& doc) {
 }
 
 bool History::editStep(int index, Document& doc, bool transactional) {
+    m_lastEditFailStep = -1;
     ++m_revision;
     if (index < 0 || index >= static_cast<int>(m_operations.size())) {
         return false;
@@ -308,6 +309,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
                 std::fprintf(stderr,
                     "[history-dbg] editStep: HARD FAILURE at step %d "
                     "(edited=%d transactional=%d)\n", i, index, transactional);
+                m_lastEditFailStep = i;
                 if (transactional) { restoreSnapshot(); return false; }
                 m_currentIndex = i - 1;
                 m_failedReplayAt = i;

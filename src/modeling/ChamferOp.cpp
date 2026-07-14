@@ -203,6 +203,24 @@ bool ChamferOp::execute(Document& doc) {
                 }
             }
         }
+        // Deduplicate: on a body whose fragmented faces were later unified,
+        // several stored fragment edges rebind onto ONE clean edge — feeding
+        // MakeChamfer the same edge repeatedly fails the whole build (#53's
+        // light-cover replay). Chamfering it once is the original intent.
+        {
+            std::vector<TopoDS_Edge> uniq;
+            for (const auto& e : m_edges) {
+                bool dup = false;
+                for (const auto& u : uniq) if (u.IsSame(e)) { dup = true; break; }
+                if (!dup) uniq.push_back(e);
+            }
+            if (uniq.size() != m_edges.size()) {
+                std::fprintf(stderr, "[Chamfer] %zu stored edges resolved to "
+                             "%zu distinct — fragmented topology was unified "
+                             "upstream\n", m_edges.size(), uniq.size());
+                m_edges = std::move(uniq);
+            }
+        }
         if (m_edgeAnchors.empty()) computeAnchors(doc);
         // Topological names, minted with the body's producing ledger in
         // context so a SEAM edge gets its gen-lineage name.

@@ -162,6 +162,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Extrude region identity: draw/extrude/draw-more replays correctly (#53)
+add_executable(test_extrude_regions test_extrude_regions.cpp)
+target_link_libraries(test_extrude_regions PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_extrude_regions COMMAND test_extrude_regions)
+
 # test_operations
 add_executable(test_operations test_operations.cpp)
 target_link_libraries(test_operations PRIVATE materializr_core gtest gtest_main)

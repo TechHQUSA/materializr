@@ -3,6 +3,7 @@
 #include <BRep_Builder.hxx>
 #include <sstream>
 #include "Sketch.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -12,6 +13,10 @@
 #include <BRepGProp_Face.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <GProp_GProps.hxx>
+#include <BRepGProp.hxx>
+#include <TopoDS_Compound.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <Bnd_Box.hxx>
@@ -38,6 +43,116 @@ void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
 // Rebuild m_profile from the currently-live source sketch, using the same
 // even-odd island construction the interactive extrude uses (see
 // Sketch::buildProfileShape) so the cascade reproduces the original shape.
+
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepTools.hxx>
+#include <gp_Pln.hxx>
+#include <ElSLib.hxx>
+#include <TopExp_Explorer.hxx>
+
+namespace {
+// Interior points of `face`, up to `maxPts`, spread over a UV grid. MANY
+// points per original region on purpose (#53): if later-drawn sketch
+// geometry SUBDIVIDED that region, each fragment holds some of the points,
+// so region selection picks every fragment — reproducing the original
+// sweep. One point would pick a single fragment (a fraction of the body).
+int pointsInsideFace(const TopoDS_Face& face, std::vector<gp_Pnt>& out,
+                     int maxPts = 12) {
+    int added = 0;
+    try {
+        Standard_Real u0, u1, v0, v1;
+        BRepTools::UVBounds(face, u0, u1, v0, v1);
+        Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+        if (surf.IsNull()) return 0;
+        const double fr[5] = {0.5, 0.25, 0.75, 0.125, 0.875};
+        for (double a : fr) {
+            for (double b : fr) {
+                if (added >= maxPts) return added;
+                double u = u0 + (u1 - u0) * a, v = v0 + (v1 - v0) * b;
+                gp_Pnt p = surf->Value(u, v);
+                BRepClass_FaceClassifier cls(face, p, 1e-6);
+                if (cls.State() == TopAbs_IN) { out.push_back(p); ++added; }
+            }
+        }
+    } catch (...) {}
+    return added;
+}
+
+// Footprint of `shape` on (or parallel to) the sketch plane, as 2D points.
+// Parallel planar faces are grouped by signed offset from the plane; the
+// nearest group wins — a both-ways extrude has caps at ±distance and no
+// face ON the plane at all (#53). Interior points project along the normal.
+// The min-offset group of planar faces parallel to `pln`, TRANSLATED onto
+// it (a both-ways extrude's caps sit at ±distance, never on the plane).
+std::vector<TopoDS_Face> footprintFacesOnPlane(const TopoDS_Shape& shape,
+                                               const gp_Pln& pln) {
+    struct Cand { double off; TopoDS_Face f; };
+    std::vector<Cand> cands;
+    for (TopExp_Explorer fx(shape, TopAbs_FACE); fx.More(); fx.Next()) {
+        const TopoDS_Face& f = TopoDS::Face(fx.Current());
+        try {
+            BRepAdaptor_Surface bs(f);
+            if (bs.GetType() != GeomAbs_Plane) continue;
+            gp_Pln fp = bs.Plane();
+            if (!fp.Axis().Direction().IsParallel(pln.Axis().Direction(), 1e-4))
+                continue;
+            cands.push_back({pln.Distance(fp.Location()), f});
+        } catch (...) {}
+    }
+    std::vector<TopoDS_Face> out;
+    if (cands.empty()) return out;
+    double best = 1e100;
+    for (const auto& c : cands) best = std::min(best, c.off);
+    for (const auto& c : cands) {
+        if (c.off > best + 1e-4) continue;
+        TopoDS_Face f = c.f;
+        if (best > 1e-6) {
+            try {
+                BRepAdaptor_Surface bs(f);
+                gp_Pnt onFace = bs.Plane().Location();
+                // Signed offset along the sketch normal.
+                gp_Vec d(pln.Axis().Direction());
+                double s = gp_Vec(pln.Location(), onFace).Dot(d);
+                gp_Trsf tr;
+                tr.SetTranslation(d.Multiplied(-s));
+                f = TopoDS::Face(BRepBuilderAPI_Transform(f, tr, true).Shape());
+            } catch (...) { continue; }
+        }
+        out.push_back(f);
+    }
+    return out;
+}
+
+// Merge coplanar fragments of a recovered footprint back into whole region
+// faces — sweeping the raw fragment compound leaves internal seam walls in
+// the body (face-count divergence downstream, and chamfer walks fail at the
+// fragment boundaries).
+TopoDS_Shape unifyProfile(const TopoDS_Shape& comp) {
+    try {
+        ShapeUpgrade_UnifySameDomain u(comp, true, true, true);
+        u.Build();
+        TopoDS_Shape s = u.Shape();
+        if (!s.IsNull()) return s;
+    } catch (...) {}
+    return comp;
+}
+
+std::vector<std::pair<double,double>> footprintPoints(
+        const std::vector<TopoDS_Face>& faces, const gp_Pln& pln) {
+    std::vector<std::pair<double,double>> pts;
+    for (const auto& f : faces) {
+        std::vector<gp_Pnt> ps;
+        if (pointsInsideFace(f, ps) == 0) continue;
+        for (const gp_Pnt& p : ps) {
+            Standard_Real u, v;
+            ElSLib::Parameters(pln, p, u, v);
+            pts.push_back({u, v});
+        }
+    }
+    return pts;
+}
+} // namespace
+
 bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
     if (m_sketchId < 0) return false;
     auto sk = doc.getSketch(m_sketchId);
@@ -45,6 +160,88 @@ bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
 
     TopoDS_Shape profile = sk->buildProfileShape();
     if (profile.IsNull()) return false;
+
+    // Select only the regions this extrude ORIGINALLY used (#53). Without
+    // recorded points, keep the whole profile (old behaviour / old files
+    // whose footprint couldn't be derived).
+    if (!m_regionPts.empty()) {
+        const gp_Pln pln = sk->getPlane();
+        BRep_Builder bb;
+        TopoDS_Compound keep;
+        bb.MakeCompound(keep);
+        int kept = 0;
+        // Track how many of the RECORDED points found a home: a partial match
+        // means part of the original area is gone from the sketch — selecting
+        // just the surviving fragments would silently shrink the body, so the
+        // historically-exact recovered profile wins instead (below).
+        std::vector<bool> hit(m_regionPts.size(), false);
+        for (TopExp_Explorer fx(profile, TopAbs_FACE); fx.More(); fx.Next()) {
+            const TopoDS_Face& f = TopoDS::Face(fx.Current());
+            bool mine = false;
+            for (size_t pi = 0; pi < m_regionPts.size(); ++pi) {
+                gp_Pnt p = ElSLib::Value(m_regionPts[pi].first,
+                                         m_regionPts[pi].second, pln);
+                BRepClass_FaceClassifier cls(f, p, 1e-4);
+                if (cls.State() == TopAbs_IN) { mine = true; hit[pi] = true; }
+            }
+            if (mine) { bb.Add(keep, f); ++kept; }
+        }
+        size_t matched = 0;
+        for (bool h : hit) if (h) ++matched;
+        // Area sanity: if the ORIGINAL region's boundary lines were later
+        // deleted, its area gets absorbed into a bigger region — every point
+        // still matches, but the selected region is far larger than what was
+        // extruded. Compare areas against the saved footprint and prefer it
+        // when the match balloons.
+        if (kept > 0 && matched == m_regionPts.size() &&
+            !m_recoveredProfile.IsNull()) {
+            auto areaOf = [](const TopoDS_Shape& s) {
+                GProp_GProps g;
+                BRepGProp::SurfaceProperties(s, g);
+                return g.Mass();
+            };
+            double aKeep = areaOf(keep), aOrig = areaOf(m_recoveredProfile);
+            if (aOrig > 1e-9 && aKeep > aOrig * 1.5) {
+                std::fprintf(stderr, "[Extrude] matched region area %.0f far "
+                             "exceeds the original footprint %.0f — using the "
+                             "saved footprint profile\n", aKeep, aOrig);
+                m_profile = m_recoveredProfile;
+                return true;
+            }
+        }
+        if (kept > 0 && matched < m_regionPts.size() &&
+            !m_recoveredProfile.IsNull()) {
+            std::fprintf(stderr, "[Extrude] only %zu/%zu recorded region "
+                         "points found — using the saved footprint profile\n",
+                         matched, m_regionPts.size());
+            m_profile = m_recoveredProfile;
+            return true;
+        }
+        if (kept > 0) {
+            m_profile = kept == 1 ? TopoDS_Shape(TopExp_Explorer(keep, TopAbs_FACE).Current())
+                                  : TopoDS_Shape(keep);
+            return true;
+        }
+        if (!m_recoveredProfile.IsNull()) {
+            // The recorded regions are GONE from the sketch (later deleted /
+            // moved). Sweep the historically-correct footprint instead of
+            // every region the sketch now has.
+            std::fprintf(stderr, "[Extrude] recorded regions missing from the "
+                         "sketch — using the saved footprint profile\n");
+            m_profile = m_recoveredProfile;
+            return true;
+        }
+        std::fprintf(stderr, "[Extrude] recorded regions not found in the "
+                     "sketch's current shape — falling back to ALL regions\n");
+    } else if (!m_recoveredProfile.IsNull()) {
+        // No recorded points at all (old file whose footprint faces were
+        // recovered but couldn't be point-sampled) — the recovered faces are
+        // still the exact historical profile; sweep them, never ALL regions.
+        m_profile = m_recoveredProfile;
+        std::fprintf(stderr, "[Extrude] no region points — using the saved "
+                     "footprint profile directly\n");
+        return true;
+    }
     m_profile = profile;
     return true;
 }
@@ -75,6 +272,31 @@ bool ExtrudeOp::execute(Document& doc) {
     }
 
     try {
+        // Record WHICH regions this extrude uses (#53): one interior point
+        // per profile face, in sketch-2D. Captured once from the picked
+        // profile; refreshed only if the face count changed (a re-derive
+        // through rebuildProfileFromSketch keeps the same regions).
+        if (m_sketchId >= 0) {
+            if (m_regionPts.empty()) {
+                std::vector<std::pair<double,double>> pts;
+                if (auto sk = doc.getSketch(m_sketchId)) {
+                    const gp_Pln pln = sk->getPlane();
+                    for (TopExp_Explorer fx(m_profile, TopAbs_FACE);
+                         fx.More(); fx.Next()) {
+                        std::vector<gp_Pnt> ps;
+                        if (pointsInsideFace(TopoDS::Face(fx.Current()), ps) == 0)
+                            { pts.clear(); break; }
+                        for (const gp_Pnt& p : ps) {
+                            Standard_Real u, v;
+                            ElSLib::Parameters(pln, p, u, v);
+                            pts.push_back({u, v});
+                        }
+                    }
+                }
+                if (!pts.empty()) m_regionPts = std::move(pts);
+            }
+        }
+
         TopoDS_Shape extrudedShape;
 
         // Compute extrude direction from the profile face's normal. A
@@ -269,6 +491,15 @@ std::string ExtrudeOp::serializeParams() const {
         m_sketchId, m_distance, static_cast<int>(m_direction),
         static_cast<int>(m_mode), m_targetBodyId, m_draftAngle);
     std::string blob = buf;
+    if (!m_regionPts.empty()) {
+        blob += ";regions=";
+        char pb[64];
+        for (size_t i = 0; i < m_regionPts.size(); ++i) {
+            std::snprintf(pb, sizeof(pb), "%s%.6f:%.6f", i ? "," : "",
+                          m_regionPts[i].first, m_regionPts[i].second);
+            blob += pb;
+        }
+    }
     if (m_sketchId < 0 && !m_profile.IsNull()) {
         std::ostringstream os;
         BRepTools::Write(m_profile, os);
@@ -312,6 +543,22 @@ bool ExtrudeOp::deserializeParams(const std::string& blob) {
         else if (key == "mode")   { m_mode = static_cast<ExtrudeMode>(i); any = true; }
         else if (key == "target") { m_targetBodyId = i; any = true; }
         else if (key == "draft")  { m_draftAngle = d; any = true; }
+        else if (key == "regions") {
+            m_regionPts.clear();
+            size_t q = 0;
+            while (q < val.size()) {
+                size_t c = val.find(',', q);
+                std::string tokp = val.substr(q, c == std::string::npos
+                                                     ? std::string::npos : c - q);
+                size_t col = tokp.find(':');
+                if (col != std::string::npos)
+                    m_regionPts.push_back({std::atof(tokp.c_str()),
+                                           std::atof(tokp.c_str() + col + 1)});
+                if (c == std::string::npos) break;
+                q = c + 1;
+            }
+            any = true;
+        }
         pos = end + 1;
     }
     return any;
@@ -322,11 +569,10 @@ bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
     // extrude instead reloads the picked profile from its params BREP blob
     // (a geometric snapshot — editable scalars, replayable, though it won't
     // follow an upstream edit of the source face).
-    if (m_sketchId >= 0) {
-        if (!rebuildProfileFromSketch(doc)) return false;
-    } else {
-        if (m_profile.IsNull()) return false;   // pre-fix save: no blob
-    }
+    // (Profile re-derivation happens at the END of this function — the
+    // old-file footprint recovery below must set m_regionPts FIRST, or the
+    // rebuild grabs every region of the sketch's final state, #53.)
+    if (m_sketchId < 0 && m_profile.IsNull()) return false; // pre-fix save: no blob
 
     if (m_mode == ExtrudeMode::NewBody) {
         // The body this step created is the extruded solid; adopt its id so
@@ -334,6 +580,36 @@ bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
         // (addOrPutBody reuses it, restoring tombstoned folder/colour/name).
         if (state.created.empty()) return false;
         m_createdBodyId = state.created.front();
+
+        // OLD-FILE region recovery (#53): a pre-regions save carries no
+        // region points, but the step's SAVED result body does — its planar
+        // faces lying ON the sketch plane are exactly the regions this
+        // extrude swept. Derive the points once so the replay stops grabbing
+        // every region of the final sketch state.
+        if (m_regionPts.empty() && m_sketchId >= 0 &&
+            !state.createdAfter.empty()) {
+            auto sk = doc.getSketch(m_sketchId);
+            const TopoDS_Shape& made = state.createdAfter.front().second;
+            if (sk && !made.IsNull()) {
+                const gp_Pln pln = sk->getPlane();
+                auto faces = footprintFacesOnPlane(made, pln);
+                std::vector<std::pair<double,double>> pts =
+                    footprintPoints(faces, pln);
+                if (!faces.empty()) {
+                    BRep_Builder rb;
+                    TopoDS_Compound rc;
+                    rb.MakeCompound(rc);
+                    for (const auto& f : faces) rb.Add(rc, f);
+                    m_recoveredProfile = unifyProfile(rc);
+                }
+                if (!pts.empty()) {
+                    m_regionPts = std::move(pts);
+                    std::fprintf(stderr, "[Extrude] derived %zu region "
+                                 "point(s) from the saved body's footprint\n",
+                                 m_regionPts.size());
+                }
+            }
+        }
     } else {
         // Boolean mode mutates the target in place; restore its pre-step shape
         // so undo() reverts and editStep can recompute from it.
@@ -341,6 +617,45 @@ bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
             if (id == m_targetBodyId) { m_previousTargetShape = shp; break; }
         }
         if (m_previousTargetShape.IsNull()) return false;
+
+        // OLD-FILE region recovery, boolean modes (#53): the swept material
+        // is the before/after DELTA — added for Union, removed for
+        // Subtract/Intersect. Its planar faces on the sketch plane are the
+        // regions this extrude used.
+        if (m_regionPts.empty() && m_sketchId >= 0) {
+            TopoDS_Shape after;
+            for (const auto& [id, shp] : state.modifiedAfter)
+                if (id == m_targetBodyId) { after = shp; break; }
+            auto sk = doc.getSketch(m_sketchId);
+            if (sk && !after.IsNull()) {
+                try {
+                    TopoDS_Shape delta =
+                        (m_mode == ExtrudeMode::Union)
+                            ? BRepAlgoAPI_Cut(after, m_previousTargetShape).Shape()
+                            : BRepAlgoAPI_Cut(m_previousTargetShape, after).Shape();
+                    const gp_Pln pln = sk->getPlane();
+                    auto faces = footprintFacesOnPlane(delta, pln);
+                    std::vector<std::pair<double,double>> pts =
+                        footprintPoints(faces, pln);
+                    if (!faces.empty()) {
+                        BRep_Builder rb;
+                        TopoDS_Compound rc;
+                        rb.MakeCompound(rc);
+                        for (const auto& f : faces) rb.Add(rc, f);
+                        m_recoveredProfile = unifyProfile(rc);
+                    }
+                    if (!pts.empty()) {
+                        m_regionPts = std::move(pts);
+                        std::fprintf(stderr, "[Extrude] derived %zu region "
+                                     "point(s) from the boolean delta "
+                                     "footprint\n", m_regionPts.size());
+                    }
+                } catch (...) {}
+            }
+        }
+    }
+    if (m_sketchId >= 0) {
+        if (!rebuildProfileFromSketch(doc)) return false;
     }
     return true;
 }
