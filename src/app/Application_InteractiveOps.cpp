@@ -2951,7 +2951,7 @@ void Application::cascadeFromSketchEdit(int sketchId) {
     // if several steps fail we stop rather than gut the history.
     std::vector<int> disabledSteps;
     while (!ok && m_history->lastEditFailStep() >= 0 &&
-           disabledSteps.size() < 3) {
+           disabledSteps.size() < 8) {
         const int bad = m_history->lastEditFailStep();
         const Operation* op = m_history->getStep(bad);
         if (!op) break;
