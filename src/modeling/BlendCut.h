@@ -41,5 +41,14 @@ bool cutChamfer(const TopoDS_Shape& body,
                 TopoDS_Shape& outShape,
                 std::vector<TopoDS_Shape>& outBlendFaces);
 
+// Convex fillet as a cut: the same swept wedge, but bounded by the arc of
+// radius `radius` tangent to both adjacent faces — subtracting it leaves
+// exactly the fillet cylinder. Same scope and gating as cutChamfer.
+bool cutFillet(const TopoDS_Shape& body,
+               const std::vector<TopoDS_Edge>& edges, double radius,
+               topo::GenerationLedger& ledger,
+               TopoDS_Shape& outShape,
+               std::vector<TopoDS_Shape>& outBlendFaces);
+
 } // namespace blendcut
 } // namespace materializr

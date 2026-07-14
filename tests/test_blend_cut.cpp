@@ -9,6 +9,7 @@
 #include "core/Document.h"
 #include "modeling/BlendCut.h"
 #include "modeling/ChamferOp.h"
+#include "modeling/FilletOp.h"
 #include "modeling/GenerationLedger.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -17,6 +18,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -110,6 +112,19 @@ double chamferThenCutVolume(const TopoDS_Shape& tool, double dTop,
     if (top.IsNull()) return -1.0;
     BRepFilletAPI_MakeChamfer mk(box);
     mk.Add(dTop, dOther, es.front(), top);
+    mk.Build();
+    if (!mk.IsDone()) return -1.0;
+    return volumeOf(BRepAlgoAPI_Cut(mk.Shape(), tool).Shape());
+}
+
+// Fillet counterpart of chamferThenCutVolume: native fillet on the pristine
+// box's edge, then the feature cut through it.
+double filletThenCutVolume(const TopoDS_Shape& tool, double r) {
+    TopoDS_Shape box = plainBox();
+    std::vector<TopoDS_Edge> es = frontTopEdges(box);
+    if (es.size() != 1) return -1.0;
+    BRepFilletAPI_MakeFillet mk(box);
+    mk.Add(r, es.front());
     mk.Build();
     if (!mk.IsDone()) return -1.0;
     return volumeOf(BRepAlgoAPI_Cut(mk.Shape(), tool).Shape());
@@ -230,6 +245,50 @@ TEST(BlendCut, ChamferOpFallsBackWhenBevelExceedsClearance) {
     EXPECT_NEAR(volumeOf(out), ref, 1e-4);
 }
 
+// Fillet flavour of the core contract: hole first, then cutFillet over the
+// fragments = fillet first, then hole. The arc tool must leave exactly the
+// fillet cylinder, so the volumes are EQUAL.
+TEST(BlendCut, FilletAcrossHoleMatchesReorder) {
+    TopoDS_Shape holed = BRepAlgoAPI_Cut(plainBox(), edgeCrossingHole()).Shape();
+    std::vector<TopoDS_Edge> frags = frontTopEdges(holed);
+    ASSERT_EQ(frags.size(), 2u);
+
+    topo::GenerationLedger ledger;
+    TopoDS_Shape out;
+    std::vector<TopoDS_Shape> blends;
+    ASSERT_TRUE(blendcut::cutFillet(holed, frags, 2.0, ledger, out, blends));
+    EXPECT_TRUE(BRepCheck_Analyzer(out).IsValid());
+    EXPECT_FALSE(blends.empty());
+
+    double ref = filletThenCutVolume(edgeCrossingHole(), 2.0);
+    ASSERT_GT(ref, 0.0);
+    EXPECT_NEAR(volumeOf(out), ref, 1e-4);
+}
+
+// Through the real op on the native-failing shallow-pocket config: FilletOp
+// must succeed via the fallback with reorder-equivalent geometry.
+TEST(BlendCut, FilletOpFallsBackAcrossShallowPocket) {
+    Document doc;
+    int id = doc.addBody(
+        BRepAlgoAPI_Cut(plainBox(), shallowPocketTool()).Shape(), "Pocketed");
+    std::vector<TopoDS_Edge> frags = frontTopEdges(doc.getBody(id));
+    ASSERT_EQ(frags.size(), 2u);
+
+    FilletOp op;
+    op.setBody(id);
+    op.setEdges(frags);
+    op.setRadius(2.0);
+    ASSERT_TRUE(op.execute(doc));
+
+    const TopoDS_Shape& out = doc.getBody(id);
+    EXPECT_TRUE(BRepCheck_Analyzer(out).IsValid());
+    double ref = filletThenCutVolume(shallowPocketTool(), 2.0);
+    ASSERT_GT(ref, 0.0);
+    EXPECT_NEAR(volumeOf(out), ref, 1e-4);
+    EXPECT_FALSE(op.getGeneratedFaces().empty());
+    EXPECT_NE(doc.bodyFaceIds(id), nullptr);
+}
+
 // A cut can only REMOVE material, so a concave (inside-corner) edge must be
 // refused — silently "chamfering" it with a cut would dig a groove instead
 // of adding the bevel sliver.
@@ -259,4 +318,6 @@ TEST(BlendCut, ConcaveEdgeRefused) {
     std::vector<TopoDS_Shape> blends;
     EXPECT_FALSE(blendcut::cutChamfer(lShape, concave, 2.0, 2.0,
                                       TopoDS_Face(), ledger, out, blends));
+    EXPECT_FALSE(blendcut::cutFillet(lShape, concave, 2.0,
+                                     ledger, out, blends));
 }

@@ -1,4 +1,5 @@
 #include "FilletOp.h"
+#include "BlendCut.h"
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
 #include "../core/Verbose.h"
@@ -207,7 +208,11 @@ bool FilletOp::execute(Document& doc) {
                 m_edgeRefs.push_back(materializr::topo::mint(e, mc));
         }
 
-        // Create fillet on the body shape
+        // Native attempt first. Every pre-existing gate is preserved, but a
+        // failure now NULLIFIES the candidate and falls through to the #55
+        // swept-arc cut fallback below instead of aborting outright.
+        TopoDS_Shape candidate;
+        {
         BRepFilletAPI_MakeFillet fillet(m_previousShape);
 
         for (const auto& edge : m_edges) {
@@ -220,14 +225,11 @@ bool FilletOp::execute(Document& doc) {
                 "[Fillet] BRepFilletAPI.IsDone() returned false (R=%.2f) "
                 "— OCCT refused to build the fillet at this radius.\n",
                 m_radius);
-            return false;
-        }
-
-        TopoDS_Shape candidate = fillet.Shape();
-        if (candidate.IsNull()) {
-            std::fprintf(stderr, "[Fillet] result shape is null (R=%.2f).\n",
-                         m_radius);
-            return false;
+        } else {
+            candidate = fillet.Shape();
+            if (candidate.IsNull())
+                std::fprintf(stderr, "[Fillet] result shape is null (R=%.2f).\n",
+                             m_radius);
         }
 
         // IsDone() is necessary but NOT sufficient: when fillet radii on
@@ -239,12 +241,12 @@ bool FilletOp::execute(Document& doc) {
         // corrupt body never gets committed to the document/history. (The bbox
         // and volume checks below catch grosser blow-outs but pass plenty of
         // invalid-but-plausibly-sized results.)
-        if (!BRepCheck_Analyzer(candidate).IsValid()) {
+        if (!candidate.IsNull() && !BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
                 "[Fillet] result failed BRepCheck_Analyzer (R=%.2f, %zu edges) "
                 "— invalid topology, refusing to commit.\n",
                 m_radius, m_edges.size());
-            return false;
+            candidate.Nullify();
         }
 
         // OCCT's fillet API is permissive — IsDone() returns true even when
@@ -263,7 +265,7 @@ bool FilletOp::execute(Document& doc) {
         //  inside, and not at all on the outside — the old "volume must
         //  not exceed input × 1.01" rule rejected the inside concave
         //  fillets even when geometrically fine.)
-        {
+        if (!candidate.IsNull()) {
             // AddOptimal walks the actual geometry rather than the looser
             // tolerance-padded extents the plain Add uses. Shelled bodies
             // tend to land in OCCT with face seams at ~1e-3 tolerance,
@@ -287,41 +289,69 @@ bool FilletOp::execute(Document& doc) {
                         m_radius,
                         ix1 - ix0, iy1 - iy0, iz1 - iz0,
                         ox1 - ox0, oy1 - oy0, oz1 - oz0);
-                    return false;
+                    candidate.Nullify();
                 }
             }
 
             GProp_GProps gpOut;
             BRepGProp::VolumeProperties(candidate, gpOut);
-            if (gpOut.Mass() < 1e-6) {
+            if (!candidate.IsNull() && gpOut.Mass() < 1e-6) {
                 std::fprintf(stderr,
                     "[Fillet] result volume ~= 0 (R=%.2f mm).\n",
                     m_radius);
-                return false;
+                candidate.Nullify();
             }
         }
 
-        // Publish the generation map (input edge -> blend faces) so the "gen"
-        // naming strategy can name a blend face by its generating edge — the
-        // general-kernel path for op-produced faces. Captured on every execute,
-        // so a rebuild's ledger reflects the current geometry.
-        m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
-        m_ledger.captureAdd(fillet, m_previousShape, TopAbs_FACE);
+        if (!candidate.IsNull()) {
+            // Publish the generation map (input edge -> blend faces) so the
+            // "gen" naming strategy can name a blend face by its generating
+            // edge — the general-kernel path for op-produced faces. Captured
+            // on every execute, so a rebuild's ledger reflects the current
+            // geometry.
+            m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
+            m_ledger.captureAdd(fillet, m_previousShape, TopAbs_FACE);
 
-        // Record the blend faces generated from each input edge so a later face
-        // click can be traced back to this fillet for re-editing.
-        m_generatedFaces.clear();
-        for (const auto& edge : m_edges) {
-            try {
-                const TopTools_ListOfShape& gen = fillet.Generated(edge);
-                // Range-based loop instead of TopTools_ListIteratorOfListOfShape,
-                // whose header was removed in OCCT 8.0 (still works on 7.x).
-                for (const TopoDS_Shape& s : gen) {
-                    if (s.ShapeType() == TopAbs_FACE)
-                        m_generatedFaces.push_back(s);
-                }
-            } catch (...) {}
+            // Record the blend faces generated from each input edge so a later
+            // face click can be traced back to this fillet for re-editing.
+            m_generatedFaces.clear();
+            for (const auto& edge : m_edges) {
+                try {
+                    const TopTools_ListOfShape& gen = fillet.Generated(edge);
+                    // Range-based loop instead of
+                    // TopTools_ListIteratorOfListOfShape, whose header was
+                    // removed in OCCT 8.0 (still works on 7.x).
+                    for (const TopoDS_Shape& s : gen) {
+                        if (s.ShapeType() == TopAbs_FACE)
+                            m_generatedFaces.push_back(s);
+                    }
+                } catch (...) {}
+            }
         }
+        } // native attempt
+
+        if (candidate.IsNull()) {
+            // #55: the native blend can't resolve against a surface feature
+            // crossing the edge. Build the same removal as a swept-arc
+            // boolean cut — collinear fragment selections merge into one
+            // span, so the round passes straight through the feature,
+            // exactly as if the fillet had preceded it in history. Only
+            // reached after the native build failed, so models where
+            // MakeFillet works never take this path. Convex straight edges
+            // between planar faces only (a cut can't ADD material, so
+            // concave fillets never come from here).
+            std::vector<TopoDS_Shape> blends;
+            TopoDS_Shape cutRes;
+            if (materializr::blendcut::cutFillet(m_previousShape, m_edges,
+                    m_radius, m_ledger, cutRes, blends)) {
+                candidate = cutRes;
+                m_generatedFaces = std::move(blends);
+                std::fprintf(stderr, "[Fillet] native blend failed — built "
+                             "as a swept-arc cut across the feature "
+                             "(#55, R=%.2f)\n", m_radius);
+            }
+        }
+        if (candidate.IsNull()) return false;
 
         // Update the body with the filleted shape (kept on the op too, so
         // serializeParams can index the generated faces against the result).
