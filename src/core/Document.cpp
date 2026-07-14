@@ -39,6 +39,8 @@ void Document::removeBody(int id) {
         // (undo/redo path through Extrude / Pattern / Mirror / etc.) can
         // restore the body's folderId, colour, visibility, and name.
         m_bodyTombstones[id] = m_bodies[idx];
+        m_bodyLedgers.erase(id);
+        m_bodyFaceIds.erase(id);
         m_bodies.erase(m_bodies.begin() + idx);
         if (m_eventBus) {
             // BodyRemovedEvent FIRST so the renderer drops the slot before
@@ -53,6 +55,7 @@ void Document::removeBody(int id) {
 
 void Document::updateBody(int id, const TopoDS_Shape& shape) {
     m_bodyLedgers.erase(id);  // producing op re-publishes after
+    m_bodyFaceIds.erase(id);  // same lifecycle (stale lineage is worse than none)
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         m_bodies[idx].shape = shape;
@@ -590,6 +593,9 @@ void Document::clear() {
     m_sketches.clear();
     m_folders.clear();
     m_bodyTombstones.clear();
+    m_bodyLedgers.clear();
+    m_bodyFaceIds.clear();
+    m_nextFaceId = 1;
     m_nextBodyId = 1;
     m_nextPlaneId = 1;
     m_nextAxisId = 1;

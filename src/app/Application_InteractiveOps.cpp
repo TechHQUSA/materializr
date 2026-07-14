@@ -593,10 +593,12 @@ void Application::refreshAllEdgeOpFaces() {
         try {
             if (auto* f = const_cast<FilletOp*>(dynamic_cast<const FilletOp*>(op))) {
                 TopoDS_Shape b = m_document->getBody(f->getBodyId());
-                if (!b.IsNull()) f->refreshGeneratedFaces(b);
+                if (!b.IsNull())
+                    f->refreshGeneratedFaces(b, m_document->bodyFaceIds(f->getBodyId()));
             } else if (auto* c = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(op))) {
                 TopoDS_Shape b = m_document->getBody(c->getBodyId());
-                if (!b.IsNull()) c->refreshGeneratedFaces(b);
+                if (!b.IsNull())
+                    c->refreshGeneratedFaces(b, m_document->bodyFaceIds(c->getBodyId()));
             }
         } catch (...) { /* body deleted downstream — nothing to refresh */ }
     }

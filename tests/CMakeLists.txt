@@ -70,6 +70,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/GenerationLedger.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ImageDecode.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/FaceLineage.cpp
     ${CMAKE_SOURCE_DIR}/src/io/BrepIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/IgesIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ObjExport.cpp
@@ -155,6 +156,11 @@ add_test(NAME test_recovery COMMAND test_recovery)
 add_executable(test_exchange_io test_exchange_io.cpp)
 target_link_libraries(test_exchange_io PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_exchange_io COMMAND test_exchange_io)
+
+# Face lineage: bevel identity through boolean splits + save/load (#49/#51)
+add_executable(test_face_lineage test_face_lineage.cpp)
+target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
 # test_operations
 add_executable(test_operations test_operations.cpp)

@@ -9,6 +9,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Dir.hxx>
 #include "SheetSpec.h"
+#include "../modeling/FaceLineage.h"
 
 namespace materializr { class Sketch; class EventBus;
 namespace topo { struct GenerationLedger; } }
@@ -122,6 +123,25 @@ public:
         auto it = m_bodyLedgers.find(id);
         return it == m_bodyLedgers.end() ? nullptr : it->second;
     }
+
+    // Face-lineage map of a body's CURRENT shape (see FaceLineage.h): face →
+    // stable ancestry ids. Published by ops after updateBody, same lifecycle
+    // as the ledger — updateBody clears it (stale lineage is worse than none;
+    // an op that doesn't re-publish leaves consumers on their geometric
+    // fallback, which is exactly the pre-lineage behaviour). Persisted in new
+    // saves; absent in old ones.
+    void setBodyFaceIds(int id, materializr::topo::FaceIdMap m) {
+        if (m.empty()) m_bodyFaceIds.erase(id);
+        else m_bodyFaceIds[id] = std::move(m);
+    }
+    const materializr::topo::FaceIdMap* bodyFaceIds(int id) const {
+        auto it = m_bodyFaceIds.find(id);
+        return it == m_bodyFaceIds.end() ? nullptr : &it->second;
+    }
+    // Mint a fresh, never-reused lineage id (document-global; persisted).
+    int mintFaceId() { return m_nextFaceId++; }
+    int faceIdCounter() const { return m_nextFaceId; }
+    void setFaceIdCounter(int n) { if (n > m_nextFaceId) m_nextFaceId = n; }
     // Add a body with an explicit id, or update the body that already has that
     // id. Keeps ids stable across save/load and history replay; bumps the id
     // counter so later auto-assigned ids don't collide.
@@ -275,6 +295,9 @@ private:
     std::map<int, std::shared_ptr<materializr::Sketch>> m_cascadeSketchOverrides;
     // See setBodyLedger — non-owning, cleared on updateBody.
     std::map<int, const materializr::topo::GenerationLedger*> m_bodyLedgers;
+    // See setBodyFaceIds — owned here (unlike the non-owning ledgers).
+    std::map<int, materializr::topo::FaceIdMap> m_bodyFaceIds;
+    int m_nextFaceId = 1;
     std::vector<FolderEntry> m_folders;
     // Tombstones: when a body is removed, its non-geometry metadata (folderId,
     // colour, visibility, name) is stashed here keyed by id. When putBody is

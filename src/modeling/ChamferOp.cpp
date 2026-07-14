@@ -1,6 +1,7 @@
 #include "ChamferOp.h"
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -252,6 +253,9 @@ bool ChamferOp::execute(Document& doc) {
         // Publish the generation map so "gen" can name a bevel face by its
         // generating edge (general-kernel path for op-produced faces).
         m_ledger.capture(chamfer, m_previousShape, TopAbs_EDGE);
+        // FACE modified-map too: face lineage propagates the input body's
+        // ancestry ids through this op (the bevels get fresh ids below).
+        m_ledger.captureAdd(chamfer, m_previousShape, TopAbs_FACE);
 
         m_generatedFaces.clear();
         for (const auto& edge : m_edges) {
@@ -269,8 +273,28 @@ bool ChamferOp::execute(Document& doc) {
         // Update the body with the chamfered shape (kept on the op too, so
         // serializeParams can index the generated faces against the result).
         m_resultShape = candidate;
+        // Snapshot the INPUT body's lineage before updateBody clears it.
+        materializr::topo::FaceIdMap inLineage;
+        if (const auto* im = doc.bodyFaceIds(m_bodyId)) inLineage = *im;
         doc.updateBody(m_bodyId, m_resultShape);
         doc.setBodyLedger(m_bodyId, &m_ledger);
+
+        // Face lineage: carry the input body's ancestry through, then stamp
+        // this chamfer's bevel faces with STABLE ids — reused across
+        // re-executes (replay/edit) so downstream references and saves stay
+        // consistent; minted fresh only when the bevel count changes.
+        {
+            materializr::topo::FaceIdMap next = materializr::topo::propagate(
+                {{&inLineage, m_previousShape}}, m_ledger, m_resultShape);
+            if (m_genFaceIds.size() != m_generatedFaces.size()) {
+                m_genFaceIds.clear();
+                for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                    m_genFaceIds.push_back(doc.mintFaceId());
+            }
+            for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                materializr::topo::addId(next, m_generatedFaces[i], m_genFaceIds[i]);
+            doc.setBodyFaceIds(m_bodyId, std::move(next));
+        }
         return true;
     } catch (...) {
         return false;
@@ -344,6 +368,11 @@ std::string ChamferOp::serializeParams() const {
                                                    TopAbs_FACE);
         if (!idx.empty()) blob += ";gen=" + idx;
     }
+    if (!m_genFaceIds.empty()) {
+        blob += ";genids=";
+        for (size_t i = 0; i < m_genFaceIds.size(); ++i)
+            blob += (i ? "," : "") + std::to_string(m_genFaceIds[i]);
+    }
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
     if (!anc.empty()) blob += ";anchor=" + anc;
     // Topological edge names (additive, LAST — length-prefixed opaque blobs
@@ -395,6 +424,7 @@ bool ChamferOp::deserializeParams(const std::string& blob) {
         else if (key == "body")     { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "edges")    { m_edgeIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "gen")      { m_genFaceIndices = SubShapeIndex::parse(val); any = true; }
+        else if (key == "genids")   { m_genFaceIds = SubShapeIndex::parse(val); any = true; }
         else if (key == "anchor")   { EdgeAnchor::parse(val, m_edgeAnchors); any = true; }
         pos = end + 1;
     }
@@ -431,8 +461,23 @@ bool ChamferOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/)
     return true;
 }
 
-void ChamferOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
-    if (currentBody.IsNull() || m_genFaceIndices.empty()) return;
+void ChamferOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                                      const materializr::topo::FaceIdMap* lineage) {
+    if (currentBody.IsNull()) return;
+    // Lineage first (exact, split-aware): every current face whose ancestry
+    // contains one of this chamfer's bevel ids IS a piece of this chamfer —
+    // including pieces a downstream boolean cut the bevel into (#51), which
+    // no geometric matcher can trace. Falls through to geometry when the
+    // body has no lineage (old saves, non-propagating downstream ops).
+    if (lineage && !m_genFaceIds.empty()) {
+        std::vector<TopoDS_Shape> mine;
+        for (const auto& e : *lineage)
+            for (int id : e.ids)
+                if (std::find(m_genFaceIds.begin(), m_genFaceIds.end(), id) !=
+                    m_genFaceIds.end()) { mine.push_back(e.face); break; }
+        if (!mine.empty()) { m_generatedFaces = std::move(mine); return; }
+    }
+    if (m_genFaceIndices.empty()) return;
     // The saved ordinal indices are only meaningful against THIS chamfer's own
     // result shape (SubShapeIndex's documented limitation). Resolving them
     // straight against the final body drifts onto unrelated faces the moment a

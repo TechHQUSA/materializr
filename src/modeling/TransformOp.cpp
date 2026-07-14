@@ -111,7 +111,22 @@ bool TransformOp::execute(Document& doc) {
             BRepBuilderAPI_Transform tf(m_previousShape, m_rawTrsf, true);
             tf.Build();
             if (!tf.IsDone()) return false;
+            materializr::topo::FaceIdMap inL;
+            if (const auto* im = doc.bodyFaceIds(m_bodyId)) inL = *im;
             doc.updateBody(m_bodyId, tf.Shape());
+            // Rigid move: carry face lineage 1:1 through the transform (the
+            // builder maps each input face to its moved twin).
+            if (!inL.empty()) {
+                materializr::topo::FaceIdMap moved;
+                for (auto& e : inL) {
+                    try {
+                        TopoDS_Shape nf = tf.ModifiedShape(e.face);
+                        if (!nf.IsNull())
+                            moved.push_back({nf, e.ids});
+                    } catch (...) {}
+                }
+                doc.setBodyFaceIds(m_bodyId, std::move(moved));
+            }
             for (const auto& [sid, prevPln] : m_previousSketchPlanes) {
                 auto sk = doc.getSketch(sid);
                 if (sk) sk->setPlane(prevPln.Transformed(m_rawTrsf));

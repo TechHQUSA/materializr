@@ -66,7 +66,8 @@ public:
     // Re-resolve generated-face indices against the body's CURRENT shape (e.g.
     // after downstream transforms moved the geometry). Called by the loader
     // after all ops are rehydrated so ownsFace() works on the final body.
-    void refreshGeneratedFaces(const TopoDS_Shape& currentBody);
+    void refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                               const materializr::topo::FaceIdMap* lineage = nullptr);
 
 private:
     int m_bodyId = -1;
@@ -82,6 +83,9 @@ private:
     TopoDS_Shape m_resultShape;
     std::vector<int> m_edgeIndices;
     std::vector<int> m_genFaceIndices;
+    // Stable lineage ids of this chamfer's bevel faces (FaceLineage.h) —
+    // minted at first execute, reused on re-execute, serialized (genids=).
+    std::vector<int> m_genFaceIds;
 
     // Generative anchors (EdgeAnchor.h) — same scheme as FilletOp.
     int m_sourceSketchId = -1;

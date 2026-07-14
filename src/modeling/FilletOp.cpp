@@ -2,6 +2,7 @@
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
 #include "../core/Verbose.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -289,6 +290,7 @@ bool FilletOp::execute(Document& doc) {
         // general-kernel path for op-produced faces. Captured on every execute,
         // so a rebuild's ledger reflects the current geometry.
         m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
+        m_ledger.captureAdd(fillet, m_previousShape, TopAbs_FACE);
 
         // Record the blend faces generated from each input edge so a later face
         // click can be traced back to this fillet for re-editing.
@@ -308,8 +310,24 @@ bool FilletOp::execute(Document& doc) {
         // Update the body with the filleted shape (kept on the op too, so
         // serializeParams can index the generated faces against the result).
         m_resultShape = candidate;
+        materializr::topo::FaceIdMap inLineage;
+        if (const auto* im = doc.bodyFaceIds(m_bodyId)) inLineage = *im;
         doc.updateBody(m_bodyId, m_resultShape);
         doc.setBodyLedger(m_bodyId, &m_ledger);
+        {
+            // Face lineage (see ChamferOp): carry ancestry, stamp blends with
+            // stable ids (reused across re-executes).
+            materializr::topo::FaceIdMap next = materializr::topo::propagate(
+                {{&inLineage, m_previousShape}}, m_ledger, m_resultShape);
+            if (m_genFaceIds.size() != m_generatedFaces.size()) {
+                m_genFaceIds.clear();
+                for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                    m_genFaceIds.push_back(doc.mintFaceId());
+            }
+            for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                materializr::topo::addId(next, m_generatedFaces[i], m_genFaceIds[i]);
+            doc.setBodyFaceIds(m_bodyId, std::move(next));
+        }
         return true;
     } catch (...) {
         return false;
@@ -374,6 +392,11 @@ std::string FilletOp::serializeParams() const {
     }
     // Generative anchors (additive; old readers ignore the key). See EdgeAnchor.
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
+    if (!m_genFaceIds.empty()) {
+        blob += ";genids=";
+        for (size_t i = 0; i < m_genFaceIds.size(); ++i)
+            blob += (i ? "," : "") + std::to_string(m_genFaceIds[i]);
+    }
     if (!anc.empty()) blob += ";anchor=" + anc;
     // Topological edge names (additive, LAST — length-prefixed opaque blobs
     // read to end-of-string). Persisting them keeps a SEAM fillet/chamfer
@@ -425,6 +448,7 @@ bool FilletOp::deserializeParams(const std::string& blob) {
         else if (key == "body")   { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "edges")  { m_edgeIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "gen")    { m_genFaceIndices = SubShapeIndex::parse(val); any = true; }
+        else if (key == "genids") { m_genFaceIds = SubShapeIndex::parse(val); any = true; }
         else if (key == "anchor") {
             EdgeAnchor::parse(val, m_edgeAnchors);
             any = true;
@@ -469,8 +493,18 @@ bool FilletOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/) 
     return true;
 }
 
-void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
+void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                                     const materializr::topo::FaceIdMap* lineage) {
     if (currentBody.IsNull()) return;
+    // Lineage first — see ChamferOp::refreshGeneratedFaces.
+    if (lineage && !m_genFaceIds.empty()) {
+        std::vector<TopoDS_Shape> mine;
+        for (const auto& e : *lineage)
+            for (int id : e.ids)
+                if (std::find(m_genFaceIds.begin(), m_genFaceIds.end(), id) !=
+                    m_genFaceIds.end()) { mine.push_back(e.face); break; }
+        if (!mine.empty()) { m_generatedFaces = std::move(mine); return; }
+    }
 
     // The saved indices were captured against THIS fillet's local result shape;
     // resolving them against the final body (which may have more faces from

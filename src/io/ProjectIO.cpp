@@ -1,4 +1,5 @@
 #include "ProjectIO.h"
+#include "../modeling/SubShapeIndex.h"
 #include "../core/Document.h"
 #include "../modeling/Sketch.h"
 #include "../modeling/SketchEditOp.h"
@@ -487,6 +488,39 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             for (int id : st.deleted) ofs << " " << id;
             ofs << "\n";
             ofs << "STEP_END\n";
+        }
+    }
+
+    // --- Face lineage (additive; older readers skip these unknown tokens) ---
+    // Per body: each face's ancestry ids, keyed by the face's ordinal in the
+    // SAVED shape (bit-identical on load, so ordinal is exact there — the
+    // drift hazard only exists across REBUILDS, which is what the ids solve).
+    {
+        bool wroteNext = false;
+        for (int bid : doc.getAllBodyIds()) {
+            const auto* m = doc.bodyFaceIds(bid);
+            if (!m || m->empty()) continue;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) { continue; }
+            std::ostringstream sec;
+            int rows = 0;
+            for (const auto& e : *m) {
+                if (e.ids.empty()) continue;
+                int ord = SubShapeIndex::indexOf(body, e.face, TopAbs_FACE);
+                if (ord <= 0) continue;
+                sec << ord << " ";
+                for (size_t k = 0; k < e.ids.size(); ++k)
+                    sec << (k ? "," : "") << e.ids[k];
+                sec << "\n";
+                ++rows;
+            }
+            if (rows > 0) {
+                if (!wroteNext) {
+                    ofs << "FACEID_NEXT " << doc.faceIdCounter() << "\n";
+                    wroteNext = true;
+                }
+                ofs << "FACEIDS " << bid << " " << rows << "\n" << sec.str();
+            }
         }
     }
 
@@ -1092,6 +1126,29 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                 e.opacity = opacity;
                 doc.setRefImage(it->second, std::move(e));
             }
+        } else if (tok == "FACEID_NEXT") {
+            int n = 0; iss >> n;
+            doc.setFaceIdCounter(n);
+        } else if (tok == "FACEIDS") {
+            // Face lineage for one body (see the save side). Bodies were read
+            // earlier in the file, so resolving ordinals here is exact.
+            int bid = 0, n = 0; iss >> bid >> n;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) {}
+            materializr::topo::FaceIdMap fm;
+            for (int i = 0; i < n; ++i) {
+                std::string fl;
+                if (!std::getline(ifs, fl)) break;
+                std::istringstream ls(fl);
+                int ord = 0; std::string csv;
+                ls >> ord >> csv;
+                if (body.IsNull() || ord <= 0 || csv.empty()) continue;
+                TopoDS_Shape f = SubShapeIndex::at(body, ord, TopAbs_FACE);
+                if (f.IsNull()) continue;
+                std::vector<int> ids = SubShapeIndex::parse(csv);
+                if (!ids.empty()) fm.push_back({f, ids});
+            }
+            if (!fm.empty()) doc.setBodyFaceIds(bid, std::move(fm));
         } else if (tok == "HISTORY_INITIAL_COUNT" && historyOut) {
             int k = 0; iss >> k;
             historyOut->present = true;

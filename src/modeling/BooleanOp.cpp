@@ -129,9 +129,20 @@ bool BooleanOp::execute(Document& doc) {
             return false;
         }
 
+        // Snapshot both inputs' face lineage BEFORE updateBody/removeBody
+        // clear them, then propagate through the boolean's FACE ledger — a
+        // split face's pieces all inherit its ancestry ids, which is what
+        // keeps a chamfer's bevel traceable after a cut crosses it (#51).
+        materializr::topo::FaceIdMap inTarget, inTool;
+        if (const auto* im = doc.bodyFaceIds(m_targetBodyId)) inTarget = *im;
+        if (const auto* im = doc.bodyFaceIds(m_toolBodyId))   inTool   = *im;
+
         // Update target body with the result
         doc.updateBody(m_targetBodyId, resultShape);
         doc.setBodyLedger(m_targetBodyId, &m_ledger);
+        doc.setBodyFaceIds(m_targetBodyId, materializr::topo::propagate(
+            {{&inTarget, m_previousTargetShape}, {&inTool, m_previousToolShape}},
+            m_ledger, resultShape));
 
         // Remove the tool body — unless we're keeping it (the "keep cutters"
         // option, or a cutter still needed by another target).

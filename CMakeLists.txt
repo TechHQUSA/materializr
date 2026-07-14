@@ -239,6 +239,7 @@ add_executable(materializr
     src/modeling/FaceAnchor.cpp
     src/modeling/TopoName.cpp
     src/modeling/GenerationLedger.cpp
+    src/modeling/FaceLineage.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp

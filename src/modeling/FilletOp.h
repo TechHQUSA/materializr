@@ -56,7 +56,8 @@ public:
     // Re-resolve generated-face indices against the body's CURRENT shape (e.g.
     // after downstream transforms moved the geometry). Called by the loader
     // after all ops are rehydrated so ownsFace() works on the final body.
-    void refreshGeneratedFaces(const TopoDS_Shape& currentBody);
+    void refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                               const materializr::topo::FaceIdMap* lineage = nullptr);
 
 private:
     int m_bodyId = -1;
@@ -66,6 +67,8 @@ private:
     // Fillet (blend) faces produced by the last execute(), so a clicked face can
     // be mapped back to this op for re-editing.
     std::vector<TopoDS_Shape> m_generatedFaces;
+    // Stable lineage ids of this fillet's blend faces (FaceLineage.h).
+    std::vector<int> m_genFaceIds;
     // The filleted result, captured by execute(). serializeParams indexes the
     // generated faces against it (they're sub-shapes of the result, not the
     // input); rehydrate restores it from the reload's after-state.
