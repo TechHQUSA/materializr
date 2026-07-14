@@ -37,6 +37,7 @@ bool HistoryPanel::render() {
 // Panel body without the window wrapper — see ItemsPanel::renderContent().
 bool HistoryPanel::renderContent() {
     bool modified = false;
+    m_hoveredStep = -1; // recomputed below from whichever row the cursor is over
 
     if (!m_history || !m_document) {
         ImGui::TextColored(materializr::dimText(), "No history available.");
@@ -177,6 +178,7 @@ bool HistoryPanel::renderContent() {
             }
             m_deleteConflict = false;
         }
+        if (ImGui::IsItemHovered()) m_hoveredStep = i; // drives the viewport preview
         if (pushedText) {
             ImGui::PopStyleColor();
         }

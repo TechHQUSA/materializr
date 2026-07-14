@@ -31,6 +31,9 @@ public:
     int getBodyId() const { return m_bodyId; }
     double getRadius() const { return m_radius; }
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // The blend faces this fillet produced on the live body — what ownsFace
+    // matches and what the history-step preview highlights.
+    const std::vector<TopoDS_Shape>& getGeneratedFaces() const { return m_generatedFaces; }
     // Body shape from the last execute()'s pre-state — needed by the
     // interactive edit-by-clicking-face flow so it can preview an updated
     // radius against the body as it stood BEFORE this fillet was applied.

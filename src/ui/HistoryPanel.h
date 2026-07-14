@@ -46,6 +46,12 @@ public:
     void setHighlightStep(int step) { m_highlightStep = step; }
     int getHighlightStep() const { return m_highlightStep; }
 
+    // The step row the cursor is currently over (-1 if none), refreshed each
+    // render. Drives the viewport's hover-preview highlight of an op's
+    // geometry; the pinned/edited step (getEditingStep) drives the persistent
+    // one.
+    int getHoveredStep() const { return m_hoveredStep; }
+
 private:
     History* m_history = nullptr;
     bool m_historyLocked = false;
@@ -54,6 +60,7 @@ private:
     materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;
     int m_highlightStep = -1; // step owning the viewport-selected sketch element
+    int m_hoveredStep = -1;   // step row under the cursor this frame (hover preview)
     bool m_showProperties = false;
     bool m_deleteConflict = false; // last delete was blocked by a dependent step
     // Steps with same typeId in a row collapse into a single expandable group

@@ -41,6 +41,9 @@ public:
     static TopoDS_Face sharedReferenceFace(const TopoDS_Shape& body,
                                            const std::vector<TopoDS_Edge>& edges);
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // The bevel faces this chamfer produced on the live body — what ownsFace
+    // matches and what the history-step preview highlights.
+    const std::vector<TopoDS_Shape>& getGeneratedFaces() const { return m_generatedFaces; }
     // Body shape from the last execute()'s pre-state — used by the interactive
     // edit-by-clicking-face flow to preview an updated distance against the
     // body as it stood BEFORE this chamfer was applied.

@@ -21,6 +21,15 @@ public:
     void render(const SelectionManager& sel, const Document& doc,
                 const glm::mat4& view, const glm::mat4& projection);
 
+    // Highlight an explicit list of shapes in one colour — the history-step
+    // preview (hover/select) knows the exact faces/bodies an op produced and
+    // draws them directly, bypassing the SelectionManager. Faces dispatch to
+    // the face fill, edges to the edge outline, everything else to the body
+    // outline. Same per-TShape tessellation cache as render().
+    void highlightShapes(const std::vector<TopoDS_Shape>& shapes,
+                         const glm::mat4& view, const glm::mat4& projection,
+                         const glm::vec3& color);
+
     // Width (in pixels) of highlighted edges and body outlines. Clamped to a
     // sane range; what the driver actually honours depends on its max line
     // width, but most support up to ~10.

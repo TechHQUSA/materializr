@@ -826,26 +826,65 @@ void Application::renderViewport() {
                 }
             }
         }
-        // Highlight the element(s) a selected history step edits, so it's clear
-        // which line / rectangle / arc the Properties values refer to. Drawn in
-        // bright orange over the (live-previewed) target sketch.
+        // Highlight the geometry a history step touches — hovering a step
+        // previews it, selecting (pinning) a step keeps it. Lets the user see
+        // WHAT each step made before editing it. Hover wins over the pinned
+        // step so moving the cursor down the list previews each in turn.
         if (m_historyPanel && m_history) {
-            int es = m_historyPanel->getEditingStep();
-            const Operation* op = (es >= 0) ? m_history->getStep(es) : nullptr;
-            if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
-                auto tgt = se->getTarget();
-                int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
-                // Show the highlight whenever the step's sketch is on screen:
-                // the active (not-yet-committed) sketch — which findSketchId
-                // can't see — or a visible committed one.
-                bool shown = tgt && (tgt == m_activeSketch ||
-                                     (sid >= 0 && m_document->isSketchVisible(sid)));
-                if (shown) {
-                    std::set<int> lines, circles, arcs;
-                    se->getEditedElements(lines, circles, arcs);
-                    m_sketchRenderer->renderElementsHighlight(
-                        tgt.get(), lines, circles, arcs,
-                        glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+            const int hov = m_historyPanel->getHoveredStep();
+            const int es  = m_historyPanel->getEditingStep();
+            const int step = (hov >= 0) ? hov : es;
+            const Operation* op = (step >= 0) ? m_history->getStep(step) : nullptr;
+            // A hover preview is a touch dimmer than a pinned selection.
+            const float k = (hov >= 0 && hov != es) ? 0.8f : 1.0f;
+            if (op) {
+                if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
+                    // Sketch step: the WHOLE sketch outline normally; the
+                    // specific edited element(s) only while we're actually IN
+                    // that sketch (Steve — the relevant sketch is enough for a
+                    // history item; element precision is for sketch editing).
+                    auto tgt = se->getTarget();
+                    int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
+                    bool shown = tgt && (tgt == m_activeSketch ||
+                                         (sid >= 0 && m_document->isSketchVisible(sid)));
+                    if (shown) {
+                        if (m_inSketchMode && tgt == m_activeSketch) {
+                            std::set<int> lines, circles, arcs;
+                            se->getEditedElements(lines, circles, arcs);
+                            m_sketchRenderer->renderElementsHighlight(
+                                tgt.get(), lines, circles, arcs,
+                                glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+                        } else {
+                            m_sketchRenderer->renderSketchHighlight(
+                                tgt.get(), glm::vec3(0.2f * k, 0.8f * k, 1.0f * k),
+                                4.0f, view, proj);
+                        }
+                    }
+                } else {
+                    // 3D op: fillet/chamfer highlight their exact blend faces;
+                    // every other op (extrude / boolean / pattern / shell /
+                    // revolve / pushpull / …) highlights the bodies it created
+                    // or modified, read from its captureDiff.
+                    std::vector<TopoDS_Shape> shapes;
+                    if (auto* f = dynamic_cast<const FilletOp*>(op))
+                        shapes = f->getGeneratedFaces();
+                    else if (auto* c = dynamic_cast<const ChamferOp*>(op))
+                        shapes = c->getGeneratedFaces();
+                    else {
+                        OperationDiff d = op->captureDiff();
+                        auto pushBody = [&](int id) {
+                            try {
+                                TopoDS_Shape s = m_document->getBody(id);
+                                if (!s.IsNull()) shapes.push_back(s);
+                            } catch (...) {}
+                        };
+                        for (int id : d.created) pushBody(id);
+                        for (const auto& m : d.modifiedBefore) pushBody(m.first);
+                    }
+                    if (!shapes.empty() && m_selectionHighlight)
+                        m_selectionHighlight->highlightShapes(
+                            shapes, view, proj,
+                            glm::vec3(0.25f * k, 0.7f * k, 1.0f * k));
                 }
             }
         }
