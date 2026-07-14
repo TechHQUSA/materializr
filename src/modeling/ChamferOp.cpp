@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <BRepFilletAPI_MakeChamfer.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp.hxx>
@@ -431,10 +432,44 @@ bool ChamferOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/)
 }
 
 void ChamferOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
-    if (m_genFaceIndices.empty() || currentBody.IsNull()) return;
-    std::vector<TopoDS_Shape> gen;
-    if (SubShapeIndex::resolveAll(currentBody, m_genFaceIndices, TopAbs_FACE, gen))
-        m_generatedFaces = std::move(gen);
+    if (currentBody.IsNull() || m_genFaceIndices.empty()) return;
+    // The saved ordinal indices are only meaningful against THIS chamfer's own
+    // result shape (SubShapeIndex's documented limitation). Resolving them
+    // straight against the final body drifts onto unrelated faces the moment a
+    // downstream op reorders the face map — which made a chamfer claim faces
+    // all over the part, and let an earlier fillet's drift steal a chamfer's
+    // bevel (#49). Resolve against the result shape to get the TRUE bevel
+    // faces as geometry, then map each to the current body by centre + surface
+    // type (a bevel doesn't move when an unrelated downstream op runs).
+    std::vector<TopoDS_Shape> truth;
+    if (m_resultShape.IsNull() ||
+        !SubShapeIndex::resolveAll(m_resultShape, m_genFaceIndices,
+                                   TopAbs_FACE, truth) ||
+        truth.empty())
+        return; // keep whatever m_generatedFaces we already have
+
+    auto surfType = [](const TopoDS_Face& f) -> int {
+        try { return static_cast<int>(BRepAdaptor_Surface(f).GetType()); }
+        catch (...) { return -1; }
+    };
+    std::vector<TopoDS_Shape> mapped;
+    for (const auto& gf : truth) {
+        gp_Pnt gc;
+        if (!faceCenter(TopoDS::Face(gf), gc)) continue;
+        const int gt = surfType(TopoDS::Face(gf));
+        TopoDS_Shape best;
+        double bestD = 1e-3; // a carried-through face keeps its centre exactly
+        for (TopExp_Explorer ex(currentBody, TopAbs_FACE); ex.More(); ex.Next()) {
+            const TopoDS_Face& cf = TopoDS::Face(ex.Current());
+            if (surfType(cf) != gt) continue;
+            gp_Pnt cc;
+            if (!faceCenter(cf, cc)) continue;
+            double dd = cc.Distance(gc);
+            if (dd < bestD) { bestD = dd; best = cf; }
+        }
+        if (!best.IsNull()) mapped.push_back(best);
+    }
+    if (!mapped.empty()) m_generatedFaces = std::move(mapped);
 }
 
 bool ChamferOp::ownsFace(const TopoDS_Shape& face) const {

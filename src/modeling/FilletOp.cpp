@@ -496,6 +496,18 @@ void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
     if (!m_genFaceIndices.empty() &&
         SubShapeIndex::resolveAll(currentBody, m_genFaceIndices, TopAbs_FACE, idxFaces)) {
         for (const auto& s : idxFaces) {
+            // A fillet blend is a cylinder / torus / sphere, or a free-form
+            // (bspline) blend — NEVER a plane or a cone. Reject those: they're
+            // ordinal-index drift onto unrelated faces once downstream ops
+            // reorder the body's face map (e.g. a later countersink chamfer's
+            // cone), which the -1 "unclassifiable" radius below would otherwise
+            // wave straight through, letting the fillet steal the chamfer's
+            // face (#49).
+            try {
+                GeomAbs_SurfaceType t =
+                    BRepAdaptor_Surface(TopoDS::Face(s)).GetType();
+                if (t == GeomAbs_Plane || t == GeomAbs_Cone) continue;
+            } catch (...) { continue; }
             double r = faceBlendRadius(TopoDS::Face(s));
             if (r >= 0.0 && std::fabs(r - m_radius) > rtol) continue; // wrong fillet
             bool dup = false;
