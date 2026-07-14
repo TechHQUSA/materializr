@@ -12,6 +12,8 @@
 // code — see layout/LayoutCommon.h for the keep-in-lockstep contract.
 
 #include <cstring>
+#include <algorithm>
+#include <cfloat>
 #include "app/Application.h"
 #include "app/layout/LayoutCommon.h"
 #include "core/SelectionManager.h"
@@ -530,15 +532,27 @@ void Application::renderModernLayout() {
                     // History the full height instead and skip the section.
                     const bool stepEditing =
                         m_historyPanel && m_historyPanel->getEditingStep() >= 0;
-                    // History fills the panel; Properties is a COMPACT bottom
-                    // footer (Steve: keep Properties in its small state — an
-                    // empty/half-filled Properties shouldn't eat half the step
-                    // list when nothing is selected). Negative child height =
-                    // "fill all but this many px", so History takes everything
-                    // above the footer with no wasted gap. The footer holds a
-                    // selection's handful of fields (or the "select something"
-                    // hint) and scrolls if a selection has many.
-                    const float footerH = stepEditing ? 0.0f : 170.0f * s;
+                    // History fills the panel; Properties is a bottom footer
+                    // that SIZES TO ITS CONTENT (Steve: no dead gap above it,
+                    // no premature scrollbar). The footer's real height is
+                    // measured each frame; History reserves last frame's value
+                    // (`-footerH` = fill all but that), so a selection change
+                    // settles in one frame. Capped at half the panel so a
+                    // many-field selection can't swallow the step list — past
+                    // the cap the footer becomes a fixed scrolling box.
+                    const float availH = ImGui::GetContentRegionAvail().y;
+                    const float capH = availH * 0.5f;
+                    // Bootstrap / re-show seed: History must reserve SOME footer
+                    // room on the first frame (and the frame we leave step
+                    // editing), or it fills the panel, pushes the footer past
+                    // the bottom edge, and AutoResizeY — which only measures
+                    // while visible — can never size it (stuck at 0). A rough
+                    // seed makes the footer visible; it snaps to exact next
+                    // frame.
+                    if (!stepEditing && m_propsFooterH <= 0.0f)
+                        m_propsFooterH = 120.0f * s;
+                    const float footerH =
+                        stepEditing ? 0.0f : std::min(m_propsFooterH, capH);
                     if (ImGui::BeginChild("##histHalf", ImVec2(0, -footerH), false)) {
                         if (m_historyPanel) {
                             // Undo/redo live in the shell's top bar; the panel
@@ -550,14 +564,32 @@ void Application::renderModernLayout() {
                     }
                     ImGui::EndChild();
                     if (!stepEditing) {
+                        const float footerTop = ImGui::GetCursorPosY();
                         ImGui::Separator();
                         touchui::sectionHeader("Properties");
-                        if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0), false)) {
+                        // Properties box auto-sizes to its content, so a short
+                        // selection leaves no dead gap and no scrollbar. A max
+                        // constraint of the remaining cap budget lets it grow
+                        // only until it would eat half the panel; past that the
+                        // box clamps and scrolls. No latch — releasing back to
+                        // content-height is automatic when the selection shrinks.
+                        const float boxCap =
+                            capH - (ImGui::GetCursorPosY() - footerTop);
+                        ImGui::SetNextWindowSizeConstraints(
+                            ImVec2(0.0f, 0.0f),
+                            ImVec2(FLT_MAX, std::max(boxCap, 1.0f)));
+                        if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0),
+                                              ImGuiChildFlags_AutoResizeY)) {
                             if (m_propertiesPanel && m_propertiesPanel->renderContent())
                                 m_meshesDirty = true;
                         }
                         ImGui::EndChild();
+                        // Measure the whole footer (separator + header + box) so
+                        // next frame's History split reserves exactly this much.
+                        m_propsFooterH = ImGui::GetCursorPosY() - footerTop;
                     }
+                    // (When step editing, keep the last measured footer height
+                    //  so re-showing Properties reserves the right room at once.)
                 }
             }
             ImGui::EndChild();

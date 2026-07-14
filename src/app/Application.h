@@ -810,6 +810,12 @@ private:
     // Active tab of the touch shell's right panel (0 = Items,
     // 1 = History & Properties). Persisted.
     int m_touchRightTab = 0;
+    // Modern-layout right panel: the Properties footer sizes to its content
+    // (AutoResizeY, capped at half the panel) rather than a fixed slab, so a
+    // short selection leaves no dead gap and no premature scrollbar. The
+    // History split above it reserves last frame's measured footer height, so
+    // a selection change settles in one frame.
+    float m_propsFooterH = 0.0f;
     // Right-panel width in logical px (× uiScale at use); dragged via the
     // panel's left-edge splitter or edge tab, persisted, clamped at both ends.
     float m_touchRightW = 300.0f;
