@@ -1,4 +1,5 @@
 #include "ChamferOp.h"
+#include "BlendCut.h"
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
 #include <algorithm>
@@ -338,6 +339,28 @@ bool ChamferOp::execute(Document& doc) {
                                  m_distance, m_distance2);
             }
             if (candidate.IsNull()) m_edges = std::move(keepEdges);
+        }
+        if (candidate.IsNull()) {
+            // #55: the native blend can't resolve against a surface feature
+            // crossing the edge (a drilled hole or pocket fragments it and
+            // ChFi3d gives up at the feature walls). Build the same removal
+            // as a swept-wedge boolean cut instead — collinear fragment
+            // selections merge into one span, so the bevel passes straight
+            // through the feature, exactly as if the chamfer had preceded it
+            // in history. Only reached after every native attempt failed, so
+            // models where MakeChamfer works never take this path.
+            prepare();
+            std::vector<TopoDS_Shape> blends;
+            TopoDS_Shape cutRes;
+            if (materializr::blendcut::cutChamfer(
+                    m_previousShape, m_edges, m_distance, dB, sharedRef,
+                    m_ledger, cutRes, blends)) {
+                candidate = cutRes;
+                m_generatedFaces = std::move(blends);
+                std::fprintf(stderr, "[Chamfer] native blend failed — built "
+                             "as a swept-wedge cut across the feature "
+                             "(#55, d=%.2f/%.2f)\n", m_distance, dB);
+            }
         }
         if (candidate.IsNull()) {
             std::fprintf(stderr, "[Chamfer] MakeChamfer failed (d=%.2f/%.2f)\n",

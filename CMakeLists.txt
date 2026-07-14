@@ -243,6 +243,7 @@ add_executable(materializr
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp
+    src/modeling/BlendCut.cpp
     src/modeling/ResizeCylindricalOp.cpp
     src/modeling/BooleanOp.cpp
     src/modeling/TransformOp.cpp

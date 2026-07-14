@@ -27,6 +27,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/ExtrudeOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/FilletOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ChamferOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/BlendCut.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/BooleanOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DeleteOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/TransformOp.cpp
@@ -378,3 +379,9 @@ target_link_libraries(probe_kernel_matrix PRIVATE materializr_core)
 # identical case stream on every OCCT version, for cross-kernel diffing).
 add_executable(probe_validity_fuzz probe_validity_fuzz.cpp)
 target_link_libraries(probe_validity_fuzz PRIVATE materializr_core)
+
+# test_blend_cut — #55: chamfer across a surface feature via the swept-wedge
+# cut fallback matches chamfer-then-cut exactly; native-success path untouched
+add_executable(test_blend_cut test_blend_cut.cpp)
+target_link_libraries(test_blend_cut PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_blend_cut COMMAND test_blend_cut)
