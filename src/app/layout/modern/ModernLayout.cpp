@@ -530,13 +530,16 @@ void Application::renderModernLayout() {
                     // History the full height instead and skip the section.
                     const bool stepEditing =
                         m_historyPanel && m_historyPanel->getEditingStep() >= 0;
-                    // History gets the SMALLER share so IT scrolls (long step
-                    // lists) while Properties keeps enough room to show a
-                    // selection's fields without its own scrollbar (Steve).
-                    const float histH = stepEditing
-                        ? 0.0f
-                        : ImGui::GetContentRegionAvail().y * 0.52f;
-                    if (ImGui::BeginChild("##histHalf", ImVec2(0, histH), false)) {
+                    // History fills the panel; Properties is a COMPACT bottom
+                    // footer (Steve: keep Properties in its small state — an
+                    // empty/half-filled Properties shouldn't eat half the step
+                    // list when nothing is selected). Negative child height =
+                    // "fill all but this many px", so History takes everything
+                    // above the footer with no wasted gap. The footer holds a
+                    // selection's handful of fields (or the "select something"
+                    // hint) and scrolls if a selection has many.
+                    const float footerH = stepEditing ? 0.0f : 170.0f * s;
+                    if (ImGui::BeginChild("##histHalf", ImVec2(0, -footerH), false)) {
                         if (m_historyPanel) {
                             // Undo/redo live in the shell's top bar; the panel
                             // shows its step counter beside the label instead.
