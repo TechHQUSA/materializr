@@ -556,16 +556,28 @@ bool makeFillTool(const Group& g, double dRef, double dOther, Tool& out) {
 // each end inward until BOTH setback samples land on their faces (bounded,
 // so a feature at mid-span is untouched). Ends are then true corner points
 // for the fan/extension logic.
-void trimGroupEnds(std::vector<Group>& groups, double dRef, double dOther) {
+void trimGroupEnds(const TopoDS_Shape& body, std::vector<Group>& groups,
+                   double dRef, double dOther) {
     const double maxTrim = std::max(dRef, dOther) + 1.5;
     for (auto& g : groups) {
+        // A setback point is supported if it lands ON its parent face — or
+        // ON/INSIDE the body: a neighbouring fused ramp COVERS the floor
+        // face there, but leaning into it is exactly what the fuse handles
+        // (trimming there yanked the ramp back from the corner and left the
+        // flat cap standing at the neighbour's toe whenever this setback
+        // exceeded the neighbour's depth). Only genuinely open air trims.
+        auto held = [&](const TopoDS_Face& f, const gp_Pnt& p) {
+            if (onFace(f, p)) return true;
+            BRepClass3d_SolidClassifier sc(body, p, 1e-7);
+            return sc.State() != TopAbs_OUT;
+        };
         auto supported = [&](double t) {
             gp_Pnt P = g.rep.line.Location().Translated(
                 gp_Vec(g.rep.line.Direction()) * t);
-            return onFace(g.rep.fRef,
-                          P.Translated(gp_Vec(g.rep.dRefDir) * dRef)) &&
-                   onFace(g.rep.fOther,
-                          P.Translated(gp_Vec(g.rep.dOtherDir) * dOther));
+            return held(g.rep.fRef,
+                        P.Translated(gp_Vec(g.rep.dRefDir) * dRef)) &&
+                   held(g.rep.fOther,
+                        P.Translated(gp_Vec(g.rep.dOtherDir) * dOther));
         };
         const double step = 0.25;
         double trimmed = 0.0;
@@ -1095,7 +1107,7 @@ bool fillChamfer(const TopoDS_Shape& body,
         // extended spans, then clip each by the column above every
         // neighbouring bevel face — the hip emerges by construction.
         const double maxSetback = std::max(dRef, dOther);
-        trimGroupEnds(groups, dRef, dOther);
+        trimGroupEnds(body, groups, dRef, dOther);
         std::vector<std::array<gp_Pnt, 2>> originalEnds;
         for (const auto& g : groups) {
             auto pt = [&](double t) {
