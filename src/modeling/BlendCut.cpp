@@ -18,12 +18,13 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepGProp_Face.hxx>
-#include <BRepPrimAPI_MakeHalfSpace.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <TopExp.hxx>
@@ -33,6 +34,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Lin.hxx>
@@ -596,22 +598,58 @@ void hipClipFillTools(const TopoDS_Shape& body,
             }
             if (nearEnd) clips.push_back(pl);
         }
-        // Apply: subtract the half-space on the far side of each clip plane.
+        // Apply each clip with a BOUNDED box on the discard side — a
+        // half-space boolean was fragile here: with matching setbacks the
+        // clip plane passes exactly through the prism's cap edge, and the
+        // tangent half-space cut could spin OCCT (app went unresponsive).
         for (const gp_Pln& pl : clips) {
             try {
                 GProp_GProps gc;
                 BRepGProp::VolumeProperties(tools[i].solid, gc);
                 const gp_Pnt keep = gc.CentreOfMass();
                 const gp_Dir n = pl.Axis().Direction();
-                const double sd =
+                const double sdKeep =
                     gp_Vec(pl.Location(), keep).Dot(gp_Vec(n));
-                if (std::abs(sd) < 1e-9) continue;
-                const gp_Pnt discard =
-                    keep.Translated(gp_Vec(n) * (-2.0 * sd));
-                TopoDS_Face plane = BRepBuilderAPI_MakeFace(pl).Face();
-                TopoDS_Shape half =
-                    BRepPrimAPI_MakeHalfSpace(plane, discard).Solid();
-                BRepAlgoAPI_Cut cut(tools[i].solid, half);
+                if (std::abs(sdKeep) < 1e-9) continue;
+                const double sKeep = (sdKeep > 0) ? 1.0 : -1.0;
+                // How deep does the prism actually reach into the discard
+                // side? Tangent / equal-height corners give ~0 — skip: there
+                // is nothing meaningful to trim, and a grazing cut only
+                // manufactures slivers (the "weird join" artifacts).
+                double discardDepth = 0.0;
+                double diag = 0.0;
+                {
+                    Bnd_Box bb;
+                    BRepBndLib::Add(tools[i].solid, bb);
+                    double x0, y0, z0, x1, y1, z1;
+                    bb.Get(x0, y0, z0, x1, y1, z1);
+                    diag = gp_Pnt(x0, y0, z0).Distance(gp_Pnt(x1, y1, z1));
+                    for (TopExp_Explorer vx(tools[i].solid, TopAbs_VERTEX);
+                         vx.More(); vx.Next()) {
+                        gp_Pnt v =
+                            BRep_Tool::Pnt(TopoDS::Vertex(vx.Current()));
+                        const double sd =
+                            gp_Vec(pl.Location(), v).Dot(gp_Vec(n));
+                        discardDepth =
+                            std::max(discardDepth, -sKeep * sd);
+                    }
+                }
+                if (discardDepth < 0.05) continue; // tangent — leave it
+                // Discard-side box: footprint 3×diag on the plane, extruded
+                // discardDepth+1 away from the keep side.
+                gp_Pnt centerOnPlane = keep.Translated(
+                    gp_Vec(n) * (-sdKeep)); // projection of keep
+                gp_Dir away = (sKeep > 0) ? n.Reversed() : n;
+                gp_Ax2 ax(centerOnPlane, away);
+                gp_Pnt corner = centerOnPlane
+                                    .Translated(gp_Vec(ax.XDirection()) *
+                                                (-1.5 * diag))
+                                    .Translated(gp_Vec(ax.YDirection()) *
+                                                (-1.5 * diag));
+                BRepPrimAPI_MakeBox mb(gp_Ax2(corner, away),
+                                       3.0 * diag, 3.0 * diag,
+                                       discardDepth + 1.0);
+                BRepAlgoAPI_Cut cut(tools[i].solid, mb.Shape());
                 if (!cut.IsDone()) continue;
                 TopoDS_Shape clipped = cut.Shape();
                 if (clipped.IsNull()) continue;
@@ -724,6 +762,19 @@ bool applyFill(const TopoDS_Shape& body, const std::vector<Tool>& tools,
             }
         }
     }
+
+    // Merge coplanar face fragments (the fuse leaves seam edges wherever the
+    // ramp lands exactly flush against an existing bevel or wall — visible as
+    // hairline steps at the joint). UnifySameDomain is cosmetic-but-correct
+    // here; fall back to the un-merged shape if it misbehaves.
+    try {
+        ShapeUpgrade_UnifySameDomain unify(res, Standard_True, Standard_True,
+                                           Standard_False);
+        unify.Build();
+        TopoDS_Shape merged = unify.Shape();
+        if (!merged.IsNull() && BRepCheck_Analyzer(merged).IsValid())
+            res = merged;
+    } catch (...) {}
 
     // Must have ADDED material, no more than the ramps themselves, and sound.
     GProp_GProps gin, gout;
