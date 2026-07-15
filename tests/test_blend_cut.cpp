@@ -289,6 +289,107 @@ TEST(BlendCut, FilletOpFallsBackAcrossShallowPocket) {
     EXPECT_NE(doc.bodyFaceIds(id), nullptr);
 }
 
+// Steve's "chamfer through the hole" case (#57 follow-up): a rectangular
+// hole in the TOP FACE near — but not touching — the front edge. The edge
+// itself is whole; the bevel legitimately sweeps ACROSS the hole. Native
+// fails (hole inside the blend's reach); the fallback must build it and
+// match chamfer-first-then-hole exactly. The old single-midpoint setback
+// guard refused this whenever the hole sat across from the edge's middle.
+TEST(BlendCut, ChamferSweepsAcrossHoleInAdjacentFace) {
+    // Hole through the top face: x 15..25, y 3..7 — clearance 3mm from the
+    // front edge, so a 5mm chamfer must pass over it.
+    TopoDS_Shape holeTool = BRepPrimAPI_MakeBox(
+        gp_Pnt(15.0, 3.0, 5.0), gp_Pnt(25.0, 7.0, 12.0)).Shape();
+
+    Document doc;
+    int id = doc.addBody(BRepAlgoAPI_Cut(plainBox(), holeTool).Shape(), "Holed");
+    std::vector<TopoDS_Edge> es = frontTopEdges(doc.getBody(id));
+    ASSERT_EQ(es.size(), 1u) << "hole must NOT touch the edge";
+
+    ChamferOp op;
+    op.setBody(id);
+    op.setEdges(es);
+    op.setDistance(5.0);
+    ASSERT_TRUE(op.execute(doc));
+
+    const TopoDS_Shape& out = doc.getBody(id);
+    EXPECT_TRUE(BRepCheck_Analyzer(out).IsValid());
+    double ref = chamferThenCutVolume(holeTool, 5.0, 5.0);
+    ASSERT_GT(ref, 0.0);
+    EXPECT_NEAR(volumeOf(out), ref, 1e-4);
+    EXPECT_FALSE(op.getGeneratedFaces().empty());
+}
+
+// Interior-corner chamfer (a FILL ramp) whose footprint crosses a hole in
+// the floor face — Steve's light-cover rim case (#57). Native handles the
+// clean corner but refuses once the ramp must cross the hole; the fill
+// fallback fuses the ramp over the full span and re-pierces the hole, which
+// must equal chamfer-first-then-hole exactly.
+TEST(BlendCut, FillRampSweepsAcrossHoleInFloor) {
+    // Plate 40x20x2 with a 3mm wall along y=8..11; interior corner at y=8,
+    // z=2. Square hole through the plate at x 15..25, y 3..6 — 2mm clear of
+    // the corner, so a 2.5mm ramp must cross into it.
+    auto plateWithWall = []() {
+        TopoDS_Shape plate = BRepPrimAPI_MakeBox(40.0, 20.0, 2.0).Shape();
+        TopoDS_Shape wall = BRepPrimAPI_MakeBox(
+            gp_Pnt(0.0, 8.0, 2.0), gp_Pnt(40.0, 11.0, 5.0)).Shape();
+        return BRepAlgoAPI_Fuse(plate, wall).Shape();
+    };
+    TopoDS_Shape holeTool = BRepPrimAPI_MakeBox(
+        gp_Pnt(15.0, 3.0, -1.0), gp_Pnt(25.0, 6.0, 3.0)).Shape();
+    // The interior corner edge: straight, both vertices at y=8, z=2.
+    auto cornerEdge = [](const TopoDS_Shape& s) {
+        for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next()) {
+            const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+            if (BRepAdaptor_Curve(e).GetType() != GeomAbs_Line) continue;
+            bool ok = true;
+            int nv = 0;
+            for (TopExp_Explorer vx(e, TopAbs_VERTEX); vx.More();
+                 vx.Next(), ++nv) {
+                gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(vx.Current()));
+                if (std::abs(p.Y() - 8.0) > 1e-7 ||
+                    std::abs(p.Z() - 2.0) > 1e-7)
+                    ok = false;
+            }
+            if (ok && nv == 2) return e;
+        }
+        return TopoDS_Edge();
+    };
+
+    // Reference: chamfer FIRST on the clean corner (native fill), THEN hole.
+    double ref = -1.0;
+    {
+        Document doc;
+        int id = doc.addBody(plateWithWall(), "Ref");
+        TopoDS_Edge e = cornerEdge(doc.getBody(id));
+        ASSERT_FALSE(e.IsNull());
+        ChamferOp op;
+        op.setBody(id);
+        op.setEdges({e});
+        op.setDistance(2.5);
+        ASSERT_TRUE(op.execute(doc)) << "native fill on clean corner failed";
+        ref = volumeOf(
+            BRepAlgoAPI_Cut(doc.getBody(id), holeTool).Shape());
+    }
+    ASSERT_GT(ref, 0.0);
+
+    // Candidate: hole FIRST, then the same chamfer — the fill fallback.
+    Document doc;
+    int id = doc.addBody(
+        BRepAlgoAPI_Cut(plateWithWall(), holeTool).Shape(), "Holed");
+    TopoDS_Edge e = cornerEdge(doc.getBody(id));
+    ASSERT_FALSE(e.IsNull());
+    ChamferOp op;
+    op.setBody(id);
+    op.setEdges({e});
+    op.setDistance(2.5);
+    ASSERT_TRUE(op.execute(doc));
+    const TopoDS_Shape& out = doc.getBody(id);
+    EXPECT_TRUE(BRepCheck_Analyzer(out).IsValid());
+    EXPECT_NEAR(volumeOf(out), ref, 1e-4);
+    EXPECT_FALSE(op.getGeneratedFaces().empty());
+}
+
 // A cut can only REMOVE material, so a concave (inside-corner) edge must be
 // refused — silently "chamfering" it with a cut would dig a groove instead
 // of adding the bevel sliver.

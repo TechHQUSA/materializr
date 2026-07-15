@@ -3,16 +3,21 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <GC_MakeArcOfCircle.hxx>
@@ -30,6 +35,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
@@ -48,6 +54,7 @@ struct EdgeInfo {
     gp_Pln plnRef, plnOther;
     gp_Dir nRef, nOther;       // outward face normals at the edge
     gp_Dir dRefDir, dOtherDir; // in-face directions away from the edge
+    bool concave = false;      // interior corner (chamfer FILLS, can't cut)
 };
 
 // A run of collinear fragments sharing one plane pair: swept as ONE tool
@@ -128,30 +135,50 @@ bool analyzeEdge(const TopoDS_Shape& body, const TopoDS_Edge& e,
     if (!outwardNormal(f1, out.nRef) || !outwardNormal(f2, out.nOther))
         return false;
     gp_Dir t = out.line.Direction();
-    // In-plane directions perpendicular to the edge, oriented INTO the solid's
-    // material — derived from the face NORMALS, not a face classifier. The old
-    // classifier probe (inFaceDir) landed in a drilled hole / open tray when a
-    // feature fragmented the face near the edge and picked the wrong side, so
-    // the wedge came out "backwards, out the back of the edge" (#57). For a
-    // convex edge the material sits on the negative side of the OTHER face's
-    // plane, so choose each direction's sign to make d·n(other) < 0.
-    gp_Dir d1 = out.nRef.Crossed(t);
-    gp_Dir d2 = out.nOther.Crossed(t);
-    if (d1.Dot(out.nOther) > 0) d1.Reverse();
-    if (d2.Dot(out.nRef) > 0) d2.Reverse();
-    out.dRefDir = d1;
-    out.dOtherDir = d2;
+    // TRUE in-face directions, robust against nearby features (#57): of the
+    // two candidates ±(n × t), pick the one whose probe points land ON the
+    // face — by MAJORITY across samples along the edge (a hole under one
+    // sample can't flip the answer, unlike the old single-midpoint probe) at
+    // a small offset (0.2mm, retry 0.05 for very narrow faces).
+    auto pickDir = [&](const TopoDS_Face& f, const gp_Dir& n,
+                       gp_Dir& outDir) -> bool {
+        gp_Dir cand = n.Crossed(t);
+        auto votes = [&](const gp_Dir& d) {
+            int hit = 0;
+            const int N = 9;
+            for (int i = 0; i < N; ++i) {
+                const double u = (i + 0.5) / N;
+                gp_Pnt base(out.p0.XYZ() * (1.0 - u) + out.p1.XYZ() * u);
+                for (double eps : {0.2, 0.05})
+                    if (onFace(f, base.Translated(gp_Vec(d) * eps))) {
+                        ++hit;
+                        break;
+                    }
+            }
+            return hit;
+        };
+        const int plus = votes(cand), minus = votes(cand.Reversed());
+        if (plus == 0 && minus == 0) return false; // can't see the face at all
+        outDir = (plus >= minus) ? cand : cand.Reversed();
+        return true;
+    };
+    if (!pickDir(f1, out.nRef, out.dRefDir) ||
+        !pickDir(f2, out.nOther, out.dOtherDir))
+        return false;
 
-    // Convex only, decided from the SOLID (robust where the face classifier is
-    // not): a point just off the edge along the OUTWARD normal bisector is
-    // OUTSIDE a convex edge and INSIDE a concave one. A cut can only remove
-    // material, so a concave edge (native OCCT would FILL it) is refused here.
-    gp_Vec bis(gp_Vec(out.nRef) + gp_Vec(out.nOther));
-    if (bis.Magnitude() < 1e-6) return false;
-    bis.Normalize();
-    const double off = std::min(probeEps, 0.05);
-    BRepClass3d_SolidClassifier sc(body, out.pm.Translated(bis * off), 1e-7);
-    if (sc.State() != TopAbs_OUT) return false;
+    // Classify the corner from the directions: CONVEX = each face runs to the
+    // material side of the other's plane (d·n(other) < 0); CONCAVE (interior
+    // corner, 270° of material — a chamfer FILLS it) = both run to the open
+    // side. Mixed / near-tangent → refuse; the tool degenerates there. (Note
+    // a solid-classifier probe on the outward bisector can NOT tell these
+    // apart — it reads OUT for both 90° and 270° corners.)
+    const double s1 = out.dRefDir.Dot(out.nOther);
+    const double s2 = out.dOtherDir.Dot(out.nRef);
+    if (s1 < -0.05 && s2 < -0.05) out.concave = false;
+    else if (s1 > 0.05 && s2 > 0.05) out.concave = true;
+    else return false;
+    (void)body;
+    (void)probeEps;
     return true;
 }
 
@@ -164,7 +191,7 @@ double paramOn(const gp_Lin& l, const gp_Pnt& p) {
 // merge collinear fragments on the same plane pair into single-span groups.
 bool buildGroups(const TopoDS_Shape& body,
                  const std::vector<TopoDS_Edge>& edges, const gp_Pln* refPln,
-                 double probeEps, bool asymmetric,
+                 double probeEps, bool asymmetric, bool wantConcave,
                  std::vector<Group>& groups) {
     TopTools_IndexedDataMapOfShapeListOfShape efm;
     TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, efm);
@@ -173,6 +200,7 @@ bool buildGroups(const TopoDS_Shape& body,
     for (const auto& e : edges) {
         EdgeInfo info;
         if (!analyzeEdge(body, e, efm, refPln, probeEps, info)) return false;
+        if (info.concave != wantConcave) return false; // wrong tool family
         infos.push_back(info);
     }
 
@@ -236,6 +264,27 @@ TopoDS_Shape sweepProfile(const TopoDS_Wire& w, const TopoDS_Edge& blendEdge,
     return prism.Shape();
 }
 
+// Does the setback line (edge line displaced by `off`) land ON `f` for at
+// least ONE of several samples along the group's span? A single-point check
+// at the edge midpoint wrongly refused the exact case this fallback exists
+// for: a bevel that legitimately sweeps ACROSS a hole in the adjacent face
+// (the sample lands in the void). One sample on the face proves the blend
+// runs along real face material somewhere; only when EVERY sample misses is
+// the blend genuinely bigger than the face it runs along — refuse then.
+bool setbackTouchesFace(const Group& g, const TopoDS_Face& f,
+                        const gp_Vec& off) {
+    const int kSamples = 9;
+    for (int i = 0; i < kSamples; ++i) {
+        const double t =
+            g.tmin + (g.tmax - g.tmin) * (i + 0.5) / kSamples;
+        gp_Pnt p = g.rep.line.Location()
+                       .Translated(gp_Vec(g.rep.line.Direction()) * t)
+                       .Translated(off);
+        if (onFace(f, p)) return true;
+    }
+    return false;
+}
+
 // The chamfer tool: a triangular wedge — apex just outside the corner, the
 // two setback points A/B exactly where the chamfer plane meets the faces.
 bool makeChamferTool(const Group& g, double dRef, double dOther, Tool& out) {
@@ -245,12 +294,10 @@ bool makeChamferTool(const Group& g, double dRef, double dOther, Tool& out) {
     if (!groupSpan(g, P0, sweep)) return false;
     gp_Pnt A = P0.Translated(gp_Vec(e.dRefDir) * dRef);
     gp_Pnt B = P0.Translated(gp_Vec(e.dOtherDir) * dOther);
-    // The setbacks must land ON their faces (checked at the representative
-    // fragment's midpoint) — otherwise the blend is bigger than the face it
-    // runs along and the "chamfer" would silently eat unrelated geometry.
-    if (!onFace(e.fRef, e.pm.Translated(gp_Vec(e.dRefDir) * dRef)))
+    // Overshoot guard, hole-tolerant (see setbackTouchesFace).
+    if (!setbackTouchesFace(g, e.fRef, gp_Vec(e.dRefDir) * dRef))
         return false;
-    if (!onFace(e.fOther, e.pm.Translated(gp_Vec(e.dOtherDir) * dOther)))
+    if (!setbackTouchesFace(g, e.fOther, gp_Vec(e.dOtherDir) * dOther))
         return false;
     gp_Vec outv = gp_Vec(e.nRef) + gp_Vec(e.nOther);
     if (outv.Magnitude() < 1e-9) return false;
@@ -305,14 +352,11 @@ bool makeFilletTool(const Group& g, double r, Tool& out) {
     // Tangency points: feet of O on each plane.
     gp_Pnt A = O.Translated(gp_Vec(e.nRef) * r);
     gp_Pnt B = O.Translated(gp_Vec(e.nOther) * r);
-    // Same honesty guard as the chamfer: the tangency lines must land ON
-    // their faces (checked at the representative fragment's midpoint).
-    {
-        gp_Vec mid(P0, e.pm);
-        if (!onFace(e.fRef, A.Translated(mid)) ||
-            !onFace(e.fOther, B.Translated(mid)))
-            return false;
-    }
+    // Same hole-tolerant overshoot guard as the chamfer: the tangency lines
+    // must land on their faces SOMEWHERE along the span.
+    if (!setbackTouchesFace(g, e.fRef, gp_Vec(P0, A)) ||
+        !setbackTouchesFace(g, e.fOther, gp_Vec(P0, B)))
+        return false;
     // Arc through the point of the circle nearest the corner (it bulges
     // toward the edge — the removed region lies between arc and corner).
     gp_Vec toCorner(O, P0);
@@ -417,6 +461,185 @@ bool applyCut(const TopoDS_Shape& body, const std::vector<Tool>& tools,
     return true;
 }
 
+// ── Concave (interior-corner) chamfer as a FILL (#57) ──────────────────────
+// An interior corner (floor meets a rising wall) is chamfered by ADDING a
+// ramp, not cutting. Native OCCT does this fine on clean geometry but gives
+// up when the ramp's footprint crosses a feature (a hole in the floor). The
+// additive twin of the wedge cut: fuse a ramp prism swept over the full span
+// — straight across any feature — then RE-PIERCE it with each crossed void's
+// own outline so a hole stays a hole, exactly as if the chamfer had preceded
+// the feature in history.
+
+// The fill tool: triangle P0→A→B where A/B sit ON the two faces at the
+// chamfer setbacks and the apex is nudged INTO the corner material so the
+// fuse meets the body transversally.
+bool makeFillTool(const Group& g, double dRef, double dOther, Tool& out) {
+    const EdgeInfo& e = g.rep;
+    gp_Pnt P0;
+    gp_Vec sweep;
+    if (!groupSpan(g, P0, sweep)) return false;
+    gp_Pnt A = P0.Translated(gp_Vec(e.dRefDir) * dRef);
+    gp_Pnt B = P0.Translated(gp_Vec(e.dOtherDir) * dOther);
+    // The ramp must rest on real face material somewhere along the span —
+    // same hole-tolerant overshoot guard as the cut.
+    if (!setbackTouchesFace(g, e.fRef, gp_Vec(e.dRefDir) * dRef))
+        return false;
+    if (!setbackTouchesFace(g, e.fOther, gp_Vec(e.dOtherDir) * dOther))
+        return false;
+    // For a concave corner the outward normal bisector points into the OPEN
+    // quadrant the ramp will occupy; nudge the apex the other way (into the
+    // corner material) so the fuse overlaps instead of kissing.
+    gp_Vec inv = gp_Vec(e.nRef) + gp_Vec(e.nOther);
+    if (inv.Magnitude() < 1e-9) return false;
+    inv.Normalize();
+    gp_Pnt C = P0.Translated(inv * (-std::min(dRef, dOther) * 0.05));
+
+    BRepBuilderAPI_MakePolygon poly;
+    poly.Add(C);
+    poly.Add(A);
+    poly.Add(B);
+    poly.Close();
+    if (!poly.IsDone()) return false;
+    TopoDS_Edge abEdge;
+    for (TopExp_Explorer ex(poly.Wire(), TopAbs_EDGE); ex.More(); ex.Next()) {
+        TopoDS_Vertex v1, v2;
+        TopExp::Vertices(TopoDS::Edge(ex.Current()), v1, v2);
+        gp_Pnt q1 = BRep_Tool::Pnt(v1), q2 = BRep_Tool::Pnt(v2);
+        if ((q1.Distance(A) < 1e-7 && q2.Distance(B) < 1e-7) ||
+            (q1.Distance(B) < 1e-7 && q2.Distance(A) < 1e-7)) {
+            abEdge = TopoDS::Edge(ex.Current());
+            break;
+        }
+    }
+    if (abEdge.IsNull()) return false;
+    out.solid = sweepProfile(poly.Wire(), abEdge, sweep, out.blendTemplate);
+    return !out.solid.IsNull();
+}
+
+// Fuse the ramp(s) onto the body, then re-pierce every void whose outline
+// (an inner wire of one of the corner's faces) the ramp roofed over. Boss
+// outlines — inner wires with material ABOVE the face — are left alone.
+bool applyFill(const TopoDS_Shape& body, const std::vector<Tool>& tools,
+               const std::vector<const Group*>& groups, double maxSetback,
+               topo::GenerationLedger& ledger, TopoDS_Shape& outShape,
+               std::vector<TopoDS_Shape>& outBlendFaces) {
+    double toolVol = 0.0;
+    TopoDS_Shape res = body;
+    for (const auto& t : tools) {
+        GProp_GProps gt;
+        BRepGProp::VolumeProperties(t.solid, gt);
+        toolVol += gt.Mass();
+        BRepAlgoAPI_Fuse fuse(res, t.solid);
+        if (!fuse.IsDone()) return false;
+        res = fuse.Shape();
+        if (res.IsNull()) return false;
+        ledger.capture(fuse, body, TopAbs_EDGE);
+        ledger.captureAdd(fuse, body, TopAbs_FACE);
+    }
+
+    // Re-pierce: for each inner wire of each corner face, if it outlines a
+    // VOID the ramp actually roofed over, extrude the outline through the
+    // ramp height and subtract — the hole punches through the new ramp just
+    // as a feature cut after the chamfer would have. Two guards keep this
+    // surgical: the outline's bbox must intersect a ramp's bbox (a wire on
+    // the far side of the part is none of our business), and the region just
+    // inside the outline must be EMPTY above the face all around its rim —
+    // a centroid-only probe misread a screw boss's ring footprint (probe
+    // fell down the boss's own bore) as a void and decapitated the boss.
+    Bnd_Box toolBox;
+    for (const auto& t : tools) BRepBndLib::Add(t.solid, toolBox);
+    toolBox.Enlarge(0.1);
+    for (const Group* g : groups) {
+        for (const TopoDS_Face* fp : {&g->rep.fRef, &g->rep.fOther}) {
+            const TopoDS_Face& f = *fp;
+            BRepAdaptor_Surface surf(f);
+            if (surf.GetType() != GeomAbs_Plane) continue;
+            gp_Dir n;
+            if (!outwardNormal(f, n)) continue;
+            const TopoDS_Wire outer = BRepTools::OuterWire(f);
+            for (TopExp_Explorer wx(f, TopAbs_WIRE); wx.More(); wx.Next()) {
+                if (wx.Current().IsSame(outer)) continue;
+                TopoDS_Wire w = TopoDS::Wire(wx.Current());
+                Bnd_Box wb;
+                BRepBndLib::Add(w, wb);
+                if (toolBox.IsOut(wb)) continue; // ramp never reaches it
+                // Face bounded by the void outline, on the face's plane.
+                BRepBuilderAPI_MakeFace mfw(surf.Plane(), w, Standard_True);
+                if (!mfw.IsDone()) continue;
+                GProp_GProps gw;
+                BRepGProp::SurfaceProperties(mfw.Face(), gw);
+                if (gw.Mass() < 1e-9) continue;
+                const gp_Pnt centroid = gw.CentreOfMass();
+                // Void all around? Probe just above the face at points a
+                // little inside the rim (plus the centroid) — ANY material
+                // hit means a boss lives inside this outline; keep it.
+                bool boss = false;
+                {
+                    auto probeIn = [&](const gp_Pnt& q) {
+                        BRepClass3d_SolidClassifier sc(
+                            body, q.Translated(gp_Vec(n) * 0.1), 1e-7);
+                        return sc.State() == TopAbs_IN;
+                    };
+                    if (probeIn(centroid)) boss = true;
+                    for (TopExp_Explorer exw(w, TopAbs_EDGE);
+                         !boss && exw.More(); exw.Next()) {
+                        BRepAdaptor_Curve wc(TopoDS::Edge(exw.Current()));
+                        gp_Pnt m = wc.Value(
+                            (wc.FirstParameter() + wc.LastParameter()) * 0.5);
+                        gp_Vec toC(m, centroid);
+                        if (toC.Magnitude() < 1e-9) continue;
+                        toC.Normalize();
+                        if (probeIn(m.Translated(
+                                toC * std::min(0.2, m.Distance(centroid)))))
+                            boss = true;
+                    }
+                }
+                if (boss) continue;
+                // Start the pierce slightly BELOW the face: the ramp's apex
+                // nudge dips a hair under the face plane, and over a void
+                // that sliver would otherwise survive as a floating skin.
+                const double down = 0.05 * maxSetback + 0.01;
+                gp_Trsf shift;
+                shift.SetTranslation(gp_Vec(n) * (-down));
+                TopoDS_Shape base =
+                    BRepBuilderAPI_Transform(mfw.Face(), shift, true).Shape();
+                BRepPrimAPI_MakePrism pierce(
+                    base, gp_Vec(n) * (maxSetback + 1.0 + down));
+                if (!pierce.IsDone()) continue;
+                BRepAlgoAPI_Cut cut(res, pierce.Shape());
+                if (!cut.IsDone()) return false;
+                TopoDS_Shape s = cut.Shape();
+                if (s.IsNull()) return false;
+                res = s;
+            }
+        }
+    }
+
+    // Must have ADDED material, no more than the ramps themselves, and sound.
+    GProp_GProps gin, gout;
+    BRepGProp::VolumeProperties(body, gin);
+    BRepGProp::VolumeProperties(res, gout);
+    if (gout.Mass() <= gin.Mass() + 1e-9 ||
+        gout.Mass() > gin.Mass() + toolVol + 1e-3)
+        return false;
+    if (!BRepCheck_Analyzer(res).IsValid()) return false;
+
+    // The ramp's slanted faces on the result.
+    for (const auto& t : tools) {
+        bool found = false;
+        for (TopExp_Explorer ex(res, TopAbs_FACE); ex.More(); ex.Next()) {
+            if (sameSupportSurface(t.blendTemplate, TopoDS::Face(ex.Current()))) {
+                outBlendFaces.push_back(ex.Current());
+                found = true;
+            }
+        }
+        if (!found) return false;
+    }
+
+    outShape = res;
+    return true;
+}
+
 } // namespace
 
 bool cutChamfer(const TopoDS_Shape& body,
@@ -446,7 +669,8 @@ bool cutChamfer(const TopoDS_Shape& body,
 
         std::vector<Group> groups;
         if (!buildGroups(body, edges, hasRefPln ? &refPln : nullptr,
-                         0.1 * std::min(dRef, dOther), asymmetric, groups))
+                         0.1 * std::min(dRef, dOther), asymmetric,
+                         /*wantConcave=*/false, groups))
             return false;
 
         std::vector<Tool> tools;
@@ -461,6 +685,52 @@ bool cutChamfer(const TopoDS_Shape& body,
     }
 }
 
+bool fillChamfer(const TopoDS_Shape& body,
+                 const std::vector<TopoDS_Edge>& edges,
+                 double dRef, double dOther,
+                 const TopoDS_Face& refFace,
+                 topo::GenerationLedger& ledger,
+                 TopoDS_Shape& outShape,
+                 std::vector<TopoDS_Shape>& outBlendFaces) {
+    outShape.Nullify();
+    outBlendFaces.clear();
+    if (body.IsNull() || edges.empty() || dRef <= 0.0 || dOther <= 0.0)
+        return false;
+    try {
+        const bool asymmetric = std::abs(dRef - dOther) > 1e-12;
+        gp_Pln refPln;
+        bool hasRefPln = false;
+        if (!refFace.IsNull()) {
+            BRepAdaptor_Surface rs(refFace);
+            if (rs.GetType() != GeomAbs_Plane) {
+                if (asymmetric) return false;
+            } else {
+                refPln = rs.Plane();
+                hasRefPln = true;
+            }
+        }
+
+        std::vector<Group> groups;
+        if (!buildGroups(body, edges, hasRefPln ? &refPln : nullptr,
+                         0.1 * std::min(dRef, dOther), asymmetric,
+                         /*wantConcave=*/true, groups))
+            return false;
+
+        std::vector<Tool> tools;
+        std::vector<const Group*> groupPtrs;
+        for (const auto& g : groups) {
+            Tool t;
+            if (!makeFillTool(g, dRef, dOther, t)) return false;
+            tools.push_back(t);
+            groupPtrs.push_back(&g);
+        }
+        return applyFill(body, tools, groupPtrs, std::max(dRef, dOther),
+                         ledger, outShape, outBlendFaces);
+    } catch (...) {
+        return false;
+    }
+}
+
 bool cutFillet(const TopoDS_Shape& body,
                const std::vector<TopoDS_Edge>& edges, double radius,
                topo::GenerationLedger& ledger, TopoDS_Shape& outShape,
@@ -470,7 +740,8 @@ bool cutFillet(const TopoDS_Shape& body,
     if (body.IsNull() || edges.empty() || radius <= 0.0) return false;
     try {
         std::vector<Group> groups;
-        if (!buildGroups(body, edges, nullptr, 0.1 * radius, false, groups))
+        if (!buildGroups(body, edges, nullptr, 0.1 * radius, false,
+                         /*wantConcave=*/false, groups))
             return false;
 
         std::vector<Tool> tools;

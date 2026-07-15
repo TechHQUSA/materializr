@@ -360,6 +360,22 @@ bool ChamferOp::execute(Document& doc) {
                 std::fprintf(stderr, "[Chamfer] native blend failed — built "
                              "as a swept-wedge cut across the feature "
                              "(#55, d=%.2f/%.2f)\n", m_distance, dB);
+            } else if (materializr::blendcut::fillChamfer(
+                           m_previousShape, m_edges, m_distance, dB, sharedRef,
+                           m_ledger, cutRes, blends) ||
+                       (m_distance2 > 0.0 &&
+                        materializr::blendcut::fillChamfer(
+                            m_previousShape, m_edges, dB, m_distance, sharedRef,
+                            m_ledger, cutRes, blends))) {
+                // Interior corner: the chamfer is a RAMP (adds material), and
+                // its footprint crosses a feature native can't resolve — fuse
+                // the ramp and re-pierce the feature (#57). Asymmetric retries
+                // with the distances swapped, mirroring the native retry.
+                candidate = cutRes;
+                m_generatedFaces = std::move(blends);
+                std::fprintf(stderr, "[Chamfer] native blend failed — built "
+                             "as a corner-fill ramp across the feature "
+                             "(#57, d=%.2f/%.2f)\n", m_distance, dB);
             }
         }
         if (candidate.IsNull()) {

@@ -41,6 +41,21 @@ bool cutChamfer(const TopoDS_Shape& body,
                 TopoDS_Shape& outShape,
                 std::vector<TopoDS_Shape>& outBlendFaces);
 
+// Concave (interior-corner) chamfer as a FILL: an inside corner is chamfered
+// by ADDING a ramp, which native OCCT refuses when the ramp's footprint
+// crosses a feature (a hole in the floor face). Fuse a ramp prism swept over
+// the full span, then re-pierce each crossed void with its own outline so a
+// hole stays open — exactly chamfer-first-then-feature. Same gating: only
+// called after native failed; straight edges between planar faces; refuses
+// convex edges (those belong to cutChamfer).
+bool fillChamfer(const TopoDS_Shape& body,
+                 const std::vector<TopoDS_Edge>& edges,
+                 double dRef, double dOther,
+                 const TopoDS_Face& refFace,
+                 topo::GenerationLedger& ledger,
+                 TopoDS_Shape& outShape,
+                 std::vector<TopoDS_Shape>& outBlendFaces);
+
 // Convex fillet as a cut: the same swept wedge, but bounded by the arc of
 // radius `radius` tangent to both adjacent faces — subtracting it leaves
 // exactly the fillet cylinder. Same scope and gating as cutChamfer.
