@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <BRepFilletAPI_MakeChamfer.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopAbs_ShapeEnum.hxx>
@@ -14,11 +15,14 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <BRepGProp_Face.hxx>
+#include <BRep_Tool.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <imgui.h>
@@ -354,6 +358,59 @@ bool ChamferOp::execute(Document& doc) {
                 m_distance, m_edges.size());
             candidate.Nullify();
         }
+        // Valid is STILL not sufficient: ChFi3d can return a PARTIAL blend —
+        // it runs the bevel up to an obstacle (a hole, a countersink), tapers
+        // out, and never resumes, leaving most of the edge untouched (#57:
+        // the ramp dying mid-run with a pointed taper). Detect it by
+        // COVERAGE: the generated faces must reach both ends of every
+        // selected edge (interior gaps are fine — a through-feature's
+        // stop-faces are legitimate). A short native result is benched, the
+        // fallbacks get their chance, and it is restored only if they can't
+        // build either.
+        TopoDS_Shape nativeBench;
+        if (!candidate.IsNull() && !m_generatedFaces.empty()) {
+            const double endTol =
+                std::max(m_distance, dB) * 1.5 + 0.5;
+            bool shortCoverage = false;
+            for (const auto& edge : m_edges) {
+                BRepAdaptor_Curve ec(edge);
+                if (ec.GetType() != GeomAbs_Line) continue;
+                gp_Pnt pa = ec.Value(ec.FirstParameter());
+                gp_Pnt pb = ec.Value(ec.LastParameter());
+                gp_Vec dir(pa, pb);
+                const double len = dir.Magnitude();
+                if (len < 1e-9) continue;
+                dir.Normalize();
+                gp_Lin eline(pa, gp_Dir(dir));
+                double lo = 1e18, hi = -1e18;
+                for (const auto& gf : m_generatedFaces)
+                    for (TopExp_Explorer vx(gf, TopAbs_VERTEX); vx.More();
+                         vx.Next()) {
+                        gp_Pnt v = BRep_Tool::Pnt(
+                            TopoDS::Vertex(vx.Current()));
+                        // Only vertices actually near THIS edge's line —
+                        // another edge's bevel must not mask a deficit.
+                        if (eline.Distance(v) >
+                            std::max(m_distance, dB) * 2.0 + 0.5)
+                            continue;
+                        const double t = gp_Vec(pa, v).Dot(dir);
+                        lo = std::min(lo, t);
+                        hi = std::max(hi, t);
+                    }
+                if (lo > endTol || hi < len - endTol) {
+                    shortCoverage = true;
+                    break;
+                }
+            }
+            if (shortCoverage) {
+                std::fprintf(stderr,
+                    "[Chamfer] native blend only covers part of the edge "
+                    "(partial taper) — trying the cut/fill fallbacks "
+                    "(d=%.2f/%.2f).\n", m_distance, dB);
+                nativeBench = candidate;
+                candidate.Nullify();
+            }
+        }
         if (candidate.IsNull()) {
             // #55: the native blend can't resolve against a surface feature
             // crossing the edge (a drilled hole or pocket fragments it and
@@ -391,6 +448,13 @@ bool ChamferOp::execute(Document& doc) {
                              "as a corner-fill ramp across the feature "
                              "(#57, d=%.2f/%.2f)\n", m_distance, dB);
             }
+        }
+        if (candidate.IsNull() && !nativeBench.IsNull()) {
+            // No fallback could build — the partial native blend is still
+            // better than failing the whole op.
+            candidate = nativeBench;
+            std::fprintf(stderr, "[Chamfer] keeping the partial native blend "
+                         "(no fallback available).\n");
         }
         if (candidate.IsNull()) {
             std::fprintf(stderr, "[Chamfer] MakeChamfer failed (d=%.2f/%.2f)\n",
