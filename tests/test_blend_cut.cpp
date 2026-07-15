@@ -467,6 +467,15 @@ TEST(BlendCut, FillRampMitersIntoNeighbourBevel) {
                 << " y=" << y;
         }
     }
+    // And the hip must EXIST: below BOTH slopes inside the corner strip there
+    // is material (the ramp reaches the corner instead of stopping in a flat
+    // cap at the neighbour's toe — the old "weird angle" left this empty).
+    {
+        gp_Pnt probe(4.0, 7.5, 2.3); // neighbour plane 2.5, own slope 4.25
+        BRepClass3d_SolidClassifier sc(out, probe, 1e-7);
+        EXPECT_EQ(sc.State(), TopAbs_IN)
+            << "hip region is hollow — ramp didn't reach the corner";
+    }
 }
 
 // Equal setbacks at the corner (#57 follow-up 4): when the fill ramp's
