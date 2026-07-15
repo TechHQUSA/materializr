@@ -9,6 +9,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass_FaceClassifier.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -84,30 +85,13 @@ bool onFace(const TopoDS_Face& f, const gp_Pnt& p) {
     return cls.State() == TopAbs_IN || cls.State() == TopAbs_ON;
 }
 
-// Of the two in-plane directions perpendicular to the edge, the one whose
-// probe point lands INSIDE the face — i.e. pointing into the face's material.
-bool inFaceDir(const TopoDS_Face& f, const gp_Dir& n, const gp_Pnt& pm,
-               const gp_Dir& t, double probeEps, gp_Dir& out) {
-    gp_Dir cand = n.Crossed(t);
-    for (double eps : {probeEps, probeEps * 0.1}) {
-        for (int flip = 0; flip < 2; ++flip) {
-            gp_Dir d = flip ? cand.Reversed() : cand;
-            if (onFace(f, pm.Translated(gp_Vec(d) * eps))) {
-                out = d;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 bool planesMatch(const gp_Pln& a, const gp_Pln& b) {
     if (!a.Axis().Direction().IsParallel(b.Axis().Direction(), 1e-4))
         return false;
     return a.Distance(b.Location()) < 1e-5;
 }
 
-bool analyzeEdge(const TopoDS_Edge& e,
+bool analyzeEdge(const TopoDS_Shape& body, const TopoDS_Edge& e,
                  const TopTools_IndexedDataMapOfShapeListOfShape& efm,
                  const gp_Pln* refPln, double probeEps, EdgeInfo& out) {
     BRepAdaptor_Curve c(e);
@@ -144,14 +128,30 @@ bool analyzeEdge(const TopoDS_Edge& e,
     if (!outwardNormal(f1, out.nRef) || !outwardNormal(f2, out.nOther))
         return false;
     gp_Dir t = out.line.Direction();
-    if (!inFaceDir(f1, out.nRef, out.pm, t, probeEps, out.dRefDir) ||
-        !inFaceDir(f2, out.nOther, out.pm, t, probeEps, out.dOtherDir))
-        return false;
-    // Convex only: walking along either face away from the edge must go to
-    // the material side of the other face's plane. Near-tangent (almost
-    // flat) edges are refused too — the tool degenerates there.
-    if (out.dRefDir.Dot(out.nOther) > -0.05) return false;
-    if (out.dOtherDir.Dot(out.nRef) > -0.05) return false;
+    // In-plane directions perpendicular to the edge, oriented INTO the solid's
+    // material — derived from the face NORMALS, not a face classifier. The old
+    // classifier probe (inFaceDir) landed in a drilled hole / open tray when a
+    // feature fragmented the face near the edge and picked the wrong side, so
+    // the wedge came out "backwards, out the back of the edge" (#57). For a
+    // convex edge the material sits on the negative side of the OTHER face's
+    // plane, so choose each direction's sign to make d·n(other) < 0.
+    gp_Dir d1 = out.nRef.Crossed(t);
+    gp_Dir d2 = out.nOther.Crossed(t);
+    if (d1.Dot(out.nOther) > 0) d1.Reverse();
+    if (d2.Dot(out.nRef) > 0) d2.Reverse();
+    out.dRefDir = d1;
+    out.dOtherDir = d2;
+
+    // Convex only, decided from the SOLID (robust where the face classifier is
+    // not): a point just off the edge along the OUTWARD normal bisector is
+    // OUTSIDE a convex edge and INSIDE a concave one. A cut can only remove
+    // material, so a concave edge (native OCCT would FILL it) is refused here.
+    gp_Vec bis(gp_Vec(out.nRef) + gp_Vec(out.nOther));
+    if (bis.Magnitude() < 1e-6) return false;
+    bis.Normalize();
+    const double off = std::min(probeEps, 0.05);
+    BRepClass3d_SolidClassifier sc(body, out.pm.Translated(bis * off), 1e-7);
+    if (sc.State() != TopAbs_OUT) return false;
     return true;
 }
 
@@ -172,7 +172,7 @@ bool buildGroups(const TopoDS_Shape& body,
     std::vector<EdgeInfo> infos;
     for (const auto& e : edges) {
         EdgeInfo info;
-        if (!analyzeEdge(e, efm, refPln, probeEps, info)) return false;
+        if (!analyzeEdge(body, e, efm, refPln, probeEps, info)) return false;
         infos.push_back(info);
     }
 
