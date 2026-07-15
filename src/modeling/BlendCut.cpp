@@ -923,18 +923,76 @@ void addCornerFans(const TopoDS_Shape& body,
                            "perp=%.2f)\n", along, perp.Magnitude());
                     continue;
                 }
-                Tool fan;
-                fan.solid = tetraSolid(V, W, T1, T2, fan.blendTemplate);
-                if (fan.solid.IsNull()) {
-                    BC_DBG("[bc] fan: tetra FAILED V=(%.1f,%.1f,%.1f) "
-                           "W=(%.1f,%.1f,%.1f) T1=(%.1f,%.1f,%.1f) "
-                           "T2=(%.1f,%.1f,%.1f)\n",
-                           V.X(),V.Y(),V.Z(), W.X(),W.Y(),W.Z(),
-                           T1.X(),T1.Y(),T1.Z(), T2.X(),T2.Y(),T2.Z());
-                    continue;
-                }
-                tools.push_back(fan);
-                BC_DBG("[bc] hip: corner fan added at group %zu end %d\n",
+                // TRUE MITER, not a fan facet: sweep OUR profile around the
+                // corner (to the neighbour's toe) and clip it by the
+                // neighbour's actual slope PLANE. The clipped face lies IN
+                // that plane, so after the fuse (+ coplanar merge) the two
+                // slopes read as one continuous miter — a flat tetra here
+                // showed up as a visible third facet ("almost acceptable").
+                Tool piece;
+                try {
+                    const gp_Pnt Vb =
+                        V.Translated(outward * (-0.05)); // overlap our ramp
+                    gp_Vec inv = gp_Vec(g.rep.nRef) + gp_Vec(g.rep.nOther);
+                    if (inv.Magnitude() < 1e-9) continue;
+                    inv.Normalize();
+                    const gp_Pnt C = Vb.Translated(
+                        inv * (-std::min(dRef, dOther) * 0.05));
+                    const gp_Pnt Ab =
+                        Vb.Translated(gp_Vec(g.rep.dRefDir) * dRef);
+                    const gp_Pnt Bb =
+                        Vb.Translated(gp_Vec(g.rep.dOtherDir) * dOther);
+                    BRepBuilderAPI_MakePolygon poly;
+                    poly.Add(C);
+                    poly.Add(Ab);
+                    poly.Add(Bb);
+                    poly.Close();
+                    if (!poly.IsDone()) continue;
+                    BRepBuilderAPI_MakeFace mf(poly.Wire(), Standard_True);
+                    if (!mf.IsDone()) continue;
+                    BRepPrimAPI_MakePrism pr(
+                        mf.Face(), outward * (along + 0.05));
+                    if (!pr.IsDone()) continue;
+                    TopoDS_Shape pieceSolid = pr.Shape();
+                    // Clip by the neighbour's slope plane: bounded box on the
+                    // ABOVE side (the keep point sits just off the corner at
+                    // floor level, always under the neighbour's slope there).
+                    const gp_Pln nbPln = BRepAdaptor_Surface(f).Plane();
+                    const gp_Dir nn = nbPln.Axis().Direction();
+                    const gp_Pnt keepPt =
+                        V.Translated(outward * 0.1)
+                            .Translated(gp_Vec(V, W) * 0.02);
+                    const double sdKeep =
+                        gp_Vec(nbPln.Location(), keepPt).Dot(gp_Vec(nn));
+                    if (std::abs(sdKeep) < 1e-9) continue;
+                    const double sKeep = (sdKeep > 0) ? 1.0 : -1.0;
+                    Bnd_Box pb;
+                    BRepBndLib::Add(pieceSolid, pb);
+                    double x0, y0, z0, x1, y1, z1;
+                    pb.Get(x0, y0, z0, x1, y1, z1);
+                    const double diag =
+                        gp_Pnt(x0, y0, z0).Distance(gp_Pnt(x1, y1, z1));
+                    const gp_Pnt centerOnPlane = keepPt.Translated(
+                        gp_Vec(nn) * (-sdKeep));
+                    const gp_Dir away = (sKeep > 0) ? nn.Reversed() : nn;
+                    gp_Pnt corner = centerOnPlane
+                        .Translated(gp_Vec(gp_Ax2(centerOnPlane, away)
+                                               .XDirection()) * (-1.5 * diag))
+                        .Translated(gp_Vec(gp_Ax2(centerOnPlane, away)
+                                               .YDirection()) * (-1.5 * diag));
+                    BRepPrimAPI_MakeBox mb(gp_Ax2(corner, away), 3.0 * diag,
+                                           3.0 * diag, diag + 1.0);
+                    BRepAlgoAPI_Cut cut(pieceSolid, mb.Shape());
+                    if (!cut.IsDone()) continue;
+                    TopoDS_Shape clipped = cut.Shape();
+                    GProp_GProps gv;
+                    BRepGProp::VolumeProperties(clipped, gv);
+                    if (clipped.IsNull() || gv.Mass() < 1e-9) continue;
+                    piece.solid = clipped;
+                    piece.blendTemplate = tools[i].blendTemplate;
+                } catch (...) { continue; }
+                tools.push_back(piece);
+                BC_DBG("[bc] hip: corner miter added at group %zu end %d\n",
                        i, e);
             }
         }
