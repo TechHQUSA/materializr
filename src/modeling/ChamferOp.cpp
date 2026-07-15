@@ -3,6 +3,7 @@
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
 #include <algorithm>
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -382,14 +383,21 @@ bool ChamferOp::execute(Document& doc) {
                 if (len < 1e-9) continue;
                 dir.Normalize();
                 gp_Lin eline(pa, gp_Dir(dir));
-                double lo = 1e18, hi = -1e18;
-                for (const auto& gf : m_generatedFaces)
+                // Per-face covered interval along the edge, then union.
+                // Ends-only (min/max) let native fragments AT the corners
+                // mask a dead middle: ChFi3d blended a few mm at each end
+                // (against neighbouring caps) and skipped the whole centre —
+                // ends "covered", gate passed, fill never ran. An interior
+                // gap on a single continuous edge is never legitimate (the
+                // stop-face through-hole case only arises on FRAGMENTED
+                // edges, each checked separately here).
+                std::vector<std::pair<double, double>> spans;
+                for (const auto& gf : m_generatedFaces) {
+                    double lo = 1e18, hi = -1e18;
                     for (TopExp_Explorer vx(gf, TopAbs_VERTEX); vx.More();
                          vx.Next()) {
                         gp_Pnt v = BRep_Tool::Pnt(
                             TopoDS::Vertex(vx.Current()));
-                        // Only vertices actually near THIS edge's line —
-                        // another edge's bevel must not mask a deficit.
                         if (eline.Distance(v) >
                             std::max(m_distance, dB) * 2.0 + 0.5)
                             continue;
@@ -397,7 +405,20 @@ bool ChamferOp::execute(Document& doc) {
                         lo = std::min(lo, t);
                         hi = std::max(hi, t);
                     }
-                if (lo > endTol || hi < len - endTol) {
+                    if (hi >= lo) spans.push_back({lo, hi});
+                }
+                if (spans.empty()) continue;
+                std::sort(spans.begin(), spans.end());
+                double covTo = spans.front().first; // start of coverage
+                const double covFrom = covTo;
+                double maxGap = 0.0;
+                for (const auto& sp : spans) {
+                    if (sp.first > covTo)
+                        maxGap = std::max(maxGap, sp.first - covTo);
+                    covTo = std::max(covTo, sp.second);
+                }
+                if (covFrom > endTol || covTo < len - endTol ||
+                    maxGap > endTol) {
                     shortCoverage = true;
                     break;
                 }
