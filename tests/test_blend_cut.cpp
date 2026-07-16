@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include "core/Document.h"
+#include "core/History.h"
 #include "modeling/BlendCut.h"
 #include "modeling/ChamferOp.h"
 #include "modeling/FilletOp.h"
@@ -246,6 +247,46 @@ TEST(BlendCut, ChamferOpFallsBackWhenBevelExceedsClearance) {
     double ref = chamferThenCutVolume(edgeCrossingHole(), 3.5, 3.5);
     ASSERT_GT(ref, 0.0);
     EXPECT_NEAR(volumeOf(out), ref, 1e-4);
+}
+
+// #56 / #59 follow-up: editing a FEATURE-CROSSED chamfer from history must
+// REBUILD it (through the same fallback the fresh apply took) to the same
+// geometry — not strand the step into a planar face. The graceful-revert of
+// #56 is the safety net; this pins that the net shouldn't need to fire for a
+// blend that the fallback CAN rebuild. editStep re-executes the op, so a
+// stranded rebuild would show as a changed final volume.
+TEST(BlendCut, EditFeatureCrossedChamferRebuildsNotStrands) {
+    Document doc;
+    History hist;
+    int id = doc.addBody(
+        BRepAlgoAPI_Cut(plainBox(), edgeCrossingHole()).Shape(), "Holed");
+    std::vector<TopoDS_Edge> frags = frontTopEdges(doc.getBody(id));
+    ASSERT_EQ(frags.size(), 2u);
+
+    auto op = std::make_unique<ChamferOp>();
+    op->setBody(id);
+    op->setEdges(frags);
+    op->setDistance(3.5);   // exceeds hole clearance → forces the fallback
+    ASSERT_TRUE(hist.pushOperation(std::move(op), doc));
+
+    const double vApplied = volumeOf(doc.getBody(id));
+    double ref = chamferThenCutVolume(edgeCrossingHole(), 3.5, 3.5);
+    ASSERT_GT(ref, 0.0);
+    ASSERT_NEAR(vApplied, ref, 1e-4) << "setup: fresh apply took the fallback";
+
+    // THE EDIT: re-execute the step with UNCHANGED params — the case that
+    // used to collapse to a planar face on the second pass.
+    ASSERT_TRUE(hist.editStep(0, doc, /*transactional=*/true))
+        << "editStep reverted instead of rebuilding the feature-crossed blend";
+    const TopoDS_Shape& out = doc.getBody(id);
+    EXPECT_TRUE(BRepCheck_Analyzer(out).IsValid());
+    EXPECT_NEAR(volumeOf(out), vApplied, 1e-4)
+        << "edited chamfer did not reproduce its geometry (stranded/planar)";
+    // The op must still own a live blend face (didn't degenerate to a plane).
+    const auto* c = dynamic_cast<const ChamferOp*>(hist.getStep(0));
+    ASSERT_NE(c, nullptr);
+    EXPECT_FALSE(c->getGeneratedFaces().empty())
+        << "no blend face after edit — collapsed to a planar face";
 }
 
 // Fillet flavour of the core contract: hole first, then cutFillet over the
