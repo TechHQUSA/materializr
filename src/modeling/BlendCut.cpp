@@ -934,17 +934,28 @@ void addCornerFans(const TopoDS_Shape& body,
                 try {
                     const gp_Pnt Vb =
                         V.Translated(outward * (-0.05)); // overlap our ramp
-                    gp_Vec inv = gp_Vec(g.rep.nRef) + gp_Vec(g.rep.nOther);
-                    if (inv.Magnitude() < 1e-9) continue;
-                    inv.Normalize();
-                    const gp_Pnt C = Vb.Translated(
-                        inv * (-std::min(dRef, dOther) * 0.05));
+                    // Apex overlap: shift the corner HORIZONTALLY into the
+                    // wall, keeping it exactly AT floor height. The shift
+                    // fills the neighbour's trim slot at the cap base (so
+                    // the clip face lands edge-to-edge on the neighbour
+                    // bevel and the coplanar merge takes), while putting
+                    // nothing below the floor — a downward apex dip swept
+                    // to a toe on the plate edge imprinted the outer wall
+                    // as a coplanar strip + razor faces, the visible
+                    // "bottom sliver" no merge could remove.
+                    const gp_Dir nWall =
+                        (std::abs(gp_Vec(g.rep.nRef).Dot(gp_Vec(nFloor))) >
+                         0.9)
+                            ? g.rep.nOther
+                            : g.rep.nRef;
+                    const gp_Pnt Cp = Vb.Translated(
+                        gp_Vec(nWall) * (-std::min(dRef, dOther) * 0.05));
                     const gp_Pnt Ab =
                         Vb.Translated(gp_Vec(g.rep.dRefDir) * dRef);
                     const gp_Pnt Bb =
                         Vb.Translated(gp_Vec(g.rep.dOtherDir) * dOther);
                     BRepBuilderAPI_MakePolygon poly;
-                    poly.Add(C);
+                    poly.Add(Cp);
                     poly.Add(Ab);
                     poly.Add(Bb);
                     poly.Close();
@@ -1009,14 +1020,21 @@ bool applyFill(const TopoDS_Shape& body, const std::vector<Tool>& tools,
                std::vector<TopoDS_Shape>& outBlendFaces) {
     double toolVol = 0.0;
     TopoDS_Shape res = body;
+    int ti = 0;
     for (const auto& t : tools) {
         GProp_GProps gt;
         BRepGProp::VolumeProperties(t.solid, gt);
         toolVol += gt.Mass();
+        GProp_GProps gb;
+        BRepGProp::VolumeProperties(res, gb);
         BRepAlgoAPI_Fuse fuse(res, t.solid);
         if (!fuse.IsDone()) { BC_DBG("[bc] fill: fuse not done\n"); return false; }
         res = fuse.Shape();
         if (res.IsNull()) { BC_DBG("[bc] fill: fuse null\n"); return false; }
+        GProp_GProps ga;
+        BRepGProp::VolumeProperties(res, ga);
+        BC_DBG("[bc] fill: fuse tool %d vol %.1f: %.1f -> %.1f\n", ti++,
+               gt.Mass(), gb.Mass(), ga.Mass());
         ledger.capture(fuse, body, TopAbs_EDGE);
         ledger.captureAdd(fuse, body, TopAbs_FACE);
     }

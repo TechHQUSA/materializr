@@ -708,6 +708,26 @@ TEST(BlendCut, MiterWedgeMergesIntoNeighbourBevel) {
     // block corner y=20 toward the long ramp's territory).
     EXPECT_GT(yMax, 20.5);
     EXPECT_GT(zMaxTop, 4.5);
+    // The plate's outer wall at x=40 (where the side bevel's toe lands) must
+    // stay ONE face: an apex bulge dipping below the floor sweeps a coplanar
+    // strip + razor faces onto it — flush geometry, but the viewport draws
+    // the fragment boundaries as a sliver under the toe.
+    int wallFaces = 0;
+    for (TopExp_Explorer fx(out, TopAbs_FACE); fx.More(); fx.Next()) {
+        const TopoDS_Face f = TopoDS::Face(fx.Current());
+        BRepAdaptor_Surface surf(f);
+        if (surf.GetType() != GeomAbs_Plane) continue;
+        gp_Dir n = surf.Plane().Axis().Direction();
+        if (std::abs(std::abs(n.X()) - 1.0) > 1e-6) continue;
+        Bnd_Box bb;
+        BRepBndLib::Add(f, bb);
+        double x0, y0, z0, x1, y1, z1;
+        bb.Get(x0, y0, z0, x1, y1, z1);
+        if (std::abs(x0 - 40.0) > 0.2 || std::abs(x1 - 40.0) > 0.2) continue;
+        wallFaces++;
+    }
+    EXPECT_EQ(wallFaces, 1)
+        << "outer wall fragmented at the bevel toe (bottom-sliver imprint)";
 }
 
 // A cut can only REMOVE material, so a concave (inside-corner) edge must be
