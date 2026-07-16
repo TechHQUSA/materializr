@@ -146,8 +146,18 @@ void RefImageRenderer::sync(const std::vector<Item>& items) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // Pin unpack state so a prior upload's stray GL_UNPACK_ROW_LENGTH /
+        // alignment can't garble this tightly-packed RGBA upload (same trap the
+        // logo and calibration-preview textures hit). Save/pin/restore.
+        GLint prevRowLen = 0, prevAlign = 4;
+        glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, img.rgba.data());
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
         glBindTexture(GL_TEXTURE_2D, 0);
         m_textures[it.planeId] = tex;
     }

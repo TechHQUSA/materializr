@@ -1927,6 +1927,11 @@ void Application::beginRefImageImport() {
             showToast("Reference image imported — set its real size with "
                       "Calibrate, then sketch over it.", 6.0);
             m_meshesDirty = true;
+            // Reference images aren't a history op, so they don't move the
+            // history step — mark the non-history dirty flag so crash-recovery
+            // re-snapshots (else a recovered project loses the image; the
+            // blob lives in the doc, but the sidecar was never rewritten).
+            markDirty();
         });
 }
 
@@ -1973,8 +1978,10 @@ void Application::renderRefImagePanel() {
                         img->widthMM, heightMM);
 
     float opacity = img->opacity;
-    if (ImGui::SliderFloat("Opacity", &opacity, 0.05f, 1.0f, "%.2f"))
+    if (ImGui::SliderFloat("Opacity", &opacity, 0.05f, 1.0f, "%.2f")) {
         m_document->setRefImageOpacity(planeId, opacity);
+        markDirty();
+    }
     ImGui::SetItemTooltip("Underlay strength — drop it until your sketch "
                           "lines read clearly on top of the photo.");
 
@@ -1982,8 +1989,10 @@ void Application::renderRefImagePanel() {
     ImGui::SetNextItemWidth(uiSz(120, 0).x);
     if (ImGui::InputFloat("Width (mm)", &widthMM, 0, 0, "%.2f",
                           ImGuiInputTextFlags_EnterReturnsTrue)) {
-        if (widthMM > 0.01f)
+        if (widthMM > 0.01f) {
             m_document->setRefImageWidthMM(planeId, widthMM);
+            markDirty();
+        }
     }
     ImGui::SetItemTooltip("Physical width of the photo's full frame. Height "
                           "follows the image's aspect ratio. Use Calibrate to "
@@ -2006,6 +2015,7 @@ void Application::renderRefImagePanel() {
         m_document->removePlane(planeId);
         if (m_selection) m_selection->clear();
         m_refImgCalibPlane = -1;
+        markDirty();
         ImGui::End();
         return;
     }
@@ -2035,8 +2045,21 @@ void Application::renderRefImagePanel() {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            // Pin unpack state (same trap as the logo texture): this upload
+            // inherits whatever GL_UNPACK_ROW_LENGTH / alignment a prior frame's
+            // texture upload left set. If it's non-zero the preview reads its
+            // rows at the wrong stride and comes out as garbled static — clean
+            // the first time, corrupt on every later open once something dirties
+            // the state. Save/pin/restore so tightly-packed RGBA reads right.
+            GLint prevRowLen = 0, prevAlign = 4;
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
+            glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, dec.width, dec.height, 0,
                          GL_RGBA, GL_UNSIGNED_BYTE, dec.rgba.data());
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
             glBindTexture(GL_TEXTURE_2D, 0);
             m_refImgPreviewW = dec.width;
             m_refImgPreviewH = dec.height;
@@ -2192,6 +2215,7 @@ void Application::renderRefImagePanel() {
             // mm-per-pixel from the picked pair → full-frame physical width.
             double mmPerPx = static_cast<double>(distMM) / pxDist;
             m_document->setRefImageWidthMM(planeId, img->pixW * mmPerPx);
+            markDirty();
             showToast("Image calibrated to real size.");
         }
         m_refImgCalibPlane = -1;
