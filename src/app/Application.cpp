@@ -92,6 +92,7 @@ inline void resetFpuForOcct() {
 #include "io/StepIO.h"
 #include "io/StlExport.h"
 #include "io/SvgExport.h"
+#include "io/DxfExport.h"
 #include "io/FileDialogs.h"
 #include "modeling/SvgImport.h"
 #include "io/ProjectIO.h"
@@ -294,6 +295,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_itemsPanel->setExportStlCallback([this](int bodyId) { exportBodyAsStl(bodyId); });
     m_itemsPanel->setEditSketchCallback([this](int sketchId) { editSketch(sketchId); });
     m_itemsPanel->setExportSketchSvgCallback([this](int sketchId) { exportSketchAsSvg(sketchId); });
+    m_itemsPanel->setExportSketchDxfCallback([this](int sketchId) { exportSketchAsDxf(sketchId); });
     m_itemsPanel->setDuplicateSketchCallback([this](int sketchId) { duplicateSketch(sketchId); });
     m_itemsPanel->setCombineSketchesCallback(
         [this](const std::vector<int>& ids) { combineSketches(ids); });
@@ -2158,15 +2160,21 @@ void Application::handleToolAction(int action) {
             // Remember which body's face was clicked — the edit path uses it to
             // detect a baked feature (clicked body doesn't change after edit).
             m_edgeOpPickedBodyId = pickedBodyId;
+            // Edit the op that BEST owns the picked face — highest
+            // ownsFaceScore (exact IsSame beats the geometric fallback), latest
+            // on ties. The old first-match loop opened an earlier fuzzy
+            // over-matching fillet instead of the actual chamfer under the
+            // cursor (#49); the Toolbar's button uses the same rule.
             const auto& ops = m_history->operations();
+            int bestI = -1, bestScore = 0;
             for (int i = 0; i < static_cast<int>(ops.size()); ++i) {
                 const auto& op = ops[i];
-                if (op && op->isEnabled() && op->ownsFace(pickedFace) &&
-                    (op->typeId() == "fillet" || op->typeId() == "chamfer")) {
-                    beginInteractiveEdgeOpEdit(i);
-                    break;
-                }
+                if (!op || !op->isEnabled()) continue;
+                if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
+                int sc = op->ownsFaceScore(pickedFace);
+                if (sc > 0 && sc >= bestScore) { bestScore = sc; bestI = i; }
             }
+            if (bestI >= 0) beginInteractiveEdgeOpEdit(bestI);
             break;
         }
 
@@ -2851,21 +2859,29 @@ void Application::saveProject() {
         std::filesystem::path p(m_currentProjectPath);
         suggest = p.filename().string();
     }
-    if (suggest.empty()) suggest = "project.materializr";
-    else if (suggest.find(".materializr") == std::string::npos)
-        suggest += ".materializr";
+    // .mzr is the preferred extension; the long-form .materializr stays fully
+    // interchangeable (the loader identifies projects by header, not name), so
+    // a resave keeps whichever extension the file already has.
+    if (suggest.empty()) suggest = "project.mzr";
+    else if (suggest.find(".mzr") == std::string::npos &&
+             suggest.find(".materializr") == std::string::npos)
+        suggest += ".mzr";
     FileDialogs::saveFile("Save Project", suggest,
-        {{"Materializr Project", "*.materializr"}, {"All Files", "*"}},
+        {{"Materializr Project", "*.mzr *.materializr"}, {"All Files", "*"}},
         [this](const std::string& chosenPath) {
             if (chosenPath.empty()) return;
             std::string path = chosenPath;
 #if !defined(MZ_MOBILE)
-            // Keep the .materializr extension. The project file is gzip-
-            // compressed, so without the extension the OS shows it as a generic
-            // "compressed archive" and the open filter can't find it. (On
-            // Android the SAF picker, not this path, names the file.)
-            if (std::filesystem::path(path).extension() != ".materializr")
-                path += ".materializr";
+            // Keep a project extension. The file is gzip-compressed, so
+            // without one the OS shows it as a generic "compressed archive"
+            // and the open filter can't find it. Either spelling is accepted;
+            // a bare name gets the preferred .mzr. (On Android the SAF
+            // picker, not this path, names the file.)
+            {
+                const auto ext = std::filesystem::path(path).extension();
+                if (ext != ".mzr" && ext != ".materializr")
+                    path += ".mzr";
+            }
 #endif
             ProjectHistory hist = captureProjectHistory();
             auto result = ProjectIO::save(path, *m_document, &hist);
@@ -3084,6 +3100,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         for (const auto& [id, shape] : st.changed) {
             if (running.find(id) == running.end()) {
                 reload.created.push_back(id);
+                reload.createdAfter.push_back({id, shape});
             } else {
                 reload.modifiedBefore.push_back({id, running[id]});
                 reload.modifiedAfter.push_back({id, shape});
@@ -3525,7 +3542,7 @@ void Application::openRecentProject(const AppSettings::RecentProject& r) {
 
 void Application::loadProject() {
     FileDialogs::openFile("Open Project",
-        {{"Materializr Project", "*.materializr"}, {"All Files", "*"}},
+        {{"Materializr Project", "*.mzr *.materializr"}, {"All Files", "*"}},
         [this](const std::string& path) {
             if (path.empty()) return;
             // Guard unsaved changes (the picked path is captured for after the
@@ -3602,6 +3619,10 @@ bool Application::isDirty() const {
 
 void Application::markDirty() {
     m_unsavedNonHistoryChanges = true;
+    // Recovery debounce: remember WHEN the newest change landed so the
+    // crash-recovery writer can snapshot once things settle (see
+    // writeProjectRecoveryIfDue), instead of re-gzipping on a timer.
+    m_lastChangeSeenAt = SDL_GetTicks() / 1000.0;
 }
 
 void Application::markSaved() {
@@ -3794,6 +3815,53 @@ void Application::exportSketchAsSvg(int sketchId) {
                              result.curveCount, path.c_str());
             } else {
                 std::fprintf(stderr, "SVG export failed: %s\n",
+                             result.errorMessage.c_str());
+            }
+        });
+#endif
+}
+
+void Application::exportSketchAsDxf(int sketchId) {
+    // The SVG twin (above) for the CAM/laser-cutter world: R12 DXF entities
+    // in millimeters. Same name derivation and dialog flow.
+    if (!m_document || sketchId < 0) return;
+    auto sketch = m_document->getSketch(sketchId);
+    if (!sketch) return;
+
+    std::string name = m_document->getSketchName(sketchId);
+    if (name.empty()) name = "sketch-" + std::to_string(sketchId);
+    for (char& ch : name) {
+        if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' ||
+            ch == '"' || ch == '<' || ch == '>' || ch == '|') ch = '_';
+    }
+    std::string defaultFile = name + ".dxf";
+    auto sk = sketch; // keep alive across the async dialog callback
+
+#if defined(MZ_MOBILE)
+    FileDialogs::mobileExportShareOrSave(defaultFile, "application/dxf",
+        [sk](const std::string& path) {
+            auto result = materializr::DxfExport::exportSketch(path, *sk);
+            if (result.success)
+                std::fprintf(stdout, "Exported %d DXF entit%s to %s\n",
+                             result.entityCount,
+                             result.entityCount == 1 ? "y" : "ies", path.c_str());
+            else
+                std::fprintf(stderr, "DXF export failed: %s\n", result.errorMessage.c_str());
+            return result.success;
+        });
+#else
+    FileDialogs::saveFile("Export Sketch to DXF", defaultFile,
+        {{"DXF Files", "*.dxf"}},
+        [sk](std::string path) {
+            if (path.empty()) return;
+            if (std::filesystem::path(path).extension() != ".dxf") path += ".dxf";
+            auto result = materializr::DxfExport::exportSketch(path, *sk);
+            if (result.success) {
+                std::fprintf(stdout, "Exported %d DXF entit%s to %s\n",
+                             result.entityCount,
+                             result.entityCount == 1 ? "y" : "ies", path.c_str());
+            } else {
+                std::fprintf(stderr, "DXF export failed: %s\n",
                              result.errorMessage.c_str());
             }
         });
@@ -5032,8 +5100,12 @@ void Application::renderSketchRecoveryPrompt() {
     // the Welcome render site in run()). Fires the frame Welcome closes.
     if (m_welcomeScreen && m_welcomeScreen->isVisible()) return;
     ImGui::OpenPopup("Recover Sketch?");
+    // Pin centered EVERY frame (not Appearing): on Android the popup can
+    // first appear on a frame where the surface size isn't final yet, and an
+    // Appearing-anchored centre computed from that degenerate viewport
+    // strands the dialog in the top-left corner for good.
     ImVec2 c = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(c, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Recover Sketch?", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::TextUnformatted(
@@ -5102,9 +5174,33 @@ void Application::writeProjectRecoveryIfDue() {
     if (bodies == 0 && curStep < 0) return;    // empty new document: nothing to lose
 
     const double now = SDL_GetTicks() / 1000.0;
-    const bool newStep = (curStep != m_lastRecoveryStep);
-    const double kThrottleSec = 5.0;
-    if (!newStep && now - m_lastRecoveryWrite < kThrottleSec) return;
+
+    // Debounce, not a metronome (Steve's call, #48): snapshot once ~5 s AFTER
+    // the last committed change settles — "time to save a good copy in case
+    // the NEXT change crashes the program" — then go quiet until something
+    // changes again. The old scheme re-serialized + re-gzipped the whole
+    // project every 5 s for as long as it sat dirty (a periodic multi-MB
+    // CPU/disk hit forever, even backgrounded).
+    if (curStep != m_lastSeenStepForRecovery) {
+        m_lastSeenStepForRecovery = curStep;   // history moved = a change
+        m_lastChangeSeenAt = now;              // (markDirty stamps the rest)
+    }
+    // Nothing new since the last snapshot → nothing to protect; stay quiet.
+    if (m_lastRecoveryWrite >= m_lastChangeSeenAt) return;
+    // First change of a new episode: remember when the oldest UNSNAPSHOTTED
+    // change landed — the burst backstop below is measured from here, not
+    // from the last write, or the first change after a long quiet spell
+    // would trip it instantly instead of settling for 5 s.
+    if (m_pendingChangeSince <= m_lastRecoveryWrite)
+        m_pendingChangeSince = m_lastChangeSeenAt;
+    if (now - m_lastChangeSeenAt < 5.0) {
+        // Still inside the settle window. Backstop: during a long BURST of
+        // rapid changes (each < 5 s apart) a pure debounce would never fire
+        // and a crash mid-burst would lose the whole run — strictly worse
+        // than the old metronome. Write anyway once the oldest pending
+        // change has waited a minute.
+        if (now - m_pendingChangeSince < 60.0) return;
+    }
 
     // Don't cancel a live preview on a background recovery tick — that would
     // revert the user's in-progress drag. The recovery file may then capture a
@@ -5123,8 +5219,9 @@ void Application::renderProjectRecoveryPrompt() {
     // sketch-recovery prompt (see renderSketchRecoveryPrompt).
     if (m_welcomeScreen && m_welcomeScreen->isVisible()) return;
     ImGui::OpenPopup("Recover Project?");
+    // Pinned centred every frame — see the Android note on the sketch prompt.
     ImVec2 c = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(c, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     if (ImGui::BeginPopupModal("Recover Project?", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         materializr::ProjectRecoveryMeta meta;
@@ -5670,8 +5767,10 @@ void Application::run() {
                     if      (pending == "LinearPattern") beginPattern(PatternKind::Linear);
                     else if (pending == "RadialPattern") beginPattern(PatternKind::Radial);
                     else if (pending == "Loft")          beginLoft();
+                    else if (pending == "BoundaryFill")  beginBoundaryFill();
                     else if (pending == "LoftPickSecond") m_loftPickHintPending = true;
                     else if (pending == "ConstructionPlane") beginConstructionPlane();
+                    else if (pending == "ImportRefImage")    beginRefImageImport();
                     else if (pending == "ConstructionAxis")  beginConstructionAxis();
                     else if (pending == "Revolve")           beginRevolve();
                     else if (pending == "Midplane")          beginConstructionPlaneMode(4);
@@ -5757,12 +5856,13 @@ void Application::run() {
                         ImGuiWindowFlags_NoFocusOnAppearing |
                         ImGuiWindowFlags_NoNav;
                     bool open = true;
-                    if (ImGui::Begin("Pick a second sketch", &open, flags)) {
+                    if (ImGui::Begin("Pick more sketches", &open, flags)) {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f),
-                                           "Loft needs a second profile.");
-                        ImGui::TextWrapped("Ctrl-click another sketch (or one "
-                                           "of its regions), then click Loft "
-                                           "again to commit.");
+                                           "Loft needs at least two profiles.");
+                        ImGui::TextWrapped("Ctrl-click the other sketches (or "
+                                           "their regions) in loft order — as "
+                                           "many as you like — then click Loft "
+                                           "again.");
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;
@@ -5808,6 +5908,8 @@ void Application::run() {
             renderSvgToolPanel();
             renderMirrorToolPanel();
             renderLoftPanel();
+            renderBoundaryFillPanel();
+            renderRefImagePanel();
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
             renderPrimitivePopup();
@@ -5889,6 +5991,7 @@ void Application::run() {
                 if (!m_currentProjectPath.empty()) {
                     pn = projectDisplayName();
                     auto dot = pn.rfind(".materializr");
+                    if (dot == std::string::npos) dot = pn.rfind(".mzr");
                     if (dot != std::string::npos) pn = pn.substr(0, dot);
                 }
                 m_statusBar->setProjectName(pn);

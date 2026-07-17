@@ -192,6 +192,10 @@ add_executable(materializr
     src/plugins/StlImportPlugin.cpp
     src/plugins/StlExportPlugin.cpp
     src/plugins/GltfExportPlugin.cpp
+    src/plugins/BrepIOPlugin.cpp
+    src/plugins/ObjExportPlugin.cpp
+    src/plugins/ThreeMfExportPlugin.cpp
+    src/plugins/DxfImportPlugin.cpp
     src/plugins/BooleanPlugin.cpp
     src/plugins/DeletePlugin.cpp
     src/plugins/TransformPlugin.cpp
@@ -201,6 +205,8 @@ add_executable(materializr
     src/plugins/ShellPlugin.cpp
     src/plugins/SplitBodyPlugin.cpp
     src/plugins/ConstructionPlanePlugin.cpp
+    src/plugins/RefImagePlugin.cpp
+    src/plugins/BoundaryFillPlugin.cpp
     src/plugins/ConstructionAxisPlugin.cpp
     src/plugins/RevolvePlugin.cpp
     src/plugins/FilletPlugin.cpp
@@ -233,9 +239,11 @@ add_executable(materializr
     src/modeling/FaceAnchor.cpp
     src/modeling/TopoName.cpp
     src/modeling/GenerationLedger.cpp
+    src/modeling/FaceLineage.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp
+    src/modeling/BlendCut.cpp
     src/modeling/ResizeCylindricalOp.cpp
     src/modeling/BooleanOp.cpp
     src/modeling/TransformOp.cpp
@@ -245,11 +253,14 @@ add_executable(materializr
     src/modeling/DefeatureOp.cpp
     src/modeling/ProjectSketchOp.cpp
     src/modeling/SplitBodyOp.cpp
+    src/modeling/SeparateBodyOp.cpp
     src/modeling/MirrorOp.cpp
     src/modeling/PatternOp.cpp
     src/modeling/RevolveOp.cpp
     src/modeling/SweepOp.cpp
     src/modeling/LoftOp.cpp
+    src/modeling/GuidedLoftOp.cpp
+    src/modeling/BoundaryFillOp.cpp
     src/modeling/SketchTransformOp.cpp
     src/modeling/ConstructionPlaneOp.cpp
     src/modeling/ConstructionAxisOp.cpp
@@ -275,6 +286,7 @@ add_executable(materializr
     src/viewport/Picker.cpp
     src/viewport/EdgeRenderer.cpp
     src/viewport/PlaneRenderer.cpp
+    src/viewport/RefImageRenderer.cpp
     src/viewport/AxisRenderer.cpp
     src/viewport/BackgroundRenderer.cpp
     src/viewport/Gizmo.cpp
@@ -303,6 +315,7 @@ add_executable(materializr
     src/ui/UpdateChecker.cpp
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp
+    src/io/ImageDecode.cpp
     src/io/SketchRecovery.cpp
     src/io/ProjectRecovery.cpp
     src/io/Settings.cpp
@@ -312,6 +325,11 @@ add_executable(materializr
     src/io/StlExport.cpp
     src/io/SvgExport.cpp
     src/io/IgesIO.cpp
+    src/io/BrepIO.cpp
+    src/io/ObjExport.cpp
+    src/io/DxfExport.cpp
+    src/io/DxfImport.cpp
+    src/io/ThreeMfExport.cpp
     src/io/ImageExport.cpp
     src/io/GltfExport.cpp
     src/io/FileDialogs.cpp

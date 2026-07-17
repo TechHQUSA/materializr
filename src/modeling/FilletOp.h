@@ -31,6 +31,9 @@ public:
     int getBodyId() const { return m_bodyId; }
     double getRadius() const { return m_radius; }
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // The blend faces this fillet produced on the live body — what ownsFace
+    // matches and what the history-step preview highlights.
+    const std::vector<TopoDS_Shape>& getGeneratedFaces() const { return m_generatedFaces; }
     // Body shape from the last execute()'s pre-state — needed by the
     // interactive edit-by-clicking-face flow so it can preview an updated
     // radius against the body as it stood BEFORE this fillet was applied.
@@ -44,6 +47,7 @@ public:
     void renderProperties() override;
     std::string typeId() const override { return "fillet"; }
     bool ownsFace(const TopoDS_Shape& face) const override;
+    int ownsFaceScore(const TopoDS_Shape& face) const override;
     OperationDiff captureDiff() const override;
     std::vector<int> plannedBodyIds() const override { return {m_bodyId}; }
     std::string serializeParams() const override;
@@ -52,7 +56,8 @@ public:
     // Re-resolve generated-face indices against the body's CURRENT shape (e.g.
     // after downstream transforms moved the geometry). Called by the loader
     // after all ops are rehydrated so ownsFace() works on the final body.
-    void refreshGeneratedFaces(const TopoDS_Shape& currentBody);
+    void refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                               const materializr::topo::FaceIdMap* lineage = nullptr);
 
 private:
     int m_bodyId = -1;
@@ -62,6 +67,8 @@ private:
     // Fillet (blend) faces produced by the last execute(), so a clicked face can
     // be mapped back to this op for re-editing.
     std::vector<TopoDS_Shape> m_generatedFaces;
+    // Stable lineage ids of this fillet's blend faces (FaceLineage.h).
+    std::vector<int> m_genFaceIds;
     // The filleted result, captured by execute(). serializeParams indexes the
     // generated faces against it (they're sub-shapes of the result, not the
     // input); rehydrate restores it from the reload's after-state.
@@ -82,6 +89,48 @@ private:
     // ledger published on the Document — can). Minted on the first valid
     // execute with the body's producing ledger in context.
     std::vector<materializr::topo::Ref> m_edgeRefs;
+
+    // Lineage-FIRST edge naming (parity with ChamferOp, #52): each filleted
+    // edge as its two adjacent faces' ancestry ids — resolvable from the
+    // FaceIdMap alone, i.e. it survives a partial replay where the ledger
+    // (runtime-only) is gone but the map was carried/restored.
+    std::vector<std::pair<int,int>> m_edgeFaceIdPairs;
+    // Input face lineage captured at execute; undo restores it so a PARTIAL
+    // replay still has ancestry for the ops it re-runs.
+    materializr::topo::FaceIdMap m_prevFaceIds;
+
+    // Known-good builds: (input body, radius) → result (see ChamferOp's
+    // StoredResult for the full story — the "put the value back" adoption).
+    // Entry 0 = the loaded original, never evicted.
+    struct StoredResult {
+        TopoDS_Shape base, result;
+        double r = -1.0;
+        std::vector<TopoDS_Shape> genFaces;
+    };
+    std::vector<StoredResult> m_storedResults;
+    void rememberResult(const TopoDS_Shape& base, const TopoDS_Shape& result);
+
+    // Transactional edit-state rollback (see Operation::snapshotEditState).
+    struct EditSnap {
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        materializr::topo::FaceIdMap prevFaceIds;
+        TopoDS_Shape previousShape, resultShape;
+        std::vector<TopoDS_Shape> generatedFaces;
+        std::vector<int> genFaceIds;
+        std::vector<StoredResult> storedResults;
+        double radius = 0.0;
+        bool valid = false;
+    };
+    EditSnap m_editSnap;
+
+public:
+    void snapshotEditState() override;
+    void restoreEditState() override;
+
+private:
 
     // Generation map of the last execute(): the input EDGE -> the blend FACE(S)
     // it produced. Lets the "gen" naming strategy name a blend face by the edge

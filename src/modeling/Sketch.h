@@ -127,6 +127,15 @@ public:
     // Convert closed profiles to OCCT wires for extrusion
     std::vector<TopoDS_Wire> buildWires() const;
 
+    // The LONGEST open chain of lines/arcs/splines as one wire, emitted as a
+    // dense polyline (arcs and splines are sampled). buildWires() deliberately
+    // prunes every non-cycle edge while hunting closed regions, so an open
+    // silhouette curve yields nothing there — this walker does the opposite,
+    // following degree-1 endpoints. Null wire when the sketch has no open
+    // chain. Used for guided-loft rails; consumers resample by height/length,
+    // so polyline fidelity is ample.
+    TopoDS_Wire buildOpenWire() const;
+
     // Whole-profile shape for "extrude everything this sketch encloses":
     // closed wires grouped even-odd by containment depth — every
     // even-depth wire is an island outer, its directly-contained

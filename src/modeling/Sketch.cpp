@@ -1,6 +1,7 @@
 #include "Sketch.h"
 
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BOPAlgo_Builder.hxx>
@@ -726,6 +727,103 @@ void Sketch::removeConstraint(int id) {
 // sketch points on its perimeter contributes a standalone full-circle wire. A
 // circle that *does* have points on it gets split into arc segments at those
 // points so the DFS can find closed loops mixing straight and curved edges.
+
+// The longest OPEN chain in the sketch — see the header note. Each element
+// becomes a run of 2D sample points; chains are walked from degree-1 nodes so
+// closed loops (which buildWires owns) never qualify.
+TopoDS_Wire Sketch::buildOpenWire() const {
+    struct ChainEdge {
+        int a = -1, b = -1;                 // endpoint point-ids
+        std::vector<glm::vec2> pts;         // samples a → b (inclusive)
+        bool used = false;
+        double len = 0.0;
+    };
+    std::vector<ChainEdge> edges;
+
+    auto pushEdge = [&](int a, int b, std::vector<glm::vec2> pts) {
+        if (pts.size() < 2) return;
+        ChainEdge e;
+        e.a = a; e.b = b; e.pts = std::move(pts);
+        for (size_t i = 1; i < e.pts.size(); ++i)
+            e.len += glm::length(e.pts[i] - e.pts[i - 1]);
+        if (e.len > 1e-9) edges.push_back(std::move(e));
+    };
+
+    for (const auto& ln : m_lines) {
+        if (ln.isConstruction) continue;
+        const SketchPoint* a = getPoint(ln.startPointId);
+        const SketchPoint* b = getPoint(ln.endPointId);
+        if (!a || !b) continue;
+        pushEdge(ln.startPointId, ln.endPointId, {a->pos, b->pos});
+    }
+    for (const auto& arc : m_arcs) {
+        if (arc.isConstruction) continue;
+        const SketchPoint* c = getPoint(arc.centerPointId);
+        const SketchPoint* a = getPoint(arc.startPointId);
+        const SketchPoint* b = getPoint(arc.endPointId);
+        if (!c || !a || !b) continue;
+        float sA = std::atan2(a->pos.y - c->pos.y, a->pos.x - c->pos.x);
+        float eA = std::atan2(b->pos.y - c->pos.y, b->pos.x - c->pos.x);
+        if (eA <= sA) eA += 2.0f * static_cast<float>(M_PI); // CCW convention
+        const int N = 24;
+        std::vector<glm::vec2> pts;
+        pts.reserve(N + 1);
+        for (int k = 0; k <= N; ++k) {
+            float ang = sA + (eA - sA) * (static_cast<float>(k) / N);
+            pts.emplace_back(c->pos.x + std::cos(ang) * static_cast<float>(arc.radius),
+                             c->pos.y + std::sin(ang) * static_cast<float>(arc.radius));
+        }
+        pushEdge(arc.startPointId, arc.endPointId, std::move(pts));
+    }
+    for (const auto& sp : m_splines) {
+        if (sp.isConstruction || sp.controlPointIds.size() < 2) continue;
+        // Closed splines belong to the region machinery, not rails.
+        if (sp.controlPointIds.front() == sp.controlPointIds.back()) continue;
+        auto pts = sampleSpline2D(sp);
+        pushEdge(sp.controlPointIds.front(), sp.controlPointIds.back(),
+                 std::move(pts));
+    }
+    if (edges.empty()) return {};
+
+    // Endpoint degrees.
+    std::unordered_map<int, int> degree;
+    for (const auto& e : edges) { ++degree[e.a]; ++degree[e.b]; }
+
+    // Walk from every degree-1 node, following unused edges; keep the longest
+    // chain by 2D length.
+    std::vector<glm::vec2> best;
+    double bestLen = -1.0;
+    for (const auto& [startPt, deg] : degree) {
+        if (deg != 1) continue;
+        for (auto& e : edges) e.used = false;
+        std::vector<glm::vec2> chain;
+        double len = 0.0;
+        int at = startPt;
+        for (;;) {
+            ChainEdge* next = nullptr;
+            for (auto& e : edges)
+                if (!e.used && (e.a == at || e.b == at)) { next = &e; break; }
+            if (!next) break;
+            next->used = true;
+            len += next->len;
+            std::vector<glm::vec2> run = next->pts;
+            if (next->b == at) std::reverse(run.begin(), run.end());
+            if (chain.empty()) chain = std::move(run);
+            else chain.insert(chain.end(), run.begin() + 1, run.end());
+            at = (next->a == at) ? next->b : next->a;
+        }
+        if (chain.size() >= 2 && len > bestLen) {
+            bestLen = len;
+            best = std::move(chain);
+        }
+    }
+    if (best.size() < 2) return {};
+
+    BRepBuilderAPI_MakePolygon poly;
+    for (const auto& p2 : best) poly.Add(sketchToWorld(p2));
+    if (!poly.IsDone()) return {};
+    return poly.Wire();
+}
 
 std::vector<TopoDS_Wire> Sketch::buildWires() const {
     std::vector<TopoDS_Wire> wires;
@@ -1521,6 +1619,14 @@ TopoDS_Shape Sketch::buildProfileShape() const {
     int islands = 0;
     for (size_t i = 0; i < n; ++i) {
         if (depth[i] % 2 != 0) continue; // hole, consumed by its parent
+        // #60: an even-depth island nested >=2 levels deep floats inside
+        // another island's hole — a "plug" (e.g. the inner circle of a
+        // stepped/counterbore hole, which sits inside both the part outline
+        // AND the counterbore circle). Even-odd parity fills it solid, but a
+        // single extruded profile must be connected material: sweeping a
+        // floating plug drops a disconnected lump into the body. Skip it — the
+        // hole stays open, matching the intent of a stepped hole.
+        if (depth[i] >= 2) continue;
         TopoDS_Face outer = wireFace(wires[i]);
         if (outer.IsNull()) continue;
         TopTools_ListOfShape holeFaces;

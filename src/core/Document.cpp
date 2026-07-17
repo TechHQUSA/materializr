@@ -39,6 +39,8 @@ void Document::removeBody(int id) {
         // (undo/redo path through Extrude / Pattern / Mirror / etc.) can
         // restore the body's folderId, colour, visibility, and name.
         m_bodyTombstones[id] = m_bodies[idx];
+        m_bodyLedgers.erase(id);
+        m_bodyFaceIds.erase(id);
         m_bodies.erase(m_bodies.begin() + idx);
         if (m_eventBus) {
             // BodyRemovedEvent FIRST so the renderer drops the slot before
@@ -53,6 +55,7 @@ void Document::removeBody(int id) {
 
 void Document::updateBody(int id, const TopoDS_Shape& shape) {
     m_bodyLedgers.erase(id);  // producing op re-publishes after
+    m_bodyFaceIds.erase(id);  // same lifecycle (stale lineage is worse than none)
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         m_bodies[idx].shape = shape;
@@ -327,6 +330,10 @@ void Document::removePlane(int id) {
     for (auto it = m_planes.begin(); it != m_planes.end(); ++it) {
         if (it->id == id) {
             m_planes.erase(it);
+            // A hosted reference image can't outlive its plane — the plane IS
+            // its pose/selection/visibility. Drop it silently (the
+            // PlaneRemovedEvent below is what the image renderer watches).
+            removeRefImage(id);
             if (m_eventBus) {
                 m_eventBus->publish(materializr::PlaneRemovedEvent{id});
                 m_eventBus->publish(materializr::DocumentModifiedEvent{true});
@@ -334,6 +341,77 @@ void Document::removePlane(int id) {
             return;
         }
     }
+}
+
+// ─── Reference images (hosted on construction planes) ──────────────────────
+
+void Document::setRefImage(int planeId, RefImageEntry entry) {
+    entry.planeId = planeId;
+    for (auto& r : m_refImages) {
+        if (r.planeId == planeId) {
+            r = std::move(entry);
+            if (m_eventBus) {
+                m_eventBus->publish(materializr::PlaneChangedEvent{planeId});
+                m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+            }
+            return;
+        }
+    }
+    m_refImages.push_back(std::move(entry));
+    if (m_eventBus) {
+        m_eventBus->publish(materializr::PlaneChangedEvent{planeId});
+        m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+    }
+}
+
+const RefImageEntry* Document::getRefImage(int planeId) const {
+    for (const auto& r : m_refImages)
+        if (r.planeId == planeId) return &r;
+    return nullptr;
+}
+
+void Document::removeRefImage(int planeId) {
+    for (auto it = m_refImages.begin(); it != m_refImages.end(); ++it) {
+        if (it->planeId == planeId) {
+            m_refImages.erase(it);
+            if (m_eventBus) {
+                m_eventBus->publish(materializr::PlaneChangedEvent{planeId});
+                m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+            }
+            return;
+        }
+    }
+}
+
+void Document::setRefImageWidthMM(int planeId, double widthMM) {
+    for (auto& r : m_refImages) {
+        if (r.planeId == planeId) {
+            r.widthMM = widthMM;
+            if (m_eventBus) {
+                m_eventBus->publish(materializr::PlaneChangedEvent{planeId});
+                m_eventBus->publish(materializr::DocumentModifiedEvent{true});
+            }
+            return;
+        }
+    }
+}
+
+void Document::setRefImageOpacity(int planeId, float opacity) {
+    for (auto& r : m_refImages) {
+        if (r.planeId == planeId) {
+            r.opacity = opacity;
+            if (m_eventBus)
+                m_eventBus->publish(materializr::PlaneChangedEvent{planeId});
+            return;
+        }
+    }
+}
+
+std::vector<int> Document::getAllRefImagePlaneIds() const {
+    std::vector<int> ids;
+    ids.reserve(m_refImages.size());
+    for (const auto& r : m_refImages) ids.push_back(r.planeId);
+    return ids;
 }
 
 const PlaneEntry* Document::getPlane(int id) const {
@@ -510,10 +588,14 @@ void Document::clear() {
     }
     m_bodies.clear();
     m_planes.clear();
+    m_refImages.clear();
     m_axes.clear();
     m_sketches.clear();
     m_folders.clear();
     m_bodyTombstones.clear();
+    m_bodyLedgers.clear();
+    m_bodyFaceIds.clear();
+    m_nextFaceId = 1;
     m_nextBodyId = 1;
     m_nextPlaneId = 1;
     m_nextAxisId = 1;

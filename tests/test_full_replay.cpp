@@ -410,6 +410,7 @@ TEST(FullReplay, EveryOpReloadsEditableAndChainReplays) {
         for (const auto& [id, shape] : st.changed) {
             if (running.find(id) == running.end()) {
                 rs.created.push_back(id);
+                rs.createdAfter.push_back({id, shape});
             } else {
                 rs.modifiedBefore.push_back(std::make_pair(id, running[id]));
                 rs.modifiedAfter.push_back(std::make_pair(id, shape));

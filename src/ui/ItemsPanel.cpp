@@ -5,6 +5,7 @@
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
 #include "../modeling/DeleteOp.h"
+#include "../modeling/SeparateBodyOp.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <cstring>
@@ -343,6 +344,9 @@ bool ItemsPanel::renderContent() {
                     if (ImGui::MenuItem("Export as SVG…")) {
                         if (m_exportSketchSvg) m_exportSketchSvg(id);
                     }
+                    if (ImGui::MenuItem("Export as DXF…")) {
+                        if (m_exportSketchDxf) m_exportSketchDxf(id);
+                    }
                     // Make an independent copy — edit it freely (e.g. resize
                     // holes) to derive a same-layout variant without touching
                     // this sketch or any body built from it.
@@ -628,6 +632,12 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
     float nameW = ImGui::GetContentRegionAvail().x - swatchW -
                   ImGui::GetStyle().ItemSpacing.x;
     std::string name = m_document->getBodyName(id);
+    // Show the kernel body id alongside the display name — it's the id that
+    // Boolean/Separate/etc. properties reference ("Target Body ID: 22"), so
+    // this is the only way to tell which body in the list a step operated on.
+    // The Selectable keeps a stable widget id via the enclosing PushID(id), so
+    // decorating the visible label is safe.
+    std::string label = name + "  \xC2\xB7 b" + std::to_string(id);
     // Auto-scroll into view ONLY when this is the lone selected body and it's
     // newly selected (typically a viewport pick changing selection). With
     // multi-select every selected row would otherwise re-issue SetScrollHereY,
@@ -636,7 +646,7 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
         m_selection && m_selection->selectedBodyCount() == 1) {
         ImGui::SetScrollHereY(0.5f);
     }
-    if (ImGui::Selectable(name.c_str(), isSelected, 0,
+    if (ImGui::Selectable(label.c_str(), isSelected, 0,
                           ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f))) {
         if (m_selection) {
             ImGuiIO& io = ImGui::GetIO();
@@ -724,6 +734,19 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
                 m_document->setBodyVisible(otherId, true);
             }
             colorChanged = true;
+        }
+        // Separate: only when the body actually holds more than one
+        // disconnected solid (air-gapped lumps fused into one body). Splits
+        // them into individual bodies — the largest keeps this one, the rest
+        // become new bodies the user can inspect or delete.
+        if (!deleted && m_history &&
+            SeparateBodyOp::solidCount(m_document->getBody(id)) > 1) {
+            if (ImGui::MenuItem("Separate")) {
+                auto op = std::make_unique<SeparateBodyOp>();
+                op->setBody(id);
+                m_history->pushOperation(std::move(op), *m_document);
+                if (m_markDirty) m_markDirty();
+            }
         }
         // Per-body STL export: dumps only this body's mesh to a file the
         // user picks. Default filename = the body's current name (see

@@ -9,6 +9,8 @@
 #include <gp_Pnt.hxx>
 #include <gp_Dir.hxx>
 #include "SheetSpec.h"
+#include "../modeling/FaceLineage.h"
+#include "../modeling/GenerationLedger.h"
 
 namespace materializr { class Sketch; class EventBus;
 namespace topo { struct GenerationLedger; } }
@@ -53,6 +55,21 @@ struct PlaneEntry {
     // for autoscale; 50 mm (= 100 mm square) is a reasonable default that's
     // clearly visible against a typical part without dominating the scene.
     double halfSize = 50.0;
+};
+
+// Reference image — a photo carried on a construction plane so a real object
+// can be traced without a 3D scanner. 1:1 with a host PlaneEntry (keyed by
+// planeId): the plane contributes pose / selection / visibility / gizmo /
+// sketch-on-plane; this entry carries the raster payload plus physical size
+// and underlay opacity. fileBytes is the ORIGINAL compressed file (png/jpg),
+// persisted verbatim into the project so a .materializr stays self-contained;
+// decode happens at render time (dims are cached here for aspect math).
+struct RefImageEntry {
+    int planeId = -1;
+    std::vector<unsigned char> fileBytes;
+    int pixW = 0, pixH = 0;    // decoded pixel dims (aspect; set at import)
+    double widthMM = 100.0;    // physical width; height follows the aspect
+    float opacity = 0.6f;      // underlay strength for tracing
 };
 
 // Construction axis — a stored ray (origin + unit direction). Used as the
@@ -100,13 +117,36 @@ public:
     // by lineage — e.g. a fillet re-finding a boolean SEAM edge, which no
     // geometric scheme can name. updateBody clears the entry (a stale ledger
     // is worse than none); the producing op re-publishes right after.
+    // Stored BY VALUE (copied from the op): a non-owning pointer dangled the
+    // moment a publishing op died before its consumer minted (SIGBUS in
+    // topo::mint via a destroyed ExtrudeOp/FilletOp ledger). Copying is cheap
+    // relative to that whole class of lifetime bugs.
     void setBodyLedger(int id, const materializr::topo::GenerationLedger* l) {
-        if (l) m_bodyLedgers[id] = l; else m_bodyLedgers.erase(id);
+        if (l) m_bodyLedgers[id] = *l; else m_bodyLedgers.erase(id);
     }
     const materializr::topo::GenerationLedger* bodyLedger(int id) const {
         auto it = m_bodyLedgers.find(id);
-        return it == m_bodyLedgers.end() ? nullptr : it->second;
+        return it == m_bodyLedgers.end() ? nullptr : &it->second;
     }
+
+    // Face-lineage map of a body's CURRENT shape (see FaceLineage.h): face →
+    // stable ancestry ids. Published by ops after updateBody, same lifecycle
+    // as the ledger — updateBody clears it (stale lineage is worse than none;
+    // an op that doesn't re-publish leaves consumers on their geometric
+    // fallback, which is exactly the pre-lineage behaviour). Persisted in new
+    // saves; absent in old ones.
+    void setBodyFaceIds(int id, materializr::topo::FaceIdMap m) {
+        if (m.empty()) m_bodyFaceIds.erase(id);
+        else m_bodyFaceIds[id] = std::move(m);
+    }
+    const materializr::topo::FaceIdMap* bodyFaceIds(int id) const {
+        auto it = m_bodyFaceIds.find(id);
+        return it == m_bodyFaceIds.end() ? nullptr : &it->second;
+    }
+    // Mint a fresh, never-reused lineage id (document-global; persisted).
+    int mintFaceId() { return m_nextFaceId++; }
+    int faceIdCounter() const { return m_nextFaceId; }
+    void setFaceIdCounter(int n) { if (n > m_nextFaceId) m_nextFaceId = n; }
     // Add a body with an explicit id, or update the body that already has that
     // id. Keeps ids stable across save/load and history replay; bumps the id
     // counter so later auto-assigned ids don't collide.
@@ -209,6 +249,17 @@ public:
     std::vector<int> getAllPlaneIds() const;
     int planeCount() const;
 
+    // Reference images — raster underlays hosted on construction planes
+    // (see RefImageEntry). Keyed by the host plane's id; changes ride the
+    // Plane*Event stream (the image renderer re-syncs off the same events the
+    // plane renderer does). removePlane() drops the hosted image with it.
+    void setRefImage(int planeId, RefImageEntry entry);   // add or replace
+    const RefImageEntry* getRefImage(int planeId) const;
+    void removeRefImage(int planeId);
+    void setRefImageWidthMM(int planeId, double widthMM);
+    void setRefImageOpacity(int planeId, float opacity);
+    std::vector<int> getAllRefImagePlaneIds() const;
+
     // Construction axes — same shape as construction planes. Used by
     // Revolve and any other op that needs to rotate around a line.
     // Axis* events let the renderer + Items panel react without polling.
@@ -241,13 +292,17 @@ private:
 
     std::vector<BodyEntry> m_bodies;
     std::vector<PlaneEntry> m_planes;
+    std::vector<RefImageEntry> m_refImages;
     std::vector<AxisEntry> m_axes;
     std::vector<SketchEntry> m_sketches;
     // See setCascadeSketchOverride — pinned final sketch states during a
     // cascade history replay. Empty outside cascadeFromSketchEdit.
     std::map<int, std::shared_ptr<materializr::Sketch>> m_cascadeSketchOverrides;
     // See setBodyLedger — non-owning, cleared on updateBody.
-    std::map<int, const materializr::topo::GenerationLedger*> m_bodyLedgers;
+    std::map<int, materializr::topo::GenerationLedger> m_bodyLedgers;
+    // See setBodyFaceIds — owned here (unlike the non-owning ledgers).
+    std::map<int, materializr::topo::FaceIdMap> m_bodyFaceIds;
+    int m_nextFaceId = 1;
     std::vector<FolderEntry> m_folders;
     // Tombstones: when a body is removed, its non-geometry metadata (folderId,
     // colour, visibility, name) is stashed here keyed by id. When putBody is

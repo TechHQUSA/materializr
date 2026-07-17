@@ -32,6 +32,8 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
+#include <TopExp_Explorer.hxx>
 #include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
 #include <ShapeFix_Face.hxx>
@@ -243,6 +245,50 @@ bool ProjectSketchOp::execute(Document& doc) {
     }
     try {
         m_previousShape = doc.getBody(m_bodyId);
+
+        // Re-resolve the target face against the (possibly rebuilt) body.
+        // Mint the topo name on the first run; when the stored handle is no
+        // longer a live sub-shape (an upstream edit moved/rebuilt the face),
+        // resolve the name instead — a stale handle's plane still reads, so
+        // without this the stamp lands at the OLD surface, buried or floating.
+        {
+            if (m_targetRef.empty()) {
+                materializr::topo::Context mc;
+                mc.doc = &doc; mc.shape = m_previousShape;
+                mc.type = TopAbs_FACE;
+                m_targetRef = materializr::topo::mint(m_targetFace, mc);
+            }
+            bool live = false;
+            for (TopExp_Explorer ex(m_previousShape, TopAbs_FACE); ex.More();
+                 ex.Next())
+                if (ex.Current().IsSame(m_targetFace)) { live = true; break; }
+            if (!live && !m_targetRef.empty()) {
+                materializr::topo::Context rc;
+                rc.doc = &doc; rc.shape = m_previousShape;
+                rc.type = TopAbs_FACE;
+                rc.crossRebuild = true;
+                TopoDS_Shape f;
+                if (materializr::topo::resolve(m_targetRef, rc, f) &&
+                    !f.IsNull() && f.ShapeType() == TopAbs_FACE) {
+                    // Orientation sanity guard (see MoveFaceOp): a resolution
+                    // that flips the face normal is a mis-resolve — keep the
+                    // stale handle's behaviour rather than stamp a wrong wall.
+                    auto normalOf = [](const TopoDS_Face& fc, gp_Vec& n) -> bool {
+                        try {
+                            BRepGProp_Face p(fc);
+                            double u1, u2, v1, v2; p.Bounds(u1, u2, v1, v2);
+                            gp_Pnt c; p.Normal((u1+u2)*0.5, (v1+v2)*0.5, c, n);
+                            return n.Magnitude() > 1e-9;
+                        } catch (...) { return false; }
+                    };
+                    gp_Vec nOld, nNew;
+                    if (normalOf(m_targetFace, nOld) &&
+                        normalOf(TopoDS::Face(f), nNew) &&
+                        nOld.Normalized().Dot(nNew.Normalized()) > 0.7)
+                        m_targetFace = TopoDS::Face(f);
+                }
+            }
+        }
 
         auto regions = sketch->buildRegions();
         if (regions.empty()) {
@@ -506,6 +552,12 @@ std::string ProjectSketchOp::serializeParams() const {
             m_previousShape, {m_targetFace}, TopAbs_FACE);
         if (!idx.empty()) blob += ";face=" + idx;
     }
+    // Topological face name (see MoveFaceOp); a single length-prefixed opaque
+    // blob written LAST — read to end-of-string. Absent in old files.
+    if (!m_targetRef.empty()) {
+        std::string b = m_targetRef.serialize();
+        blob += ";faceref=" + std::to_string(b.size()) + ":" + b;
+    }
     return blob;
 }
 
@@ -518,6 +570,20 @@ bool ProjectSketchOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // faceref is a length-prefixed opaque blob written last — read to end.
+        if (key == "faceref") {
+            std::string rest = blob.substr(eq + 1);
+            size_t c = rest.find(':');
+            if (c != std::string::npos) {
+                size_t n = static_cast<size_t>(
+                    std::atoll(rest.substr(0, c).c_str()));
+                if (c + 1 + n <= rest.size())
+                    m_targetRef =
+                        materializr::topo::Ref::parse(rest.substr(c + 1, n));
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "body")   { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "sketch") { m_sketchId = std::atoi(val.c_str()); any = true; }

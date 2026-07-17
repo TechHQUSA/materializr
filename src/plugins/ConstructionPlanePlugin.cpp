@@ -108,6 +108,10 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
             for (int pid : doc.getAllPlaneIds()) {
                 const auto* entry = doc.getPlane(pid);
                 if (!entry || !entry->visible) continue;
+                // Planes hosting a reference image are drawn by
+                // RefImagePlugin as textured quads (with their own selection
+                // border) — the translucent blue fill would wash the photo out.
+                if (doc.getRefImage(pid)) continue;
                 glm::vec4 col(0.30f, 0.55f, 0.95f, 0.30f);
                 g_state->renderer.addPlane(entry->plane, entry->name, col,
                                            static_cast<float>(entry->halfSize),

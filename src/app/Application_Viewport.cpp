@@ -65,6 +65,7 @@
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
 #include "modeling/DeleteOp.h"
+#include "modeling/SeparateBodyOp.h"
 #include "modeling/SketchEditOp.h"
 #include "io/StepIO.h"
 #include "io/StlExport.h"
@@ -435,6 +436,15 @@ void Application::renderViewport() {
                            lightBg ? 1.0f : 0.0f /*lightBg palette*/,
                            m_sketchGridThickness /*sketch grid line width*/);
         };
+        // OUTSIDE sketch mode the world grid draws EARLY — before the plugin
+        // passes — so translucent pass content (reference-image photos,
+        // construction-plane quads) blends OVER it: a photo's opacity then
+        // genuinely reveals the grid/ground beneath instead of fading to the
+        // bare background. Bodies still paint over the early grid opaquely, so
+        // the final image is unchanged for solid geometry. IN sketch mode the
+        // grid stays late (below) so its lines land ON TOP of the photo being
+        // traced.
+        if (!(m_inSketchMode && m_activeSketch)) drawGrid();
         // Plugin-registered render passes (e.g. ConstructionPlanePlugin's
         // plane quads) draw between the grid/background and the body/edge
         // pass. PluginContext receives the same view+proj, and each pass'
@@ -486,11 +496,13 @@ void Application::renderViewport() {
             m_selectionHighlight->render(*m_selection, *m_document, view, proj);
         }
 
-        // Grid drawn here — after bodies/edges/section/highlight — so it blends
-        // over solid geometry and fades cleanly under the opacity slider, rather
-        // than punching grid lines through coplanar faces (the old "grey grid
-        // baked into the face that opacity couldn't remove").
-        drawGrid();
+        // Sketch-mode grid drawn here — after bodies/edges/section/highlight —
+        // so it blends over solid geometry (and the reference photo being
+        // traced) and fades cleanly under the opacity slider, rather than
+        // punching grid lines through coplanar faces (the old "grey grid baked
+        // into the face that opacity couldn't remove"). The non-sketch world
+        // grid already drew EARLY, before the plugin passes (see above).
+        if (m_inSketchMode && m_activeSketch) drawGrid();
 
         // Update gizmo visibility and position based on selection.
         // Suppressed by navigationOnly so a panel pick highlights the body
@@ -815,26 +827,65 @@ void Application::renderViewport() {
                 }
             }
         }
-        // Highlight the element(s) a selected history step edits, so it's clear
-        // which line / rectangle / arc the Properties values refer to. Drawn in
-        // bright orange over the (live-previewed) target sketch.
+        // Highlight the geometry a history step touches — hovering a step
+        // previews it, selecting (pinning) a step keeps it. Lets the user see
+        // WHAT each step made before editing it. Hover wins over the pinned
+        // step so moving the cursor down the list previews each in turn.
         if (m_historyPanel && m_history) {
-            int es = m_historyPanel->getEditingStep();
-            const Operation* op = (es >= 0) ? m_history->getStep(es) : nullptr;
-            if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
-                auto tgt = se->getTarget();
-                int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
-                // Show the highlight whenever the step's sketch is on screen:
-                // the active (not-yet-committed) sketch — which findSketchId
-                // can't see — or a visible committed one.
-                bool shown = tgt && (tgt == m_activeSketch ||
-                                     (sid >= 0 && m_document->isSketchVisible(sid)));
-                if (shown) {
-                    std::set<int> lines, circles, arcs;
-                    se->getEditedElements(lines, circles, arcs);
-                    m_sketchRenderer->renderElementsHighlight(
-                        tgt.get(), lines, circles, arcs,
-                        glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+            const int hov = m_historyPanel->getHoveredStep();
+            const int es  = m_historyPanel->getEditingStep();
+            const int step = (hov >= 0) ? hov : es;
+            const Operation* op = (step >= 0) ? m_history->getStep(step) : nullptr;
+            // A hover preview is a touch dimmer than a pinned selection.
+            const float k = (hov >= 0 && hov != es) ? 0.8f : 1.0f;
+            if (op) {
+                if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
+                    // Sketch step: the WHOLE sketch outline normally; the
+                    // specific edited element(s) only while we're actually IN
+                    // that sketch (Steve — the relevant sketch is enough for a
+                    // history item; element precision is for sketch editing).
+                    auto tgt = se->getTarget();
+                    int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
+                    bool shown = tgt && (tgt == m_activeSketch ||
+                                         (sid >= 0 && m_document->isSketchVisible(sid)));
+                    if (shown) {
+                        if (m_inSketchMode && tgt == m_activeSketch) {
+                            std::set<int> lines, circles, arcs;
+                            se->getEditedElements(lines, circles, arcs);
+                            m_sketchRenderer->renderElementsHighlight(
+                                tgt.get(), lines, circles, arcs,
+                                glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+                        } else {
+                            m_sketchRenderer->renderSketchHighlight(
+                                tgt.get(), glm::vec3(0.2f * k, 0.8f * k, 1.0f * k),
+                                4.0f, view, proj);
+                        }
+                    }
+                } else {
+                    // 3D op: fillet/chamfer highlight their exact blend faces;
+                    // every other op (extrude / boolean / pattern / shell /
+                    // revolve / pushpull / …) highlights the bodies it created
+                    // or modified, read from its captureDiff.
+                    std::vector<TopoDS_Shape> shapes;
+                    if (auto* f = dynamic_cast<const FilletOp*>(op))
+                        shapes = f->getGeneratedFaces();
+                    else if (auto* c = dynamic_cast<const ChamferOp*>(op))
+                        shapes = c->getGeneratedFaces();
+                    else {
+                        OperationDiff d = op->captureDiff();
+                        auto pushBody = [&](int id) {
+                            try {
+                                TopoDS_Shape s = m_document->getBody(id);
+                                if (!s.IsNull()) shapes.push_back(s);
+                            } catch (...) {}
+                        };
+                        for (int id : d.created) pushBody(id);
+                        for (const auto& m : d.modifiedBefore) pushBody(m.first);
+                    }
+                    if (!shapes.empty() && m_selectionHighlight)
+                        m_selectionHighlight->highlightShapes(
+                            shapes, view, proj,
+                            glm::vec3(0.25f * k, 0.7f * k, 1.0f * k));
                 }
             }
         }
@@ -2598,7 +2649,14 @@ void Application::renderViewport() {
             // begins over the viewport, keep the block alive until the button lifts.
             if (viewportHovered && ImGui::IsMouseDown(ImGuiMouseButton_Left))
                 m_viewportInputLatch = true;
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            // A two-finger takeover releases the button AND parks the cursor
+            // off-screen (so the widget under the first finger can't fire,
+            // #39). Hold the latch through the gesture: pan/zoom consumption
+            // and the release-frame handlers (placement rollback, box-select
+            // end) live inside this hovered scope and must keep running,
+            // exactly as they did when the cursor stayed frozen at the press.
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                !(m_window && m_window->twoFingerActive()))
                 m_viewportInputLatch = false;
             if (m_viewportInputLatch) viewportHovered = true;
         }
@@ -6102,7 +6160,8 @@ void Application::renderViewport() {
         m_viewCube->setExtraOffset(0.0f, 0.0f);
     ViewCubeAction vcAction = m_viewCube->render(
         m_viewport->getCamera(), m_invertCubeDrag,
-        m_themeManager && m_themeManager->getTheme() == Theme::Light);
+        m_themeManager && m_themeManager->getTheme() == Theme::Light,
+        m_window && m_window->lastLeftReleaseWasGesture());
     if (vcAction != ViewCubeAction::None) {
         handleViewCubeAction(static_cast<int>(vcAction));
     }
@@ -6337,6 +6396,22 @@ void Application::renderViewport() {
                 exportBodyAsStl(bid);
                 m_contextMenuFace.Nullify();
             }
+            // Separate: only when the body actually holds more than one
+            // disconnected solid (air-gapped lumps fused into one body).
+            // Mirrors the Items-panel entry — splits them into individual
+            // bodies, largest keeping this one.
+            TopoDS_Shape bshape;
+            try { bshape = m_document->getBody(bid); } catch (...) {}
+            if (m_history && SeparateBodyOp::solidCount(bshape) > 1) {
+                if (ImGui::MenuItem("Separate")) {
+                    auto op = std::make_unique<SeparateBodyOp>();
+                    op->setBody(bid);
+                    m_history->pushOperation(std::move(op), *m_document);
+                    markDirty();
+                    m_meshesDirty = true;
+                    m_contextMenuFace.Nullify();
+                }
+            }
         };
 
         // With Multi-Select on, the menu's Select actions ADD to the current
@@ -6437,6 +6512,10 @@ void Application::renderViewport() {
             }
             if (ImGui::MenuItem("Export as SVG…")) {
                 exportSketchAsSvg(sid);
+                m_contextMenuSketchId = -1;
+            }
+            if (ImGui::MenuItem("Export as DXF…")) {
+                exportSketchAsDxf(sid);
                 m_contextMenuSketchId = -1;
             }
             ImGui::Separator();

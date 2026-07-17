@@ -1,4 +1,5 @@
 #include "ProjectIO.h"
+#include "../modeling/SubShapeIndex.h"
 #include "../core/Document.h"
 #include "../modeling/Sketch.h"
 #include "../modeling/SketchEditOp.h"
@@ -427,6 +428,29 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
                 << a->direction.X() << " " << a->direction.Y() << " " << a->direction.Z() << "\n";
         }
     }
+    // Reference images (photo underlays hosted on construction planes). The
+    // ORIGINAL compressed file bytes go in verbatim, length-prefixed like
+    // PARAMS_LEN, so a .materializr stays self-contained and no recompression
+    // ever degrades the photo. Keyed by the SAVED plane id — the loader remaps
+    // through the CPLANE savedId→newId map (plane ids aren't preserved).
+    // Block only appears when images exist, so ordinary projects are
+    // byte-identical to before.
+    {
+        std::vector<int> imgIds = doc.getAllRefImagePlaneIds();
+        if (!imgIds.empty()) {
+            ofs << "REFIMG_COUNT " << static_cast<int>(imgIds.size()) << "\n";
+            for (int pid : imgIds) {
+                const auto* r = doc.getRefImage(pid);
+                if (!r) continue;
+                ofs << "REFIMG " << r->planeId << " " << r->widthMM << " "
+                    << r->opacity << " " << r->pixW << " " << r->pixH << " "
+                    << r->fileBytes.size() << "\n";
+                ofs.write(reinterpret_cast<const char*>(r->fileBytes.data()),
+                          static_cast<std::streamsize>(r->fileBytes.size()));
+                ofs << "\n";
+            }
+        }
+    }
 
     // --- History (optional) ---
     if (history && history->present) {
@@ -464,6 +488,39 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             for (int id : st.deleted) ofs << " " << id;
             ofs << "\n";
             ofs << "STEP_END\n";
+        }
+    }
+
+    // --- Face lineage (additive; older readers skip these unknown tokens) ---
+    // Per body: each face's ancestry ids, keyed by the face's ordinal in the
+    // SAVED shape (bit-identical on load, so ordinal is exact there — the
+    // drift hazard only exists across REBUILDS, which is what the ids solve).
+    {
+        bool wroteNext = false;
+        for (int bid : doc.getAllBodyIds()) {
+            const auto* m = doc.bodyFaceIds(bid);
+            if (!m || m->empty()) continue;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) { continue; }
+            std::ostringstream sec;
+            int rows = 0;
+            for (const auto& e : *m) {
+                if (e.ids.empty()) continue;
+                int ord = SubShapeIndex::indexOf(body, e.face, TopAbs_FACE);
+                if (ord <= 0) continue;
+                sec << ord << " ";
+                for (size_t k = 0; k < e.ids.size(); ++k)
+                    sec << (k ? "," : "") << e.ids[k];
+                sec << "\n";
+                ++rows;
+            }
+            if (rows > 0) {
+                if (!wroteNext) {
+                    ofs << "FACEID_NEXT " << doc.faceIdCounter() << "\n";
+                    wroteNext = true;
+                }
+                ofs << "FACEIDS " << bid << " " << rows << "\n" << sec.str();
+            }
         }
     }
 
@@ -840,6 +897,10 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
 
     // After the bodies, v2 files carry a SKETCH section. Scan remaining lines and
     // dispatch; stop at END. (v1 files just have END here — nothing to do.)
+    // CPLANE loading allocates NEW plane ids; REFIMG entries reference the
+    // saved ones, so the CPLANE arm records the remap here for REFIMG to use
+    // (save order guarantees CPLANE precedes REFIMG).
+    std::map<int, int> refImgPlaneRemap;
     std::string line;
     while (std::getline(ifs, line)) {
         std::istringstream iss(line);
@@ -986,7 +1047,7 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                     gp_Pln pln(ax);
                     int newId = doc.addPlane(pln, pname);
                     doc.setPlaneVisible(newId, vis != 0);
-                    (void)savedId; // not preserved
+                    refImgPlaneRemap[savedId] = newId; // REFIMG remaps via this
                 } catch (...) {}
             }
         } else if (tok == "CAXIS_COUNT") {
@@ -1020,6 +1081,74 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                     (void)savedId;
                 } catch (...) {}
             }
+        } else if (tok == "REFIMG_COUNT") {
+            // Reference images. Header line + length-prefixed raw file bytes
+            // (same technique + bounds discipline as PARAMS_LEN). Saved plane
+            // ids remap through the CPLANE arm's map; an image whose plane
+            // vanished (corrupt / hand-edited file) is skipped, not fatal.
+            int n = 0; iss >> n;
+            for (int i = 0; i < n; ++i) {
+                std::string rline;
+                if (!std::getline(ifs, rline)) break;
+                std::istringstream rs(rline);
+                std::string rtok; rs >> rtok;
+                if (rtok != "REFIMG") continue;
+                int savedPlane = -1, pixW = 0, pixH = 0;
+                double widthMM = 100.0;
+                float opacity = 0.6f;
+                std::size_t nbytes = 0;
+                rs >> savedPlane >> widthMM >> opacity >> pixW >> pixH >> nbytes;
+                // Bound the untrusted length against the bytes left.
+                std::streampos here = ifs.tellg();
+                std::size_t remaining =
+                    (here >= 0 && static_cast<std::size_t>(here) <= contents.size())
+                        ? contents.size() - static_cast<std::size_t>(here) : 0;
+                if (nbytes == 0 || nbytes > remaining) {
+                    result.errorMessage = "REFIMG length exceeds remaining file size";
+                    return result;
+                }
+                std::vector<unsigned char> bytes(nbytes);
+                ifs.read(reinterpret_cast<char*>(bytes.data()),
+                         static_cast<std::streamsize>(nbytes));
+                if (static_cast<std::size_t>(ifs.gcount()) != nbytes) {
+                    result.errorMessage = "Short read on REFIMG blob";
+                    return result;
+                }
+                std::string skip;
+                std::getline(ifs, skip); // trailing newline after the blob
+                auto it = refImgPlaneRemap.find(savedPlane);
+                if (it == refImgPlaneRemap.end()) continue; // orphaned image
+                RefImageEntry e;
+                e.fileBytes = std::move(bytes);
+                e.pixW = pixW;
+                e.pixH = pixH;
+                e.widthMM = widthMM;
+                e.opacity = opacity;
+                doc.setRefImage(it->second, std::move(e));
+            }
+        } else if (tok == "FACEID_NEXT") {
+            int n = 0; iss >> n;
+            doc.setFaceIdCounter(n);
+        } else if (tok == "FACEIDS") {
+            // Face lineage for one body (see the save side). Bodies were read
+            // earlier in the file, so resolving ordinals here is exact.
+            int bid = 0, n = 0; iss >> bid >> n;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) {}
+            materializr::topo::FaceIdMap fm;
+            for (int i = 0; i < n; ++i) {
+                std::string fl;
+                if (!std::getline(ifs, fl)) break;
+                std::istringstream ls(fl);
+                int ord = 0; std::string csv;
+                ls >> ord >> csv;
+                if (body.IsNull() || ord <= 0 || csv.empty()) continue;
+                TopoDS_Shape f = SubShapeIndex::at(body, ord, TopAbs_FACE);
+                if (f.IsNull()) continue;
+                std::vector<int> ids = SubShapeIndex::parse(csv);
+                if (!ids.empty()) fm.push_back({f, ids});
+            }
+            if (!fm.empty()) doc.setBodyFaceIds(bid, std::move(fm));
         } else if (tok == "HISTORY_INITIAL_COUNT" && historyOut) {
             int k = 0; iss >> k;
             historyOut->present = true;

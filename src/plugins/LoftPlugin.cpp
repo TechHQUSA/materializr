@@ -9,19 +9,19 @@
 #include <cstdio>
 #include <memory>
 
-// Two-profile sketch loft.
+// N-profile sketch loft (2+).
 //
 // Selection contract:
-//   * 2+ sketches (or regions of 2 sketches) selected -> the action lofts
-//                              between the first two, producing a new solid.
+//   * 2+ sketches (or regions) selected -> the action lofts through ALL of
+//                              them in click order, producing a new solid.
 //   * 1 sketch / region selected -> the action stashes the request as the
 //                              "LoftPickSecond" interactive-op so Application
 //                              can render a hint popup telling the user to
-//                              Ctrl-click a second sketch and click Loft again.
+//                              Ctrl-click more sketches and click Loft again.
 //
-// We pull the outer wire of each sketch's first region — for the common case
-// (one closed loop per profile sketch) that's exactly what BRepOffsetAPI_
-// ThruSections needs.
+// We pull the outer wire of each sketch's outermost region — for the common
+// case (one closed loop per profile sketch) that's exactly what
+// BRepOffsetAPI_ThruSections needs.
 //
 // The button is registered under both HasSketches AND HasSketchRegions: when
 // the user clicks inside a closed region the toolbar switches to the Region
@@ -52,18 +52,23 @@ REGISTER_PLUGIN(Loft, [](materializr::PluginContext& ctx) {
             return;
         }
 
-        // Hand off to Application, which opens the Loft popup (Solid/Shell,
-        // Smooth/Ruled, Reverse-B-wire, live preview, Apply / Cancel) — same
-        // architecture as Linear/Radial Pattern.
+        // Hand off to Application, which opens the Loft popup (section list
+        // with reorder + per-section Flip, Solid/Shell, Smooth/Ruled, live
+        // preview, Apply / Cancel) — same architecture as Linear/Radial
+        // Pattern.
         ctx.requestInteractiveOp("Loft");
     };
 
     const char* tooltip =
-        "Loft a solid between two sketch profiles. Select two sketches or "
-        "regions (Ctrl-click to add a second) and click. With one selected, "
-        "you'll be prompted to pick the second.\n\n"
-        "Best results when the two profiles sit on PARALLEL planes with "
-        "similar topology (both rectangles, both circles, etc.). Profiles on "
+        "Loft a solid through two or more sketch profiles. Ctrl-click each "
+        "sketch (or region) in order — first to last is the skinning order — "
+        "then click Loft. With one selected, you'll be prompted to pick more.\n\n"
+        "GUIDED MODE: select ONE closed profile plus 1-2 OPEN curves and the "
+        "profile is swept up along them — draw each curve as a side "
+        "silhouette rising from the base (a slanted line = straight taper, "
+        "an arc = rounded side). Strokes past the peak are ignored.\n\n"
+        "Best results when the profiles sit on PARALLEL planes with similar "
+        "topology (all rectangles, all circles, etc.). Profiles on "
         "perpendicular planes or with very different vertex counts produce a "
         "tent / pyramid surface — that's the loft algorithm being honest, not "
         "a bug. For floor-to-vertical transitions, a Sweep along a guide curve "

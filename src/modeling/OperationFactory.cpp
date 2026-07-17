@@ -2,8 +2,11 @@
 #include "PlaneTransformOp.h"
 #include "SweepOp.h"
 #include "LoftOp.h"
+#include "GuidedLoftOp.h"
+#include "BoundaryFillOp.h"
 #include "SketchTransformOp.h"
 #include "SplitBodyOp.h"
+#include "SeparateBodyOp.h"
 #include "MirrorOp.h"
 #include "CopyOp.h"
 #include "AlignOp.h"
@@ -69,8 +72,11 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     if (typeId == "copy")            return std::make_unique<CopyOp>();
     if (typeId == "mirror")          return std::make_unique<MirrorOp>();
     if (typeId == "split_body")      return std::make_unique<SplitBodyOp>();
+    if (typeId == "separate_body")   return std::make_unique<SeparateBodyOp>();
     if (typeId == "sketchtransform") return std::make_unique<materializr::SketchTransformOp>();
     if (typeId == "loft")            return std::make_unique<LoftOp>();
+    if (typeId == "guided_loft")     return std::make_unique<GuidedLoftOp>();
+    if (typeId == "boundary_fill")   return std::make_unique<BoundaryFillOp>();
     if (typeId == "sweep")           return std::make_unique<SweepOp>();
     //   - Tier 2b (persistent sub-shape identity, see SubShapeIndex.h):
     //     edges/faces persist as ordinal indices into the step's input shape.

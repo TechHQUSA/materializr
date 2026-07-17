@@ -34,6 +34,8 @@
 #include <future>
 #include "modeling/PatternOp.h"
 #include "modeling/LoftOp.h"
+#include "modeling/GuidedLoftOp.h"
+#include "modeling/BoundaryFillOp.h"
 #include "modeling/ConstructionPlaneOp.h"
 #include "modeling/ConstructionAxisOp.h"
 #include <Geom_Plane.hxx>
@@ -47,6 +49,7 @@
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Edge.hxx>
 #include <BRepBndLib.hxx>
@@ -126,14 +129,68 @@ void Application::computeEdgeOpFaceDirs() {
             if (!f.IsSame(faceA)) { faceB = f; break; }
         if (faceB.IsNull()) return;
 
-        auto inFaceDir = [&](const TopoDS_Shape& f) -> glm::vec3 {
-            GProp_GProps props;
-            BRepGProp::SurfaceProperties(f, props);
-            gp_Pnt cm = props.CentreOfMass();
-            glm::vec3 c(cm.X(), cm.Y(), cm.Z());
-            glm::vec3 d = c - m_edgeOpMid;
-            d -= glm::dot(d, m_edgeOpDir) * m_edgeOpDir; // perpendicular to edge
-            return (glm::length(d) > 1e-6f) ? glm::normalize(d) : m_edgeOpOutDir;
+        auto inFaceDir = [&](const TopoDS_Shape& fshape) -> glm::vec3 {
+            // Centroid heuristic (perp-to-edge component of centroid − edge
+            // mid) — kept only as the last-resort fallback. It points the
+            // WRONG way whenever the face wraps around other features and its
+            // centroid lands on the far side of the edge (the light cover's
+            // shelf face flipped the yellow A-arrow, #57).
+            auto centroidDir = [&]() -> glm::vec3 {
+                GProp_GProps props;
+                BRepGProp::SurfaceProperties(fshape, props);
+                gp_Pnt cm = props.CentreOfMass();
+                glm::vec3 c(cm.X(), cm.Y(), cm.Z());
+                glm::vec3 d = c - m_edgeOpMid;
+                d -= glm::dot(d, m_edgeOpDir) * m_edgeOpDir;
+                return (glm::length(d) > 1e-6f) ? glm::normalize(d)
+                                                : m_edgeOpOutDir;
+            };
+            // Robust path (same scheme as BlendCut::analyzeEdge): the in-face
+            // direction is ±(normal × edge-tangent); pick the sign by MAJORITY
+            // of classifier probes sampled along the edge, so a hole under one
+            // sample can't flip the arrow.
+            try {
+                const TopoDS_Face face = TopoDS::Face(fshape);
+                BRepGProp_Face gf(face);
+                Standard_Real u0, u1, v0, v1;
+                gf.Bounds(u0, u1, v0, v1);
+                gp_Pnt fp;
+                gp_Vec nv;
+                gf.Normal((u0 + u1) * 0.5, (v0 + v1) * 0.5, fp, nv);
+                if (nv.Magnitude() < 1e-12) return centroidDir();
+                gp_Dir n(nv);
+                gp_Dir t(m_edgeOpDir.x, m_edgeOpDir.y, m_edgeOpDir.z);
+                gp_Dir cand = n.Crossed(t);
+                BRepAdaptor_Curve cu(e0);
+                auto votes = [&](const gp_Dir& d) {
+                    int hit = 0;
+                    const int N = 9;
+                    for (int i = 0; i < N; ++i) {
+                        const double u = (i + 0.5) / N;
+                        gp_Pnt base = cu.Value(
+                            cu.FirstParameter() +
+                            (cu.LastParameter() - cu.FirstParameter()) * u);
+                        for (double eps : {0.2, 0.05}) {
+                            BRepClass_FaceClassifier cls(
+                                face, base.Translated(gp_Vec(d) * eps), 1e-6);
+                            if (cls.State() == TopAbs_IN ||
+                                cls.State() == TopAbs_ON) {
+                                ++hit;
+                                break;
+                            }
+                        }
+                    }
+                    return hit;
+                };
+                const int plus = votes(cand);
+                const int minus = votes(cand.Reversed());
+                if (plus == 0 && minus == 0) return centroidDir();
+                gp_Dir best = (plus >= minus) ? cand : cand.Reversed();
+                return glm::normalize(
+                    glm::vec3(best.X(), best.Y(), best.Z()));
+            } catch (...) {
+                return centroidDir();
+            }
         };
         m_edgeOpFaceDirA = inFaceDir(faceA);
         m_edgeOpFaceDirB = inFaceDir(faceB);
@@ -276,6 +333,22 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
     }
     if (m_edgeOpBodyId < 0 || m_edgeOpEdges.empty() ||
         m_edgeOpPreviousShape.IsNull()) return;
+
+    // Snapshot the WHOLE document now — before the first preview editStep runs
+    // — so commit/cancel can revert cleanly if the edit can't rebuild. These
+    // ops fail on execute() but were fine on load, so there is no re-execute
+    // path back to this state; only a body snapshot restores it. (See
+    // restoreEdgeOpSnapshot / History::markFullyApplied.)
+    m_edgeOpDocSnapshot.clear();
+    for (int id : m_document->getAllBodyIds()) {
+        try { m_edgeOpDocSnapshot[id] = m_document->getBody(id); } catch (...) {}
+    }
+    // And every op's edit state: the preview frames run editStep
+    // NON-transactionally, so ops re-resolve edges/refs against preview
+    // bodies; if the commit then reverts to the body snapshot, that state
+    // must revert too or the step wedges (silently fails on every later
+    // edit until reload).
+    m_history->snapshotAllEditState();
 
     m_edgeOpActive        = true;
     m_edgeOpEditingIndex  = historyIndex;
@@ -443,13 +516,15 @@ void Application::commitInteractiveEdgeOp() {
                            m_edgeOpType == EdgeOpType::Fillet,
                            m_edgeOpOrigValue,
                            m_edgeOpTwoDist ? m_edgeOpOrigValue2 : -1.0f);
-            m_history->editStep(m_edgeOpEditingIndex, *m_document);
+            if (!m_history->editStep(m_edgeOpEditingIndex, *m_document))
+                restoreEdgeOpSnapshot();
             refreshAllEdgeOpFaces();   // replayed — rebind every op's faces
         }
         m_edgeOpActive = false;
         m_edgeOpEditingIndex = -1;
         m_edgeOpEdges.clear();
         m_edgeOpPreviousShape.Nullify();
+        m_edgeOpDocSnapshot.clear();
         m_edgeOpType = EdgeOpType::None;
         m_meshesDirty = true;
         return;
@@ -464,12 +539,41 @@ void Application::commitInteractiveEdgeOp() {
                        m_edgeOpValue,
                        m_edgeOpTwoDist ? m_edgeOpValue2 : -1.0f);
         bool editOk = m_history->editStep(m_edgeOpEditingIndex, *m_document);
+        if (!editOk) {
+            // The step couldn't rebuild on the current body (its edges
+            // reference geometry a later feature consumed — the classic case
+            // for a chamfer/fillet that was originally applied BEFORE those
+            // features). editStep left the model half-replayed; restore the
+            // pre-edit snapshot so nothing turns into a stray planar face, put
+            // the op's parameter back, and tell the user the honest remedy.
+            setEdgeOpParam(m_history->getStep(m_edgeOpEditingIndex),
+                           m_edgeOpType == EdgeOpType::Fillet,
+                           m_edgeOpOrigValue,
+                           m_edgeOpTwoDist ? m_edgeOpOrigValue2 : -1.0f);
+            restoreEdgeOpSnapshot();
+            refreshAllEdgeOpFaces();
+            showToast(std::string(m_edgeOpType == EdgeOpType::Fillet
+                                      ? "This fillet" : "This chamfer") +
+                      " can't be rebuilt on the current body \xE2\x80\x94 its edges "
+                      "reference geometry that a later feature changed. Left as-is; "
+                      "delete it and re-apply the feature on the updated body.");
+            m_edgeOpActive = false;
+            m_edgeOpDragging = false;
+            m_edgeOpEditingIndex = -1;
+            m_edgeOpEdges.clear();
+            m_edgeOpPreviousShape.Nullify();
+            m_edgeOpDocSnapshot.clear();
+            m_selection->clear();
+            m_meshesDirty = true;
+            m_edgeOpType = EdgeOpType::None;
+            return;
+        }
         // Refresh face→op mapping after the edit so ownsFace() works on the new
         // body positions. The replay re-ran EVERY op's execute(), so every
         // fillet/chamfer (not just the edited one) needs rebinding — otherwise
         // the others' faces stay at their pre-Transform positions and become
         // un-clickable until the next reload.
-        if (editOk) refreshAllEdgeOpFaces();
+        refreshAllEdgeOpFaces();
 
         // Detect a frozen op: the clicked body's geometry matches what we measured
         // at beginInteractiveEdgeOpEdit() time — before any preview ran. If the
@@ -551,6 +655,7 @@ void Application::commitInteractiveEdgeOp() {
     m_edgeOpEditingIndex = -1;
     m_edgeOpEdges.clear();
     m_edgeOpPreviousShape.Nullify();
+    m_edgeOpDocSnapshot.clear();
     m_selection->clear();
     m_meshesDirty = true;
     m_edgeOpType = EdgeOpType::None;
@@ -565,7 +670,11 @@ void Application::cancelInteractiveEdgeOp() {
                        m_edgeOpType == EdgeOpType::Fillet,
                        m_edgeOpOrigValue,
                        m_edgeOpTwoDist ? m_edgeOpOrigValue2 : -1.0f);
-        m_history->editStep(m_edgeOpEditingIndex, *m_document);
+        // Replaying at the original value can itself fail for a step that no
+        // longer rebuilds; fall back to the pre-edit snapshot so cancelling
+        // never strands the model.
+        if (!m_history->editStep(m_edgeOpEditingIndex, *m_document))
+            restoreEdgeOpSnapshot();
     } else if (m_edgeOpBodyId >= 0 && !m_edgeOpPreviousShape.IsNull()) {
         m_document->updateBody(m_edgeOpBodyId, m_edgeOpPreviousShape);
     }
@@ -574,9 +683,29 @@ void Application::cancelInteractiveEdgeOp() {
     m_edgeOpEditingIndex = -1;
     m_edgeOpEdges.clear();
     m_edgeOpPreviousShape.Nullify();
+    m_edgeOpDocSnapshot.clear();
     m_edgeOpType = EdgeOpType::None;
     refreshAllEdgeOpFaces();   // body was replayed — rebind every op's faces
     m_meshesDirty = true;
+}
+
+bool Application::restoreEdgeOpSnapshot() {
+    if (m_edgeOpDocSnapshot.empty()) return false;
+    // Put every snapshotted body back; drop any body a failed replay spawned.
+    std::set<int> want;
+    for (const auto& [id, shp] : m_edgeOpDocSnapshot) {
+        try { m_document->putBody(id, shp); } catch (...) {}
+        want.insert(id);
+    }
+    for (int id : m_document->getAllBodyIds())
+        if (!want.count(id)) { try { m_document->removeBody(id); } catch (...) {} }
+    // Restore op edit state captured at session begin — the preview replays
+    // mutated resolution members against bodies we just discarded.
+    m_history->restoreAllEditState();
+    // The steps didn't re-execute; tell history the model is fully applied so
+    // undo/redo stay consistent with the restored bodies.
+    m_history->markFullyApplied();
+    return true;
 }
 
 void Application::refreshAllEdgeOpFaces() {
@@ -588,15 +717,33 @@ void Application::refreshAllEdgeOpFaces() {
         // filleted lid that was then deleted). getBody() throws on a missing id,
         // which — uncaught here — aborted the whole app on load ("Fatal error:
         // Body not found: N"). Skip any op whose body is gone; nothing to refresh.
-        try {
-            if (auto* f = const_cast<FilletOp*>(dynamic_cast<const FilletOp*>(op))) {
-                TopoDS_Shape b = m_document->getBody(f->getBodyId());
-                if (!b.IsNull()) f->refreshGeneratedFaces(b);
-            } else if (auto* c = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(op))) {
-                TopoDS_Shape b = m_document->getBody(c->getBodyId());
-                if (!b.IsNull()) c->refreshGeneratedFaces(b);
+        auto* f = const_cast<FilletOp*>(dynamic_cast<const FilletOp*>(op));
+        auto* c = const_cast<ChamferOp*>(dynamic_cast<const ChamferOp*>(op));
+        if (!f && !c) continue;
+        const int bodyId = f ? f->getBodyId() : c->getBodyId();
+        auto refresh = [&](const TopoDS_Shape& s, int id) {
+            if (f) f->refreshGeneratedFaces(s, m_document->bodyFaceIds(id));
+            else   c->refreshGeneratedFaces(s, m_document->bodyFaceIds(id));
+        };
+        TopoDS_Shape own;
+        try { own = m_document->getBody(bodyId); } catch (...) {}
+        if (!own.IsNull()) {
+            try { refresh(own, bodyId); } catch (...) {}
+        } else {
+            // The op's own body was CONSUMED by a downstream boolean — its
+            // bevel faces now live on the successor body. Refresh against every
+            // current body; refreshGeneratedFaces matches by the op's stable
+            // face-lineage ids (exact) or blend geometry, so only the body that
+            // actually carried the faces forward updates — the rest are no-ops.
+            // Without this a filleted/chamfered body that was later unioned into
+            // another lost its history-hover highlight entirely.
+            for (int b : m_document->getAllBodyIds()) {
+                try {
+                    TopoDS_Shape bs = m_document->getBody(b);
+                    if (!bs.IsNull()) refresh(bs, b);
+                } catch (...) {}
             }
-        } catch (...) { /* body deleted downstream — nothing to refresh */ }
+        }
     }
 }
 
@@ -2534,15 +2681,52 @@ void Application::cancelPattern() {
 //
 // LoftPlugin walks the selection and, when 2+ distinct sketches are present,
 // fires requestInteractiveOp("Loft"). The main frame loop dispatches that to
-// beginLoft(), which snapshots the two profile wires (the outer wire of each
-// sketch's first region) and opens the popup. updateLoft re-pushes a preview
-// LoftOp each frame the user changes a toggle, commitLoft leaves the final
-// op on history, cancelLoft undoes the preview.
+// beginLoft(), which snapshots one profile section per selected sketch (the
+// outer wire of each sketch's outermost region, in click order — that order
+// is the skinning order) and opens the popup. updateLoft re-pushes a preview
+// LoftOp each frame the user changes a toggle / flips / reorders a section,
+// commitLoft leaves the final op on history, cancelLoft undoes the preview.
+
+// The outermost closed region of a sketch (largest outer-wire bbox) plus its
+// hole wires — shared by Loft and Boundary Fill. Concentric profiles decompose
+// into multiple regions; taking the outermost keeps the holes as channels
+// instead of grabbing the inner disk.
+static TopoDS_Wire outermostRegionWire(materializr::Sketch* sk,
+                                       std::vector<TopoDS_Wire>& holesOut,
+                                       bool* fromRegionOut = nullptr) {
+    holesOut.clear();
+    if (fromRegionOut) *fromRegionOut = false;
+    if (!sk) return {};
+    auto regions = sk->buildRegions();
+    if (!regions.empty()) {
+        size_t best = 0;
+        double bestDiag = -1.0;
+        for (size_t i = 0; i < regions.size(); ++i) {
+            if (regions[i].outerWire.IsNull()) continue;
+            Bnd_Box bb;
+            BRepBndLib::Add(regions[i].outerWire, bb);
+            if (bb.IsVoid()) continue;
+            double x0, y0, z0, x1, y1, z1;
+            bb.Get(x0, y0, z0, x1, y1, z1);
+            double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+            double diag = dx * dx + dy * dy + dz * dz;
+            if (diag > bestDiag) { bestDiag = diag; best = i; }
+        }
+        holesOut = regions[best].holeWires;
+        if (fromRegionOut) *fromRegionOut = true;   // regions are closed loops
+        return regions[best].outerWire;
+    }
+    auto wires = sk->buildWires();
+    if (!wires.empty()) return wires[0];
+    return {};
+}
 
 void Application::beginLoft() {
     if (!m_selection || !m_document) return;
 
-    // Snapshot the first two distinct sketches in click order.
+    // Snapshot every distinct selected sketch, in click order — with three
+    // ribs the loft runs first→last, so the order the user picked them in IS
+    // the loft order (reorderable later in the panel).
     std::vector<int> sketchIds;
     auto addId = [&](int id) {
         if (id < 0) return;
@@ -2557,49 +2741,78 @@ void Application::beginLoft() {
     }
     if (sketchIds.size() < 2) return;
 
-    auto wireFromSketch = [&](int id, std::vector<TopoDS_Wire>& holesOut) -> TopoDS_Wire {
-        holesOut.clear();
-        auto sk = m_document->getSketch(id);
-        if (!sk) return {};
-        auto regions = sk->buildRegions();
-        if (!regions.empty()) {
-            // Concentric profiles decompose into MULTIPLE regions (the ring
-            // AND the inner disk). Loft the outermost one — largest outer
-            // bbox — so its holes become the tube channel; blindly taking
-            // regions[0] could grab the inner disk and loft a solid cone.
-            size_t best = 0;
-            double bestDiag = -1.0;
-            for (size_t i = 0; i < regions.size(); ++i) {
-                if (regions[i].outerWire.IsNull()) continue;
-                Bnd_Box bb;
-                BRepBndLib::Add(regions[i].outerWire, bb);
-                if (bb.IsVoid()) continue;
-                double x0, y0, z0, x1, y1, z1;
-                bb.Get(x0, y0, z0, x1, y1, z1);
-                double dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
-                double diag = dx * dx + dy * dy + dz * dz;
-                if (diag > bestDiag) { bestDiag = diag; best = i; }
-            }
-            holesOut = regions[best].holeWires; // inner boundaries → tube channels
-            return regions[best].outerWire;
-        }
-        auto wires = sk->buildWires();
-        if (!wires.empty()) return wires[0];
-        return {};
-    };
 
-    m_loftWireA = wireFromSketch(sketchIds[0], m_loftHolesA);
-    m_loftWireB = wireFromSketch(sketchIds[1], m_loftHolesB);
-    if (m_loftWireA.IsNull() || m_loftWireB.IsNull()) {
-        std::fprintf(stderr,
-            "[Loft] could not derive a closed wire from one of the "
-            "selected sketches (need a closed region in each).\n");
+    // Classify each sketch: a closed region = a SECTION; no closed region but
+    // an open wire = a RAIL candidate (a side-silhouette curve). One section +
+    // 1–2 rails = guided loft (base swept along the rails — the "pyramid with
+    // rounded sides" shape a section stack can't express). Anything else =
+    // plain N-section loft.
+    m_loftSections.clear();
+    m_loftRails.clear();
+    m_loftRailsMode = false;
+    int unusable = 0;
+    for (int id : sketchIds) {
+        LoftSection sec;
+        sec.sketchId = id;
+        bool fromRegion = false;
+        {
+            auto sk = m_document->getSketch(id);
+            sec.outer = outermostRegionWire(sk.get(), sec.holes, &fromRegion);
+        }
+        // "Closed" = the sketch produced a REGION. (Never trust TopoDS's
+        // Closed() flag — it's builder-advisory and the region walker doesn't
+        // set it, which mis-filed plain circles as open and refused the loft.)
+        if (!sec.outer.IsNull() && fromRegion) {
+            m_loftSections.push_back(std::move(sec));
+            continue;
+        }
+        // No closed region — take the sketch's longest OPEN chain as a rail.
+        // (buildWires() can't serve here: it prunes every non-cycle edge.)
+        if (auto sk = m_document->getSketch(id)) {
+            TopoDS_Wire open = sk->buildOpenWire();
+            if (!open.IsNull()) {
+                m_loftRails.push_back({id, open});
+                continue;
+            }
+        }
+        std::fprintf(stderr, "[Loft] sketch %d has no usable geometry.\n", id);
+        ++unusable;
+    }
+
+    if (m_loftSections.size() == 1 && !m_loftRails.empty() &&
+        m_loftRails.size() <= 2) {
+        // Guided mode: the single closed profile is the base, the open
+        // sketches are its rails.
+        if (auto sk = m_document->getSketch(m_loftSections[0].sketchId))
+            m_loftBasePlane = sk->getPlane();
+        m_loftRailsMode = true;
+    } else if (m_loftSections.size() >= 2) {
+        // Plain section loft; open sketches (if any) don't participate.
+        if (!m_loftRails.empty())
+            showToast(std::to_string(m_loftRails.size()) +
+                      " open sketch(es) ignored — rails need exactly ONE "
+                      "closed base profile.");
+        m_loftRails.clear();
+    } else {
+        const bool tooManyRails =
+            m_loftSections.size() == 1 && m_loftRails.size() > 2;
+        const int nClosed = static_cast<int>(m_loftSections.size());
+        const int nOpen   = static_cast<int>(m_loftRails.size());
+        m_loftSections.clear();
+        m_loftRails.clear();
+        showToast(tooManyRails
+            ? "Guided loft takes at most two rail curves - deselect the "
+              "extras."
+            : "Selected " + std::to_string(nClosed) + " closed profile(s) + " +
+              std::to_string(nOpen) + " open curve(s). Loft needs 2+ closed "
+              "profiles (sections), or exactly 1 closed + 1-2 open (rails).");
         return;
     }
+    if (unusable > 0)
+        showToast(std::to_string(unusable) + " empty sketch(es) skipped.");
 
     m_loftSolid = true;
     m_loftRuled = false;
-    m_loftReverseB = false;
     m_loftPreviewPushed = false;
     m_loftActive = true;
 
@@ -2608,27 +2821,44 @@ void Application::beginLoft() {
 
 void Application::updateLoft() {
     if (!m_loftActive || !m_history || !m_document) return;
-    if (m_loftWireA.IsNull() || m_loftWireB.IsNull()) return;
+    if (m_loftRailsMode ? m_loftSections.empty() : m_loftSections.size() < 2)
+        return;
 
-    // Undo previous preview so history accumulates exactly one LoftOp.
+    // Undo previous preview so history accumulates exactly one op.
     if (m_loftPreviewPushed && m_history->canUndo()) {
         m_history->undo(*m_document);
         m_loftPreviewPushed = false;
     }
 
+    if (m_loftRailsMode) {
+        auto gop = std::make_unique<GuidedLoftOp>();
+        gop->setBase(m_loftSections[0].outer, m_loftBasePlane);
+        for (const LoftRail& r : m_loftRails) gop->addRail(r.wire);
+        gop->setSolid(m_loftSolid);
+        if (m_history->pushOperation(std::move(gop), *m_document))
+            m_loftPreviewPushed = true;
+        else
+            showToast("Guided loft failed - rails must rise away from the "
+                      "base profile's plane.");
+        m_meshesDirty = true;
+        return;
+    }
+
     auto op = std::make_unique<LoftOp>();
-    op->addProfile(m_loftWireA, m_loftHolesA);
-    // Reverse profile B's wire when requested: this re-orders B's vertices so
-    // they pair differently against A's, which is the standard remedy for
-    // the "apex pinch / pyramid" output when start vertices are misaligned.
-    // Reverse B's hole wires to match, so inner channels pair consistently.
-    if (m_loftReverseB) {
-        std::vector<TopoDS_Wire> holesB;
-        holesB.reserve(m_loftHolesB.size());
-        for (const auto& h : m_loftHolesB) holesB.push_back(TopoDS::Wire(h.Reversed()));
-        op->addProfile(TopoDS::Wire(m_loftWireB.Reversed()), holesB);
-    } else {
-        op->addProfile(m_loftWireB, m_loftHolesB);
+    for (const LoftSection& sec : m_loftSections) {
+        // Flip reverses the wire's vertex order so it pairs differently
+        // against its neighbours — the standard remedy for the "apex pinch /
+        // twist" output when start vertices are misaligned. Holes reverse
+        // with it, so inner channels pair consistently.
+        if (sec.reverse) {
+            std::vector<TopoDS_Wire> holes;
+            holes.reserve(sec.holes.size());
+            for (const auto& h : sec.holes)
+                holes.push_back(TopoDS::Wire(h.Reversed()));
+            op->addProfile(TopoDS::Wire(sec.outer.Reversed()), holes);
+        } else {
+            op->addProfile(sec.outer, sec.holes);
+        }
     }
     op->setSolid(m_loftSolid);
     op->setRuled(m_loftRuled);
@@ -2641,8 +2871,9 @@ void Application::updateLoft() {
 void Application::commitLoft() {
     m_loftActive = false;
     m_loftPreviewPushed = false;
-    m_loftWireA = TopoDS_Wire();
-    m_loftWireB = TopoDS_Wire();
+    m_loftSections.clear();
+    m_loftRails.clear();
+    m_loftRailsMode = false;
     m_meshesDirty = true;
 }
 
@@ -2856,13 +3087,58 @@ void Application::cascadeFromSketchEdit(int sketchId) {
         m_document->setCascadeSketchOverride(
             sketchId, std::make_shared<materializr::Sketch>(*sk));
     bool ok = m_history->editStep(earliest, *m_document, /*transactional=*/true);
+    // A step that can't follow the change (its geometry no longer exists on
+    // the re-derived body) used to revert the WHOLE edit behind a message
+    // that guessed at the culprit. Instead: disable the failing step, retry,
+    // and tell the user exactly which feature to re-apply (#53). Bounded —
+    // if several steps fail we stop rather than gut the history.
+    std::vector<int> disabledSteps;
+    while (!ok && m_history->lastEditFailStep() >= 0 &&
+           disabledSteps.size() < 8) {
+        const int bad = m_history->lastEditFailStep();
+        const Operation* op = m_history->getStep(bad);
+        if (!op) break;
+        std::fprintf(stderr, "[Cascade] disabling step %d (%s) and retrying\n",
+                     bad, op->name().c_str());
+        m_history->setStepEnabled(bad, false, *m_document);
+        disabledSteps.push_back(bad);
+        ok = m_history->editStep(earliest, *m_document, /*transactional=*/true);
+    }
+    if (!ok && !disabledSteps.empty()) {
+        // Still failing — restore what we disabled and fall back to a clean
+        // full revert (never leave the history silently gutted).
+        for (int i : disabledSteps)
+            m_history->setStepEnabled(i, true, *m_document);
+        disabledSteps.clear();
+    }
     m_document->clearCascadeSketchOverrides();
     std::fprintf(stderr, "[Cascade] sketchId=%d replay from step %d: %s\n",
                  sketchId, earliest, ok ? "applied" : "reverted");
     if (!ok) {
+        std::string culprit;
+        if (m_history->lastEditFailStep() >= 0) {
+            if (const Operation* op =
+                    m_history->getStep(m_history->lastEditFailStep()))
+                culprit = " (step " +
+                          std::to_string(m_history->lastEditFailStep() + 1) +
+                          ": " + op->description() + ")";
+        }
         showToast("Couldn't update the model for that sketch change \xE2\x80\x94 a "
-                  "downstream feature (e.g. a fillet) couldn't follow it, so the "
-                  "model was left unchanged.");
+                  "downstream feature" + culprit + " couldn't follow it, so "
+                  "the model was left unchanged.");
+    } else if (!disabledSteps.empty()) {
+        std::string names;
+        for (size_t i = 0; i < disabledSteps.size(); ++i) {
+            const Operation* op = m_history->getStep(disabledSteps[i]);
+            names += (i ? ", " : "") + std::string("step ") +
+                     std::to_string(disabledSteps[i] + 1) +
+                     (op ? " (" + op->description() + ")" : "");
+        }
+        showToast("Model updated \xE2\x80\x94 but " + names +
+                  " couldn't follow the change and was DISABLED. Its edge/face "
+                  "picks no longer exist on the new shape \xE2\x80\x94 delete "
+                  "it and re-apply the feature (re-enabling would retry the "
+                  "old picks).", 9.0);
     }
 
     // Partial remesh: mark only bodies whose shape changed, plus any that were
@@ -2886,8 +3162,99 @@ void Application::cancelLoft() {
         m_loftPreviewPushed = false;
     }
     m_loftActive = false;
-    m_loftWireA = TopoDS_Wire();
-    m_loftWireB = TopoDS_Wire();
+    m_loftSections.clear();
+    m_loftRails.clear();
+    m_loftRailsMode = false;
+    m_meshesDirty = true;
+}
+
+
+// ─── Boundary Fill (interactive popup) ──────────────────────────────────────
+//
+// BoundaryFillPlugin fires requestInteractiveOp("BoundaryFill") with 2+
+// closed sketches selected. Same live-preview scaffolding as Loft: one
+// BoundaryFillOp is pushed as the preview, re-pushed on toggle, committed on
+// Apply, undone on Cancel.
+
+void Application::beginBoundaryFill() {
+    if (!m_selection || !m_document) return;
+
+    std::vector<int> sketchIds;
+    auto addId = [&](int id) {
+        if (id < 0) return;
+        for (int x : sketchIds) if (x == id) return;
+        sketchIds.push_back(id);
+    };
+    for (const auto& e : m_selection->getSelection()) {
+        if ((e.type == SelectionType::Sketch ||
+             e.type == SelectionType::SketchRegion) && e.sketchId >= 0) {
+            addId(e.sketchId);
+        }
+    }
+
+    m_bfillProfiles.clear();
+    for (int id : sketchIds) {
+        auto sk = m_document->getSketch(id);
+        if (!sk) continue;
+        BFillProfile prof;
+        prof.sketchId = id;
+        bool fromRegion = false;
+        prof.outer = outermostRegionWire(sk.get(), prof.holes, &fromRegion);
+        if (prof.outer.IsNull() || !fromRegion) {
+            std::fprintf(stderr,
+                "[BoundaryFill] sketch %d has no closed region — skipped.\n", id);
+            continue;
+        }
+        prof.plane = sk->getPlane();
+        m_bfillProfiles.push_back(std::move(prof));
+    }
+    if (m_bfillProfiles.size() < 2) {
+        m_bfillProfiles.clear();
+        showToast("Boundary Fill needs at least two sketches with a closed "
+                  "region (e.g. top + front + side silhouettes).");
+        return;
+    }
+
+    m_bfillPreviewPushed = false;
+    m_bfillActive = true;
+    updateBoundaryFill();
+}
+
+void Application::updateBoundaryFill() {
+    if (!m_bfillActive || !m_history || !m_document) return;
+    if (m_bfillProfiles.size() < 2) return;
+
+    if (m_bfillPreviewPushed && m_history->canUndo()) {
+        m_history->undo(*m_document);
+        m_bfillPreviewPushed = false;
+    }
+
+    auto op = std::make_unique<BoundaryFillOp>();
+    for (const BFillProfile& p : m_bfillProfiles)
+        op->addProfile(p.outer, p.holes, p.plane);
+    if (m_history->pushOperation(std::move(op), *m_document)) {
+        m_bfillPreviewPushed = true;
+    } else {
+        showToast("Boundary Fill: the silhouettes don't enclose a common "
+                  "volume - make sure they overlap in space.");
+    }
+    m_meshesDirty = true;
+}
+
+void Application::commitBoundaryFill() {
+    m_bfillActive = false;
+    m_bfillPreviewPushed = false;
+    m_bfillProfiles.clear();
+    m_meshesDirty = true;
+}
+
+void Application::cancelBoundaryFill() {
+    if (m_bfillPreviewPushed && m_history && m_history->canUndo()) {
+        m_history->undo(*m_document);
+        m_bfillPreviewPushed = false;
+    }
+    m_bfillActive = false;
+    m_bfillProfiles.clear();
     m_meshesDirty = true;
 }
 

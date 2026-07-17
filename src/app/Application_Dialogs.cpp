@@ -67,6 +67,8 @@
 #include "io/StlIO.h"
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
+#include "io/ImageDecode.h"
+#include <fstream>
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
 #include "modeling/Unfold.h"
@@ -1743,19 +1745,122 @@ void Application::renderLoftPanel() {
         ImGuiWindowFlags_AlwaysAutoResize);
 
     bool changed = false;
+
+    auto sketchLabel = [&](int id) {
+        std::string label = "Sketch " + std::to_string(id);
+        if (m_document) {
+            if (auto sk = m_document->getSketch(id)) {
+                label = sk->getName();
+                if (label == "Sketch") label += " " + std::to_string(id);
+            }
+        }
+        return label;
+    };
+
+    // ── Guided ("rails") mode: one closed base + open side-silhouette
+    //    curves. A different machine entirely (GuidedLoftOp), so the panel
+    //    swaps to a read-only summary + the Solid toggle.
+    if (m_loftRailsMode) {
+        ImGui::TextColored(materializr::accentText(), "Guided loft");
+        ImGui::TextWrapped("Base: %s",
+                           m_loftSections.empty() ? "?"
+                               : sketchLabel(m_loftSections[0].sketchId).c_str());
+        for (size_t i = 0; i < m_loftRails.size(); ++i)
+            ImGui::TextWrapped("Rail %zu: %s", i + 1,
+                               sketchLabel(m_loftRails[i].sketchId).c_str());
+        ImGui::TextDisabled("The base profile shrinks/grows to follow the\n"
+                            "rails as it rises; rails meeting a single point\n"
+                            "close to an apex.");
+        ImGui::Separator();
+        if (ImGui::Checkbox("Solid (off = surface shell)", &m_loftSolid))
+            changed = true;
+
+        ImGui::Separator();
+        bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+        bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (changed) updateLoft();
+        if (applyClicked) commitLoft();
+        else if (cancelClicked || escPressed) cancelLoft();
+        ImGui::End();
+        return;
+    }
+
+    // ── Section list: the loft skins these top-to-bottom. ↑/↓ reorder;
+    //    Flip reverses a section's vertex order (fixes pinch/twist against
+    //    its neighbours).
+    ImGui::TextColored(materializr::accentText(), "Sections (%d)",
+                       static_cast<int>(m_loftSections.size()));
+    ImGui::SetItemTooltip("Profiles are skinned in this order — top of the "
+                          "list is one end of the loft. Reorder with the "
+                          "arrows if the surface jumps back and forth. Flip "
+                          "a section if the loft pinches or twists there.");
+    for (int i = 0; i < static_cast<int>(m_loftSections.size()); ++i) {
+        LoftSection& sec = m_loftSections[i];
+        ImGui::PushID(i);
+        // ↑ / ↓ reorder (disabled at the ends).
+        ImGui::BeginDisabled(i == 0);
+        if (ImGui::ArrowButton("up", ImGuiDir_Up)) {
+            std::swap(m_loftSections[i], m_loftSections[i - 1]);
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine(0.0f, 2.0f);
+        ImGui::BeginDisabled(i + 1 == static_cast<int>(m_loftSections.size()));
+        if (ImGui::ArrowButton("down", ImGuiDir_Down)) {
+            std::swap(m_loftSections[i], m_loftSections[i + 1]);
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(sketchLabel(sec.sketchId).c_str());
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - uiSz(50, 0).x);
+        if (ImGui::Checkbox("Flip", &sec.reverse)) changed = true;
+        ImGui::SetItemTooltip("Reverse this profile's vertex order. Use it if "
+                              "the loft pinches to an apex or twists at this "
+                              "section — usually means its start vertex isn't "
+                              "lined up with the neighbouring profiles'.");
+        ImGui::PopID();
+    }
+
+    // Warn when the sections don't sit on (roughly) parallel planes: the loft
+    // skins them in list order, so perpendicular "wall" profiles make the
+    // surface double back through itself — the boundary-fill / guide-rails
+    // feature that case wants doesn't exist yet, and the weave otherwise looks
+    // like a bug rather than a modelling-intent mismatch.
+    if (m_document && m_loftSections.size() >= 2) {
+        gp_Dir n0;
+        bool have0 = false, skewed = false;
+        for (const LoftSection& sec : m_loftSections) {
+            auto sk = m_document->getSketch(sec.sketchId);
+            if (!sk) continue;
+            gp_Dir n = sk->getPlane().Axis().Direction();
+            if (!have0) { n0 = n; have0 = true; continue; }
+            if (std::abs(n.Dot(n0)) < 0.85) { skewed = true; break; }  // >~32°
+        }
+        if (skewed) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + uiSz(260, 0).x);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1.0f),
+                "Sections sit on very different planes. Loft skins them in "
+                "list order (a stack of cross-sections), so this will likely "
+                "fold through itself. For a base + side-wall shape, draw the "
+                "side silhouettes as OPEN curves instead - one closed profile "
+                "plus open curves lofts guided by them as rails.");
+            ImGui::PopTextWrapPos();
+        }
+    }
+
+    ImGui::Separator();
     if (ImGui::Checkbox("Solid (off = surface shell)", &m_loftSolid)) changed = true;
     ImGui::SetItemTooltip("On: ThruSections caps the ends and produces a solid "
                           "body. Off: open shell — useful when one profile is "
                           "open or you want a swept surface.");
     if (ImGui::Checkbox("Ruled surface (off = smooth)", &m_loftRuled)) changed = true;
     ImGui::SetItemTooltip("Ruled draws straight-line ribs between matching "
-                          "vertices on the two profiles. Smooth interpolates a "
+                          "vertices on adjacent profiles. Smooth interpolates a "
                           "curved surface — usually nicer between similar "
                           "profiles, less predictable between dissimilar ones.");
-    if (ImGui::Checkbox("Reverse profile B vertex order", &m_loftReverseB)) changed = true;
-    ImGui::SetItemTooltip("Re-pairs vertices between the two profiles. Use this "
-                          "if the loft pinches to an apex or twists — usually "
-                          "means the wires' start vertices weren't lined up.");
 
     ImGui::Separator();
     bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
@@ -1769,6 +1874,397 @@ void Application::renderLoftPanel() {
     } else if (cancelClicked || escPressed) {
         cancelLoft();
     }
+
+    ImGui::End();
+}
+
+// ─── Reference image (photo underlay on a construction plane) ───────────────
+
+void Application::beginRefImageImport() {
+    materializr::FileDialogs::openFile(
+        "Import Reference Image",
+        {{"Images", "*.png *.jpg *.jpeg *.bmp *.PNG *.JPG *.JPEG *.BMP"}},
+        [this](const std::string& path) {
+            if (path.empty() || !m_document) return;
+            std::ifstream f(path, std::ios::binary);
+            if (!f) {
+                showToast("Could not open the image file.");
+                return;
+            }
+            std::vector<unsigned char> bytes(
+                (std::istreambuf_iterator<char>(f)),
+                std::istreambuf_iterator<char>());
+            int w = 0, h = 0;
+            if (!materializr::probeImageSize(bytes.data(), bytes.size(), w, h)) {
+                showToast("Not a readable image (PNG / JPEG / BMP supported).");
+                return;
+            }
+            // Name from the filename, so the Items panel reads naturally.
+            std::string base = std::filesystem::path(path).stem().string();
+            if (base.empty()) base = "Reference";
+            // Host plane: the GROUND plane at the origin — where a top-down
+            // "photo with a ruler" naturally lives; move/rotate it with the
+            // gizmo like any construction plane afterwards. The world is Y-up
+            // internally (the user-facing "XY" sketch plane is normal +Y —
+            // same pose as Sketch on XY), so normal (0,0,1) would be a wall.
+            int planeId = m_document->addPlane(
+                gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0),
+                              gp_Dir(1, 0, 0))),
+                "Image: " + base);
+            RefImageEntry e;
+            e.fileBytes = std::move(bytes);
+            e.pixW = w;
+            e.pixH = h;
+            e.widthMM = 100.0;      // sane default; calibration refines it
+            e.opacity = 0.6f;
+            m_document->setRefImage(planeId, std::move(e));
+            if (m_selection) {
+                SelectionEntry se;
+                se.type = SelectionType::Plane;
+                se.planeId = planeId;
+                m_selection->select(se);
+            }
+            showToast("Reference image imported — set its real size with "
+                      "Calibrate, then sketch over it.", 6.0);
+            m_meshesDirty = true;
+            // Reference images aren't a history op, so they don't move the
+            // history step — mark the non-history dirty flag so crash-recovery
+            // re-snapshots (else a recovered project loses the image; the
+            // blob lives in the doc, but the sidecar was never rewritten).
+            markDirty();
+        });
+}
+
+void Application::renderRefImagePanel() {
+    // Gate: exactly the case where a construction plane hosting an image is
+    // selected (outside sketch mode). The plane click / Items-panel click is
+    // the selection path — no separate tool state.
+    if (!m_selection || !m_document || m_inSketchMode) return;
+    int planeId = -1;
+    for (const auto& e : m_selection->getSelection()) {
+        if (e.type == SelectionType::Plane && e.planeId >= 0) {
+            planeId = e.planeId;
+            break;
+        }
+    }
+    const RefImageEntry* img =
+        planeId >= 0 ? m_document->getRefImage(planeId) : nullptr;
+    if (!img) {
+        // Selection moved off the image — drop the calibration popup state
+        // and the preview texture so we don't hold a stale GL object.
+        if (m_refImgPreviewTex) {
+            glDeleteTextures(1, &m_refImgPreviewTex);
+            m_refImgPreviewTex = 0;
+            m_refImgPreviewPlane = -1;
+        }
+        m_refImgCalibPlane = -1;
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 300,
+                                   ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(300, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Reference Image", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(materializr::accentText(), "%s",
+                       m_document->getPlaneName(planeId).c_str());
+    double heightMM = img->pixW > 0
+        ? img->widthMM * static_cast<double>(img->pixH) / img->pixW
+        : img->widthMM;
+    ImGui::TextDisabled("%d x %d px  ·  %.1f x %.1f mm", img->pixW, img->pixH,
+                        img->widthMM, heightMM);
+
+    float opacity = img->opacity;
+    if (ImGui::SliderFloat("Opacity", &opacity, 0.05f, 1.0f, "%.2f")) {
+        m_document->setRefImageOpacity(planeId, opacity);
+        markDirty();
+    }
+    ImGui::SetItemTooltip("Underlay strength — drop it until your sketch "
+                          "lines read clearly on top of the photo.");
+
+    float widthMM = static_cast<float>(img->widthMM);
+    ImGui::SetNextItemWidth(uiSz(120, 0).x);
+    if (ImGui::InputFloat("Width (mm)", &widthMM, 0, 0, "%.2f",
+                          ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (widthMM > 0.01f) {
+            m_document->setRefImageWidthMM(planeId, widthMM);
+            markDirty();
+        }
+    }
+    ImGui::SetItemTooltip("Physical width of the photo's full frame. Height "
+                          "follows the image's aspect ratio. Use Calibrate to "
+                          "derive this from a ruler in the shot.");
+
+    if (ImGui::Button("Calibrate scale...", ImVec2(uiSz(135, 0).x, 0))) {
+        m_refImgCalibPlane = planeId;
+        m_refImgPickCount = 0;
+        m_refImgCalibZoom = 1.0f;
+        m_refImgCalibPan[0] = m_refImgCalibPan[1] = 0.0f;
+    }
+    ImGui::SetItemTooltip("Click two points a known distance apart in the "
+                          "photo (the ruler you photographed), type that "
+                          "distance, and the image scales to real millimetres.");
+    ImGui::SameLine();
+    if (ImGui::Button("Remove", ImVec2(uiSz(90, 0).x, 0))) {
+        // Removing the image removes its host plane too — the plane existed
+        // only to carry the photo. (No history op: reference scaffolding,
+        // same as sketch drafts.)
+        m_document->removePlane(planeId);
+        if (m_selection) m_selection->clear();
+        m_refImgCalibPlane = -1;
+        markDirty();
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Separator();
+    ImGui::TextWrapped("Move / rotate with the gizmo like a construction "
+                       "plane. Sketch on it to trace the photo.");
+    ImGui::End();
+
+    // ── Calibration popup ────────────────────────────────────────────────
+    if (m_refImgCalibPlane != planeId) return;
+
+    // (Re)build the preview texture for this plane's image if needed. The
+    // decode is at most a few hundred ms for a phone photo and happens once
+    // per popup open — acceptable without a spinner.
+    if (m_refImgPreviewPlane != planeId || !m_refImgPreviewTex) {
+        if (m_refImgPreviewTex) {
+            glDeleteTextures(1, &m_refImgPreviewTex);
+            m_refImgPreviewTex = 0;
+        }
+        materializr::DecodedImage dec;
+        if (materializr::decodeImage(img->fileBytes.data(),
+                                     img->fileBytes.size(), dec)) {
+            glGenTextures(1, &m_refImgPreviewTex);
+            glBindTexture(GL_TEXTURE_2D, m_refImgPreviewTex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            // Pin unpack state (same trap as the logo texture): this upload
+            // inherits whatever GL_UNPACK_ROW_LENGTH / alignment a prior frame's
+            // texture upload left set. If it's non-zero the preview reads its
+            // rows at the wrong stride and comes out as garbled static — clean
+            // the first time, corrupt on every later open once something dirties
+            // the state. Save/pin/restore so tightly-packed RGBA reads right.
+            GLint prevRowLen = 0, prevAlign = 4;
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
+            glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, dec.width, dec.height, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, dec.rgba.data());
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            m_refImgPreviewW = dec.width;
+            m_refImgPreviewH = dec.height;
+            m_refImgPreviewPlane = planeId;
+        } else {
+            m_refImgCalibPlane = -1;
+            showToast("Could not decode the image for calibration.");
+            return;
+        }
+    }
+
+    bool calibOpen = true;
+    ImGui::SetNextWindowSize(uiSz(540, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Calibrate Image Scale", &calibOpen,
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextWrapped("Click two points a KNOWN distance apart (e.g. two "
+                       "marks on the ruler in your photo), then enter that "
+                       "distance.");
+    ImGui::Spacing();
+
+    // Fit the image INSIDE the viewport, preserving aspect — sizing by width
+    // alone let a portrait phone photo (3000×4000 px) blow the popup past the
+    // bottom of the screen. Cap both dimensions against the work area and take
+    // the tighter constraint.
+    const ImGuiViewport* mainVp = ImGui::GetMainViewport();
+    const float maxW = std::min(uiSz(520, 0).x, mainVp->WorkSize.x * 0.55f);
+    const float maxH = mainVp->WorkSize.y * 0.55f;
+    const float aspect = m_refImgPreviewW > 0
+        ? static_cast<float>(m_refImgPreviewH) / m_refImgPreviewW : 1.0f;
+    float dispW = maxW;
+    float dispH = dispW * aspect;
+    if (dispH > maxH) { dispH = maxH; dispW = dispH / aspect; }
+    // Zoomable, pannable preview inside a clipped child: scroll zooms about
+    // the cursor, right-drag pans — a 4000 px phone photo's ruler ticks are
+    // unpickable at fit-to-window scale.
+    ImVec2 viewPos = ImGui::GetCursorScreenPos();
+    ImGui::BeginChild("##calibView", ImVec2(dispW, dispH), false,
+                      ImGuiWindowFlags_NoScrollbar |
+                      ImGuiWindowFlags_NoScrollWithMouse);
+    const float zoom = m_refImgCalibZoom;
+    const float imgW = dispW * zoom, imgH = dispH * zoom;
+    // Clamp pan so the image always covers the viewportable area.
+    auto clampPan = [&](float pan, float imgSz, float viewSz) {
+        if (imgSz <= viewSz) return (viewSz - imgSz) * 0.5f;
+        return std::min(0.0f, std::max(viewSz - imgSz, pan));
+    };
+    m_refImgCalibPan[0] = clampPan(m_refImgCalibPan[0], imgW, dispW);
+    m_refImgCalibPan[1] = clampPan(m_refImgCalibPan[1], imgH, dispH);
+    ImVec2 imgPos(viewPos.x + m_refImgCalibPan[0],
+                  viewPos.y + m_refImgCalibPan[1]);
+    ImGui::SetCursorScreenPos(imgPos);
+    ImGui::Image((ImTextureID)(intptr_t)m_refImgPreviewTex,
+                 ImVec2(imgW, imgH));
+    ImGui::SetCursorScreenPos(viewPos);
+    ImGui::InvisibleButton("##calibClicks", ImVec2(dispW, dispH));
+    const bool hovered = ImGui::IsItemHovered();
+    ImGuiIO& io = ImGui::GetIO();
+    if (hovered && io.MouseWheel != 0.0f) {
+        const float newZoom = std::min(12.0f,
+            std::max(1.0f, zoom * std::pow(1.25f, io.MouseWheel)));
+        if (newZoom != zoom) {
+            // Keep the image point under the cursor fixed while zooming.
+            ImVec2 m = ImGui::GetMousePos();
+            const float fx = (m.x - imgPos.x) / imgW;
+            const float fy = (m.y - imgPos.y) / imgH;
+            m_refImgCalibZoom = newZoom;
+            m_refImgCalibPan[0] = (m.x - viewPos.x) - fx * dispW * newZoom;
+            m_refImgCalibPan[1] = (m.y - viewPos.y) - fy * dispH * newZoom;
+        }
+    }
+    // Panning: right-drag (desktop) or LEFT-drag (a tablet's one finger IS
+    // the left mouse). Picking then happens on RELEASE of a non-drag (a tap),
+    // so panning never places stray points.
+    if (hovered && (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f))) {
+        m_refImgCalibPan[0] += io.MouseDelta.x;
+        m_refImgCalibPan[1] += io.MouseDelta.y;
+    }
+    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+        m_refImgPickCount < 2) {
+        ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 6.0f);
+        const bool wasTap = drag.x == 0.0f && drag.y == 0.0f;
+        if (wasTap) {
+            ImVec2 m = ImGui::GetMousePos();
+            float px = (m.x - imgPos.x) / imgW * m_refImgPreviewW;
+            float py = (m.y - imgPos.y) / imgH * m_refImgPreviewH;
+            if (px >= 0 && py >= 0 && px <= m_refImgPreviewW &&
+                py <= m_refImgPreviewH) {
+                m_refImgPickPx[m_refImgPickCount][0] = px;
+                m_refImgPickPx[m_refImgPickCount][1] = py;
+                ++m_refImgPickCount;
+            }
+        }
+    }
+    // Markers + connecting line (in the child's draw list, clipped with it).
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    auto toScreen = [&](int i) {
+        return ImVec2(imgPos.x + m_refImgPickPx[i][0] / m_refImgPreviewW * imgW,
+                      imgPos.y + m_refImgPickPx[i][1] / m_refImgPreviewH * imgH);
+    };
+    for (int i = 0; i < m_refImgPickCount; ++i) {
+        ImVec2 p = toScreen(i);
+        dl->AddCircle(p, 7.0f, IM_COL32(255, 200, 40, 255), 0, 2.5f);
+        dl->AddCircleFilled(p, 2.5f, IM_COL32(255, 200, 40, 255));
+    }
+    if (m_refImgPickCount == 2)
+        dl->AddLine(toScreen(0), toScreen(1), IM_COL32(255, 200, 40, 220), 2.0f);
+    ImGui::EndChild();
+    // Zoom buttons: pinch is routed to the 3D camera on tablets, so the
+    // dialog gets explicit controls (they help on desktop too). Zoom about
+    // the view centre.
+    auto zoomAbout = [&](float factor) {
+        const float newZoom = std::min(12.0f,
+            std::max(1.0f, m_refImgCalibZoom * factor));
+        if (newZoom == m_refImgCalibZoom) return;
+        const float cxv = dispW * 0.5f, cyv = dispH * 0.5f;
+        const float fx = (cxv - m_refImgCalibPan[0]) / imgW;
+        const float fy = (cyv - m_refImgCalibPan[1]) / imgH;
+        m_refImgCalibZoom = newZoom;
+        m_refImgCalibPan[0] = cxv - fx * dispW * newZoom;
+        m_refImgCalibPan[1] = cyv - fy * dispH * newZoom;
+    };
+    if (ImGui::Button("+", ImVec2(uiSz(34, 0).x, 0))) zoomAbout(1.5f);
+    ImGui::SameLine();
+    if (ImGui::Button("-", ImVec2(uiSz(34, 0).x, 0))) zoomAbout(1.0f / 1.5f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit")) {
+        m_refImgCalibZoom = 1.0f;
+        m_refImgCalibPan[0] = m_refImgCalibPan[1] = 0.0f;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.0f%%  -  drag to pan, tap to pick, scroll to zoom",
+                        m_refImgCalibZoom * 100.0f);
+
+    ImGui::Text("Points picked: %d / 2", m_refImgPickCount);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset points")) m_refImgPickCount = 0;
+
+    ImGui::SetNextItemWidth(uiSz(120, 0).x);
+    ImGui::InputText("Distance between points (mm)", m_refImgDistBuf,
+                     sizeof(m_refImgDistBuf), ImGuiInputTextFlags_CharsDecimal);
+
+    float distMM = static_cast<float>(std::atof(m_refImgDistBuf));
+    bool canApply = m_refImgPickCount == 2 && distMM > 0.0f;
+    ImGui::BeginDisabled(!canApply);
+    if (ImGui::Button("Apply", ImVec2(120, 0))) {
+        float ddx = m_refImgPickPx[1][0] - m_refImgPickPx[0][0];
+        float ddy = m_refImgPickPx[1][1] - m_refImgPickPx[0][1];
+        float pxDist = std::sqrt(ddx * ddx + ddy * ddy);
+        if (pxDist > 1.0f) {
+            // mm-per-pixel from the picked pair → full-frame physical width.
+            double mmPerPx = static_cast<double>(distMM) / pxDist;
+            m_document->setRefImageWidthMM(planeId, img->pixW * mmPerPx);
+            markDirty();
+            showToast("Image calibrated to real size.");
+        }
+        m_refImgCalibPlane = -1;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0))) m_refImgCalibPlane = -1;
+
+    ImGui::End();
+    if (!calibOpen) m_refImgCalibPlane = -1;
+}
+
+
+void Application::renderBoundaryFillPanel() {
+    if (!m_bfillActive) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 280,
+                                    ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(280, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Boundary Fill", nullptr,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(materializr::accentText(), "Silhouettes (%d)",
+                       static_cast<int>(m_bfillProfiles.size()));
+    for (const BFillProfile& prof : m_bfillProfiles) {
+        std::string label = "Sketch " + std::to_string(prof.sketchId);
+        if (m_document) {
+            if (auto sk = m_document->getSketch(prof.sketchId)) {
+                label = sk->getName();
+                if (label == "Sketch")
+                    label += " " + std::to_string(prof.sketchId);
+            }
+        }
+        ImGui::BulletText("%s", label.c_str());
+    }
+    ImGui::TextDisabled("Each sketch is the body's outline seen from\n"
+                        "its plane's direction; the solid is what\n"
+                        "matches ALL of them (order doesn't matter).");
+
+    ImGui::Separator();
+    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    ImGui::SameLine();
+    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+
+    if (applyClicked) commitBoundaryFill();
+    else if (cancelClicked || escPressed) cancelBoundaryFill();
 
     ImGui::End();
 }

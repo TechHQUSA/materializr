@@ -1,5 +1,6 @@
 #include "LoftOp.h"
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <Standard_ErrorHandler.hxx> // OCC_CATCH_SIGNALS
 #include <BRepAlgoAPI_Cut.hxx>
 #include <TopoDS.hxx>
 #include <imgui.h>
@@ -35,6 +36,13 @@ bool LoftOp::execute(Document& doc) {
     }
 
     try {
+        // Degenerate section stacks (e.g. perpendicular "wall" profiles that
+        // make the surface fold through itself) can drive ThruSections to a
+        // kernel FAULT, not just a clean failure. OCC_CATCH_SIGNALS turns that
+        // signal into a Standard_Failure the catch below absorbs — without it
+        // the app dies (crash reproduced by repeated preview/cancel on a
+        // weaving 3-section loft).
+        OCC_CATCH_SIGNALS
         BRepOffsetAPI_ThruSections thruSections(m_solid ? Standard_True : Standard_False,
                                                  m_ruled ? Standard_True : Standard_False);
 
