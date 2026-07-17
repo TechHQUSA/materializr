@@ -137,6 +137,19 @@ public:
     const std::string& lastGoodParams() const { return m_lastGoodParams; }
     void rememberGoodParams() { m_lastGoodParams = serializeParams(); }
 
+    // Transactional edit-state rollback (History::editStep). A doomed replay
+    // executes ops that individually SUCCEED before a later step fails; those
+    // executes mutate op-internal resolution state (a fillet/chamfer rewrites
+    // its stored edges/anchors/refs against the mid-replay bodies). Restoring
+    // the BODY snapshot alone leaves that state pointing at geometry that no
+    // longer exists, so the next edit attempt fails where a fresh session
+    // succeeds (the "one failed edit wedges the step until reload" bug).
+    // History snapshots every op before a transactional replay and restores
+    // them on failure. Default: stateless (most ops re-derive everything from
+    // the document); ops holding resolved sub-shape state override both.
+    virtual void snapshotEditState() {}
+    virtual void restoreEditState() {}
+
     // Wall-clock time this op was constructed (or restored to a stored value
     // on project load). Used by the HistoryPanel to bucket steps into
     // "Today / Yesterday / <date>" collapsible groups so a 145-step project

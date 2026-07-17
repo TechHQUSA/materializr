@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include "FaceLineage.h"
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
@@ -77,6 +78,10 @@ private:
     bool m_nonUniform = false;
     double m_cx = 0, m_cy = 0, m_cz = 0;       // centre for rotate/scale
     TopoDS_Shape m_previousShape;
+    // Input face lineage, captured at execute so undo can restore it —
+    // updateBody wipes the map and a partial replay (editStep starting after
+    // the producer) never re-runs the op that minted it.
+    materializr::topo::FaceIdMap m_prevFaceIds;
     // Sketches anchored to this body (sourceBodyId == m_bodyId) get the same
     // transform applied to their plane so the sketch follows the host face
     // when the body moves. Cached previous planes for undo restoration.

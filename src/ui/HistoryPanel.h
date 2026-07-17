@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <string>
 
 class History;
 class Document;
@@ -68,6 +69,11 @@ private:
     // plain extrude) instead of a fixed box that scrolls when a selection is
     // field-heavy. Capped when rendered so it can't swallow the step list.
     float m_stepPropsH = 0.0f;
+    // Pre-edit params of the step being edited: renderProperties binds the
+    // input fields STRAIGHT to op members, so after a failed Apply the typed
+    // (rejected) value would silently stick — restore this blob instead.
+    int m_paramsSnapStep = -1;
+    std::string m_paramsSnap;
     bool m_deleteConflict = false; // last delete was blocked by a dependent step
     // Steps with same typeId in a row collapse into a single expandable group
     // header. The set holds the START step index of each group the user has

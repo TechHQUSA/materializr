@@ -154,6 +154,12 @@ add_executable(test_edgeop_highlight_reload test_edgeop_highlight_reload.cpp)
 target_link_libraries(test_edgeop_highlight_reload PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_edgeop_highlight_reload COMMAND test_edgeop_highlight_reload)
 
+# test_topo_contract - THE topological-naming contract: one case per
+# (reference kind x upstream-edit kind), driven through the real replay path.
+add_executable(test_topo_contract test_topo_contract.cpp)
+target_link_libraries(test_topo_contract PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_contract COMMAND test_topo_contract)
+
 # test_sketch_edit_cascade - editing a sketch drives a hole through a chamfer
 add_executable(test_sketch_edit_cascade test_sketch_edit_cascade.cpp)
 target_link_libraries(test_sketch_edit_cascade PRIVATE materializr_core gtest gtest_main)

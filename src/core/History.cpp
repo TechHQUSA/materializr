@@ -238,6 +238,12 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         for (int id : doc.getAllBodyIds()) bodySnap[id] = doc.getBody(id);
         for (int sid : doc.getAllSketchIds())
             if (auto sk = doc.getSketch(sid)) sketchSnap.emplace(sid, *sk);
+        // Op-internal edit state too: ops that SUCCEED during a replay that
+        // later fails have re-resolved their stored edges/refs against bodies
+        // the rollback below is about to discard. Restoring bodies but not
+        // that state wedges the step — the next attempt resolves against
+        // geometry that no longer exists (fails where a fresh session works).
+        for (auto& op : m_operations) op->snapshotEditState();
     }
     auto restoreSnapshot = [&]() {
         std::set<int> want;
@@ -245,6 +251,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         for (int id : doc.getAllBodyIds()) if (!want.count(id)) doc.removeBody(id);
         for (const auto& [sid, sk] : sketchSnap)
             if (auto live = doc.getSketch(sid)) *live = sk;
+        for (auto& op : m_operations) op->restoreEditState();
         m_currentIndex = savedIndex;
     };
 
@@ -297,8 +304,15 @@ bool History::editStep(int index, Document& doc, bool transactional) {
                 // and everything above it (where the next Ctrl+Z would hit
                 // the step below: "undo deleted the whole body"). The UI
                 // re-reads the op, so the value visibly snaps back.
+                //
+                // PREVIEW MODE ONLY: a transactional caller holds a full
+                // pre-edit snapshot, which restores the EXACT prior model —
+                // a lastGoodParams REBUILD merely approximates it (fallback-
+                // built blends are path-dependent: rebuilding "the same"
+                // chamfer can produce different downstream geometry, silently
+                // swapping the model under a failed edit).
                 const std::string& good = op->lastGoodParams();
-                if (i == index && !good.empty() &&
+                if (i == index && !transactional && !good.empty() &&
                     op->deserializeParams(good) && op->execute(doc)) {
                     std::fprintf(stderr,
                         "[history-dbg] editStep: step %d rejected new params, "

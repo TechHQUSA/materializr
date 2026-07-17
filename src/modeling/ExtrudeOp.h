@@ -1,6 +1,8 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include "GenerationLedger.h"
+#include "FaceLineage.h"
 #include <TopoDS_Shape.hxx>
 #include <string>
 
@@ -66,6 +68,15 @@ private:
     // For undo
     int m_createdBodyId = -1;
     TopoDS_Shape m_previousTargetShape; // for boolean undo
+    // Face lineage through the boolean modes: the target's ancestry must
+    // survive an extrude-cut/union or every downstream lineage consumer
+    // (chamfer/fillet edge pairs) goes blind past this step. Ledger feeds
+    // the gen naming scheme; m_prevFaceIds is restored by undo (partial
+    // replay never re-runs the upstream minters); m_mintedIds keeps the
+    // completion ids STABLE across re-executes.
+    materializr::topo::GenerationLedger m_boolLedger;
+    materializr::topo::FaceIdMap m_prevFaceIds;
+    std::vector<int> m_mintedIds;
     // Optional: id of the sketch this extrude was built from. Used by the
     // cascade-on-sketch-edit path to re-derive m_profile and re-execute.
     int m_sketchId = -1;

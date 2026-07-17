@@ -2,6 +2,7 @@
 #include "Sketch.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_ModifyShape.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
@@ -74,6 +75,10 @@ bool TransformOp::execute(Document& doc) {
     try {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
+        // And the input face lineage: updateBody wipes it, and a partial
+        // replay never re-runs the op that minted it — undo restores this.
+        m_prevFaceIds.clear();
+        if (const auto* im = doc.bodyFaceIds(m_bodyId)) m_prevFaceIds = *im;
         // Same for sketch planes anchored to this body — they follow the
         // host face/body through Translate / Rotate so sketches drawn on it
         // stay registered to "where they were drawn" even after a move.
@@ -107,26 +112,28 @@ bool TransformOp::execute(Document& doc) {
 
         // Reloaded legacy step: apply the reconstructed rigid transform straight
         // to the LIVE body so any upstream edit (a fillet on this body) survives.
+        // Rigid/affine move: carry face lineage 1:1 through the transform
+        // (the builder maps each input face to its moved twin). Used by every
+        // build path below — without it a transform severs the ancestry chain
+        // a downstream fillet/chamfer resolves its edges through.
+        auto carryFaceIds = [&](BRepBuilderAPI_ModifyShape& tf) {
+            if (m_prevFaceIds.empty()) return;
+            materializr::topo::FaceIdMap moved;
+            for (auto& e : m_prevFaceIds) {
+                try {
+                    TopoDS_Shape nf = tf.ModifiedShape(e.face);
+                    if (!nf.IsNull()) moved.push_back({nf, e.ids});
+                } catch (...) {}
+            }
+            doc.setBodyFaceIds(m_bodyId, std::move(moved));
+        };
+
         if (m_useRawTrsf) {
             BRepBuilderAPI_Transform tf(m_previousShape, m_rawTrsf, true);
             tf.Build();
             if (!tf.IsDone()) return false;
-            materializr::topo::FaceIdMap inL;
-            if (const auto* im = doc.bodyFaceIds(m_bodyId)) inL = *im;
             doc.updateBody(m_bodyId, tf.Shape());
-            // Rigid move: carry face lineage 1:1 through the transform (the
-            // builder maps each input face to its moved twin).
-            if (!inL.empty()) {
-                materializr::topo::FaceIdMap moved;
-                for (auto& e : inL) {
-                    try {
-                        TopoDS_Shape nf = tf.ModifiedShape(e.face);
-                        if (!nf.IsNull())
-                            moved.push_back({nf, e.ids});
-                    } catch (...) {}
-                }
-                doc.setBodyFaceIds(m_bodyId, std::move(moved));
-            }
+            carryFaceIds(tf);
             for (const auto& [sid, prevPln] : m_previousSketchPlanes) {
                 auto sk = doc.getSketch(sid);
                 if (sk) sk->setPlane(prevPln.Transformed(m_rawTrsf));
@@ -148,6 +155,7 @@ bool TransformOp::execute(Document& doc) {
             gtf.Build();
             if (!gtf.IsDone()) return false;
             doc.updateBody(m_bodyId, gtf.Shape());
+            carryFaceIds(gtf);
             return true;
         }
 
@@ -176,6 +184,7 @@ bool TransformOp::execute(Document& doc) {
         }
 
         doc.updateBody(m_bodyId, transform.Shape());
+        carryFaceIds(transform);
 
         // Propagate the SAME gp_Trsf to every sketch anchored to this body
         // so the sketch's plane (and therefore its 2D coordinate frame)
@@ -202,6 +211,12 @@ bool TransformOp::undo(Document& doc) {
 
     try {
         doc.updateBody(m_bodyId, m_previousShape);
+        // Restore the input face lineage captured at execute — updateBody
+        // just wiped it, and if this undo is part of a PARTIAL replay
+        // (editStep starting after the map's producer), nothing upstream
+        // will re-mint it.
+        if (!m_prevFaceIds.empty())
+            doc.setBodyFaceIds(m_bodyId, m_prevFaceIds);
         // Restore the sketch planes we snapshotted in execute(). Even if
         // some sketches have been removed since, we just skip the missing
         // ones — restoration is best-effort.

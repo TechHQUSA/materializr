@@ -90,6 +90,48 @@ private:
     // execute with the body's producing ledger in context.
     std::vector<materializr::topo::Ref> m_edgeRefs;
 
+    // Lineage-FIRST edge naming (parity with ChamferOp, #52): each filleted
+    // edge as its two adjacent faces' ancestry ids — resolvable from the
+    // FaceIdMap alone, i.e. it survives a partial replay where the ledger
+    // (runtime-only) is gone but the map was carried/restored.
+    std::vector<std::pair<int,int>> m_edgeFaceIdPairs;
+    // Input face lineage captured at execute; undo restores it so a PARTIAL
+    // replay still has ancestry for the ops it re-runs.
+    materializr::topo::FaceIdMap m_prevFaceIds;
+
+    // Known-good builds: (input body, radius) → result (see ChamferOp's
+    // StoredResult for the full story — the "put the value back" adoption).
+    // Entry 0 = the loaded original, never evicted.
+    struct StoredResult {
+        TopoDS_Shape base, result;
+        double r = -1.0;
+        std::vector<TopoDS_Shape> genFaces;
+    };
+    std::vector<StoredResult> m_storedResults;
+    void rememberResult(const TopoDS_Shape& base, const TopoDS_Shape& result);
+
+    // Transactional edit-state rollback (see Operation::snapshotEditState).
+    struct EditSnap {
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        materializr::topo::FaceIdMap prevFaceIds;
+        TopoDS_Shape previousShape, resultShape;
+        std::vector<TopoDS_Shape> generatedFaces;
+        std::vector<int> genFaceIds;
+        std::vector<StoredResult> storedResults;
+        double radius = 0.0;
+        bool valid = false;
+    };
+    EditSnap m_editSnap;
+
+public:
+    void snapshotEditState() override;
+    void restoreEditState() override;
+
+private:
+
     // Generation map of the last execute(): the input EDGE -> the blend FACE(S)
     // it produced. Lets the "gen" naming strategy name a blend face by the edge
     // that generated it (itself sketch-anchored, so edit-stable) — the general

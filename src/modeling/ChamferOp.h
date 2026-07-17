@@ -92,6 +92,52 @@ private:
     // lineage map BEFORE any geometric guessing.
     int m_refFaceId = -1;
     std::vector<std::pair<int,int>> m_edgeFaceIdPairs;
+    // Input face lineage captured at execute; undo restores it so a PARTIAL
+    // replay (editStep starting after the map's producer) still has ancestry
+    // for the ops it re-runs.
+    materializr::topo::FaceIdMap m_prevFaceIds;
+
+    // Known-good builds: (input body, params) → result, kept for the loaded
+    // original plus recent in-session successes. When a REBUILD at exact
+    // previously-successful values on the exact same input fails — the "put
+    // it back to 15" case, where the new blend is everywhere coincident with
+    // features built on the original bevel, the worst case for the boolean
+    // fallback — adopt the stored result outright: identical input +
+    // identical params ⇒ that stored shape IS the answer. A single slot
+    // wasn't enough: a successful 16-edit overwrote the original 15 answer,
+    // so "back to 15" had nothing to adopt. Bounded; entry 0 (the loaded
+    // original) is never evicted. Shape handles are cheap (shared TShapes).
+    struct StoredResult {
+        TopoDS_Shape base, result;
+        double d = -1.0, d2 = -2.0;
+        std::vector<TopoDS_Shape> genFaces;
+    };
+    std::vector<StoredResult> m_storedResults;
+    void rememberResult(const TopoDS_Shape& base, const TopoDS_Shape& result);
+
+    // Transactional edit-state rollback (see Operation::snapshotEditState):
+    // everything a doomed replay's execute() may have rewritten.
+    struct EditSnap {
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        materializr::topo::FaceIdMap prevFaceIds;
+        TopoDS_Shape previousShape, resultShape;
+        std::vector<TopoDS_Shape> generatedFaces;
+        std::vector<int> genFaceIds;
+        std::vector<StoredResult> storedResults;
+        double distance = 0.0, distance2 = -1.0;
+        int refFaceId = -1;
+        bool valid = false;
+    };
+    EditSnap m_editSnap;
+
+public:
+    void snapshotEditState() override;
+    void restoreEditState() override;
+
+private:
 
     // Generative anchors (EdgeAnchor.h) — same scheme as FilletOp.
     int m_sourceSketchId = -1;

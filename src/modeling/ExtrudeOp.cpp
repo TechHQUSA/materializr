@@ -14,6 +14,7 @@
 #include <BRepGProp_Face.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeShape.hxx>
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
 #include <TopoDS_Compound.hxx>
@@ -393,6 +394,34 @@ bool ExtrudeOp::execute(Document& doc) {
             }
         }
 
+        // Boolean-mode face lineage: capture the target's map, record the
+        // builder's Generated/Modified against BOTH inputs, propagate onto
+        // the result, and complete with STABLE minted ids (reused across
+        // re-executes while the uncovered count matches). Published after
+        // updateBody in each boolean case below.
+        auto publishBoolLineage = [&](BRepBuilderAPI_MakeShape& bld,
+                                      const TopoDS_Shape& toolShape,
+                                      const TopoDS_Shape& result) {
+            m_boolLedger.capture(bld, m_previousTargetShape, TopAbs_FACE);
+            m_boolLedger.captureAdd(bld, toolShape, TopAbs_FACE);
+            doc.setBodyLedger(m_targetBodyId, &m_boolLedger);
+            materializr::topo::FaceIdMap next = materializr::topo::propagate(
+                {{&m_prevFaceIds, m_previousTargetShape}}, m_boolLedger,
+                result);
+            std::vector<TopoDS_Shape> uncovered;
+            for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next())
+                if (!materializr::topo::idsFor(next, ex.Current()))
+                    uncovered.push_back(ex.Current());
+            if (m_mintedIds.size() != uncovered.size()) {
+                m_mintedIds.clear();
+                for (size_t i = 0; i < uncovered.size(); ++i)
+                    m_mintedIds.push_back(doc.mintFaceId());
+            }
+            for (size_t i = 0; i < uncovered.size(); ++i)
+                materializr::topo::addId(next, uncovered[i], m_mintedIds[i]);
+            doc.setBodyFaceIds(m_targetBodyId, std::move(next));
+        };
+
         // Apply boolean mode
         switch (m_mode) {
             case ExtrudeMode::NewBody: {
@@ -408,6 +437,9 @@ bool ExtrudeOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
+                m_prevFaceIds.clear();
+                if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
+                    m_prevFaceIds = *im;
                 BRepAlgoAPI_Fuse fuse(m_previousTargetShape, extrudedShape);
                 fuse.Build();
                 if (!fuse.IsDone()) {
@@ -421,6 +453,7 @@ bool ExtrudeOp::execute(Document& doc) {
                     if (!unified.IsNull()) fused = unified;
                 } catch (...) { /* keep un-unified result */ }
                 doc.updateBody(m_targetBodyId, fused);
+                publishBoolLineage(fuse, extrudedShape, fused);
                 m_createdBodyId = -1;
                 break;
             }
@@ -429,12 +462,16 @@ bool ExtrudeOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
+                m_prevFaceIds.clear();
+                if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
+                    m_prevFaceIds = *im;
                 BRepAlgoAPI_Cut cut(m_previousTargetShape, extrudedShape);
                 cut.Build();
                 if (!cut.IsDone()) {
                     return false;
                 }
                 doc.updateBody(m_targetBodyId, cut.Shape());
+                publishBoolLineage(cut, extrudedShape, doc.getBody(m_targetBodyId));
                 m_createdBodyId = -1;
                 break;
             }
@@ -443,12 +480,16 @@ bool ExtrudeOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
+                m_prevFaceIds.clear();
+                if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
+                    m_prevFaceIds = *im;
                 BRepAlgoAPI_Common common(m_previousTargetShape, extrudedShape);
                 common.Build();
                 if (!common.IsDone()) {
                     return false;
                 }
                 doc.updateBody(m_targetBodyId, common.Shape());
+                publishBoolLineage(common, extrudedShape, doc.getBody(m_targetBodyId));
                 m_createdBodyId = -1;
                 break;
             }
@@ -472,6 +513,10 @@ bool ExtrudeOp::undo(Document& doc) {
             // Restore previous target shape for boolean operations
             if (m_targetBodyId >= 0 && !m_previousTargetShape.IsNull()) {
                 doc.updateBody(m_targetBodyId, m_previousTargetShape);
+                // And its face lineage — a partial replay (editStep starting
+                // after the map's producer) never re-runs the minters.
+                if (!m_prevFaceIds.empty())
+                    doc.setBodyFaceIds(m_targetBodyId, m_prevFaceIds);
             }
         }
         return true;

@@ -10,6 +10,7 @@
 #include <gp_Dir.hxx>
 #include "SheetSpec.h"
 #include "../modeling/FaceLineage.h"
+#include "../modeling/GenerationLedger.h"
 
 namespace materializr { class Sketch; class EventBus;
 namespace topo { struct GenerationLedger; } }
@@ -116,12 +117,16 @@ public:
     // by lineage — e.g. a fillet re-finding a boolean SEAM edge, which no
     // geometric scheme can name. updateBody clears the entry (a stale ledger
     // is worse than none); the producing op re-publishes right after.
+    // Stored BY VALUE (copied from the op): a non-owning pointer dangled the
+    // moment a publishing op died before its consumer minted (SIGBUS in
+    // topo::mint via a destroyed ExtrudeOp/FilletOp ledger). Copying is cheap
+    // relative to that whole class of lifetime bugs.
     void setBodyLedger(int id, const materializr::topo::GenerationLedger* l) {
-        if (l) m_bodyLedgers[id] = l; else m_bodyLedgers.erase(id);
+        if (l) m_bodyLedgers[id] = *l; else m_bodyLedgers.erase(id);
     }
     const materializr::topo::GenerationLedger* bodyLedger(int id) const {
         auto it = m_bodyLedgers.find(id);
-        return it == m_bodyLedgers.end() ? nullptr : it->second;
+        return it == m_bodyLedgers.end() ? nullptr : &it->second;
     }
 
     // Face-lineage map of a body's CURRENT shape (see FaceLineage.h): face →
@@ -294,7 +299,7 @@ private:
     // cascade history replay. Empty outside cascadeFromSketchEdit.
     std::map<int, std::shared_ptr<materializr::Sketch>> m_cascadeSketchOverrides;
     // See setBodyLedger — non-owning, cleared on updateBody.
-    std::map<int, const materializr::topo::GenerationLedger*> m_bodyLedgers;
+    std::map<int, materializr::topo::GenerationLedger> m_bodyLedgers;
     // See setBodyFaceIds — owned here (unlike the non-owning ledgers).
     std::map<int, materializr::topo::FaceIdMap> m_bodyFaceIds;
     int m_nextFaceId = 1;

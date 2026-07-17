@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include "TopoName.h"
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopTools_ListOfShape.hxx>
@@ -43,6 +44,11 @@ private:
     int m_bodyId = -1;
     TopTools_ListOfShape m_faces;   // live face refs (fresh ops)
     std::vector<int> m_faceIndices; // SubShapeIndex ordinals (reloaded ops)
+    // Topological names for the drafted faces (see ShellOp): minted on the
+    // first execute, resolved when the stored handles go stale because an
+    // upstream edit rebuilt the body — without them a cascade replay strands
+    // the taper on faces of a body that no longer exists.
+    std::vector<materializr::topo::Ref> m_faceRefs;
     double m_dirX = 0.0, m_dirY = 1.0, m_dirZ = 0.0; // pull direction
     double m_nX = 0.0, m_nY = 0.0, m_nZ = 0.0;       // point on neutral plane
     double m_angleDeg = 5.0;

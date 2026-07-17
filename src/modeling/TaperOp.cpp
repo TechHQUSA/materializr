@@ -7,6 +7,7 @@
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
@@ -40,6 +41,48 @@ bool TaperOp::execute(Document& doc) {
     }
     try {
         m_previousShape = doc.getBody(m_bodyId);
+
+        // Re-resolve the drafted faces against the (possibly rebuilt) body.
+        // Mint topo names on the first run, while the stored handles are
+        // valid; on later runs, if any handle is no longer a sub-shape of the
+        // current body (an upstream edit rebuilt it), resolve the names
+        // instead — otherwise DraftAngle::Add just fails on the stale face.
+        {
+            auto isLive = [&](const TopoDS_Shape& f) {
+                for (TopExp_Explorer ex(m_previousShape, TopAbs_FACE);
+                     ex.More(); ex.Next())
+                    if (ex.Current().IsSame(f)) return true;
+                return false;
+            };
+            bool allLive = !m_faces.IsEmpty();
+            for (const TopoDS_Shape& f : m_faces)
+                if (!isLive(f)) { allLive = false; break; }
+            if (allLive && m_faceRefs.empty()) {
+                materializr::topo::Context ctx;
+                ctx.doc = &doc; ctx.shape = m_previousShape;
+                ctx.type = TopAbs_FACE;
+                for (const TopoDS_Shape& f : m_faces)
+                    m_faceRefs.push_back(materializr::topo::mint(f, ctx));
+            } else if (!allLive) {
+                bool named = !m_faceRefs.empty();
+                for (const auto& r : m_faceRefs)
+                    if (r.empty()) { named = false; break; }
+                std::vector<TopoDS_Shape> out;
+                materializr::topo::Context rc;
+                rc.doc = &doc; rc.shape = m_previousShape;
+                rc.type = TopAbs_FACE;
+                rc.crossRebuild = true;
+                if (!named ||
+                    !materializr::topo::resolveSet(m_faceRefs, rc, out) ||
+                    out.size() != static_cast<size_t>(m_faces.Size())) {
+                    std::fprintf(stderr, "[Taper] could not re-find the "
+                                 "drafted face(s) on the rebuilt body\n");
+                    return false;
+                }
+                m_faces.Clear();
+                for (const auto& f : out) m_faces.Append(TopoDS::Face(f));
+            }
+        }
 
         gp_Dir dir(m_dirX, m_dirY, m_dirZ);
         gp_Pln neutral(gp_Pnt(m_nX, m_nY, m_nZ), dir);
@@ -113,6 +156,20 @@ std::string TaperOp::serializeParams() const {
                                                    TopAbs_FACE);
         if (!idx.empty()) blob += ";faces=" + idx;
     }
+    // Topological face names (see ShellOp): only when every face is nameable;
+    // length-prefixed opaque blobs, written LAST (read to end-of-string).
+    if (!m_faceRefs.empty()) {
+        bool allNamed = true;
+        for (const auto& r : m_faceRefs) if (r.empty()) { allNamed = false; break; }
+        if (allNamed) {
+            std::string rb;
+            for (const auto& r : m_faceRefs) {
+                std::string b = r.serialize();
+                rb += std::to_string(b.size()) + ":" + b;
+            }
+            blob += ";facerefs=" + rb;
+        }
+    }
     return blob;
 }
 
@@ -125,6 +182,24 @@ bool TaperOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
+        // facerefs is a length-prefixed list written last — read to the end.
+        if (key == "facerefs") {
+            std::string rest = blob.substr(eq + 1);
+            m_faceRefs.clear();
+            size_t p = 0;
+            while (p < rest.size()) {
+                size_t c = rest.find(':', p);
+                if (c == std::string::npos) break;
+                size_t n = static_cast<size_t>(
+                    std::atoll(rest.substr(p, c - p).c_str()));
+                if (c + 1 + n > rest.size()) break;
+                m_faceRefs.push_back(
+                    materializr::topo::Ref::parse(rest.substr(c + 1, n)));
+                p = c + 1 + n;
+            }
+            any = true;
+            break;
+        }
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "body")  { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "angle") { m_angleDeg = std::atof(val.c_str()); any = true; }

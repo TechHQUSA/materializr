@@ -158,6 +158,20 @@ public:
         ++m_revision;
     }
 
+    // Session-level edit-state protection for the interactive edit flows,
+    // which run editStep NON-transactionally per preview frame (too hot for
+    // per-frame snapshots). Snapshot every op's edit state once when the
+    // interactive session BEGINS, restore it when the session reverts to its
+    // body snapshot — otherwise ops that executed during doomed preview
+    // replays keep resolution state pointing at discarded geometry, and the
+    // step is wedged until reload (fails where a fresh session succeeds).
+    void snapshotAllEditState() {
+        for (auto& op : m_operations) op->snapshotEditState();
+    }
+    void restoreAllEditState() {
+        for (auto& op : m_operations) op->restoreEditState();
+    }
+
     // Clear history
     void clear();
 

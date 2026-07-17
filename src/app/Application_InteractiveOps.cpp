@@ -343,6 +343,12 @@ void Application::beginInteractiveEdgeOpEdit(int historyIndex) {
     for (int id : m_document->getAllBodyIds()) {
         try { m_edgeOpDocSnapshot[id] = m_document->getBody(id); } catch (...) {}
     }
+    // And every op's edit state: the preview frames run editStep
+    // NON-transactionally, so ops re-resolve edges/refs against preview
+    // bodies; if the commit then reverts to the body snapshot, that state
+    // must revert too or the step wedges (silently fails on every later
+    // edit until reload).
+    m_history->snapshotAllEditState();
 
     m_edgeOpActive        = true;
     m_edgeOpEditingIndex  = historyIndex;
@@ -693,6 +699,9 @@ bool Application::restoreEdgeOpSnapshot() {
     }
     for (int id : m_document->getAllBodyIds())
         if (!want.count(id)) { try { m_document->removeBody(id); } catch (...) {} }
+    // Restore op edit state captured at session begin — the preview replays
+    // mutated resolution members against bodies we just discarded.
+    m_history->restoreAllEditState();
     // The steps didn't re-execute; tell history the model is fully applied so
     // undo/redo stay consistent with the restored bodies.
     m_history->markFullyApplied();

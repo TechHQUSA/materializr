@@ -6,6 +6,7 @@
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <TopExp_Explorer.hxx>
 #include <cstdio>
 #include <cstdlib>
 #include <imgui.h>
@@ -136,13 +137,37 @@ bool BooleanOp::execute(Document& doc) {
         materializr::topo::FaceIdMap inTarget, inTool;
         if (const auto* im = doc.bodyFaceIds(m_targetBodyId)) inTarget = *im;
         if (const auto* im = doc.bodyFaceIds(m_toolBodyId))   inTool   = *im;
+        m_prevTargetFaceIds = inTarget;   // undo restores these — a partial
+        m_prevToolFaceIds   = inTool;     // replay never re-runs the minters
 
         // Update target body with the result
         doc.updateBody(m_targetBodyId, resultShape);
         doc.setBodyLedger(m_targetBodyId, &m_ledger);
-        doc.setBodyFaceIds(m_targetBodyId, materializr::topo::propagate(
-            {{&inTarget, m_previousTargetShape}, {&inTool, m_previousToolShape}},
-            m_ledger, resultShape));
+        {
+            materializr::topo::FaceIdMap next = materializr::topo::propagate(
+                {{&inTarget, m_previousTargetShape},
+                 {&inTool, m_previousToolShape}},
+                m_ledger, resultShape);
+            // COMPLETE the published map, with STABLE ids: faces with no
+            // inherited ancestry (inputs carried no lineage — the common
+            // fresh-extrude case) get ids reused across re-executes while
+            // the uncovered count is unchanged. Without this, a downstream
+            // chamfer/fillet captures pairs against ids this op re-mints
+            // differently on every replay, and its lineage tier dies.
+            std::vector<TopoDS_Shape> uncovered;
+            for (TopExp_Explorer ex(resultShape, TopAbs_FACE); ex.More();
+                 ex.Next())
+                if (!materializr::topo::idsFor(next, ex.Current()))
+                    uncovered.push_back(ex.Current());
+            if (m_mintedIds.size() != uncovered.size()) {
+                m_mintedIds.clear();
+                for (size_t i = 0; i < uncovered.size(); ++i)
+                    m_mintedIds.push_back(doc.mintFaceId());
+            }
+            for (size_t i = 0; i < uncovered.size(); ++i)
+                materializr::topo::addId(next, uncovered[i], m_mintedIds[i]);
+            doc.setBodyFaceIds(m_targetBodyId, std::move(next));
+        }
 
         // Remove the tool body — unless we're keeping it (the "keep cutters"
         // option, or a cutter still needed by another target).
@@ -164,6 +189,8 @@ bool BooleanOp::undo(Document& doc) {
         // Restore target body to previous shape
         if (m_targetBodyId >= 0 && !m_previousTargetShape.IsNull()) {
             doc.updateBody(m_targetBodyId, m_previousTargetShape);
+            if (!m_prevTargetFaceIds.empty())
+                doc.setBodyFaceIds(m_targetBodyId, m_prevTargetFaceIds);
         }
 
         // Re-add the tool body that was removed — restore it under its ORIGINAL
@@ -174,6 +201,8 @@ bool BooleanOp::undo(Document& doc) {
         // also pulls folder/colour/visibility back from the tombstone.
         if (m_removedToolId >= 0 && !m_previousToolShape.IsNull()) {
             doc.putBody(m_toolBodyId, m_previousToolShape, "Boolean Tool (restored)");
+            if (!m_prevToolFaceIds.empty())
+                doc.setBodyFaceIds(m_toolBodyId, m_prevToolFaceIds);
             m_removedToolId = -1;
         }
 

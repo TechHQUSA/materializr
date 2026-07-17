@@ -402,6 +402,12 @@ bool HistoryPanel::renderContent() {
                 ImGui::CalcTextSize("0000000").x +
                 2.0f * (ImGui::GetFrameHeight() +
                         ImGui::GetStyle().ItemInnerSpacing.x));
+            // First frame on a newly selected step: remember its params so a
+            // failed Apply can snap the fields back (they bind live to the op).
+            if (m_paramsSnapStep != m_editingStep) {
+                m_paramsSnapStep = m_editingStep;
+                m_paramsSnap = op->serializeParams();
+            }
             const_cast<Operation*>(op)->renderProperties();
             ImGui::PopItemWidth();
             // Measure the fields so next frame's block sizes to them. In a
@@ -427,6 +433,15 @@ bool HistoryPanel::renderContent() {
                 bool applied = m_history->editStep(m_editingStep, *m_document,
                                                    /*transactional=*/true);
                 modified = true;
+                if (!applied && !m_paramsSnap.empty()) {
+                    // The replay was rolled back — snap the fields back to the
+                    // pre-edit values too. The inputs bind live to op members,
+                    // so without this the REJECTED value silently sticks in
+                    // the panel while the geometry shows the old state.
+                    const_cast<Operation*>(op)->deserializeParams(m_paramsSnap);
+                } else if (applied) {
+                    m_paramsSnap = op->serializeParams();   // new baseline
+                }
                 // If the edited step is a SketchEditOp, publish a cascade
                 // event so any downstream Extrude / Push-Pull that consumed
                 // this sketch re-runs with the new constraint values. We

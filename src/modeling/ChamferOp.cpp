@@ -83,6 +83,60 @@ std::vector<TopoDS_Shape> facesCreatedVsPrev(const TopoDS_Shape& result,
 
 ChamferOp::ChamferOp() = default;
 
+void ChamferOp::rememberResult(const TopoDS_Shape& base,
+                               const TopoDS_Shape& result) {
+    if (base.IsNull() || result.IsNull()) return;
+    // Refresh an existing (base, params) entry rather than duplicating.
+    for (auto& e : m_storedResults) {
+        if (e.base.IsEqual(base) && std::abs(e.d - m_distance) < 1e-9 &&
+            std::abs(e.d2 - m_distance2) < 1e-9) {
+            e.result = result;
+            e.genFaces = m_generatedFaces;
+            return;
+        }
+    }
+    m_storedResults.push_back(
+        {base, result, m_distance, m_distance2, m_generatedFaces});
+    // Bounded; keep entry 0 (the loaded original) forever, evict the oldest
+    // in-session entry after that.
+    if (m_storedResults.size() > 8)
+        m_storedResults.erase(m_storedResults.begin() + 1);
+}
+
+void ChamferOp::snapshotEditState() {
+    m_editSnap.edges = m_edges;
+    m_editSnap.anchors = m_edgeAnchors;
+    m_editSnap.refs = m_edgeRefs;
+    m_editSnap.pairs = m_edgeFaceIdPairs;
+    m_editSnap.prevFaceIds = m_prevFaceIds;
+    m_editSnap.previousShape = m_previousShape;
+    m_editSnap.resultShape = m_resultShape;
+    m_editSnap.generatedFaces = m_generatedFaces;
+    m_editSnap.genFaceIds = m_genFaceIds;
+    m_editSnap.distance = m_distance;
+    m_editSnap.distance2 = m_distance2;
+    m_editSnap.storedResults = m_storedResults;
+    m_editSnap.refFaceId = m_refFaceId;
+    m_editSnap.valid = true;
+}
+
+void ChamferOp::restoreEditState() {
+    if (!m_editSnap.valid) return;
+    m_edges = m_editSnap.edges;
+    m_edgeAnchors = m_editSnap.anchors;
+    m_edgeRefs = m_editSnap.refs;
+    m_edgeFaceIdPairs = m_editSnap.pairs;
+    m_prevFaceIds = m_editSnap.prevFaceIds;
+    m_previousShape = m_editSnap.previousShape;
+    m_resultShape = m_editSnap.resultShape;
+    m_generatedFaces = m_editSnap.generatedFaces;
+    m_genFaceIds = m_editSnap.genFaceIds;
+    m_distance = m_editSnap.distance;
+    m_distance2 = m_editSnap.distance2;
+    m_storedResults = m_editSnap.storedResults;
+    m_refFaceId = m_editSnap.refFaceId;
+}
+
 void ChamferOp::setBody(int bodyId) {
     m_bodyId = bodyId;
 }
@@ -158,6 +212,31 @@ bool ChamferOp::execute(Document& doc) {
     if (m_bodyId < 0 || m_edges.empty() || m_distance <= 0.0) {
         return false;
     }
+
+    // FAILURE MUST NOT POISON THE OP. Resolution below rewrites m_edges (and
+    // can rewrite anchors/refs) against the current body; if the build then
+    // fails, those half-resolved members would feed the NEXT attempt — which
+    // is how one failed edit wedged every later edit until reload (probe:
+    // fail at d2=14, then even the fresh-working d2=16 refused). Snapshot the
+    // resolution state and roll it back on every non-success exit.
+    struct ResolutionGuard {
+        ChamferOp& op;
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        bool committed = false;
+        explicit ResolutionGuard(ChamferOp& o)
+            : op(o), edges(o.m_edges), anchors(o.m_edgeAnchors),
+              refs(o.m_edgeRefs), pairs(o.m_edgeFaceIdPairs) {}
+        ~ResolutionGuard() {
+            if (committed) return;
+            op.m_edges = std::move(edges);
+            op.m_edgeAnchors = std::move(anchors);
+            op.m_edgeRefs = std::move(refs);
+            op.m_edgeFaceIdPairs = std::move(pairs);
+        }
+    } guard(*this);
 
     try {
         // Store previous shape for undo
@@ -516,6 +595,29 @@ bool ChamferOp::execute(Document& doc) {
             std::fprintf(stderr, "[Chamfer] keeping the partial native blend "
                          "(no fallback available).\n");
         }
+        // LAST RESORT before failing: if the caller asked for EXACTLY the
+        // parameters of a previously-successful build on EXACTLY the same
+        // input body, that stored result IS the answer — adopt it. This is
+        // the "put the value back" case: rebuilding at the original value
+        // fails because the new blend is everywhere coincident with features
+        // built on the original bevel (worst case for the boolean fallback),
+        // yet the correct output already exists on the op.
+        if (candidate.IsNull()) {
+            for (auto it = m_storedResults.rbegin();
+                 it != m_storedResults.rend(); ++it) {
+                if (it->base.IsNull() || it->result.IsNull()) continue;
+                if (!m_previousShape.IsEqual(it->base)) continue;
+                if (std::abs(m_distance - it->d) > 1e-9 ||
+                    std::abs(m_distance2 - it->d2) > 1e-9) continue;
+                candidate = it->result;
+                m_generatedFaces = it->genFaces;
+                std::fprintf(stderr, "[Chamfer] rebuild failed at known-good "
+                             "params — adopting the stored result (same "
+                             "input body, same values, d=%.2f/%.2f)\n",
+                             m_distance, m_distance2);
+                break;
+            }
+        }
         if (candidate.IsNull()) {
             std::fprintf(stderr, "[Chamfer] MakeChamfer failed (d=%.2f/%.2f)\n",
                          m_distance, m_distance2);
@@ -603,6 +705,7 @@ bool ChamferOp::execute(Document& doc) {
             }
             if (pairs.size() == m_edges.size()) m_edgeFaceIdPairs = std::move(pairs);
         }
+        m_prevFaceIds = inLineage;   // undo restores (partial-replay lifeline)
         doc.updateBody(m_bodyId, m_resultShape);
         doc.setBodyLedger(m_bodyId, &m_ledger);
 
@@ -624,6 +727,9 @@ bool ChamferOp::execute(Document& doc) {
                                         [&doc]() { return doc.mintFaceId(); });
             doc.setBodyFaceIds(m_bodyId, std::move(next));
         }
+        // Remember this build for the adopt-stored-result path (see above).
+        rememberResult(m_previousShape, m_resultShape);
+        guard.committed = true;   // success — keep the (re)resolved state
         return true;
     } catch (...) {
         return false;
@@ -637,6 +743,10 @@ bool ChamferOp::undo(Document& doc) {
 
     try {
         doc.updateBody(m_bodyId, m_previousShape);
+        // Restore the input lineage captured at execute — updateBody wiped
+        // it, and a partial replay won't re-run the op that minted it.
+        if (!m_prevFaceIds.empty())
+            doc.setBodyFaceIds(m_bodyId, m_prevFaceIds);
         return true;
     } catch (...) {
         return false;
@@ -819,6 +929,9 @@ bool ChamferOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/)
     if (m_generatedFaces.empty() && !m_resultShape.IsNull() &&
         !m_previousShape.IsNull())
         m_generatedFaces = facesCreatedVsPrev(m_resultShape, m_previousShape);
+    // Seed the known-good cache with the LOADED build (entry 0, never
+    // evicted): the original save is the answer for "put the value back".
+    rememberResult(m_previousShape, m_resultShape);
     return true;
 }
 
