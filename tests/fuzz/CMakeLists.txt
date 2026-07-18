@@ -57,3 +57,7 @@ add_fuzz_target(fuzz_igesio
 
 add_fuzz_target(fuzz_settings_roundtrip
     EXTRA_SOURCES ${CMAKE_SOURCE_DIR}/src/io/Settings.cpp)
+
+# DxfImport is already compiled into materializr_core, so no EXTRA_SOURCES —
+# but it pulls the OCCT geometry it samples (spline/ellipse) from there too.
+add_fuzz_target(fuzz_dxfimport)
