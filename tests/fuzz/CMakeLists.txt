@@ -9,9 +9,11 @@
 if(OpenCASCADE_MAJOR_VERSION EQUAL 7 AND OpenCASCADE_MINOR_VERSION LESS 8)
     set(FUZZ_STEP_LIB TKSTEP)
     set(FUZZ_IGES_LIB TKIGES)
+    set(FUZZ_STL_LIB TKSTL)
 else()
     set(FUZZ_STEP_LIB TKDESTEP)
     set(FUZZ_IGES_LIB TKDEIGES)
+    set(FUZZ_STL_LIB TKDESTL)
 endif()
 
 # Shared sanitizer/driver flags for every fuzz target. -fno-sanitize-recover=all
@@ -61,3 +63,18 @@ add_fuzz_target(fuzz_settings_roundtrip
 # DxfImport is already compiled into materializr_core, so no EXTRA_SOURCES —
 # but it pulls the OCCT geometry it samples (spline/ellipse) from there too.
 add_fuzz_target(fuzz_dxfimport)
+
+# BrepIO / StlIO: same OCC_CONVERT_SIGNALS treatment as StepIO/IgesIO — the .cpp
+# is recompiled into the target with the def so OCC_CATCH_SIGNALS actually
+# converts a kernel fault (materializr_core's copy is built without it). The
+# static-lib copy of each object is simply not extracted once the target
+# defines the symbols itself, so there's no duplicate-symbol clash.
+add_fuzz_target(fuzz_brepio
+    EXTRA_SOURCES ${CMAKE_SOURCE_DIR}/src/io/BrepIO.cpp
+    EXTRA_LIBS TKBRep
+    DEFS OCC_CONVERT_SIGNALS)
+
+add_fuzz_target(fuzz_stlio
+    EXTRA_SOURCES ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
+    EXTRA_LIBS ${FUZZ_STL_LIB}
+    DEFS OCC_CONVERT_SIGNALS)
