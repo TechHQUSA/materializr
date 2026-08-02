@@ -94,12 +94,25 @@ public:
     }
 
     void renderOverlay(PluginContext& ctx) override {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, materializr::accentText());
-        ImGui::Text(materializr::touchMode()
-            ? "SKETCH MODE - Draw shapes. Finish Sketch applies, Exit Sketch discards."
-            : "SKETCH MODE - Draw shapes. Enter to finish, Escape to cancel.");
-        ImGui::PopStyleColor();
+        if (m_sketchTool->getMode() == SketchToolMode::Dimension) {
+            const char* msg = "DIMENSION - Click an entity to dimension.";
+            switch (m_sketchTool->getDimPhase()) {
+                case DimPhase::PickSecondOrPlace:
+                    msg = "DIMENSION - Click a second entity, or empty space to place.";
+                    break;
+                case DimPhase::PlaceLabel:
+                    msg = "DIMENSION - Click to place the label.";
+                    break;
+                default: break;
+            }
+            materializr::viewportBanner(materializr::accentText(), "%s", msg);
+        } else {
+            materializr::viewportBanner(
+                materializr::accentText(),
+                materializr::touchMode()
+                    ? "SKETCH MODE - Draw shapes. Finish Sketch applies, Exit Sketch discards."
+                    : "SKETCH MODE - Draw shapes. Enter to finish, Escape to cancel.");
+        }
 
         // Dimension input when placing
         if (m_sketchTool->hasPreview()) {

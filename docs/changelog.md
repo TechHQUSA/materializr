@@ -3,6 +3,89 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.5.1] — 2026-07-26
+
+### Added
+
+- **Sketch dimension tool** (`D` or toolbar): measure or drive line lengths,
+  circle diameters, arc radii, point/line distances, angles, rim-to-rim gaps
+  and hole-centre offsets. Reference by default (bracketed grey labels that
+  measure without moving anything); typing a value or ticking *Driving* makes
+  the solver hold the geometry to the number. Contributed by @TechHQUSA.
+- **Thread profiles**: trapezoidal (ACME/leadscrew), square, buttress and
+  rounded join the standard V profile — external and internal — plus a radial
+  fit clearance for 3D-printed bolt+nut pairs.
+- **Polygon tool readout**: live radius and side count while placing.
+- The Thread tool gets its own icon instead of sharing the rotate arrows.
+
+### Fixed
+
+- **Parts showing through walls** on complex assemblies: the renderer no
+  longer displaces faces to break depth ties, so faces and edges sit exactly
+  where they should at every zoom level.
+- **Multi-body transforms bake on reload**: moving several bodies at once now
+  reloads as an editable history step; upstream edits propagate and undo
+  restores every body.
+- **Fillets drifting after push/pull edits**: push/pull hands face identity
+  through to downstream features, so fillets/chamfers stay on their edges
+  across replay.
+- **Threads**: cut correctly on unioned bodies; run through end chamfers like
+  a real bolt lead-in; resizing one segment of a stepped rod no longer carves
+  the neighbour; internal rounded threads keep a continuous smooth bore at
+  any length; re-cuts are cancellable mid-boolean.
+- **Section view** no longer stalls on threaded bodies — computes in the
+  background and can be cancelled.
+- **Malformed BREP files** with absurd section counts are rejected instantly
+  instead of hanging the importer.
+
+## [1.5.0] — 2026-07-18
+
+### Highlights
+
+- **File exchange, wholesale.** BREP import/export, OBJ export, 3MF export and
+  DXF sketch export join the roster, DXF **import** stamps laser/CNC profiles
+  straight into a sketch, and IGES finally applies the Y-up/Z-up axis
+  conversion. Project files prefer the shorter **`.mzr`** extension
+  (`.materializr` stays interchangeable).
+- **Reference images.** Drop a picture into the viewport and model against it,
+  with GL upload state pinned and recovery snapshots on import.
+- **New modeling ops:** **Guided Loft** (loft steered by guide curves),
+  N-section loft, **Boundary Fill**, and **Separate** (split a body's
+  disconnected solids into individual bodies).
+- **Chamfer/fillet, rebuilt.** True corner miters and hips, interior-gap
+  coverage detection, swept-wedge/arc fallbacks when a blend crosses a surface
+  feature, asymmetric-distance retries — and **topological naming** backed by
+  face lineage, so bevel/blend identity survives booleans, reloads and
+  history edits instead of drifting onto the wrong face.
+- **History that follows.** Extrude remembers its regions and the cascade
+  disables steps that can't follow (up to 8 before reverting); hovering a
+  history step highlights its geometry in the viewport.
+- **Desktop QoL:** Linux HiDPI interface scale, click-drag line tool with
+  on-release segment commits, movable operation panels, Push/Pull correctly
+  gated off curved faces.
+- **Android Play compliance:** target SDK 35, 16 KB page support, and an app
+  bundle (AAB) build alongside the per-ABI APKs.
+
+### Fixed
+
+- **macOS startup crash on new systems** (#12): the bundled SDL2 is now built
+  from source against a current SDK with a macOS 14.0 deployment floor —
+  1.3.0–1.4.3 dmgs aborted in dyld init on macOS 26.5.x.
+- **Audit hardening** (#65): Sweep/Loft/Extrude boolean results are
+  validity-gated before committing to the document, SVG import gets text and
+  global-vertex budgets, settings integers are clamped and `.cfg` writes
+  sanitized against newline injection, and a failed project load leaves an
+  empty document instead of half a project.
+- Shell: honestly reports fillet-ringed faces it can't hollow instead of
+  producing a silent sealed hollow, with a mirror-body fallback for box faces
+  (#30).
+- Stepped-hole sketches no longer extrude a floating plug from the inner
+  circle (#60); duplicated-sketch, soft-keyboard and snap fixes carried
+  forward from the 1.4.x line.
+- Recovery autosave debounces on quiescence instead of ticking every 5
+  seconds; two-finger touch gestures no longer click the widget under the
+  first finger.
+
 ## [1.4.3] — 2026-07-07
 
 Rolls up the whole `1.4.0 … 1.4.3` line (the intermediate patch releases shipped

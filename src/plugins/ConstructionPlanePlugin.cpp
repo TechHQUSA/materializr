@@ -66,6 +66,14 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
         [](const materializr::PlaneChangedEvent&) {
             if (g_state) g_state->dirty = true;
         });
+    // A different TAB is now in front: this cache belongs to the old
+    // document. No Plane event fires for that (neither document changed —
+    // the active one did), so without this the previous project's planes
+    // keep drawing over the new one.
+    ctx.events().subscribe<materializr::ActiveDocumentChangedEvent>(
+        [](const materializr::ActiveDocumentChangedEvent&) {
+            if (g_state) g_state->dirty = true;
+        });
 
     // Render pass — Application iterates registered passes once per frame
     // after the body / edge / grid layer but before the gizmo overlay.
@@ -108,6 +116,10 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
             for (int pid : doc.getAllPlaneIds()) {
                 const auto* entry = doc.getPlane(pid);
                 if (!entry || !entry->visible) continue;
+                // Planes hosting a reference image are drawn by
+                // RefImagePlugin as textured quads (with their own selection
+                // border) — the translucent blue fill would wash the photo out.
+                if (doc.getRefImage(pid)) continue;
                 glm::vec4 col(0.30f, 0.55f, 0.95f, 0.30f);
                 g_state->renderer.addPlane(entry->plane, entry->name, col,
                                            static_cast<float>(entry->halfSize),

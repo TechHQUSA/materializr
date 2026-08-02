@@ -1,5 +1,9 @@
 #include "LoftOp.h"
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <GProp_GProps.hxx>
+#include <Standard_ErrorHandler.hxx> // OCC_CATCH_SIGNALS
 #include <BRepAlgoAPI_Cut.hxx>
 #include <TopoDS.hxx>
 #include <imgui.h>
@@ -35,6 +39,13 @@ bool LoftOp::execute(Document& doc) {
     }
 
     try {
+        // Degenerate section stacks (e.g. perpendicular "wall" profiles that
+        // make the surface fold through itself) can drive ThruSections to a
+        // kernel FAULT, not just a clean failure. OCC_CATCH_SIGNALS turns that
+        // signal into a Standard_Failure the catch below absorbs — without it
+        // the app dies (crash reproduced by repeated preview/cancel on a
+        // weaving 3-section loft).
+        OCC_CATCH_SIGNALS
         BRepOffsetAPI_ThruSections thruSections(m_solid ? Standard_True : Standard_False,
                                                  m_ruled ? Standard_True : Standard_False);
 
@@ -70,9 +81,32 @@ bool LoftOp::execute(Document& doc) {
                 if (!inner.IsDone()) continue; // skip a hole that won't loft
                 BRepAlgoAPI_Cut cut(loftedShape, inner.Shape());
                 cut.Build();
-                if (cut.IsDone()) loftedShape = cut.Shape();
+                if (!cut.IsDone()) continue;
+                // Adopt the cut only if it's still a usable solid — a bad hole
+                // channel can yield a null/empty/invalid result that would
+                // otherwise replace a perfectly good outer loft.
+                TopoDS_Shape cutShape = cut.Shape();
+                if (cutShape.IsNull()) continue;
+                GProp_GProps cutProps;
+                BRepGProp::VolumeProperties(cutShape, cutProps);
+                if (cutProps.Mass() < 1e-6) continue;
+                if (!BRepCheck_Analyzer(cutShape).IsValid()) continue;
+                loftedShape = cutShape;
             }
         }
+
+        // Validate-or-refuse (same gate as BooleanOp/FilletOp/ShellOp): a
+        // degenerate section stack can pass IsDone() yet produce a null or
+        // topologically invalid shape that later crashes tessellation/save.
+        // The volume check only applies to solid lofts — a surface loft
+        // legitimately encloses no volume.
+        if (loftedShape.IsNull()) return false;
+        if (m_solid) {
+            GProp_GProps gp;
+            BRepGProp::VolumeProperties(loftedShape, gp);
+            if (gp.Mass() < 1e-6) return false;
+        }
+        if (!BRepCheck_Analyzer(loftedShape).IsValid()) return false;
 
         doc.addOrPutBody(m_createdBodyId, loftedShape, "Loft");
 

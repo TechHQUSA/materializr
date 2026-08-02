@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 #include <vector>
 
 #ifdef _WIN32
@@ -40,11 +41,28 @@ std::string configBaseDir() {
 
 std::string recoveryDir() { return configBaseDir() + "/recovery"; }
 
+// Concurrent instances that get their own snapshot namespace, and tabs per
+// instance that get their own snapshot file. Both scans and the free-slot
+// search must agree on these bounds — a mismatch either hides orphans or
+// reclaims a slot that still holds live work.
+constexpr int kMaxSlots = 16;   // kMaxSessionsPerSlot lives in the header
+
 // Slot N's snapshot filename. Slot 0 keeps the legacy name so recovery files
 // written by older builds are still found (as slot-0 orphans) after updating.
 std::string slotSnapshotPath(int slot) {
     if (slot == 0) return recoveryDir() + "/autosave.materializr";
     return recoveryDir() + "/autosave-" + std::to_string(slot) + ".materializr";
+}
+// Per-session (tab) snapshot within a slot. Session 0 keeps the slot's legacy
+// name so snapshots written by older single-session builds are still found
+// (and ours still restore on an older build); later sessions insert "-t<K>"
+// before the extension.
+std::string sessionSnapshotPath(int slot, int sessionIndex) {
+    if (sessionIndex <= 0) return slotSnapshotPath(slot);
+    std::string base = slotSnapshotPath(slot);
+    const std::string ext = ".materializr";
+    return base.substr(0, base.size() - ext.size()) +
+           "-t" + std::to_string(sessionIndex) + ext;
 }
 std::string slotLockPath(int slot) {
     return recoveryDir() + "/slot" + std::to_string(slot) + ".lock";
@@ -84,6 +102,22 @@ void releaseLock(LockHandle h) {
 }
 #endif
 
+// True if slot N holds ANY session's leftover snapshot. Checking only the
+// session-0 (legacy) name is not enough: a slot can hold nothing but "-t<K>"
+// files — an instance that quit cleanly with an unsaved BACKGROUND tab leaves
+// exactly that, since clean exit deliberately preserves a dirty inactive tab's
+// snapshot while clearing the active one's. Treating such a slot as free let a
+// new instance claim it, which hid those orphans from the scan (it skips slots
+// whose lock it cannot take — and we would then hold that lock) and then
+// overwrote them with our own tabs. That is the only copy of that work.
+bool slotHasAnySnapshot(int slot) {
+    std::error_code ec;
+    for (int t = 0; t < kMaxSessionsPerSlot; ++t)
+        if (std::filesystem::exists(sessionSnapshotPath(slot, t), ec))
+            return true;
+    return false;
+}
+
 // Claim this instance's slot (first call only; the lock handle is deliberately
 // leaked so it lives exactly as long as the process).
 int claimedSlot() {
@@ -95,8 +129,8 @@ int claimedSlot() {
         // orphan scan treat the file as OURS (probe denied against our own
         // lock) and silently shadow the very recovery we should be offering.
         for (int pass = 0; pass < 2; ++pass) {
-            for (int n = 0; n < 16; ++n) {
-                if (pass == 0 && std::filesystem::exists(slotSnapshotPath(n), ec))
+            for (int n = 0; n < kMaxSlots; ++n) {
+                if (pass == 0 && slotHasAnySnapshot(n))
                     continue;
                 LockHandle h = tryLock(slotLockPath(n));
                 if (h != kBadLock) return n; // hold forever (kernel frees on exit)
@@ -114,16 +148,39 @@ std::string metaPathFor(const std::string& snapshotPath) {
     return snapshotPath + ".meta";
 }
 
-// The orphaned snapshot chosen by hasProjectRecovery() for this launch.
+// The orphaned snapshot chosen by hasProjectRecovery() for this launch, and
+// how many orphans the scan saw in total (for the prompt's plural wording).
 std::string s_candidatePath;
+// Every orphan the scan saw, newest first — one per tab the dead instance
+// had open. The restore takes them ALL (one per tab); s_candidatePath stays
+// the newest for the prompt's summary line.
+std::vector<std::string> s_orphanPaths;
+int s_orphanCount = 0;
 } // namespace
 
-std::string projectRecoveryPath() { return slotSnapshotPath(claimedSlot()); }
+std::string projectRecoveryPath(int sessionIndex) {
+    static bool s_sweptTmp = [] {
+        // Hygiene: a crash exactly mid-write can leave an *.tmp beside the
+        // snapshots. It's superseded the moment its slot/index is reused, but
+        // sweep day-old ones anyway so they can't accumulate across installs.
+        std::error_code ec;
+        for (auto& e : std::filesystem::directory_iterator(recoveryDir(), ec)) {
+            if (e.path().extension() != ".tmp") continue;
+            auto t = std::filesystem::last_write_time(e.path(), ec);
+            if (ec) continue;
+            const auto age = std::filesystem::file_time_type::clock::now() - t;
+            if (age > std::chrono::hours(24)) std::filesystem::remove(e.path(), ec);
+        }
+        return true;
+    }();
+    (void)s_sweptTmp;
+    return sessionSnapshotPath(claimedSlot(), sessionIndex);
+}
 
 bool writeProjectRecovery(const Document& doc, const ProjectHistory* history,
                           const std::string& projectPath, int bodyCount,
-                          int stepCount) {
-    const std::string path = projectRecoveryPath();
+                          int stepCount, int sessionIndex) {
+    const std::string path = projectRecoveryPath(sessionIndex);
     std::error_code ec;
     std::filesystem::create_directories(
         std::filesystem::path(path).parent_path(), ec);
@@ -160,32 +217,49 @@ bool hasProjectRecovery() {
     (void)claimedSlot();
 
     s_candidatePath.clear();
+    s_orphanPaths.clear();
+    s_orphanCount = 0;
     std::error_code ec;
     std::filesystem::file_time_type bestTime{};
-    for (int n = 0; n < 16; ++n) {
-        const std::string snap = slotSnapshotPath(n);
-        if (!std::filesystem::exists(snap, ec)) continue;
-        // Liveness probe: acquirable lock = the owning instance is dead (or
-        // the file predates slot locks — same conclusion: nobody owns it).
+    for (int n = 0; n < kMaxSlots; ++n) {
+        // Liveness probe once per slot: acquirable lock = the owning instance
+        // is dead (or the files predate slot locks — same conclusion: nobody
+        // owns them). A dead slot may hold SEVERAL per-session snapshots —
+        // one per tab that instance had open — and every one is an orphan.
         LockHandle h = tryLock(slotLockPath(n));
         if (h == kBadLock) continue; // owner alive (possibly us) — not ours to offer
         releaseLock(h);
-        auto t = std::filesystem::last_write_time(snap, ec);
-        if (ec) t = std::filesystem::file_time_type{};
-        if (s_candidatePath.empty() || t > bestTime) {
-            s_candidatePath = snap;
-            bestTime = t;
+        for (int t = 0; t < kMaxSessionsPerSlot; ++t) {
+            const std::string snap = sessionSnapshotPath(n, t);
+            if (!std::filesystem::exists(snap, ec)) continue;
+            ++s_orphanCount;
+            s_orphanPaths.push_back(snap);
+            auto mt = std::filesystem::last_write_time(snap, ec);
+            if (ec) mt = std::filesystem::file_time_type{};
+            if (s_candidatePath.empty() || mt > bestTime) {
+                s_candidatePath = snap;
+                bestTime = mt;
+            }
         }
     }
     return !s_candidatePath.empty();
 }
 
+int projectRecoveryOrphanCount() { return s_orphanCount; }
+
 std::string projectRecoveryRestorePath() { return s_candidatePath; }
 
+std::vector<std::string> projectRecoveryOrphanPaths() { return s_orphanPaths; }
+
 bool readProjectRecoveryMeta(ProjectRecoveryMeta& meta) {
+    return readProjectRecoveryMetaAt(s_candidatePath, meta);
+}
+
+bool readProjectRecoveryMetaAt(const std::string& snapshotPath,
+                               ProjectRecoveryMeta& meta) {
     meta = ProjectRecoveryMeta{};
-    if (s_candidatePath.empty()) return false;
-    std::ifstream is(metaPathFor(s_candidatePath));
+    if (snapshotPath.empty()) return false;
+    std::ifstream is(metaPathFor(snapshotPath));
     if (is.is_open()) {
         std::string line;
         while (std::getline(is, line)) {
@@ -207,20 +281,29 @@ bool readProjectRecoveryMeta(ProjectRecoveryMeta& meta) {
     return true;
 }
 
-void clearProjectRecovery() {
+void clearProjectRecovery(int sessionIndex) {
     std::error_code ec;
-    std::filesystem::remove(projectRecoveryPath(), ec);
-    std::filesystem::remove(projectRecoveryPath() + ".tmp", ec);
-    std::filesystem::remove(metaPathFor(projectRecoveryPath()), ec);
+    const std::string p = projectRecoveryPath(sessionIndex);
+    std::filesystem::remove(p, ec);
+    std::filesystem::remove(p + ".tmp", ec);
+    std::filesystem::remove(metaPathFor(p), ec);
 }
 
 void clearProjectRecoveryCandidate() {
-    if (s_candidatePath.empty()) return;
+    clearProjectRecoveryAt(s_candidatePath);
+}
+
+void clearProjectRecoveryAt(const std::string& snapshotPath) {
+    if (snapshotPath.empty()) return;
     std::error_code ec;
-    std::filesystem::remove(s_candidatePath, ec);
-    std::filesystem::remove(s_candidatePath + ".tmp", ec);
-    std::filesystem::remove(metaPathFor(s_candidatePath), ec);
-    s_candidatePath.clear();
+    std::filesystem::remove(snapshotPath, ec);
+    std::filesystem::remove(snapshotPath + ".tmp", ec);
+    std::filesystem::remove(metaPathFor(snapshotPath), ec);
+    s_orphanPaths.erase(
+        std::remove(s_orphanPaths.begin(), s_orphanPaths.end(), snapshotPath),
+        s_orphanPaths.end());
+    if (s_candidatePath == snapshotPath) s_candidatePath.clear();
+    if (s_orphanCount > 0) --s_orphanCount;
 }
 
 } // namespace materializr

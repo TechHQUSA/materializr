@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 1.4.3 LANGUAGES CXX)
+project(Materializr VERSION 1.5.1 LANGUAGES CXX)
 
 # Pre-release suffix appended to the reported version (e.g. "-beta.1"). Empty on
 # stable releases. Kept here next to project() so a beta build self-identifies
@@ -66,11 +66,34 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# ImGui (docking branch)
+# ImGui (docking), pinned to a RELEASE TAG.
+#
+# GIT_TAG was `docking` — a BRANCH HEAD, so every configure resolved to whatever
+# that branch pointed at that day. ImGui is the entire UI and input layer,
+# compiled straight into the shipped binary, so an upstream force-push or a
+# merged malicious PR would land in the next release with no review step; and
+# two builds of the same Materializr tag could ship different ImGui, which makes
+# a release impossible to reproduce.
+#
+# It must be a TAG, not a branch commit. `docking` is rebased onto master
+# regularly, and every rebase orphans the commits that were on it: the SHA this
+# was first pinned to (81cfcb8c1) was unreachable in a fresh clone within hours
+# —
+#     $ git clone https://github.com/ocornut/imgui.git
+#     $ git cat-file -t 81cfcb8c1fed1e4dac8bcdc059ce811c17b6194c
+#     fatal: git cat-file: could not get object info
+#
+# — which made the whole project unbuildable from scratch. (GitHub's API still
+# serves orphaned commits, so a SHA that looks alive there can already be dead
+# to `git clone`. Check with a clone, not the API.) The same rebase is why the
+# ImGui our own build machine had cached, d460434, no longer exists either.
+#
+# Tags are immutable, so this is stable ground. Bump it deliberately; keep it in
+# step with android/app/jni/src/CMakeLists.txt.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        docking
+    GIT_TAG        v1.92.8-docking # b61e56346a92cfcaf1f43a545ca37b0b32239654
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -192,6 +215,10 @@ add_executable(materializr
     src/plugins/StlImportPlugin.cpp
     src/plugins/StlExportPlugin.cpp
     src/plugins/GltfExportPlugin.cpp
+    src/plugins/BrepIOPlugin.cpp
+    src/plugins/ObjExportPlugin.cpp
+    src/plugins/ThreeMfExportPlugin.cpp
+    src/plugins/DxfImportPlugin.cpp
     src/plugins/BooleanPlugin.cpp
     src/plugins/DeletePlugin.cpp
     src/plugins/TransformPlugin.cpp
@@ -201,6 +228,8 @@ add_executable(materializr
     src/plugins/ShellPlugin.cpp
     src/plugins/SplitBodyPlugin.cpp
     src/plugins/ConstructionPlanePlugin.cpp
+    src/plugins/RefImagePlugin.cpp
+    src/plugins/BoundaryFillPlugin.cpp
     src/plugins/ConstructionAxisPlugin.cpp
     src/plugins/RevolvePlugin.cpp
     src/plugins/FilletPlugin.cpp
@@ -219,6 +248,7 @@ add_executable(materializr
     src/core/VariableManager.cpp
     src/core/Material.cpp
     src/core/Verbose.cpp
+    src/core/ThrowTrace.cpp
     src/core/VersionManager.cpp
     src/modeling/ExtrudeOp.cpp
     src/modeling/PushPullOp.cpp
@@ -233,23 +263,29 @@ add_executable(materializr
     src/modeling/FaceAnchor.cpp
     src/modeling/TopoName.cpp
     src/modeling/GenerationLedger.cpp
+    src/modeling/FaceLineage.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
     src/modeling/ChamferOp.cpp
+    src/modeling/BlendCut.cpp
     src/modeling/ResizeCylindricalOp.cpp
     src/modeling/BooleanOp.cpp
     src/modeling/TransformOp.cpp
+    src/modeling/BatchTransformOp.cpp
     src/modeling/ShellOp.cpp
     src/modeling/TaperOp.cpp
     src/modeling/ScaleFaceOp.cpp
     src/modeling/DefeatureOp.cpp
     src/modeling/ProjectSketchOp.cpp
     src/modeling/SplitBodyOp.cpp
+    src/modeling/SeparateBodyOp.cpp
     src/modeling/MirrorOp.cpp
     src/modeling/PatternOp.cpp
     src/modeling/RevolveOp.cpp
     src/modeling/SweepOp.cpp
     src/modeling/LoftOp.cpp
+    src/modeling/GuidedLoftOp.cpp
+    src/modeling/BoundaryFillOp.cpp
     src/modeling/SketchTransformOp.cpp
     src/modeling/ConstructionPlaneOp.cpp
     src/modeling/ConstructionAxisOp.cpp
@@ -275,6 +311,7 @@ add_executable(materializr
     src/viewport/Picker.cpp
     src/viewport/EdgeRenderer.cpp
     src/viewport/PlaneRenderer.cpp
+    src/viewport/RefImageRenderer.cpp
     src/viewport/AxisRenderer.cpp
     src/viewport/BackgroundRenderer.cpp
     src/viewport/Gizmo.cpp
@@ -295,14 +332,17 @@ add_executable(materializr
     src/ui/DrawingView.cpp
     src/ui/VersionPanel.cpp
     src/ui/SectionPanel.cpp
-    src/ui/SettingsPanel.cpp
     src/ui/ToastNotification.cpp
     src/ui/ShortcutsPanel.cpp
     src/ui/AboutDialog.cpp
     src/ui/WelcomeScreen.cpp
+    src/ui/LandingPage.cpp
+    src/app/ProjectSession.cpp
     src/ui/UpdateChecker.cpp
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp
+    src/io/ImageDecode.cpp
+    src/io/ImageEncode.cpp
     src/io/SketchRecovery.cpp
     src/io/ProjectRecovery.cpp
     src/io/Settings.cpp
@@ -312,7 +352,11 @@ add_executable(materializr
     src/io/StlExport.cpp
     src/io/SvgExport.cpp
     src/io/IgesIO.cpp
-    src/io/ImageExport.cpp
+    src/io/BrepIO.cpp
+    src/io/ObjExport.cpp
+    src/io/DxfExport.cpp
+    src/io/DxfImport.cpp
+    src/io/ThreeMfExport.cpp
     src/io/GltfExport.cpp
     src/io/FileDialogs.cpp
 )

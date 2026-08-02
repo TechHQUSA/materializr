@@ -52,6 +52,7 @@
 #include <cstdio>
 #include <map>
 #include <memory>
+#include "test_tmp_path.h"
 
 using materializr::Sketch;
 using namespace materializr;
@@ -391,7 +392,7 @@ TEST(FullReplay, EveryOpReloadsEditableAndChainReplays) {
     // ── Save through the real ProjectIO, load into a fresh document. ──
     ProjectHistory saved = captureHistory(hist, doc);
     ASSERT_EQ(static_cast<int>(saved.steps.size()), nSteps);
-    const std::string path = "/tmp/mtz_full_replay.materializr";
+    const std::string path = mzrtest::tmpPath("mtz_full_replay.materializr");
     ASSERT_TRUE(ProjectIO::save(path, doc, &saved).success);
     Document doc2;
     ProjectHistory loaded;
@@ -410,6 +411,7 @@ TEST(FullReplay, EveryOpReloadsEditableAndChainReplays) {
         for (const auto& [id, shape] : st.changed) {
             if (running.find(id) == running.end()) {
                 rs.created.push_back(id);
+                rs.createdAfter.push_back({id, shape});
             } else {
                 rs.modifiedBefore.push_back(std::make_pair(id, running[id]));
                 rs.modifiedAfter.push_back(std::make_pair(id, shape));

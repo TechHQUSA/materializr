@@ -334,6 +334,17 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         if (!m_twoFinger) {
             // Two-finger gesture begins: cancel any in-progress orbit, set refs.
             if (m_leftDown) {
+                // Park the cursor off-screen BEFORE the forced release — same
+                // trick as the drag-to-scroll latch above. ImGui buttons fire on
+                // release-while-hovered, so releasing at the finger's position
+                // made the widget under the first pinch finger CLICK when the
+                // second finger landed (Undo, a panel row, …; issue #39 — the
+                // ViewCube was the reported case, #38). Event order is
+                // preserved through ImGui's trickling, so the release is always
+                // applied with the cursor parked, even when the press itself is
+                // still queued (a fast two-finger landing). The motion branch
+                // below re-feeds the gesture centroid, restoring a real hover.
+                io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
                 io.AddMouseButtonEvent(0, false); m_leftDown = false;
                 m_leftReleaseWasGesture = true; // spurious release from the 2nd finger
             }
@@ -381,6 +392,15 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
             else if (m_twoFingerMode == 2) { m_zoomAcc += dZ; }
             m_lastCentroidX = cx; m_lastCentroidY = cy;
             m_lastPinchDist = dist;
+            // Report the gesture centroid as the cursor. The viewport applies
+            // the pan/zoom deltas inside its hovered gate, which used to
+            // survive a pinch only because the cursor froze at the first
+            // finger's press position; with that position now parked
+            // off-screen (see the takeover above), the centroid keeps the
+            // gate truthful — and keeps every coordinate ImGui hands the app
+            // finite while two fingers are down.
+            io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+            io.AddMousePosEvent(cx, cy);
         }
         return;
     }
@@ -526,6 +546,10 @@ void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float n
         const bool quickTap = !m_holdSelect && !m_movedBeyondHold && !m_suppressLeft &&
                               (nowT - m_downTicks) < 300u;
         if (quickTap) {
+            // A genuine tap — drive the viewport SELECTION off this lift (not the
+            // press frame) so a following nav gesture can't corrupt it (#68).
+            m_singleTapPending = true;
+            m_singleTapX = m_downX; m_singleTapY = m_downY;
             const std::uint32_t dblMs =
                 static_cast<std::uint32_t>(io.MouseDoubleClickTime * 1000.0f);
             const float ddx = m_downX - m_lastTapX, ddy = m_downY - m_lastTapY;
@@ -615,6 +639,13 @@ bool Window::consumeTouchZoom(float& dz) {
 bool Window::consumeDoubleTap() {
     if (!m_doubleTapPending) return false;
     m_doubleTapPending = false;
+    return true;
+}
+
+bool Window::consumeSingleTap(float& x, float& y) {
+    if (!m_singleTapPending) return false;
+    m_singleTapPending = false;
+    x = m_singleTapX; y = m_singleTapY;
     return true;
 }
 
@@ -724,6 +755,20 @@ bool Window::isCtrlDown() {
     // multi-select uses the on-screen toggle instead); when an Android tablet has
     // a keyboard attached, hardware Ctrl (undo/redo, additive select) just works.
     const Uint8* state = SDL_GetKeyboardState(nullptr);
+#if defined(__APPLE__)
+    // Command counts as the shortcut modifier here, because it already does
+    // everywhere else in the app: ImGui turns on ConfigMacOSXBehaviors for
+    // __APPLE__ and then SWAPS Cmd and Ctrl in AddKeyEvent, so every shortcut
+    // reached through io.KeyCtrl (Save, Open, Import, Export, tab switching)
+    // is Cmd on a Mac. This function deliberately bypasses ImGui — it polls
+    // the hardware so undo/redo survive text-input focus — and therefore never
+    // saw that swap, leaving Undo/Redo/Select-All alone on physical Control.
+    // Reported by FlorianLoch (#74): "UI says Ctrl+O but it is actually bound
+    // to Cmd+O... this doesn't apply to all bindings. Undo and redo are indeed
+    // bound to Ctrl+Z and Ctrl+Y." Physical Ctrl keeps working too, so nobody
+    // used to the old behaviour loses it.
+    if (state[SDL_SCANCODE_LGUI] || state[SDL_SCANCODE_RGUI]) return true;
+#endif
     return state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL];
 }
 

@@ -2,13 +2,16 @@
 #include "../platform_defs.h"
 
 #include <memory>
+#include <atomic>
 #include <future>
+#include <mutex>
 #include <vector>
 #include <functional>
 #include <string>
 #include <set>
 #include <map>
 #include <glm/glm.hpp>
+#include "io/ImageDecode.h"   // DecodedImage — thumbnail peek results
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Face.hxx>
@@ -25,6 +28,7 @@
 #include "modeling/SketchConstraints.h" // for ConstraintType (applySketchConstraint)
 #include "modeling/Unfold.h" // for FlatPattern (m_unfoldPattern)
 #include "modeling/TopoName.h" // for topo::Ref (m_threadFaceRef)
+#include "viewport/SectionView.h" // SectionView::Result (async section compute)
 #include "core/SheetSpec.h" // for SheetMaterial (m_unfoldMaterial)
 #include "io/Settings.h" // for AppSettings::RecentProject (m_recentProjects)
 
@@ -58,9 +62,12 @@ class ItemsPanel;
 class StatusBar;
 class ThemeManager;
 class PropertiesPanel;
+class LandingPage;
+struct ProjectSession;
 class Sketch;
 class SketchSolver;
 class SketchTool;
+struct PendingDimension;
 class EventBus;
 class PluginContext;
 
@@ -210,7 +217,13 @@ private:
     // multi-body project without juggling visibility for the file-menu
     // "Export STL" (which writes every visible body to one file).
     void exportBodyAsStl(int bodyId);
+    // Export the given bodies to any format the plugin registry can
+    // write, as ONE file with their relative positions intact (a
+    // print-in-place assembly is several bodies that must stay put).
+    void exportBodiesAs(const std::vector<int>& bodyIds,
+                        const std::string& formatName);
     void exportSketchAsSvg(int sketchId);
+    void exportSketchAsDxf(int sketchId);
     // Zoom-fit the camera onto the selection (or all visible bodies when
     // nothing is selected). Bound to F and View > Frame Selection — the menu
     // item is the touch path.
@@ -222,6 +235,164 @@ private:
     void saveProject();
     std::string projectDisplayName() const;    // name or basename or "New project"         // Save dialog (Save As behavior)
     void saveProjectQuick();    // Save to current path if known, else falls through to saveProject
+    // Register the sketch currently being drawn into the Document so a save
+    // taken mid-sketch actually contains it. Idempotent; see the definition.
+    void flushActiveSketchToDocument();
+    // Render the "home view" of the project (visible bodies only — no
+    // sketches, planes, axes, grid or overlays; reset isometric camera,
+    // zoom-fit) into an offscreen 512px square and PNG-encode it. Embedded
+    // in the save file as the landing-page tile. False when there is nothing
+    // to show (no visible bodies) — the save then simply carries no thumbnail.
+    // Main thread only (needs the GL context).
+    bool captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut);
+    // Landing page: rebuild the tile list from m_recentProjects (peeking each
+    // file's embedded thumbnail into a GL texture) and show it. Rendered by
+    // renderLandingPage() each frame; actions (new/open/dismiss) are handled
+    // there. The page hides itself whenever a project load succeeds.
+    // `fromStartup` hides the header's close button: at startup there is no
+    // session behind the page to go back to (closing would equal New Project).
+    void showLandingPage(bool fromStartup = false);
+    // File → Home Screen. Leaving for the home screen IS leaving the project:
+    // the save/discard prompt fires HERE (not later when a tile is clicked),
+    // the project closes, and the page shows over an empty workspace.
+    void goToHomeScreen();
+    void renderLandingPage();
+    // True while the landing page owns the screen. Layout chrome (panels,
+    // toolbars, shells, edge tabs, status bar) checks this and stands down —
+    // relying on z-order alone is fragile because any later focus event can
+    // lift a chrome window above the page.
+    bool landingPageUp() const;
+
+    // ── Project sessions (tabs) ──────────────────────────────────────────
+    // Make m_sessions[idx] the active project: stash the outgoing session's
+    // working state (path/name/dirty/camera), repoint the m_document /
+    // m_history / m_selection mirrors, restore the incoming session's state
+    // and rewire every consumer that caches document pointers.
+    void adoptSession(size_t idx);
+    // The two halves of adoptSession. stash writes the working copies back
+    // into the active session; apply repoints the mirrors at m_sessions[idx],
+    // restores its state and rewires consumers. closeSession uses apply alone
+    // (the outgoing session is being destroyed — nothing to stash into).
+    void stashActiveSessionState();
+    void applySessionState(size_t idx);
+    // Forced (undebounced) recovery snapshot of the active session; called
+    // right before a tab deactivates so inactive tabs always have an exact
+    // crash-recovery file.
+    void writeSessionRecoveryNow();
+
+    // ── Tab lifecycle (UI lands in phase 3; menu + Ctrl+Tab already wired) ──
+    // Fresh empty session; does NOT switch to it. Recovery indices recycle
+    // (smallest unused, capped at the scanner's 0..15 namespace) so a closed
+    // tab's snapshot file can never fall outside the startup scan.
+    size_t createSession();
+    int nextFreeRecoveryIndex() const;
+    // Full user-visible switch: refuses mid-sketch and mid-thread-recut
+    // (toast explains), cancels live previews, shelves the outgoing tab's GPU
+    // meshes (all platforms), swaps state, queues the incoming rebuild.
+    bool switchToSession(size_t idx);
+    // Tear down a session: recovery file cleared, session destroyed; the last
+    // tab is replaced by a fresh empty one (there is always >= 1). Unsaved-
+    // changes prompting is the CALLER's job (route through guardedOpen).
+    void closeSession(size_t idx);
+
+    // ── Tab UI (phase 3) ─────────────────────────────────────────────────
+    // Display label for a tab: explicit name → file basename → "Untitled".
+    std::string sessionDisplayLabel(size_t i) const;
+    // Unsaved-changes state, valid for active AND inactive sessions.
+    bool sessionDirty(size_t i) const;
+    // Make tab i active if it isn't (switch may refuse → false + toast).
+    // Every per-tab menu action funnels through this so Save/Close always
+    // operate on the ACTIVE session's machinery.
+    bool activateTabFor(size_t i);
+    // Shared per-tab dropdown body: Save / Save As / Close Tab.
+    void renderTabMenuItems(size_t i);
+    // Render-pass split point: below this draws BEHIND the bodies (reference
+    // photos), at/above draws IN FRONT (construction planes, axes).
+    static constexpr int kBodyPassPriority = 500;
+    // Does this body id still resolve in the ACTIVE document? Document::getBody
+    // throws on a miss, and callers that only want a yes/no answer kept writing
+    // their own try/catch (or, worse, forgot to — see the sketch-attachment
+    // gating, which treated a dead id as "still attached").
+    bool bodyExists(int bodyId) const;
+    // Create a fresh tab AND make it active; on a refused switch (mid-sketch
+    // etc.) the just-created session is cleaned up again. False = nothing
+    // happened (the refusal already toasted).
+    bool openNewTab();
+    // True when the active tab is an untouched empty workspace (no project,
+    // no geometry, no history) — i.e. safe to load into without displacing
+    // anything the user still wants.
+    bool activeSessionIsScratch() const;
+    // Reopen a previous session's projects, one per tab, and focus the tab
+    // that was in front. Runs from the deferred startup slot when "open last
+    // project on launch" is on. Missing projects are skipped, not fatal.
+    void restoreSessionTabs(const std::vector<std::string>& paths,
+                            size_t activeIndex);
+    // The "+" button's dropdown, shared by all three layouts: New Project /
+    // Open Project... / Open Recent — every flavor lands in its own new tab.
+    void renderNewTabMenuBody();
+    // Classic: dock-style tab bar pinned to the top of the Viewport window —
+    // deliberately NOT a dock node, so tabs can't be dragged into the panel
+    // docks (Steve: "only bound to the viewport to keep it from getting
+    // weird"). Also hosts the trailing "+".
+    void renderViewportTabBar();
+    // Im-touch: the open-projects sheet the project-name chip opens.
+    void renderTouchTabsSheet();
+    // Set when the active session changed OUTSIDE the classic tab bar
+    // (Ctrl+Tab, menus, a refused switch snapping back) so the bar re-asserts
+    // the visual selection exactly once instead of fighting user clicks.
+    bool m_tabSelectionSync = true;
+    // One-shot: raise the Settings window on the next render. Set by every
+    // explicit open request — an already-open window buried under the home
+    // page otherwise never surfaces.
+    bool m_settingsRaise = false;
+    // (Re)apply the current mirrors to everything that holds a Document /
+    // History / SelectionManager pointer: panels, event-bus binds, plugin
+    // context, per-History callbacks. Called from the ctor and every adopt.
+    void wireDocumentConsumers();
+    ProjectSession& currentSession() { return *m_sessions[m_activeSession]; }
+    // Landing-page tile context menu: load a recent project's BAKED bodies
+    // into a scratch Document and export them as STEP/STL. Deliberately not
+    // parametric — final shapes only.
+    void exportRecentProjectAs(const std::string& ref, const std::string& name,
+                               bool asStl);
+    // Thumbnail side-cache (SDL pref path /thumbs, keyed by hash of the
+    // recent ref). Exists for refs the landing page can't peek directly —
+    // Android content:// documents — and doubles as a fallback everywhere.
+    // Written on every successful save and on mobile recent-opens.
+    void cacheProjectThumbnail(const std::string& ref,
+                               const std::vector<uint8_t>& png);
+    bool readCachedThumbnail(const std::string& ref, std::vector<uint8_t>& png);
+    // Cache entry at least as new as the project file it came from.
+    bool thumbCacheFresh(const std::string& ref) const;
+
+    // Off-thread thumbnail peeks for landing tiles the cache couldn't serve.
+    // ProjectIO::peekThumbnail gunzips an ENTIRE project to read one line, so
+    // a full recents list of these blocked startup for seconds; the worker
+    // decodes to RGBA and the main thread uploads (GL is not shareable here).
+    struct ThumbResult { std::string ref; DecodedImage img; };
+    struct ThumbJob {
+        std::mutex mutex;
+        std::vector<ThumbResult> done;
+        std::atomic<bool> cancel{false};
+    };
+    void startThumbnailPeeks(const std::vector<std::string>& refs);
+    void drainThumbnailPeeks();   // main thread, while the landing page is up
+    std::shared_ptr<ThumbJob> m_thumbJob;
+
+    // Cross-project parts: scratch-load `ref` and open the "Import Parts"
+    // modal listing its bodies + sketches. `intoNewProject` (landing-tile
+    // flow) clears the workspace first; otherwise parts land in the current
+    // document. Copies are BAKED (bodies) / independent (sketches severed
+    // from their source body) — nothing parametric crosses files.
+    void openPartsPicker(const std::string& ref, const std::string& name,
+                         bool intoNewProject);
+    void renderPartsPickerDialog();
+    // Items-panel body context menu: write one body into a fresh project
+    // file (and add it to Open Recent so it shows on the landing page).
+    // Open the given bodies in a NEW TAB as an unsaved project — the "use
+    // this part elsewhere" flow. Not a file write: you see what you got
+    // first, and save it (or not) like any other project.
+    void exportBodiesToNewProject(const std::vector<int>& bodyIds);
     void loadProject();         // File dialog → loadProjectAt
     // Load a project file directly by path. Used by loadProject() and by the
     // "auto-open last project on launch" path.
@@ -275,6 +446,14 @@ private:
     void enterSketchOnPlane(const gp_Pln& plane);
     void enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId = -1);
     void editSketch(int sketchId);
+    // True centre of a threaded host body on `pln` (the Thread step's axis
+    // piercing the plane), in the plane's 2D frame. False when the body has
+    // no enabled Thread step whose axis is perpendicular to the plane.
+    bool threadAxisCenter2d(int bodyId, const gp_Pln& pln,
+                            glm::vec2& out) const;
+    // Body owning a planar face coplanar with pln — re-adopts a severed
+    // sketch-body link (sourceBody saved as -1).
+    int findBodyUnderRegionlessPlane(const gp_Pln& pln) const;
     void extrudeSketchById(int sketchId, ExtrudeMode mode = ExtrudeMode::NewBody);
     // Interactive subtract of a single sketch region from the body the sketch
     // was drawn on (red preview). Used by the region toolbar where viewport
@@ -335,6 +514,16 @@ private:
     // doesn't match the constraint's requirements. Routed from the toolbar
     // Constraints section; constraints are always opt-in.
     void applySketchConstraint(ConstraintType type);
+
+    // Commit the Dimension tool's resolved pending dimension: one undoable
+    // constraint add (or value+label update when the same pair is already
+    // dimensioned), then open the ##DimEdit popup on it for value entry.
+    void applyPendingDimension();
+
+    // Sketch-space auto anchor of a dimension's label: line/pair midpoint,
+    // circle/arc center, or the midpoint of the point-to-line perpendicular
+    // foot segment. Label offsets are stored relative to this.
+    glm::vec2 dimensionAutoAnchor(const PendingDimension& pd) const;
 
     // Align the orbit camera to look straight at the active sketch's plane in ortho.
     // Called when entering sketch mode / editing an existing sketch.
@@ -499,9 +688,17 @@ private:
     std::unique_ptr<SelectionHighlight> m_selectionHighlight;
     std::unique_ptr<BoxSelect> m_boxSelect;
     std::unique_ptr<SectionView> m_sectionView;
-    std::unique_ptr<Document> m_document;
-    std::unique_ptr<History> m_history;
-    std::unique_ptr<SelectionManager> m_selection;
+    // The open projects ("tabs"). Sessions OWN the document/history/selection;
+    // the raw pointers below are mirrors into m_sessions[m_activeSession],
+    // repointed by adoptSession() so the existing ~900 `m_document->` sites
+    // compile (and stay tab-correct) unchanged. Declared HERE, where the old
+    // unique_ptrs sat, so destruction order relative to the renderers and the
+    // event bus is exactly what it was single-session.
+    std::vector<std::unique_ptr<ProjectSession>> m_sessions;
+    size_t m_activeSession = 0;
+    Document* m_document = nullptr;
+    History* m_history = nullptr;
+    SelectionManager* m_selection = nullptr;
     std::unique_ptr<EventBus> m_eventBus;
     std::unique_ptr<PluginContext> m_pluginContext;
 
@@ -514,6 +711,15 @@ private:
     std::unique_ptr<PropertiesPanel> m_propertiesPanel;
     std::unique_ptr<AboutDialog> m_aboutDialog;
     std::unique_ptr<WelcomeScreen> m_welcomeScreen;
+    std::unique_ptr<LandingPage> m_landingPage;
+    // Parts-picker modal state (see openPartsPicker). The scratch document
+    // pins the source shapes alive until the modal resolves.
+    std::shared_ptr<Document> m_partsPickerDoc;
+    std::string m_partsPickerSource;              // display name
+    bool m_partsPickerOpen = false;
+    bool m_partsPickerIntoNew = false;
+    std::vector<std::pair<int, bool>> m_partsPickerBodies;   // id, checked
+    std::vector<std::pair<int, bool>> m_partsPickerSketches; // id, checked
     std::unique_ptr<ShortcutsPanel> m_shortcutsPanel;
     std::unique_ptr<HelpPanel> m_helpPanel;
     std::unique_ptr<MeasureTool> m_measureTool;
@@ -611,6 +817,12 @@ private:
     // prompt. Snapshots immediately on each new committed step, else throttled.
     double m_lastRecoveryWrite = 0.0;    // wall-clock secs of last recovery write
     int    m_lastRecoveryStep = -2;      // history currentStep at last write
+    // Debounce inputs for the recovery writer: when the newest change landed
+    // (markDirty stamps non-history changes; the writer itself stamps history
+    // step movement) — the snapshot fires once ~5 s AFTER this settles.
+    double m_lastChangeSeenAt = 0.0;
+    int    m_lastSeenStepForRecovery = -2;
+    double m_pendingChangeSince = 0.0;   // oldest unsnapshotted change (burst backstop)
     bool   m_pendingProjectRecovery = false;
     void writeProjectRecoveryIfDue();    // per-frame crash-recovery snapshot
     void renderProjectRecoveryPrompt();  // startup "restore unsaved project?" modal
@@ -622,6 +834,11 @@ private:
 
     // Numeric dimension input shown while placing a sketch shape
     char m_sketchDimBuf[32] = "";
+    // Line/Circle inline dimension, as a VALUE rather than the buffer above.
+    // The buffer form meant an InputText, i.e. the OS keyboard on a tablet;
+    // a value drives materializr::inputNumber and so gets the number pad,
+    // matching the Rectangle W/H fields beside it.
+    float m_sketchDimValue = 0.0f;
     bool m_sketchDimWasShown = false; // tracks placing transitions to grab keyboard focus
 
     // Dimension-label click-to-edit. m_dimEditingId is the constraint being
@@ -633,6 +850,25 @@ private:
     char m_dimEditingBuf[32] = "";
     bool m_dimEditingFocus = false;
     bool m_dimEditingClickedThisFrame = false;
+    // Set by applyPendingDimension() (Dimension tool commit) to defer
+    // ImGui::OpenPopup("##DimEdit") to the viewport's own ImGui window scope
+    // next frame — OpenPopup only works when called from the window that
+    // owns the popup's ID stack, which the app-level commit path isn't in.
+    bool m_dimOpenEditRequested = false;
+    // Set by the ##DimEdit popup block (Application_Viewport.cpp) the frame
+    // an Escape press is seen while the popup is up — BEFORE ImGui closes
+    // it and the block clears m_dimEditingId. renderViewport() runs before
+    // handleShortcuts() each frame, so by the time the global Escape chain
+    // asks "is a dimension popup open", m_dimEditingId is already -1; this
+    // flag is how the chain learns the popup just consumed this Escape
+    // press instead of falling through to the Dimension-mode / sketch-exit
+    // steps. Consumed (cleared) by the chain on the SAME press it gates;
+    // also cleared on every sketch enter/exit reset to avoid staleness.
+    bool m_dimPopupConsumedEsc = false;
+    // Same-frame signal: the ##DimEdit popup was open when this frame's left
+    // click landed, so the click belongs to the popup (dismiss/interaction) —
+    // the Dimension tool's click routing must not treat it as a fresh pick.
+    bool m_dimPopupSwallowClick = false;
 
     // Sketch grid step in mm (drives both the visual face grid and snap-to-line)
     float m_sketchGridStep = 1.0f;
@@ -776,6 +1012,12 @@ private:
     // Application_Viewport so press-and-hold synthesizes a right-click over the
     // tree, opening a row's context menu just like the classic/modern panels).
     bool m_imTouchTreeHovered = false;
+    // Tab strip (classic in-viewport bar / modern pills): hovered this frame.
+    // Same purpose — both already call BeginPopupContextItem for Save / Save As
+    // / Close, but on touch that menu was UNREACHABLE: the long-press gate arms
+    // only over the canvas and the Items panel, so a press-and-hold on a tab
+    // never became the right-click those popups wait for.
+    bool m_tabBarHovered = false;
     // im-touch rename: a namespaced key (body=id, sketch=1000000+id,
     // folder=2000000+id, plane=4000000+id, axis=5000000+id) whose name is being
     // edited in the rename modal; -1 = idle. The buffer holds the edited text.
@@ -803,6 +1045,12 @@ private:
     // Active tab of the touch shell's right panel (0 = Items,
     // 1 = History & Properties). Persisted.
     int m_touchRightTab = 0;
+    // Modern-layout right panel: the Properties footer sizes to its content
+    // (AutoResizeY, no scrollbar) rather than a fixed slab — it grows upward
+    // from the bottom as a selection needs more room, and History absorbs the
+    // rest and scrolls. The History split above it reserves last frame's
+    // measured footer height, so a selection change settles in one frame.
+    float m_propsFooterH = 0.0f;
     // Right-panel width in logical px (× uiScale at use); dragged via the
     // panel's left-edge splitter or edge tab, persisted, clamped at both ends.
     float m_touchRightW = 300.0f;
@@ -1010,6 +1258,12 @@ private:
     // Accumulated delta from drag start (translate only). Used so snap-to-grid
     // can snap the absolute position rather than each per-frame increment.
     glm::vec3 m_gizmoTotalDelta{0.0f};
+    // The live drag's preview transform, mirrored from gizmoPreviewApply().
+    // The drag moves bodies by a GPU model matrix and never writes the
+    // document, so anything else drawn in world space — the gizmo itself, the
+    // selection outline — has no way to know the body moved. This is that
+    // channel. Identity whenever no drag is running (gizmoPreviewReset()).
+    glm::mat4 m_gizmoPreviewXf{1.0f};
     // Accumulated rotation (deg, about m_gizmoRotAxis) from drag start, for soft
     // 45° snapping; and accumulated per-axis scale (raw drag deltas → factors).
     float m_gizmoTotalAngle = 0.0f;
@@ -1103,6 +1357,12 @@ private:
     // since the edit-mode live preview mutates the real op's parameter.
     float m_edgeOpOrigValue = 0.0f;
     float m_edgeOpOrigValue2 = 0.0f; // second distance at edit-begin (cancel restore)
+    // Every body's shape at edit-begin (before any preview). If the edit can't
+    // rebuild — a fillet/chamfer whose edges reference geometry a feature later
+    // consumed, which fails on execute() but loaded fine — commit/cancel
+    // restore this so the model is left exactly as it was instead of a stranded
+    // half-replayed (planar) state. See restoreEdgeOpSnapshot().
+    std::map<int, TopoDS_Shape> m_edgeOpDocSnapshot;
 
     // Compute m_edgeOpFaceDirA/B — the two in-face drag directions for the
     // first selected edge (A = the face ChamferOp uses for distance 1). Sets
@@ -1123,6 +1383,9 @@ private:
     bool updateInteractiveEdgeOp();
     void commitInteractiveEdgeOp();
     void cancelInteractiveEdgeOp();
+    // Restore every body to m_edgeOpDocSnapshot and mark history fully applied
+    // (see the snapshot member). Returns true if a snapshot was present.
+    bool restoreEdgeOpSnapshot();
     // Re-resolve every fillet/chamfer op's generated-face mapping against the
     // current bodies. Must run after ANY editStep replay (commit, cancel, or
     // zero-value bail) because the replay re-runs each op's execute(), leaving
@@ -1138,6 +1401,7 @@ private:
     // face-edit case they're equal.
     bool m_resizeCylActive = false;
     bool m_resizeCylPreviewFailed = false; // last preview produced no valid body
+    bool m_resizeCylDeferredPreview = false; // threaded body: no live preview, applies on OK
     int  m_resizeCylBodyId = -1;
     bool m_resizeCylIsHole = true; // true: hole (normal toward axis), false: solid boundary
     // Axis anchored at the V_min end of the affected cylindrical region.
@@ -1180,6 +1444,10 @@ private:
     float  m_threadPitch  = 1.0f;
     float  m_threadDepth  = 0.6f;
     bool   m_threadRightHanded = true;
+    int    m_threadProfile = 0;      // ThreadProfile enum (0 = Standard V)
+    float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)
+    int    m_threadStarts = 1;       // interleaved helix count (bottle caps: 3-4)
+    float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch
     char   m_threadPitchBuf[32] = "1.0";
     char   m_threadDepthBuf[32] = "0.6";
     // Apply runs the helical sweep + boolean on a worker thread (it takes
@@ -1199,6 +1467,7 @@ private:
         TopoDS_Shape launchedFrom;   // doc body at launch — stale-guard
         std::future<TopoDS_Shape> fut;
         int attempts = 1;            // relaunch-on-stale counter (cap 3)
+        std::shared_ptr<std::atomic<bool>> cancel; // per-job worker token
     };
     std::vector<PendingThreadRecut> m_threadRecuts;
     void installThreadRecutHook();
@@ -1206,6 +1475,14 @@ private:
     bool launchThreadRecut(ThreadOp& op, int attempts);
     void pollThreadRecuts();   // per-frame: apply/relaunch/discard results
     void flushThreadRecuts();  // block until drained (save path)
+    // Cancel button on the re-cut modal: signal every worker, suspend the
+    // affected Thread steps (body is sitting pre-thread), abandon futures.
+    void cancelThreadRecuts();
+    // Cancel token for the initial-Apply worker (m_threadFuture).
+    std::shared_ptr<std::atomic<bool>> m_threadApplyCancel;
+    // Abandoned std::async futures (their destructor BLOCKS): parked here and
+    // reaped by pollThreadRecuts once the (cancelled) worker actually exits.
+    std::vector<std::future<TopoDS_Shape>> m_threadZombies;
 
     // Section View — render-only clipping of the scene by a plane so the
     // user can inspect interiors (thread profiles, wall thickness) without
@@ -1222,6 +1499,11 @@ private:
     float  m_sectionOffset     = 0.0f;
     bool   m_sectionFlip       = false;
     bool   m_sectionDirty      = true; // recompute overlay curves next frame
+    bool   m_sectionPending    = false;   // overlay recompute waiting for rest
+    uint32_t m_sectionRestMs   = 0;       // last plane change (debounce clock)
+    // Async overlay compute (one recompute on a threaded body took 100s).
+    std::future<SectionView::Result> m_sectionFut;
+    std::shared_ptr<std::atomic<bool>> m_sectionCancel;
     gp_Pln sectionBasePlane() const;  // flip applied, offset NOT applied
     void   renderSectionPanel();      // floating controls while enabled
 
@@ -1373,29 +1655,87 @@ private:
     void cancelPattern();      // undo preview if any + clean up state
     void renderPatternPanel(); // ImGui popup contents
 
-    // Interactive Loft popup — two profile wires snapshotted from the selected
-    // sketches at begin time, plus Solid/Shell + Smooth/Ruled + Reverse-B
-    // toggles, all driving a live preview pushed onto history (same pattern
-    // as Linear/Radial Pattern). Reverse-B flips profile B's wire direction
-    // before passing it to LoftOp, which is the usual fix for the "apex
-    // pinch / pyramid" output when the two wires' start vertices don't
-    // line up.
+    // Interactive Loft popup — N profile sections snapshotted from the
+    // selected sketches (in click order) at begin time, plus Solid/Shell +
+    // Smooth/Ruled toggles, all driving a live preview pushed onto history
+    // (same pattern as Linear/Radial Pattern). LoftOp itself has always been
+    // N-capable; this layer feeds it a whole stack of ribs. Each section has
+    // its own Flip toggle — reversing a wire's vertex order re-pairs it
+    // against its neighbours, the usual fix for the "apex pinch / twist"
+    // output when start vertices don't line up — and the panel can reorder
+    // sections, since ThruSections skins them in the order given.
+    struct LoftSection {
+        int sketchId = -1;                // identity for the panel label
+        TopoDS_Wire outer;
+        // Inner (hole) wires, so a ring section lofts into a tube.
+        std::vector<TopoDS_Wire> holes;
+        bool reverse = false;             // flip vertex order when feeding LoftOp
+    };
     bool m_loftActive = false;
-    TopoDS_Wire m_loftWireA;
-    TopoDS_Wire m_loftWireB;
-    // Inner (hole) wires of each profile, so a ring section lofts into a tube.
-    std::vector<TopoDS_Wire> m_loftHolesA;
-    std::vector<TopoDS_Wire> m_loftHolesB;
+    std::vector<LoftSection> m_loftSections;
     bool m_loftSolid = true;
     bool m_loftRuled = false;
-    bool m_loftReverseB = false;
     bool m_loftPreviewPushed = false;
+    // Guided ("rails") mode: selected sketches WITHOUT a closed region are
+    // treated as open rail curves when exactly one closed base profile is also
+    // selected — beginLoft auto-detects and the panel switches to the rails
+    // variant driving a GuidedLoftOp instead of a section LoftOp.
+    bool m_loftRailsMode = false;
+    gp_Pln m_loftBasePlane;
+    struct LoftRail {
+        int sketchId = -1;
+        TopoDS_Wire wire;
+    };
+    std::vector<LoftRail> m_loftRails;
 
     void beginLoft();          // reads selection, snapshots wires, pushes initial preview
     void updateLoft();         // re-push preview with current params
     void commitLoft();
     void cancelLoft();
     void renderLoftPanel();
+
+    // ── Boundary Fill (silhouette intersection) ──
+    // N closed sketches, each treated as a silhouette: every profile is
+    // extruded through the others' extent and the prisms are intersected
+    // (visual hull). Separate feature from Loft by design — no section
+    // ordering, no rails, no formula sensitivity.
+    struct BFillProfile {
+        int sketchId = -1;
+        TopoDS_Wire outer;
+        std::vector<TopoDS_Wire> holes;
+        gp_Pln plane;
+    };
+    bool m_bfillActive = false;
+    std::vector<BFillProfile> m_bfillProfiles;
+    bool m_bfillPreviewPushed = false;
+
+    void beginBoundaryFill();
+    void updateBoundaryFill();
+    void commitBoundaryFill();
+    void cancelBoundaryFill();
+    void renderBoundaryFillPanel();
+
+    // ── Reference image (photo underlay hosted on a construction plane) ──
+    // Import: file dialog → decode/validate → addPlane + setRefImage; the
+    // photo then moves/rotates via the normal plane gizmo and is sketch-on-able
+    // like any plane. The panel (shown while an image-hosting plane is
+    // selected) drives opacity / physical width / the ruler-calibration popup.
+    void beginRefImageImport();
+    void renderRefImagePanel();
+    // Calibration popup state: which plane's image is being calibrated
+    // (-1 = closed), the ImGui preview texture (panel-owned, one at a time),
+    // and up to two picked points in IMAGE-PIXEL coordinates.
+    int          m_refImgCalibPlane = -1;
+    unsigned int m_refImgPreviewTex = 0;
+    int          m_refImgPreviewPlane = -1;
+    int          m_refImgPreviewW = 0, m_refImgPreviewH = 0;
+    int          m_refImgPickCount = 0;
+    float        m_refImgPickPx[2][2] = {{0, 0}, {0, 0}};
+    char         m_refImgDistBuf[32] = "10";
+    // Calibrate preview navigation: scroll-to-zoom (cursor-anchored) +
+    // right-drag pan, so ruler ticks on a big phone photo are pickable.
+    float        m_refImgCalibZoom = 1.0f;
+    float        m_refImgCalibPan[2] = {0, 0};
 
     // Interactive Construction Plane popup. ConstructionPlanePlugin fires
     // requestInteractiveOp("ConstructionPlane"); Application reads the

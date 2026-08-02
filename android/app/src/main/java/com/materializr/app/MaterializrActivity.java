@@ -4,9 +4,11 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
@@ -16,6 +18,9 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.Comparator;
 
 import org.libsdl.app.SDLActivity;
 
@@ -85,12 +90,29 @@ public class MaterializrActivity extends SDLActivity {
     public static boolean nativeCommitSaveToUri(String uriStr, String tempPath) {
         MaterializrActivity a = sInstance;
         if (a == null || uriStr == null || uriStr.isEmpty()) return false;
-        try (InputStream in = new FileInputStream(tempPath);
-             OutputStream out = a.getContentResolver()
-                                 .openOutputStream(Uri.parse(uriStr), "wt")) {
-            copy(in, out);
+        try {
+            try (InputStream in = new FileInputStream(tempPath);
+                 OutputStream out = a.getContentResolver()
+                                     .openOutputStream(Uri.parse(uriStr), "wt")) {
+                copy(in, out);
+            }
+            // Only AFTER the stream closed cleanly. Cloud providers do the
+            // actual upload at close(), so a fallback written inside the
+            // try-with-resources would record content the document never
+            // received — leaving the backup copy newer than the real file
+            // after a save the user was told had failed.
+            try {
+                File dir = new File(a.getCacheDir(), "import");
+                dir.mkdirs();
+                File named = new File(dir, a.queryName(Uri.parse(uriStr)));
+                try (InputStream in2 = new FileInputStream(tempPath);
+                     OutputStream out2 = new FileOutputStream(named)) { copy(in2, out2); }
+                a.writeDocFallback(uriStr, named);
+            } catch (Exception ignored) {}
             return true;
         } catch (Exception e) {
+            android.util.Log.w("Materializr",
+                "nativeCommitSaveToUri failed for " + uriStr, e);
             return false;
         }
     }
@@ -192,10 +214,140 @@ public class MaterializrActivity extends SDLActivity {
             try (InputStream in = a.getContentResolver().openInputStream(uri);
                  OutputStream out = new FileOutputStream(dst)) { copy(in, out); }
             a.rememberDoc(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            a.writeDocFallback(uriString, dst);
             return dst.getAbsolutePath();
         } catch (Exception e) {
+            // Persisted SAF grants are NOT durable in practice: they're wiped
+            // by uninstall / clear-data, and the Downloads provider's numeric
+            // document ids churn on re-index — either way openInputStream
+            // throws and every recent silently died here (the long-standing
+            // "access may have been revoked" bug, diagnosed 2026-07-28).
+            // Serve the app-private fallback copy from the last successful
+            // open/save instead.
+            //
+            // But NOT when the document demonstrably still exists: that read
+            // failed for a transient reason (a cloud provider offline or a
+            // document it hasn't cached, storage unmounted, provider process
+            // restarting), and the write grant is very much alive. Opening a
+            // stale copy there and letting quick-save commit it is how you
+            // silently overwrite newer work with older work. Fail visibly
+            // instead — the user retries when they're back online.
+            android.util.Log.w("Materializr",
+                "nativeOpenUri: resolver failed for " + uriString, e);
+            if (a.documentStillExists(uriString)) {
+                android.util.Log.w("Materializr",
+                    "nativeOpenUri: document exists but is unreachable — "
+                    + "refusing the stale fallback");
+                return "";
+            }
+            String fb = a.readDocFallback(uriString);
+            if (!fb.isEmpty()) {
+                // The caller must not treat this as the real document: the
+                // original is gone or unreachable, so quick-saving back to
+                // that URI could overwrite a file we never actually read.
+                // Native drops the save identity and says so (see
+                // mobileLastOpenWasFallback).
+                sLastOpenWasFallback = true;
+                android.util.Log.w("Materializr",
+                    "nativeOpenUri: using fallback copy " + fb);
+            }
+            return fb;
+        }
+    }
+
+    // True when the most recent nativeOpenUri() served an app-private fallback
+    // copy rather than the real document. Native reads this right after the
+    // open and unlinks the project from its content:// URI, so the next save
+    // goes through the picker instead of truncating a document whose current
+    // contents we never saw.
+    private static boolean sLastOpenWasFallback = false;
+    public static boolean nativeLastOpenWasFallback() { return sLastOpenWasFallback; }
+
+    // Does the provider still have this document? Distinguishes "unreachable
+    // right now" (row present -> the read failure was transient) from "gone or
+    // disowned" (no row, or the query itself is refused -> the grant/doc-id
+    // died, which is exactly what the fallback copies exist for). Note a
+    // deleted file and a churned Downloads document id look identical here —
+    // both come back as no row — so both take the fallback path, and the
+    // unlink above is what keeps the deleted-file case from writing back.
+    private boolean documentStillExists(String uriString) {
+        try {
+            Uri uri = Uri.parse(uriString);
+            try (Cursor c = getContentResolver().query(
+                     uri, new String[]{ DocumentsContract.Document.COLUMN_DOCUMENT_ID },
+                     null, null, null)) {
+                return c != null && c.moveToFirst();
+            }
+        } catch (Exception e) {
+            return false;   // refused or unqueryable — treat as gone
+        }
+    }
+
+    // ---- App-private fallback copies for Open Recent -------------------------
+    // files/docfallback/<sha1(uri)>_<displayName>. Written on every successful
+    // open and save-commit; read when the content resolver can no longer serve
+    // the URI (see nativeOpenUri). Pruned to the newest 15 — same order of
+    // magnitude as the recents list itself.
+    private File docFallbackDir() {
+        File d = new File(getFilesDir(), "docfallback");
+        d.mkdirs();
+        return d;
+    }
+
+    private static String sha1Hex(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            byte[] h = md.digest(s.getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : h) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(s.hashCode());
+        }
+    }
+
+    private void writeDocFallback(String uriString, File src) {
+        try {
+            String key = sha1Hex(uriString);
+            File dir = docFallbackDir();
+            // One fallback per document: drop any older copy under a
+            // different display name before writing the current one.
+            File[] old = dir.listFiles((d, n) -> n.startsWith(key + "_"));
+            if (old != null) for (File f : old) f.delete();
+            File dst = new File(dir, key + "_" + src.getName());
+            try (InputStream in = new FileInputStream(src);
+                 OutputStream out = new FileOutputStream(dst)) { copy(in, out); }
+            pruneDocFallback(dir);
+        } catch (Exception e) {
+            android.util.Log.w("Materializr", "writeDocFallback failed", e);
+        }
+    }
+
+    private String readDocFallback(String uriString) {
+        try {
+            String key = sha1Hex(uriString);
+            File[] hits = docFallbackDir().listFiles((d, n) -> n.startsWith(key + "_"));
+            if (hits == null || hits.length == 0) return "";
+            File src = hits[0];
+            // Hand back a cache temp named like the original document, so the
+            // native side sees the same shape as a live-URI open.
+            File dir = new File(getCacheDir(), "import");
+            dir.mkdirs();
+            File dst = new File(dir, src.getName().substring(key.length() + 1));
+            try (InputStream in = new FileInputStream(src);
+                 OutputStream out = new FileOutputStream(dst)) { copy(in, out); }
+            return dst.getAbsolutePath();
+        } catch (Exception e) {
+            android.util.Log.w("Materializr", "readDocFallback failed", e);
             return "";
         }
+    }
+
+    private static void pruneDocFallback(File dir) {
+        File[] all = dir.listFiles();
+        if (all == null || all.length <= 15) return;
+        Arrays.sort(all, Comparator.comparingLong(File::lastModified));
+        for (int i = 0; i < all.length - 15; ++i) all[i].delete();
     }
 
     private static void signal(String value) { sResultValue = value; sResultReady = true; }
@@ -254,8 +406,10 @@ public class MaterializrActivity extends SDLActivity {
                 try (InputStream in = getContentResolver().openInputStream(uri);
                      OutputStream out = new FileOutputStream(dst)) { copy(in, out); }
                 rememberDoc(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                writeDocFallback(uri.toString(), dst);
                 signal(dst.getAbsolutePath());
             } catch (Exception e) {
+                android.util.Log.w("Materializr", "open-result copy failed", e);
                 signal("");
             }
         } else { // REQ_SAVE: remember the destination; native writes a temp then commits.

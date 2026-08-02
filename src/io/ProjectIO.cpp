@@ -1,4 +1,5 @@
 #include "ProjectIO.h"
+#include "../modeling/SubShapeIndex.h"
 #include "../core/Document.h"
 #include "../modeling/Sketch.h"
 #include "../modeling/SketchEditOp.h"
@@ -18,6 +19,7 @@
 #include <zlib.h>
 #include <cstdio>
 
+#include <array>
 #include <cstddef>
 #include <fstream>
 #include <sstream>
@@ -185,10 +187,58 @@ std::string gunzipInflate(const std::string& src) {
     return (ret == Z_STREAM_END) ? out : std::string{};
 }
 
+// ─── base64 (for the THUMB_PNG section) ─────────────────────────────────────
+// The thumbnail rides in the line-oriented tail region, where older loaders
+// skip unknown sections one getline at a time — so the PNG must be a single
+// newline-free line, hence base64 rather than a raw length-prefixed blob.
+const char kB64Alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+std::string base64Encode(const uint8_t* data, size_t len) {
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < len) v |= static_cast<uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < len) v |= static_cast<uint32_t>(data[i + 2]);
+        out += kB64Alphabet[(v >> 18) & 63];
+        out += kB64Alphabet[(v >> 12) & 63];
+        out += (i + 1 < len) ? kB64Alphabet[(v >> 6) & 63] : '=';
+        out += (i + 2 < len) ? kB64Alphabet[v & 63] : '=';
+    }
+    return out;
+}
+bool base64Decode(const std::string& in, std::vector<uint8_t>& out) {
+    // Reverse table built once; -1 = invalid character.
+    static const auto table = [] {
+        std::array<int8_t, 256> t;
+        t.fill(-1);
+        for (int i = 0; i < 64; ++i)
+            t[static_cast<unsigned char>(kB64Alphabet[i])] = static_cast<int8_t>(i);
+        return t;
+    }();
+    out.clear();
+    out.reserve((in.size() / 4) * 3);
+    uint32_t acc = 0;
+    int bits = 0;
+    for (char c : in) {
+        if (c == '=') break;
+        int8_t v = table[static_cast<unsigned char>(c)];
+        if (v < 0) return false;
+        acc = (acc << 6) | static_cast<uint32_t>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<uint8_t>((acc >> bits) & 0xFF));
+        }
+    }
+    return !out.empty();
+}
+
 } // namespace
 
 ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& doc,
-                                  const ProjectHistory* history) {
+                                  const ProjectHistory* history,
+                                  const std::vector<uint8_t>* thumbnailPng) {
     ProjectSaveResult result;
 
     // OCCT BinTools::Write (per body and inside the HISTORY blocks) can throw
@@ -239,6 +289,14 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         }
 
         ofs << "\nBODY_END\n";
+    }
+
+    // --- Thumbnail (optional, 1.6+) ---
+    // Placed FIRST in the tail region so peekThumbnail can stop parsing the
+    // moment the body blocks end. One base64 line — see the encoder note.
+    if (thumbnailPng && !thumbnailPng->empty()) {
+        ofs << "THUMB_PNG "
+            << base64Encode(thumbnailPng->data(), thumbnailPng->size()) << "\n";
     }
 
     // --- Sketches ---
@@ -322,12 +380,21 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         // Constraints: opt-in user-applied sketch constraints. One line each,
         // type stored as the enum's int value (stable as long as we only append
         // to ConstraintType in SketchConstraints.h — which is the policy).
+        // K line format:
+        //   K id type eA eB value valueY labelOffX labelOffY isDriving
+        // Label offsets were added for the dimension tool; isDriving for
+        // reference (annotation-only) dimensions. Readers of older builds
+        // ignore trailing tokens, so a file written here still loads there
+        // — losing the offsets and treating every dimension as driving,
+        // which is that build's only behaviour anyway.
         const auto& cns = sk->getConstraints();
         ofs << "CONSTRAINT_COUNT " << static_cast<int>(cns.size()) << "\n";
         for (const auto& c : cns) {
             ofs << "K " << c.id << " " << static_cast<int>(c.type) << " "
                 << c.entityA << " " << c.entityB << " "
-                << c.value << " " << c.valueY << "\n";
+                << c.value << " " << c.valueY << " "
+                << c.labelOffX << " " << c.labelOffY << " "
+                << (c.isDriving ? 1 : 0) << "\n";
         }
 
         ofs << "SKETCH_END\n";
@@ -427,6 +494,29 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
                 << a->direction.X() << " " << a->direction.Y() << " " << a->direction.Z() << "\n";
         }
     }
+    // Reference images (photo underlays hosted on construction planes). The
+    // ORIGINAL compressed file bytes go in verbatim, length-prefixed like
+    // PARAMS_LEN, so a .materializr stays self-contained and no recompression
+    // ever degrades the photo. Keyed by the SAVED plane id — the loader remaps
+    // through the CPLANE savedId→newId map (plane ids aren't preserved).
+    // Block only appears when images exist, so ordinary projects are
+    // byte-identical to before.
+    {
+        std::vector<int> imgIds = doc.getAllRefImagePlaneIds();
+        if (!imgIds.empty()) {
+            ofs << "REFIMG_COUNT " << static_cast<int>(imgIds.size()) << "\n";
+            for (int pid : imgIds) {
+                const auto* r = doc.getRefImage(pid);
+                if (!r) continue;
+                ofs << "REFIMG " << r->planeId << " " << r->widthMM << " "
+                    << r->opacity << " " << r->pixW << " " << r->pixH << " "
+                    << r->fileBytes.size() << "\n";
+                ofs.write(reinterpret_cast<const char*>(r->fileBytes.data()),
+                          static_cast<std::streamsize>(r->fileBytes.size()));
+                ofs << "\n";
+            }
+        }
+    }
 
     // --- History (optional) ---
     if (history && history->present) {
@@ -464,6 +554,39 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             for (int id : st.deleted) ofs << " " << id;
             ofs << "\n";
             ofs << "STEP_END\n";
+        }
+    }
+
+    // --- Face lineage (additive; older readers skip these unknown tokens) ---
+    // Per body: each face's ancestry ids, keyed by the face's ordinal in the
+    // SAVED shape (bit-identical on load, so ordinal is exact there — the
+    // drift hazard only exists across REBUILDS, which is what the ids solve).
+    {
+        bool wroteNext = false;
+        for (int bid : doc.getAllBodyIds()) {
+            const auto* m = doc.bodyFaceIds(bid);
+            if (!m || m->empty()) continue;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) { continue; }
+            std::ostringstream sec;
+            int rows = 0;
+            for (const auto& e : *m) {
+                if (e.ids.empty()) continue;
+                int ord = SubShapeIndex::indexOf(body, e.face, TopAbs_FACE);
+                if (ord <= 0) continue;
+                sec << ord << " ";
+                for (size_t k = 0; k < e.ids.size(); ++k)
+                    sec << (k ? "," : "") << e.ids[k];
+                sec << "\n";
+                ++rows;
+            }
+            if (rows > 0) {
+                if (!wroteNext) {
+                    ofs << "FACEID_NEXT " << doc.faceIdCounter() << "\n";
+                    wroteNext = true;
+                }
+                ofs << "FACEIDS " << bid << " " << rows << "\n" << sec.str();
+            }
         }
     }
 
@@ -596,7 +719,29 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 std::istringstream s(line); std::string t; Constraint c{};
                 int tval = 0;
                 s >> t >> c.id >> tval >> c.entityA >> c.entityB >> c.value >> c.valueY;
+                // Range-check before the cast: a value outside the enum's
+                // range is undefined behaviour, and the solver's switches
+                // have no default arm to absorb it. Drop the constraint
+                // rather than carry a garbage type into the solver.
+                if (tval < static_cast<int>(ConstraintType::Coincident) ||
+                    tval > static_cast<int>(ConstraintType::CircleGap))
+                    continue;
                 c.type = static_cast<ConstraintType>(tval);
+                // Label offsets are trailing optional fields (since the
+                // dimension tool); legacy 6-field K lines default to auto
+                // placement.
+                if (!(s >> c.labelOffX >> c.labelOffY)) {
+                    c.labelOffX = 0.0;
+                    c.labelOffY = 0.0;
+                }
+                // isDriving is the 9th field (reference dimensions). Absent
+                // in every file written before it existed — and in every
+                // geometric constraint ever written — so the default is
+                // DRIVING, preserving old behaviour exactly. Note the stream
+                // is already in fail state here for a legacy 6-field line, so
+                // this extraction fails too and the default stands.
+                int drv = 1;
+                c.isDriving = (s >> drv) ? (drv != 0) : true;
                 c.isSatisfied = false;
                 maxConstraintId = std::max(maxConstraintId, c.id);
                 sk.addRawConstraint(c);
@@ -643,8 +788,10 @@ void readSketch(std::istream& ifs, const std::string& startLine, Document& doc) 
 
 } // namespace
 
-ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
-                                  ProjectHistory* historyOut) {
+namespace {
+
+ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
+                           ProjectHistory* historyOut) {
     ProjectLoadResult result;
 
     // OCCT BinTools::Read / BRepTools::Read run on untrusted bytes below and throw
@@ -840,6 +987,10 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
 
     // After the bodies, v2 files carry a SKETCH section. Scan remaining lines and
     // dispatch; stop at END. (v1 files just have END here — nothing to do.)
+    // CPLANE loading allocates NEW plane ids; REFIMG entries reference the
+    // saved ones, so the CPLANE arm records the remap here for REFIMG to use
+    // (save order guarantees CPLANE precedes REFIMG).
+    std::map<int, int> refImgPlaneRemap;
     std::string line;
     while (std::getline(ifs, line)) {
         std::istringstream iss(line);
@@ -986,7 +1137,7 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                     gp_Pln pln(ax);
                     int newId = doc.addPlane(pln, pname);
                     doc.setPlaneVisible(newId, vis != 0);
-                    (void)savedId; // not preserved
+                    refImgPlaneRemap[savedId] = newId; // REFIMG remaps via this
                 } catch (...) {}
             }
         } else if (tok == "CAXIS_COUNT") {
@@ -1020,6 +1171,74 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
                     (void)savedId;
                 } catch (...) {}
             }
+        } else if (tok == "REFIMG_COUNT") {
+            // Reference images. Header line + length-prefixed raw file bytes
+            // (same technique + bounds discipline as PARAMS_LEN). Saved plane
+            // ids remap through the CPLANE arm's map; an image whose plane
+            // vanished (corrupt / hand-edited file) is skipped, not fatal.
+            int n = 0; iss >> n;
+            for (int i = 0; i < n; ++i) {
+                std::string rline;
+                if (!std::getline(ifs, rline)) break;
+                std::istringstream rs(rline);
+                std::string rtok; rs >> rtok;
+                if (rtok != "REFIMG") continue;
+                int savedPlane = -1, pixW = 0, pixH = 0;
+                double widthMM = 100.0;
+                float opacity = 0.6f;
+                std::size_t nbytes = 0;
+                rs >> savedPlane >> widthMM >> opacity >> pixW >> pixH >> nbytes;
+                // Bound the untrusted length against the bytes left.
+                std::streampos here = ifs.tellg();
+                std::size_t remaining =
+                    (here >= 0 && static_cast<std::size_t>(here) <= contents.size())
+                        ? contents.size() - static_cast<std::size_t>(here) : 0;
+                if (nbytes == 0 || nbytes > remaining) {
+                    result.errorMessage = "REFIMG length exceeds remaining file size";
+                    return result;
+                }
+                std::vector<unsigned char> bytes(nbytes);
+                ifs.read(reinterpret_cast<char*>(bytes.data()),
+                         static_cast<std::streamsize>(nbytes));
+                if (static_cast<std::size_t>(ifs.gcount()) != nbytes) {
+                    result.errorMessage = "Short read on REFIMG blob";
+                    return result;
+                }
+                std::string skip;
+                std::getline(ifs, skip); // trailing newline after the blob
+                auto it = refImgPlaneRemap.find(savedPlane);
+                if (it == refImgPlaneRemap.end()) continue; // orphaned image
+                RefImageEntry e;
+                e.fileBytes = std::move(bytes);
+                e.pixW = pixW;
+                e.pixH = pixH;
+                e.widthMM = widthMM;
+                e.opacity = opacity;
+                doc.setRefImage(it->second, std::move(e));
+            }
+        } else if (tok == "FACEID_NEXT") {
+            int n = 0; iss >> n;
+            doc.setFaceIdCounter(n);
+        } else if (tok == "FACEIDS") {
+            // Face lineage for one body (see the save side). Bodies were read
+            // earlier in the file, so resolving ordinals here is exact.
+            int bid = 0, n = 0; iss >> bid >> n;
+            TopoDS_Shape body;
+            try { body = doc.getBody(bid); } catch (...) {}
+            materializr::topo::FaceIdMap fm;
+            for (int i = 0; i < n; ++i) {
+                std::string fl;
+                if (!std::getline(ifs, fl)) break;
+                std::istringstream ls(fl);
+                int ord = 0; std::string csv;
+                ls >> ord >> csv;
+                if (body.IsNull() || ord <= 0 || csv.empty()) continue;
+                TopoDS_Shape f = SubShapeIndex::at(body, ord, TopAbs_FACE);
+                if (f.IsNull()) continue;
+                std::vector<int> ids = SubShapeIndex::parse(csv);
+                if (!ids.empty()) fm.push_back({f, ids});
+            }
+            if (!fm.empty()) doc.setBodyFaceIds(bid, std::move(fm));
         } else if (tok == "HISTORY_INITIAL_COUNT" && historyOut) {
             int k = 0; iss >> k;
             historyOut->present = true;
@@ -1099,6 +1318,35 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
         // Unknown sections are ignored for forward compatibility.
     }
 
+    // A sketch can outlive the body it was drawn on: delete that body (or have
+    // an op consume it) and the sketch keeps the now-dead id. Nothing validated
+    // it, and two behaviours keyed off it silently went wrong — the toolbar
+    // offered Push/Pull and hid Extrude (attachment is an either/or), while
+    // PushPullOp took the fuse-into-existing path, failed doc.getBody() and
+    // SKIPPED the target, so push/pull appeared to do nothing at all.
+    //
+    // A sketch whose host is gone IS free-floating, so say so once here rather
+    // than re-deriving it at every consumer. Found in Steve's antenna tracker:
+    // Sketch 2 pointed at body 5 after a re-extrude brought the box back under
+    // a different id.
+    {
+        const std::vector<int> liveBodies = doc.getAllBodyIds();
+        for (int sid : doc.getAllSketchIds()) {
+            auto sk = doc.getSketch(sid);
+            if (!sk) continue;
+            const int host = sk->getSourceBody();
+            if (host < 0) continue;
+            if (std::find(liveBodies.begin(), liveBodies.end(), host) !=
+                liveBodies.end())
+                continue;
+            std::fprintf(stderr,
+                         "[ProjectIO] sketch %d was anchored to body %d, which "
+                         "no longer exists — treating it as free-floating.\n",
+                         sid, host);
+            sk->setSourceBody(-1);
+        }
+    }
+
     result.success = true;
     result.bodiesLoaded = loadedCount;
     return result;
@@ -1113,6 +1361,111 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
         result.errorMessage = "Project load failed: unrecognized error";
     }
     return result;
+}
+
+} // namespace
+
+ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
+                                  ProjectHistory* historyOut) {
+    ProjectLoadResult result = loadImpl(filePath, doc, historyOut);
+    // Transactional guarantee: loadImpl clears the document and then mutates
+    // it incrementally, so a mid-parse failure (corrupt/hostile file) would
+    // otherwise hand the caller a silently truncated document. Reset to a
+    // clean empty state so failure is unambiguous — never half a project.
+    if (!result.success) doc.clear();
+    return result;
+}
+
+bool ProjectIO::peekThumbnail(const std::string& filePath,
+                              std::vector<uint8_t>& pngOut) {
+    // Mirrors loadImpl's preamble (slurp → inflate → header → SAVED_BY →
+    // BODY_COUNT) but hops over each body via its length prefix instead of
+    // handing the bytes to OCCT, then reads the first tail line. Everything
+    // here is bounds-checked the same way the real loader is; any surprise
+    // just means "no thumbnail".
+    try {
+        std::ifstream raw(filePath, std::ios::in | std::ios::binary);
+        if (!raw.is_open()) return false;
+        raw.seekg(0, std::ios::end);
+        std::streampos rawSize = raw.tellg();
+        raw.seekg(0, std::ios::beg);
+        if (rawSize > static_cast<std::streampos>(512LL * 1024 * 1024)) return false;
+        std::ostringstream slurp;
+        slurp << raw.rdbuf();
+        std::string contents = slurp.str();
+        raw.close();
+        if (looksLikeGzip(contents)) {
+            contents = gunzipInflate(contents);
+            if (contents.empty()) return false;
+        }
+
+        std::istringstream ifs(contents, std::ios::binary);
+        std::string line;
+        if (!std::getline(ifs, line) ||
+            line.rfind("MATERIALIZR_PROJECT", 0) != 0) return false;
+        int fileVersion = 2;
+        {
+            auto sp = line.find("v");
+            if (sp != std::string::npos) {
+                try { fileVersion = std::stoi(line.substr(sp + 1)); } catch (...) {}
+            }
+        }
+        // v2 saves predate thumbnails entirely, and every thumbnail-bearing
+        // save is v3 with length-prefixed bodies — required for the hop below.
+        if (fileVersion < 3) return false;
+
+        {
+            auto pos = ifs.tellg();
+            std::string peek;
+            if (!(std::getline(ifs, peek) && peek.rfind("SAVED_BY ", 0) == 0))
+                ifs.seekg(pos);
+        }
+
+        int bodyCount = 0;
+        {
+            if (!std::getline(ifs, line)) return false;
+            std::istringstream iss(line);
+            std::string label;
+            iss >> label >> bodyCount;
+            if (label != "BODY_COUNT" || iss.fail() || bodyCount < 0) return false;
+        }
+
+        for (int i = 0; i < bodyCount; ++i) {
+            if (!std::getline(ifs, line)) return false;
+            std::istringstream iss(line);
+            std::string label;
+            iss >> label;
+            if (label != "BODY_START") return false;
+            // BODY_START id "name" visible r g b byteCount — the byte count is
+            // the last token after the closing quote (same parse as the loader).
+            auto lq = line.rfind('"');
+            if (lq == std::string::npos) return false;
+            std::istringstream after(line.substr(lq + 1));
+            int visible = 1;
+            float r, g, b;
+            std::size_t byteCount = 0;
+            after >> visible >> r >> g >> b >> byteCount;
+            if (after.fail()) return false;
+            std::streampos here = ifs.tellg();
+            if (here < 0) return false;
+            std::size_t remaining =
+                contents.size() > static_cast<std::size_t>(here)
+                    ? contents.size() - static_cast<std::size_t>(here) : 0;
+            if (byteCount > remaining) return false;
+            ifs.seekg(here + static_cast<std::streamoff>(byteCount));
+            if (!std::getline(ifs, line)) return false;   // newline after payload
+            if (!std::getline(ifs, line)) return false;
+            if (line != "BODY_END") return false;
+        }
+
+        // The tail region: THUMB_PNG is written as its very first line, so
+        // hitting SKETCH_COUNT (or anything else) means this save has none.
+        if (!std::getline(ifs, line)) return false;
+        if (line.rfind("THUMB_PNG ", 0) != 0) return false;
+        return base64Decode(line.substr(10), pngOut);
+    } catch (...) {
+        return false;
+    }
 }
 
 std::unique_ptr<SketchEditOp> ProjectIO::rehydrateSketchEditOp(
@@ -1217,7 +1570,9 @@ void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
     for (const auto& c : cns)
         os << "K " << c.id << " " << static_cast<int>(c.type) << " "
            << c.entityA << " " << c.entityB << " "
-           << c.value << " " << c.valueY << "\n";
+           << c.value << " " << c.valueY << " "
+           << c.labelOffX << " " << c.labelOffY << " "
+           << (c.isDriving ? 1 : 0) << "\n";
 
     os << "SKETCH_END\n";
 }

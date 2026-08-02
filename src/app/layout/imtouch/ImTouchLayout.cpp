@@ -10,6 +10,7 @@
 
 #include "app/Application.h"
 #include "app/layout/LayoutCommon.h"
+#include <algorithm>   // std::min — viewport-capped popup height
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/Operation.h"
@@ -60,7 +61,7 @@ const char* stepIcon(const std::string& t) {
     if (t == "scale_face" || t == "resize_cylindrical" || t == "taper")
                                            return MZ_ICON_SCALE;
     if (t == "primitive")                  return MZ_ICON_PRIMITIVE;
-    if (t == "thread")                     return MZ_ICON_ROTATE;
+    if (t == "thread")                     return MZ_ICON_THREAD;
     if (t == "construction_plane" || t == "construction_axis")
                                            return MZ_ICON_AXES;
     if (t == "sketchedit" || t == "combine_sketches" || t == "project_sketch")
@@ -165,11 +166,18 @@ void Application::renderImTouchLayout() {
                           " (" + std::to_string(n) + ")";
                 }
             }
+            // Tab affordance (Steve's popout): more than one open project adds
+            // a chevron and the chip becomes the button that opens the tabs
+            // sheet — no extra chrome when only one project is open (the chip
+            // still opens the sheet then too, for "+ New Project").
+            std::string chev = "  " ICON_IC_NAV_ARROW_DOWN;
+            if (sessionDirty(m_activeSession)) pn += " \xe2\x80\xa2";
             const float padX = 14.0f * s;
             const ImVec2 tn = ImGui::CalcTextSize(pn.c_str());
             const ImVec2 tsl = sel.empty() ? ImVec2(0.0f, 0.0f)
                                            : ImGui::CalcTextSize(sel.c_str());
-            const float bw = padX * 2.0f + tn.x + tsl.x;
+            const ImVec2 tc = ImGui::CalcTextSize(chev.c_str());
+            const float bw = padX * 2.0f + tn.x + tsl.x + tc.x;
             const ImVec2 p = ImGui::GetCursorScreenPos();
             dl->AddRectFilled(p, ImVec2(p.x + bw, p.y + bh),
                               ImGui::GetColorU32(touchui::rowBg()),
@@ -179,7 +187,12 @@ void Application::renderImTouchLayout() {
             if (!sel.empty())
                 dl->AddText(ImVec2(p.x + padX + tn.x, p.y + (bh - tsl.y) * 0.5f),
                             ImGui::GetColorU32(touchui::textDim()), sel.c_str());
-            ImGui::Dummy(ImVec2(bw, bh));
+            dl->AddText(ImVec2(p.x + padX + tn.x + tsl.x,
+                               p.y + (bh - tc.y) * 0.5f),
+                        ImGui::GetColorU32(touchui::textDim()), chev.c_str());
+            if (ImGui::InvisibleButton("##projTabsChip", ImVec2(bw, bh)))
+                ImGui::OpenPopup("##TouchTabs");
+            renderTouchTabsSheet();
         }
     }
     ImGui::End();
@@ -333,7 +346,15 @@ void Application::renderImTouchLayout() {
                     "body", MZ_ICON_BODY,
                     m_document->getBodyName(id).c_str(), &visible,
                     selB.count(id) > 0, &bcol.x);
-                if (act.eyeToggled) m_document->setBodyVisible(id, visible);
+                if (act.eyeToggled) {
+                    m_document->setBodyVisible(id, visible);
+                    // The viewport only filters hidden bodies when it rebuilds
+                    // its meshes — without this the flag flips but the stale
+                    // mesh keeps drawing (#37; desktop's ItemsPanel returns
+                    // colorChanged for the same reason).
+                    m_meshesDirty = true;
+                    markDirty();
+                }
                 if (act.swatchClicked) ImGui::OpenPopup("bodyColor");
                 glm::vec3 newCol;
                 if (colorPopup("bodyColor", "Body colour",
@@ -424,6 +445,7 @@ void Application::renderImTouchLayout() {
                             /*selected=*/false, &fcol.x);
                         if (fact.eyeToggled) {
                             m_document->setFolderVisible(fid, fvis);
+                            m_meshesDirty = true;  // cascades to member bodies (#37)
                             markDirty();
                         }
                         if (fact.clicked)
@@ -1055,8 +1077,19 @@ void Application::renderImTouchLayout() {
             s_seenRev = m_history->revision();
 
             if (wantOpen) ImGui::OpenPopup("##LiteStepProps");
-            ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f * s, 0),
-                                                ImVec2(360.0f * s, 460.0f * s));
+            // Sized to host an UNFOLDED number pad (TouchWidgets numberField),
+            // not just a column of one-line fields: at the old 360x460 the pad
+            // had to be a popup of its own to fit, which is what put a popup
+            // inside this popup.
+            //
+            // Capped against the VIEWPORT, not a bare constant: a fixed height
+            // that happens to exceed the screen just hides the bottom of the
+            // dialog, which is how the pad's Enter key went missing the first
+            // time. Screen height wins whenever it's the smaller of the two.
+            const float vpH = ImGui::GetMainViewport()->Size.y;
+            const float maxPopupH = std::min(760.0f * s, vpH * 0.88f);
+            ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f * s, 0),
+                                                ImVec2(420.0f * s, maxPopupH));
             if (ImGui::BeginPopup("##LiteStepProps")) {
                 const Operation* op =
                     (m_imTouchHistoryEdit >= 0 && m_imTouchHistoryEdit < steps)
@@ -1093,9 +1126,24 @@ void Application::renderImTouchLayout() {
                     } else {
                         // The op's own parameter editor — identical widgets to
                         // the desktop History panel's Properties section.
-                        ImGui::BeginChild("##props", ImVec2(0.0f, 200.0f * s),
-                                          true);
+                        // An EXPLICIT height, derived from the popup's own cap.
+                        // A fill height (-footerH) reads better but is circular
+                        // here: BeginPopup implies AlwaysAutoResize, so the
+                        // popup sizes to the child while the child sizes to the
+                        // popup, and the result was a short popup anchored
+                        // halfway down the screen with its lower half off it.
+                        const float footerH = 44.0f * s +
+                                              ImGui::GetStyle().ItemSpacing.y * 2.0f;
+                        const float headerH = 80.0f * s;   // title + separator
+                        const float childH =
+                            std::max(200.0f * s, maxPopupH - footerH - headerH);
+                        ImGui::BeginChild("##props", ImVec2(0.0f, childH), true);
+                        ImGui::PushItemWidth(
+                            ImGui::CalcTextSize("0000000").x +
+                            2.0f * (ImGui::GetFrameHeight() +
+                                    ImGui::GetStyle().ItemInnerSpacing.x));
                         const_cast<Operation*>(op)->renderProperties();
+                        ImGui::PopItemWidth();
                         ImGui::EndChild();
                         ImGui::BeginDisabled(histLocked);
                         if (ImGui::Button("Apply Changes",

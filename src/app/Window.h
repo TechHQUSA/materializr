@@ -75,6 +75,11 @@ public:
     bool consumeTouchPan(float& dx, float& dy);   // centroid movement, pixels
     bool consumeTouchZoom(float& dz);             // pinch delta, wheel-equivalent
     bool consumeDoubleTap();                      // true once after two quick taps (touch "double-click")
+    // true once (with the tap position) after a GENUINE single tap lifts — not a
+    // hold, drag, or 2-finger gesture. Selection commits off THIS instead of the
+    // press frame so a following nav gesture (one-finger orbit / two-finger
+    // pan-zoom) can't re-pick or clear it before the drag is recognized (#68).
+    bool consumeSingleTap(float& x, float& y);
     bool consumeUndoTap();                        // true once after a two-finger tap (mobile undo gesture)
     bool consumeRedoTap();                        // true once after a three-finger tap (mobile redo gesture)
 
@@ -82,6 +87,13 @@ public:
     // lift but a two-finger gesture taking over (the second finger landing forces
     // a release). Lets press-drag-release placement ignore spurious releases.
     bool lastLeftReleaseWasGesture() const { return m_leftReleaseWasGesture; }
+
+    // True while a two-finger pan/pinch gesture is in progress. The viewport
+    // keeps its input latch alive through the gesture: the takeover parks the
+    // cursor off-screen (see handleFingerEvent), which would otherwise drop
+    // IsItemHovered and starve the pan/zoom consumption plus the release
+    // handlers that used to see the frozen press position.
+    bool twoFingerActive() const { return m_twoFinger; }
 
     // True once a one-finger press has been held stationary past the hold
     // threshold AND then dragged. The viewport uses this to start a box/drag-
@@ -154,6 +166,8 @@ private:
     std::uint32_t m_lastTapTick = 0;
     float m_lastTapX = 0.0f, m_lastTapY = 0.0f;
     bool  m_doubleTapPending = false;
+    bool  m_singleTapPending = false;     // a genuine single tap lifted (see consumeSingleTap)
+    float m_singleTapX = 0.0f, m_singleTapY = 0.0f;
     bool  m_movedBeyondHold = false;      // moved too far -> it's a drag, not a hold
     bool  m_holdSelect = false;           // hold threshold passed; select-drag mode
     bool  m_textInputActive = false;      // soft keyboard currently raised

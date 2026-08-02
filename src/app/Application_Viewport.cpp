@@ -2,6 +2,7 @@
 #include "ui_scale.h"
 #include "touch_mode.h"
 #include "gl_common.h"
+#include <chrono>
 
 #include <cstdlib>
 #include <filesystem>
@@ -26,6 +27,9 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
+#include "io/ImageEncode.h"
 #include "viewport/Gizmo.h"
 #include "viewport/SelectionHighlight.h"
 #include "ui/TouchIcons.h"   // im-touch circle-confirm bubble ✗/✓ glyphs
@@ -59,12 +63,14 @@
 #include "modeling/SketchTransformOp.h"
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
+#include "modeling/BatchTransformOp.h"
 #include "modeling/PlaneTransformOp.h"
 #include "modeling/AxisTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
 #include "modeling/DeleteOp.h"
+#include "modeling/SeparateBodyOp.h"
 #include "modeling/SketchEditOp.h"
 #include "io/StepIO.h"
 #include "io/StlExport.h"
@@ -83,6 +89,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>
 #include <BRep_Tool.hxx>
@@ -97,6 +104,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
 #include <gp_XYZ.hxx>
+#include "../ui/NumField.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -181,6 +189,14 @@ void Application::gizmoPreviewApply(const glm::mat4& m) {
     // slots (shape + edges). GPU-only — the document is untouched, so a drag
     // frame costs two uniform updates per body instead of re-tessellating
     // the body (see the Revolve live preview, which pioneered the pattern).
+    //
+    // Mirror it for the world-space chrome. Because the document never moves,
+    // the gizmo (positioned from the body's bbox centre) and the selection
+    // outline (cached in world coords) both sat at the PRE-drag pose for the
+    // whole drag: the body slid out from under its own gizmo and snapped back
+    // together on release, and the outline had to be hidden outright. Every
+    // preview passes through here, so this is the one place that has to know.
+    m_gizmoPreviewXf = m;
     for (auto& [id, orig] : m_gizmoDragOriginals) {
         if (m_shapeRenderer) {
             int slot = m_shapeRenderer->findSlotByBody(id);
@@ -190,6 +206,170 @@ void Application::gizmoPreviewApply(const glm::mat4& m) {
             int slot = m_edgeRenderer->findSlotByBody(id);
             if (slot >= 0) m_edgeRenderer->setModelMatrix(slot, m);
         }
+    }
+}
+
+// Does this Radius constraint measure an ARC (rather than a circle)?
+//
+// Drafting convention splits the two: an arc is called out by RADIUS ("R 10"),
+// a full circle by DIAMETER ("Ø 20"). Constraint::value stores a radius for
+// both, so the label, the edit-popup prefill, and the popup's commit all have
+// to agree on which convention applies — hence one helper rather than three
+// copies of the scan. Non-Radius types are never arc radii.
+static bool constraintIsArcRadiusIn(const Sketch& sk, const Constraint& c) {
+    if (c.type != ConstraintType::Radius) return false;
+    for (const auto& circ : sk.getCircles())
+        if (circ.id == c.entityA) return false; // a circle wins
+    for (const auto& arc : sk.getArcs())
+        if (arc.id == c.entityA) return true;
+    return false;
+}
+
+// Recover the two comparable entities behind a dimension, so the edit popup
+// can offer "Make equal" (equal length for two lines, equal radius for two
+// circles/arcs). Returns false when the dimension has no such pair.
+//
+// Derived rather than stored: every dimension that came from a two-entity pick
+// still carries enough to reconstruct the pair, so no extra state has to be
+// threaded through PendingDimension and the option stays available when the
+// user re-opens an OLD dimension's popup, not just a freshly placed one.
+static bool dimensionEqualPair(const Sketch& sk, const Constraint& c,
+                               int& outA, int& outB) {
+    auto isCurveId = [&sk](int id) {
+        for (const auto& x : sk.getCircles()) if (x.id == id) return true;
+        for (const auto& x : sk.getArcs())    if (x.id == id) return true;
+        return false;
+    };
+    switch (c.type) {
+        case ConstraintType::Angle:      // entityA/entityB are both line ids
+        case ConstraintType::CircleGap:  // entityA/entityB are both curve ids
+            outA = c.entityA; outB = c.entityB;
+            return outA >= 0 && outB >= 0 && outA != outB;
+        case ConstraintType::DistancePointLine: {
+            // entityA is a POINT on the second line, entityB the first line.
+            // Recover the second line as the one owning that point — that is
+            // exactly how resolveDimension's parallel branch built the pair.
+            for (const auto& l : sk.getLines()) {
+                if (l.id == c.entityB) continue;
+                if (l.startPointId == c.entityA || l.endPointId == c.entityA) {
+                    outA = c.entityB; outB = l.id;
+                    return true;
+                }
+            }
+            return false;
+        }
+        case ConstraintType::Distance: {
+            // Only meaningful when both ends are circle/arc centres (a
+            // centre-to-centre dim); two bare points have no "length" to
+            // equalise. Map each centre back to its curve.
+            auto curveOfCentre = [&sk](int ptId) {
+                for (const auto& x : sk.getCircles())
+                    if (x.centerPointId == ptId) return x.id;
+                for (const auto& x : sk.getArcs())
+                    if (x.centerPointId == ptId) return x.id;
+                return -1;
+            };
+            int ca = curveOfCentre(c.entityA), cb = curveOfCentre(c.entityB);
+            if (ca < 0 || cb < 0 || ca == cb) return false;
+            outA = ca; outB = cb;
+            return isCurveId(ca) && isCurveId(cb);
+        }
+        default:
+            return false;
+    }
+}
+
+// Sketch-space auto anchor of a dimension's label: line/pair midpoint,
+// circle/arc center, or the midpoint of the point-to-line perpendicular foot
+// segment. Label offsets (Constraint::labelOffX/Y) are stored relative to
+// this, so it has to stay in sync with the dimension-label render pass below.
+glm::vec2 Application::dimensionAutoAnchor(const PendingDimension& pd) const {
+    if (!m_activeSketch || !pd.valid) return glm::vec2(0.0f);
+    const Sketch& sk = *m_activeSketch;
+    auto lineEnds = [&sk](int id, glm::vec2& s, glm::vec2& e) {
+        for (const auto& l : sk.getLines())
+            if (l.id == id) {
+                const SketchPoint* sp = sk.getPoint(l.startPointId);
+                const SketchPoint* ep = sk.getPoint(l.endPointId);
+                if (!sp || !ep) return false;
+                s = sp->pos; e = ep->pos; return true;
+            }
+        return false;
+    };
+    switch (pd.type) {
+        case ConstraintType::Distance: {
+            const SketchPoint* a = sk.getPoint(pd.entityA);
+            const SketchPoint* b = sk.getPoint(pd.entityB);
+            return (a && b) ? 0.5f * (a->pos + b->pos) : glm::vec2(0.0f);
+        }
+        case ConstraintType::Radius: {
+            for (const auto& c : sk.getCircles())
+                if (c.id == pd.entityA) {
+                    const SketchPoint* ctr = sk.getPoint(c.centerPointId);
+                    if (ctr) return ctr->pos;
+                }
+            for (const auto& a : sk.getArcs())
+                if (a.id == pd.entityA) {
+                    const SketchPoint* ctr = sk.getPoint(a.centerPointId);
+                    if (ctr) return ctr->pos;
+                }
+            return glm::vec2(0.0f);
+        }
+        case ConstraintType::DistancePointLine: {
+            const SketchPoint* p = sk.getPoint(pd.entityA);
+            glm::vec2 s, e;
+            if (p && lineEnds(pd.entityB, s, e)) {
+                glm::vec2 d = e - s;
+                float len2 = glm::dot(d, d);
+                if (len2 > 1e-12f) {
+                    // Foot clamped to the physical segment: the constraint
+                    // measures against the infinite carrier, but a label
+                    // anchored past the segment's end hangs over unrelated
+                    // geometry (rectangle corners made parallel-line dims
+                    // look attached to a third line).
+                    float t = glm::clamp(glm::dot(p->pos - s, d) / len2, 0.0f, 1.0f);
+                    glm::vec2 foot = s + d * t;
+                    return 0.5f * (p->pos + foot);
+                }
+            }
+            return p ? p->pos : glm::vec2(0.0f);
+        }
+        case ConstraintType::Angle: {
+            glm::vec2 as, ae, bs, be;
+            if (lineEnds(pd.entityA, as, ae) && lineEnds(pd.entityB, bs, be))
+                return 0.25f * (as + ae + bs + be);
+            return glm::vec2(0.0f);
+        }
+        case ConstraintType::CircleGap: {
+            glm::vec2 cA(0.0f), cB(0.0f);
+            double rA = -1.0, rB = -1.0;
+            auto grab = [&](int id, glm::vec2& ctr, double& r) {
+                for (const auto& c : sk.getCircles())
+                    if (c.id == id) {
+                        const SketchPoint* p = sk.getPoint(c.centerPointId);
+                        if (p) { ctr = p->pos; r = c.radius; }
+                        return;
+                    }
+                for (const auto& a : sk.getArcs())
+                    if (a.id == id) {
+                        const SketchPoint* p = sk.getPoint(a.centerPointId);
+                        if (p) { ctr = p->pos; r = a.radius; }
+                        return;
+                    }
+            };
+            grab(pd.entityA, cA, rA);
+            grab(pd.entityB, cB, rB);
+            if (rA < 0.0 || rB < 0.0) return 0.0f * cA;
+            glm::vec2 d = cB - cA;
+            float len = glm::length(d);
+            if (len < 1e-6f) return 0.5f * (cA + cB);
+            glm::vec2 u = d / len;
+            // Midpoint of the gap: from A's rim to B's rim along the centre line.
+            glm::vec2 rimA = cA + u * static_cast<float>(rA);
+            glm::vec2 rimB = cB - u * static_cast<float>(rB);
+            return 0.5f * (rimA + rimB);
+        }
+        default: return glm::vec2(0.0f);
     }
 }
 
@@ -232,6 +412,13 @@ void Application::renderViewport() {
         m_viewportWinX = wp.x; m_viewportWinY = wp.y;
         m_viewportWinW = ws.x; m_viewportWinH = ws.y;
     }
+
+    // Classic: the project tab strip lives at the top of the viewport (and
+    // ONLY the viewport — it's a plain tab bar, not a dock node, so tabs
+    // can't be dragged into the panel docks). Drawn before contentSize is
+    // measured so the 3D image and all item-relative picking shift down
+    // together; suppressed while the landing page owns the screen.
+    if (classicLayout() && !landingPageUp()) renderViewportTabBar();
 
     ImVec2 contentSize = ImGui::GetContentRegionAvail();
     int w = static_cast<int>(contentSize.x);
@@ -435,14 +622,26 @@ void Application::renderViewport() {
                            lightBg ? 1.0f : 0.0f /*lightBg palette*/,
                            m_sketchGridThickness /*sketch grid line width*/);
         };
+        // OUTSIDE sketch mode the world grid draws EARLY — before the plugin
+        // passes — so translucent pass content (reference-image photos,
+        // construction-plane quads) blends OVER it: a photo's opacity then
+        // genuinely reveals the grid/ground beneath instead of fading to the
+        // bare background. Bodies still paint over the early grid opaquely, so
+        // the final image is unchanged for solid geometry. IN sketch mode the
+        // grid stays late (below) so its lines land ON TOP of the photo being
+        // traced.
+        if (!(m_inSketchMode && m_activeSketch)) drawGrid();
         // Plugin-registered render passes (e.g. ConstructionPlanePlugin's
         // plane quads) draw between the grid/background and the body/edge
         // pass. PluginContext receives the same view+proj, and each pass'
         // initialize() ran in initRenderers so GL state is ready.
+        // Passes that draw BEHIND geometry. The reference photo (priority 490)
+        // belongs here: it is meant to be traced over.
         if (m_pluginContext) {
             for (auto& pass :
                  materializr::PluginRegistry::instance().renderPasses()) {
-                if (pass.render) pass.render(*m_pluginContext, view, proj);
+                if (pass.priority < kBodyPassPriority && pass.render)
+                    pass.render(*m_pluginContext, view, proj);
             }
         }
         // Section view: feed the clip plane to the body shader and refresh
@@ -458,12 +657,69 @@ void Application::renderViewport() {
                                              glm::vec3(n.X(), n.Y(), n.Z()));
             m_edgeRenderer->setSectionPlane(true, p,
                                             glm::vec3(n.X(), n.Y(), n.Z()));
+            // DEBOUNCED overlay recompute. The GPU clip planes above track
+            // the slider instantly; SectionView::update() runs a full OCCT
+            // plane-section + cap triangulation on the MAIN thread — on a
+            // swept-thread body (helicoid BSplines) that's seconds PER
+            // recompute, and firing it on every drag tick froze the app
+            // solid. Recompute only once the plane has RESTED for 250 ms
+            // (the overlay/cap pops in when the drag pauses).
+            // ASYNC overlay recompute. One recompute on a swept-thread body
+            // measured 100.78s — on the main thread that froze the whole
+            // app (Steve's section-view hang). The GPU clip planes above
+            // track the slider instantly; the overlay (curves + caps)
+            // computes on a WORKER from deep-copied shapes, debounced until
+            // the plane rests, newest-plane-wins (a superseded compute is
+            // user-break-cancelled mid-boolean).
+            const uint32_t nowMs = static_cast<uint32_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count());
             if (m_sectionDirty || geomChanged) {
-                m_sectionView->setEnabled(true);
-                m_sectionView->setPlane(pl);
-                m_sectionView->setOffset(m_sectionOffset);
-                m_sectionView->update();
+                m_sectionRestMs = nowMs;
+                m_sectionPending = true;
                 m_sectionDirty = false;
+                // Supersede an in-flight compute — its plane is stale.
+                if (m_sectionFut.valid() && m_sectionCancel)
+                    m_sectionCancel->store(true);
+            }
+            m_sectionView->setEnabled(true);
+            if (m_sectionPending && !m_sectionFut.valid() &&
+                nowMs - m_sectionRestMs >= 250) {
+                gp_Pln cutting = pl;
+                {
+                    gp_Pnt o2 = cutting.Location();
+                    o2.Translate(gp_Vec(n) *
+                                 static_cast<double>(m_sectionOffset));
+                    cutting.SetLocation(o2);
+                }
+                std::vector<std::pair<TopoDS_Shape, glm::vec3>> bodies;
+                for (int id : m_document->getAllBodyIds()) {
+                    if (!m_document->isBodyVisible(id)) continue;
+                    try {
+                        const TopoDS_Shape& s = m_document->getBody(id);
+                        if (s.IsNull()) continue;
+                        bodies.emplace_back(BRepBuilderAPI_Copy(s).Shape(),
+                                            m_document->getBodyColor(id));
+                    } catch (...) { continue; }
+                }
+                m_sectionCancel = std::make_shared<std::atomic<bool>>(false);
+                auto cancel = m_sectionCancel;
+                m_sectionFut = std::async(
+                    std::launch::async,
+                    [bodies = std::move(bodies), cutting, cancel]() {
+                        const auto t0 = std::chrono::steady_clock::now();
+                        auto r = materializr::SectionView::compute(
+                            bodies, cutting, cancel.get());
+                        const double secs = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - t0).count();
+                        if (secs > 0.5)
+                            std::fprintf(stderr, "[Perf] section overlay "
+                                                 "computed in %.2fs on the "
+                                                 "worker\n", secs);
+                        return r;
+                    });
+                m_sectionPending = false;
             }
         } else {
             m_shapeRenderer->setSectionPlane(false, glm::vec3(0.0f),
@@ -471,26 +727,61 @@ void Application::renderViewport() {
             m_edgeRenderer->setSectionPlane(false, glm::vec3(0.0f),
                                             glm::vec3(0.0f, 1.0f, 0.0f));
             if (m_sectionView) m_sectionView->setEnabled(false);
+            // Kill an in-flight compute — its result is unwanted.
+            if (m_sectionFut.valid() && m_sectionCancel)
+                m_sectionCancel->store(true);
+        }
+        // Land a finished section compute (also reaps a cancelled one).
+        if (m_sectionFut.valid() &&
+            m_sectionFut.wait_for(std::chrono::milliseconds(0)) ==
+                std::future_status::ready) {
+            auto r = m_sectionFut.get();
+            const bool cancelled = m_sectionCancel && m_sectionCancel->load();
+            if (!cancelled && m_sectionEnabled && m_sectionView)
+                m_sectionView->apply(std::move(r));
         }
         m_shapeRenderer->render(view, proj, cam.getPosition());
         m_edgeRenderer->render(view, proj);
+        // Passes that draw IN FRONT — construction planes (500) and axes (501),
+        // which is what both already claim ("above body") but never got: the
+        // whole block ran before the bodies, and PlaneRenderer draws with
+        // glDepthMask(GL_FALSE). Correct for a transparent overlay, but it
+        // leaves no depth behind, so any body drawn afterwards passed the depth
+        // test and painted straight over it. A plane 2mm ABOVE a body therefore
+        // rendered as if it were UNDER it (Steve). Depth TEST is still on, so a
+        // plane genuinely behind a body stays correctly hidden.
+        if (m_pluginContext) {
+            for (auto& pass :
+                 materializr::PluginRegistry::instance().renderPasses()) {
+                if (pass.priority >= kBodyPassPriority && pass.render)
+                    pass.render(*m_pluginContext, view, proj);
+            }
+        }
         if (m_sectionView) m_sectionView->render(view, proj);
 
         // Render selection highlight (face/edge/body)
-        // Selection highlight is cached in world coords — it wouldn't follow
-        // the GPU-model-matrix Revolve preview OR the (equally GPU-only)
-        // gizmo drag preview, so we hide it while either is animating. The
-        // body itself remains highlighted by the body-renderer's outline;
-        // the selection chrome reappears the moment the preview ends.
-        if (!m_revolveLiveActive && !m_gizmoDragging) {
-            m_selectionHighlight->render(*m_selection, *m_document, view, proj);
+        // The highlight is cached in world coords, so it can't follow a
+        // GPU-model-matrix preview on its own. For a gizmo drag it doesn't
+        // need to: the shader's only transform is u_mvp = projection * view
+        // applied to world-space vertices, so folding the preview into the
+        // view matrix moves the outline with the body exactly, with no change
+        // to SelectionHighlight and no re-tessellation. m_gizmoPreviewXf is
+        // identity when no drag is running, so this is a no-op the rest of
+        // the time. (Revolve still hides it — that preview deforms the
+        // geometry rather than rigidly transforming it, so no single matrix
+        // can carry the outline along.)
+        if (!m_revolveLiveActive) {
+            m_selectionHighlight->render(*m_selection, *m_document,
+                                         view * m_gizmoPreviewXf, proj);
         }
 
-        // Grid drawn here — after bodies/edges/section/highlight — so it blends
-        // over solid geometry and fades cleanly under the opacity slider, rather
-        // than punching grid lines through coplanar faces (the old "grey grid
-        // baked into the face that opacity couldn't remove").
-        drawGrid();
+        // Sketch-mode grid drawn here — after bodies/edges/section/highlight —
+        // so it blends over solid geometry (and the reference photo being
+        // traced) and fades cleanly under the opacity slider, rather than
+        // punching grid lines through coplanar faces (the old "grey grid baked
+        // into the face that opacity couldn't remove"). The non-sketch world
+        // grid already drew EARLY, before the plugin passes (see above).
+        if (m_inSketchMode && m_activeSketch) drawGrid();
 
         // Update gizmo visibility and position based on selection.
         // Suppressed by navigationOnly so a panel pick highlights the body
@@ -539,6 +830,17 @@ void Application::renderViewport() {
                                        (zmin+zmax)*0.5f);
                     m_gizmoCenterCache[bodyId] = {tsh, shape.Location(), center};
                 }
+                // Follow the live drag. Transforming the centre by the preview
+                // matrix is right for all three modes rather than just adding
+                // the translation: rotate and scale build their matrix about
+                // the pivot, so a centre that sits on the pivot maps to itself
+                // and the gizmo correctly stays put, while a multi-body drag
+                // about a shared pivot moves this body's centre by exactly the
+                // amount the body moved. It also picks up the grid-SNAPPED
+                // translation for free — the snap is applied before the matrix
+                // is built, so the gizmo can't drift off-grid from the body.
+                if (m_gizmoDragging)
+                    center = glm::vec3(m_gizmoPreviewXf * glm::vec4(center, 1.0f));
                 m_gizmo->setPosition(center);
                 m_gizmo->setVisible(true);
                 gizmoShown = true;
@@ -815,26 +1117,65 @@ void Application::renderViewport() {
                 }
             }
         }
-        // Highlight the element(s) a selected history step edits, so it's clear
-        // which line / rectangle / arc the Properties values refer to. Drawn in
-        // bright orange over the (live-previewed) target sketch.
+        // Highlight the geometry a history step touches — hovering a step
+        // previews it, selecting (pinning) a step keeps it. Lets the user see
+        // WHAT each step made before editing it. Hover wins over the pinned
+        // step so moving the cursor down the list previews each in turn.
         if (m_historyPanel && m_history) {
-            int es = m_historyPanel->getEditingStep();
-            const Operation* op = (es >= 0) ? m_history->getStep(es) : nullptr;
-            if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
-                auto tgt = se->getTarget();
-                int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
-                // Show the highlight whenever the step's sketch is on screen:
-                // the active (not-yet-committed) sketch — which findSketchId
-                // can't see — or a visible committed one.
-                bool shown = tgt && (tgt == m_activeSketch ||
-                                     (sid >= 0 && m_document->isSketchVisible(sid)));
-                if (shown) {
-                    std::set<int> lines, circles, arcs;
-                    se->getEditedElements(lines, circles, arcs);
-                    m_sketchRenderer->renderElementsHighlight(
-                        tgt.get(), lines, circles, arcs,
-                        glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+            const int hov = m_historyPanel->getHoveredStep();
+            const int es  = m_historyPanel->getEditingStep();
+            const int step = (hov >= 0) ? hov : es;
+            const Operation* op = (step >= 0) ? m_history->getStep(step) : nullptr;
+            // A hover preview is a touch dimmer than a pinned selection.
+            const float k = (hov >= 0 && hov != es) ? 0.8f : 1.0f;
+            if (op) {
+                if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
+                    // Sketch step: the WHOLE sketch outline normally; the
+                    // specific edited element(s) only while we're actually IN
+                    // that sketch (Steve — the relevant sketch is enough for a
+                    // history item; element precision is for sketch editing).
+                    auto tgt = se->getTarget();
+                    int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
+                    bool shown = tgt && (tgt == m_activeSketch ||
+                                         (sid >= 0 && m_document->isSketchVisible(sid)));
+                    if (shown) {
+                        if (m_inSketchMode && tgt == m_activeSketch) {
+                            std::set<int> lines, circles, arcs;
+                            se->getEditedElements(lines, circles, arcs);
+                            m_sketchRenderer->renderElementsHighlight(
+                                tgt.get(), lines, circles, arcs,
+                                glm::vec3(1.0f, 0.55f, 0.1f), 5.0f, view, proj);
+                        } else {
+                            m_sketchRenderer->renderSketchHighlight(
+                                tgt.get(), glm::vec3(0.2f * k, 0.8f * k, 1.0f * k),
+                                4.0f, view, proj);
+                        }
+                    }
+                } else {
+                    // 3D op: fillet/chamfer highlight their exact blend faces;
+                    // every other op (extrude / boolean / pattern / shell /
+                    // revolve / pushpull / …) highlights the bodies it created
+                    // or modified, read from its captureDiff.
+                    std::vector<TopoDS_Shape> shapes;
+                    if (auto* f = dynamic_cast<const FilletOp*>(op))
+                        shapes = f->getGeneratedFaces();
+                    else if (auto* c = dynamic_cast<const ChamferOp*>(op))
+                        shapes = c->getGeneratedFaces();
+                    else {
+                        OperationDiff d = op->captureDiff();
+                        auto pushBody = [&](int id) {
+                            try {
+                                TopoDS_Shape s = m_document->getBody(id);
+                                if (!s.IsNull()) shapes.push_back(s);
+                            } catch (...) {}
+                        };
+                        for (int id : d.created) pushBody(id);
+                        for (const auto& m : d.modifiedBefore) pushBody(m.first);
+                    }
+                    if (!shapes.empty() && m_selectionHighlight)
+                        m_selectionHighlight->highlightShapes(
+                            shapes, view, proj,
+                            glm::vec3(0.25f * k, 0.7f * k, 1.0f * k));
                 }
             }
         }
@@ -1720,6 +2061,20 @@ void Application::renderViewport() {
                             }
                         }
                     }
+                } else if (pm == SketchToolMode::Polygon) {
+                    // ps = centre, pe = a vertex (vertex 0 lands under the
+                    // cursor). Show the circumradius (centre→vertex) as a
+                    // radius dimension — the polygon analogue of the circle's
+                    // diameter readout — tagged with the side count.
+                    glm::vec2 rvec = pe - ps;
+                    float r = glm::length(rvec);
+                    if (r > 1e-3f) {
+                        char num[40];
+                        fmtLen(num, sizeof(num), r, "mm");
+                        std::snprintf(dbuf, sizeof(dbuf), "R %s \xC2\xB7 %d-gon",
+                                      num, m_sketchTool->getPolygonSides());
+                        drawDim(sketch2world(ps), sketch2world(pe), dbuf);
+                    }
                 }
             }
 
@@ -1798,10 +2153,24 @@ void Application::renderViewport() {
                             ImGui::SetNextItemWidth(touchui::numberPadWidth(keySide));
                             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                                 ImVec2(uiW(12.0f), uiW(12.0f)));
-                            ImGui::InputTextWithHint("##bubbleDia", hint,
-                                m_sketchShapeDimBuf, sizeof(m_sketchShapeDimBuf),
-                                ImGuiInputTextFlags_CharsDecimal |
-                                ImGuiInputTextFlags_AutoSelectAll);
+                            // The pad, with the empty-is-meaningful hint:
+                            // nothing typed = keep the dragged diameter (the
+                            // ✓ below parses the buffer; empty buffer means
+                            // "keep"). A commit writes the buffer back so
+                            // that contract is untouched.
+                            double diaPadV = 0.0;
+                            (void)materializr::parseFinite(m_sketchShapeDimBuf,
+                                                           diaPadV);
+                            if (touchui::numberField("##bubbleDia", nullptr,
+                                                     &diaPadV, "%.2f",
+                                                     nullptr, hint)) {
+                                if (diaPadV > 0.0)
+                                    std::snprintf(m_sketchShapeDimBuf,
+                                                  sizeof(m_sketchShapeDimBuf),
+                                                  "%.6g", diaPadV);
+                                else
+                                    m_sketchShapeDimBuf[0] = '\0';
+                            }
                             ImGui::PopStyleVar();
                         } else {
                             // Rectangle: two native Width/Height fields (tap to
@@ -1813,11 +2182,11 @@ void Application::renderViewport() {
                                                 ImVec2(uiW(10.0f), uiW(10.0f)));
                             ImGui::TextDisabled("Width (mm)");
                             ImGui::SetNextItemWidth(fieldW);
-                            ImGui::InputFloat("##bubbleW", &m_sketchShapeDimW,
+                            materializr::inputNumber("##bubbleW", &m_sketchShapeDimW,
                                               0.0f, 0.0f, "%.2f");
                             ImGui::TextDisabled("Height (mm)");
                             ImGui::SetNextItemWidth(fieldW);
-                            ImGui::InputFloat("##bubbleH", &m_sketchShapeDimH,
+                            materializr::inputNumber("##bubbleH", &m_sketchShapeDimH,
                                               0.0f, 0.0f, "%.2f");
                             ImGui::PopStyleVar();
                             if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
@@ -2303,6 +2672,16 @@ void Application::renderViewport() {
                 // Reset the per-frame "click swallowed by a label" flag —
                 // re-evaluated below as labels are drawn and hit-tested.
                 m_dimEditingClickedThisFrame = false;
+                // The Dimension tool's commit path (applyPendingDimension, in
+                // Application.cpp) sets m_dimEditingId + this flag from outside
+                // any ImGui window scope. OpenPopup only takes effect when
+                // called from the window that owns the popup's ID stack, so
+                // defer it to here — same scope as the label-click OpenPopup
+                // calls below.
+                if (m_dimOpenEditRequested) {
+                    ImGui::OpenPopup("##DimEdit");
+                    m_dimOpenEditRequested = false;
+                }
                 auto drawLabel = [&](glm::vec2 pos, const char* text,
                                      const Constraint& c) {
                     ImVec2 sp;
@@ -2316,7 +2695,11 @@ void Application::renderViewport() {
                     ImU32 bg = hovered ? IM_COL32(45, 45, 60, 235)
                                        : IM_COL32(20, 20, 28, 220);
                     dl->AddRectFilled(rMin, rMax, bg, 3.0f);
-                    dl->AddText(tp, IM_COL32(255, 235, 120, 255), text);
+                    // Driving dimensions in the usual amber; reference ones in
+                    // a muted grey so a glance separates "this number controls
+                    // the shape" from "this number just reports it".
+                    dl->AddText(tp, c.isDriving ? IM_COL32(255, 235, 120, 255)
+                                                : IM_COL32(170, 178, 190, 255), text);
                     // Click → open edit popup. Skipped if we're already
                     // editing this same constraint to avoid re-triggering
                     // the open every frame the popup is up.
@@ -2327,9 +2710,11 @@ void Application::renderViewport() {
                             std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
                                           "%.2f", c.value * 180.0 / M_PI);
                         } else if (c.type == ConstraintType::Radius) {
-                            // Edited as diameter to match the label.
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
-                                          "%.2f", c.value * 2.0);
+                            // Edited in whatever unit the label shows: radius
+                            // for an arc (R), diameter for a circle (Ø).
+                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
+                                          constraintIsArcRadiusIn(*m_activeSketch, c)
+                                              ? c.value : c.value * 2.0);
                         } else {
                             std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
                                           "%.2f", c.value);
@@ -2337,6 +2722,44 @@ void Application::renderViewport() {
                         m_dimEditingFocus = true;
                         m_dimEditingClickedThisFrame = true;
                         ImGui::OpenPopup("##DimEdit");
+                    }
+                };
+                // Resolves a constraint's label position from its stored
+                // offset (Constraint::labelOffX/Y, relative to the type's
+                // geometric anchor — see dimensionAutoAnchor) or the auto
+                // position when unset (legacy / not yet user-placed). Draws a
+                // thin leader from the anchor to the label whenever the user
+                // has moved it off the auto spot.
+                // `leaderFrom` overrides where a placed label's leader starts
+                // (default: the anchor). DistancePointLine passes its dim
+                // line's midpoint — the offset math must stay anchored on
+                // dimensionAutoAnchor (what applyPendingDimension stored
+                // against), but a leader drawn from that anchor points at the
+                // constraint's pinned corner, not the dimension line.
+                auto placeLabel = [&](glm::vec2 anchor, glm::vec2 autoOff,
+                                      const char* text, const Constraint& c,
+                                      const glm::vec2* leaderFrom = nullptr) {
+                    bool placed = (c.labelOffX != 0.0 || c.labelOffY != 0.0);
+                    glm::vec2 lpos = placed
+                        ? anchor + glm::vec2(static_cast<float>(c.labelOffX),
+                                             static_cast<float>(c.labelOffY))
+                        : anchor + autoOff;
+                    if (placed) {
+                        glm::vec2 lsrc = leaderFrom ? *leaderFrom : anchor;
+                        ImVec2 sa, sb;
+                        if (toImg(dim2world(lsrc), sa) && toImg(dim2world(lpos), sb))
+                            dl->AddLine(sa, sb, IM_COL32(255, 235, 120, 90), 1.0f);
+                    }
+                    // Reference (non-driving) dimensions are bracketed, the
+                    // standard drafting notation for a measurement that does
+                    // not control the geometry. One place, so every dimension
+                    // type picks it up — drawLabel handles the colour.
+                    if (!c.isDriving) {
+                        char ref[48];
+                        std::snprintf(ref, sizeof(ref), "[%s]", text);
+                        drawLabel(lpos, ref, c);
+                    } else {
+                        drawLabel(lpos, text, c);
                     }
                 };
                 char lbl[40];
@@ -2359,7 +2782,7 @@ void Application::renderViewport() {
                             perp = perp / pl * off;
                         }
                         std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
-                        drawLabel(mid + perp, lbl, c);
+                        placeLabel(mid, perp, lbl, c);
                     } else if (c.type == ConstraintType::Radius) {
                         glm::vec2 center(0.0f);
                         float radius = 1.0f;
@@ -2389,15 +2812,19 @@ void Application::renderViewport() {
                             }
                         }
                         if (!found) continue;
-                        // Place the label tangentially outside the circle (up
+                        // Auto label sits tangentially outside the circle (up
                         // and to the right) so the centre stays clear for
                         // concentric-circle drawing. Offset is the radius + a
                         // small constant so it floats just past the perimeter.
-                        glm::vec2 labelPos = center +
+                        glm::vec2 autoOff =
                             glm::vec2(0.7071f, 0.7071f) * (radius + 1.2f);
-                        std::snprintf(lbl, sizeof(lbl), "\xC3\x98 %.2f mm",
-                                      c.value * 2.0);
-                        drawLabel(labelPos, lbl, c);
+                        // Drafting convention: arcs read as R, circles as Ø.
+                        if (constraintIsArcRadiusIn(*m_activeSketch, c))
+                            std::snprintf(lbl, sizeof(lbl), "R %.2f mm", c.value);
+                        else
+                            std::snprintf(lbl, sizeof(lbl), "\xC3\x98 %.2f mm",
+                                          c.value * 2.0);
+                        placeLabel(center, autoOff, lbl, c);
                     } else if (c.type == ConstraintType::Angle) {
                         // SolidWorks-style angle dim: find the vertex where the
                         // two constrained lines meet, draw a small arc spanning
@@ -2475,13 +2902,273 @@ void Application::renderViewport() {
                                             0, 1.5f);
                         }
 
-                        // Label hugs the outside of the arc midpoint.
+                        // Auto label hugs the outside of the arc midpoint.
                         float midA = angA + diff * 0.5f;
                         glm::vec2 labelPos = vertex +
                             glm::vec2(std::cos(midA), std::sin(midA)) * (arcR + 2.5f);
                         float deg = std::abs(static_cast<float>(diff * 180.0 / M_PI));
                         std::snprintf(lbl, sizeof(lbl), "%.1f\xC2\xB0", deg);
-                        drawLabel(labelPos, lbl, c);
+                        // The stored offset is relative to dimensionAutoAnchor's
+                        // Angle anchor (mean of all four line endpoints), NOT
+                        // `vertex` — applyPendingDimension() computed it that
+                        // way, so the leader/placed-position math has to match
+                        // or a placed label would drift from where it was
+                        // dropped. autoOff folds that mismatch away: it's
+                        // defined so anchor + autoOff == labelPos exactly,
+                        // reproducing today's arc-hugging auto placement
+                        // whenever the constraint has no stored offset.
+                        glm::vec2 angleAnchor =
+                            0.25f * (aS->pos + aE->pos + bS->pos + bE->pos);
+                        glm::vec2 autoOff = labelPos - angleAnchor;
+                        placeLabel(angleAnchor, autoOff, lbl, c);
+                    } else if (c.type == ConstraintType::DistancePointLine) {
+                        // Validate the entities exist before trusting
+                        // dimensionAutoAnchor's result — it silently returns
+                        // (0,0) on a dangling id, which would otherwise plant
+                        // a stray label at the sketch origin.
+                        const SketchPoint* dp = m_activeSketch->getPoint(c.entityA);
+                        const SketchLine* dpLine = nullptr;
+                        for (const auto& l : m_activeSketch->getLines())
+                            if (l.id == c.entityB) { dpLine = &l; break; }
+                        if (!dp || !dpLine) continue;
+                        const SketchPoint* ls = m_activeSketch->getPoint(dpLine->startPointId);
+                        const SketchPoint* le = m_activeSketch->getPoint(dpLine->endPointId);
+                        if (!ls || !le) continue;
+                        glm::vec2 seg = le->pos - ls->pos;
+                        float segLen = glm::length(seg);
+                        if (segLen < 1e-6f) continue;
+                        glm::vec2 dirA = seg / segLen;
+                        glm::vec2 nA(-dirA.y, dirA.x);
+                        float sd = glm::dot(dp->pos - ls->pos, nA);
+
+                        PendingDimension pd;
+                        pd.type = c.type; pd.entityA = c.entityA;
+                        pd.entityB = c.entityB; pd.valid = true;
+                        glm::vec2 anchor = dimensionAutoAnchor(pd);
+                        bool hasOff = (c.labelOffX != 0.0 || c.labelOffY != 0.0);
+                        glm::vec2 labelPos = hasOff
+                            ? anchor + glm::vec2(static_cast<float>(c.labelOffX),
+                                                 static_cast<float>(c.labelOffY))
+                            : anchor;
+                        // CAD-style perpendicular dimension line, drawn at the
+                        // label's station along the line. The constraint pins
+                        // one endpoint of the measured pair — in rectangles
+                        // that's a corner sitting on a NEIGHBORING edge, and a
+                        // leader pointing there read as "the dim attached to a
+                        // third line". The dim line spans the measured gap
+                        // wherever the label sits instead.
+                        float tL = glm::clamp(glm::dot(labelPos - ls->pos, dirA),
+                                              0.0f, segLen);
+                        glm::vec2 baseA = ls->pos + dirA * tL;
+                        glm::vec2 baseB = baseA + nA * sd;
+                        ImVec2 pA, pB;
+                        if (toImg(dim2world(baseA), pA) && toImg(dim2world(baseB), pB)) {
+                            dl->AddLine(pA, pB, IM_COL32(20, 20, 28, 200), 3.0f);
+                            dl->AddLine(pA, pB, IM_COL32(255, 235, 120, 230), 1.5f);
+                        }
+                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
+                        glm::vec2 midDim = 0.5f * (baseA + baseB);
+                        placeLabel(anchor, midDim - anchor, lbl, c, &midDim);
+                    } else if (c.type == ConstraintType::CircleGap) {
+                        // Draw the gap segment between the two facing rims,
+                        // label at its midpoint (the leader runs from there).
+                        auto grab = [&](int id, glm::vec2& ctr, double& r) -> bool {
+                            for (const auto& cc : m_activeSketch->getCircles())
+                                if (cc.id == id) {
+                                    const SketchPoint* p = m_activeSketch->getPoint(cc.centerPointId);
+                                    if (p) { ctr = p->pos; r = cc.radius; return true; }
+                                }
+                            for (const auto& aa : m_activeSketch->getArcs())
+                                if (aa.id == id) {
+                                    const SketchPoint* p = m_activeSketch->getPoint(aa.centerPointId);
+                                    if (p) { ctr = p->pos; r = aa.radius; return true; }
+                                }
+                            return false;
+                        };
+                        glm::vec2 cA, cB; double rA = 0, rB = 0;
+                        if (!grab(c.entityA, cA, rA) || !grab(c.entityB, cB, rB)) continue;
+                        glm::vec2 d = cB - cA;
+                        float len = glm::length(d);
+                        if (len < 1e-6f) continue;
+                        glm::vec2 u = d / len;
+                        glm::vec2 rimA = cA + u * static_cast<float>(rA);
+                        glm::vec2 rimB = cB - u * static_cast<float>(rB);
+                        ImVec2 pA, pB;
+                        if (toImg(dim2world(rimA), pA) && toImg(dim2world(rimB), pB)) {
+                            dl->AddLine(pA, pB, IM_COL32(20, 20, 28, 200), 3.0f);
+                            dl->AddLine(pA, pB, IM_COL32(255, 235, 120, 230), 1.5f);
+                        }
+                        PendingDimension pd;
+                        pd.type = c.type; pd.entityA = c.entityA;
+                        pd.entityB = c.entityB; pd.valid = true;
+                        glm::vec2 anchor = dimensionAutoAnchor(pd);
+                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
+                        placeLabel(anchor, glm::vec2(0.0f), lbl, c, &anchor);
+                    }
+                }
+
+                // Dimension tool feedback: highlight the hovered pickable
+                // entity while picking, and ghost the pending label at the
+                // cursor (with a leader from its anchor) once enough entities
+                // are picked to resolve a dimension.
+                if (m_sketchTool->getMode() == SketchToolMode::Dimension) {
+                    ImVec2 mp = ImGui::GetMousePos();
+                    glm::vec2 sketchCursor = screenToSketch(
+                        mp.x - imgMin.x, mp.y - imgMin.y, imgSize.x, imgSize.y);
+                    DimPick hov = m_sketchTool->dimHitTest(sketchCursor);
+                    if (hov.kind == DimEntityKind::Point) {
+                        const SketchPoint* p = m_activeSketch->getPoint(hov.id);
+                        ImVec2 sp;
+                        if (p && toImg(dim2world(p->pos), sp))
+                            dl->AddCircle(sp, 7.0f, IM_COL32(255, 235, 120, 255), 0, 2.0f);
+                    } else if (hov.kind == DimEntityKind::Line) {
+                        for (const auto& l : m_activeSketch->getLines()) {
+                            if (l.id != hov.id) continue;
+                            const SketchPoint* a = m_activeSketch->getPoint(l.startPointId);
+                            const SketchPoint* b = m_activeSketch->getPoint(l.endPointId);
+                            ImVec2 sa, sb;
+                            if (a && b && toImg(dim2world(a->pos), sa) &&
+                                toImg(dim2world(b->pos), sb))
+                                dl->AddLine(sa, sb, IM_COL32(255, 235, 120, 200), 3.0f);
+                            break;
+                        }
+                    } else if (hov.kind == DimEntityKind::Circle ||
+                               hov.kind == DimEntityKind::Arc) {
+                        glm::vec2 hCenter(0.0f);
+                        float hRadius = 0.0f;
+                        bool hFound = false;
+                        if (hov.kind == DimEntityKind::Circle) {
+                            for (const auto& circ : m_activeSketch->getCircles())
+                                if (circ.id == hov.id) {
+                                    const SketchPoint* cp = m_activeSketch->getPoint(circ.centerPointId);
+                                    if (cp) {
+                                        hCenter = cp->pos;
+                                        hRadius = static_cast<float>(circ.radius);
+                                        hFound = true;
+                                    }
+                                    break;
+                                }
+                        } else {
+                            for (const auto& arc : m_activeSketch->getArcs())
+                                if (arc.id == hov.id) {
+                                    const SketchPoint* cp = m_activeSketch->getPoint(arc.centerPointId);
+                                    if (cp) {
+                                        hCenter = cp->pos;
+                                        hRadius = static_cast<float>(arc.radius);
+                                        hFound = true;
+                                    }
+                                    break;
+                                }
+                        }
+                        if (hFound) {
+                            // Screen-space radius: project the center and a
+                            // point one radius away along the sketch plane's
+                            // X axis, then measure the pixel span between
+                            // them (the plane may be tilted/scaled on screen).
+                            ImVec2 sc, sr;
+                            if (toImg(dim2world(hCenter), sc) &&
+                                toImg(dim2world(hCenter + glm::vec2(hRadius, 0.0f)), sr)) {
+                                float screenR = std::hypot(sr.x - sc.x, sr.y - sc.y);
+                                dl->AddCircle(sc, screenR, IM_COL32(255, 235, 120, 255), 0, 2.0f);
+                            }
+                        }
+                    }
+
+                    const PendingDimension& pend = m_sketchTool->getPendingDimension();
+                    if (pend.valid &&
+                        (m_sketchTool->getDimPhase() == DimPhase::PlaceLabel ||
+                         m_sketchTool->getDimPhase() == DimPhase::PickSecondOrPlace)) {
+                        char gbuf[40];
+                        if (pend.type == ConstraintType::Angle)
+                            std::snprintf(gbuf, sizeof(gbuf), "%.1f\xC2\xB0",
+                                          std::abs(pend.measured) * 180.0 / M_PI);
+                        else if (pend.type == ConstraintType::Radius)
+                            std::snprintf(gbuf, sizeof(gbuf), "\xC3\x98%.2f",
+                                          pend.measured * 2.0);
+                        else
+                            std::snprintf(gbuf, sizeof(gbuf), "%.2f mm", pend.measured);
+                        glm::vec2 ganchor = dimensionAutoAnchor(pend);
+                        // Pending point-to-line / parallel-line dims preview
+                        // the same CAD-style perpendicular dimension line the
+                        // committed render draws, following the cursor's
+                        // station — the leader then hugs the dim line rather
+                        // than the corner point carrying the constraint.
+                        if (pend.type == ConstraintType::DistancePointLine) {
+                            const SketchPoint* gp = m_activeSketch->getPoint(pend.entityA);
+                            const SketchLine* gl = nullptr;
+                            for (const auto& l : m_activeSketch->getLines())
+                                if (l.id == pend.entityB) { gl = &l; break; }
+                            const SketchPoint* gs = gl ? m_activeSketch->getPoint(gl->startPointId) : nullptr;
+                            const SketchPoint* ge = gl ? m_activeSketch->getPoint(gl->endPointId) : nullptr;
+                            if (gp && gs && ge) {
+                                glm::vec2 seg = ge->pos - gs->pos;
+                                float segLen = glm::length(seg);
+                                if (segLen > 1e-6f) {
+                                    glm::vec2 dirA = seg / segLen;
+                                    glm::vec2 nA(-dirA.y, dirA.x);
+                                    float sd = glm::dot(gp->pos - gs->pos, nA);
+                                    float tL = glm::clamp(
+                                        glm::dot(sketchCursor - gs->pos, dirA),
+                                        0.0f, segLen);
+                                    glm::vec2 baseA = gs->pos + dirA * tL;
+                                    glm::vec2 baseB = baseA + nA * sd;
+                                    ImVec2 gA, gB;
+                                    if (toImg(dim2world(baseA), gA) &&
+                                        toImg(dim2world(baseB), gB)) {
+                                        dl->AddLine(gA, gB, IM_COL32(20, 20, 28, 200), 3.0f);
+                                        dl->AddLine(gA, gB, IM_COL32(255, 235, 120, 230), 1.5f);
+                                    }
+                                    ganchor = 0.5f * (baseA + baseB);
+                                }
+                            }
+                        }
+                        // A pending diameter (single circle/arc picked, still
+                        // deciding whether a second circle turns it into a
+                        // gap) draws a diameter line ACROSS the circle rather
+                        // than a leader from the centre — a centre-anchored
+                        // leader reads as "measuring from the centre" and hid
+                        // that a second circle click makes a rim gap.
+                        bool drewSpecial = false;
+                        if (pend.type == ConstraintType::Radius) {
+                            glm::vec2 ctr(0.0f); float rad = 0.0f; bool found = false;
+                            for (const auto& circ : m_activeSketch->getCircles())
+                                if (circ.id == pend.entityA) {
+                                    const SketchPoint* cp = m_activeSketch->getPoint(circ.centerPointId);
+                                    if (cp) { ctr = cp->pos; rad = static_cast<float>(circ.radius); found = true; }
+                                    break;
+                                }
+                            for (const auto& arc : m_activeSketch->getArcs())
+                                if (arc.id == pend.entityA) {
+                                    const SketchPoint* cp = m_activeSketch->getPoint(arc.centerPointId);
+                                    if (cp) { ctr = cp->pos; rad = static_cast<float>(arc.radius); found = true; }
+                                    break;
+                                }
+                            if (found) {
+                                // Diameter line oriented toward the cursor.
+                                glm::vec2 d = sketchCursor - ctr;
+                                float len = glm::length(d);
+                                glm::vec2 u = (len > 1e-6f) ? d / len : glm::vec2(1.0f, 0.0f);
+                                ImVec2 e1, e2;
+                                if (toImg(dim2world(ctr - u * rad), e1) &&
+                                    toImg(dim2world(ctr + u * rad), e2)) {
+                                    dl->AddLine(e1, e2, IM_COL32(20, 20, 28, 200), 3.0f);
+                                    dl->AddLine(e1, e2, IM_COL32(255, 235, 120, 230), 1.5f);
+                                    ImVec2 sc;
+                                    if (toImg(dim2world(sketchCursor), sc))
+                                        dl->AddText(ImVec2(sc.x + 8, sc.y - 8),
+                                                    IM_COL32(255, 235, 120, 220), gbuf);
+                                    drewSpecial = true;
+                                }
+                            }
+                        }
+                        ImVec2 sa, sc;
+                        if (!drewSpecial &&
+                            toImg(dim2world(ganchor), sa) &&
+                            toImg(dim2world(sketchCursor), sc)) {
+                            dl->AddLine(sa, sc, IM_COL32(255, 235, 120, 90), 1.0f);
+                            dl->AddText(ImVec2(sc.x + 8, sc.y - 8),
+                                        IM_COL32(255, 235, 120, 220), gbuf);
+                        }
                     }
                 }
 
@@ -2489,7 +3176,33 @@ void Application::renderViewport() {
                 // BeginPopup returning false (Esc / click-outside) closes the
                 // edit and leaves the constraint unchanged. Enter commits the
                 // typed value, re-runs the solver, and marks the project dirty.
+                // A left click landing while the edit popup is up belongs to
+                // the popup (typically the dismiss-click outside it). The
+                // Dimension tool's routing later this frame checks this flag
+                // so that click can't double as a fresh entity pick — without
+                // it, dismissing the popup over a line started an unwanted
+                // new dimension on that line.
+                m_dimPopupSwallowClick =
+                    (m_dimEditingId >= 0) &&
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Left);
                 if (m_dimEditingId >= 0) {
+                    // Latch "the popup just consumed an Escape" BEFORE
+                    // BeginPopup below can act on it and clear
+                    // m_dimEditingId — the global Escape chain in
+                    // handleShortcuts() runs AFTER this render pass, so by
+                    // then m_dimEditingId would already read -1 and the
+                    // chain would wrongly treat the press as a fresh
+                    // Dimension-mode / sketch-exit step instead of "just
+                    // closed the popup". Covers both ImGui Escape behaviours
+                    // here: while the InputText has focus, the first Escape
+                    // only defocuses it (BeginPopup still returns true,
+                    // m_dimEditingId unchanged) — this block is still
+                    // entered next frame with the popup still up, so a
+                    // second Escape (the one that actually closes it) is
+                    // caught the same way.
+                    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                        m_dimPopupConsumedEsc = true;
+                    }
                     // Restore normal padding — the viewport window's
                     // WindowPadding(0,0) is still pushed here, and the popup
                     // captures the style at its own Begin.
@@ -2504,11 +3217,19 @@ void Application::renderViewport() {
                             m_dimEditingFocus = false;
                         }
                         ImGui::SetNextItemWidth(120.0f);
-                        if (ImGui::InputText("##dimval", m_dimEditingBuf,
-                                             sizeof(m_dimEditingBuf),
-                                             ImGuiInputTextFlags_EnterReturnsTrue |
-                                             ImGuiInputTextFlags_CharsDecimal |
-                                             ImGuiInputTextFlags_AutoSelectAll)) {
+                        // Number wearing a text coat (see the pad sweep): the
+                        // buffer stays authoritative — every seed site writes
+                        // it — so parse it in, let inputNumber edit the value
+                        // (pad on touch, InputDouble otherwise), and write the
+                        // commit back for the parse below.
+                        double dimPadV = 0.0;
+                        (void)materializr::parseFinite(m_dimEditingBuf, dimPadV);
+                        if (materializr::inputNumber(
+                                "##dimval", &dimPadV, 0.0, 0.0, "%.2f",
+                                ImGuiInputTextFlags_EnterReturnsTrue)) {
+                            std::snprintf(m_dimEditingBuf,
+                                          sizeof(m_dimEditingBuf), "%.6g",
+                                          dimPadV);
                             // parseFinite: CharsDecimal blocks "nan" but not
                             // "1e999" → inf, which passed the v > 0 guards
                             // below into the constraint solver.
@@ -2523,10 +3244,22 @@ void Application::renderViewport() {
                                     if (cn.type == ConstraintType::Angle) {
                                         cn.value = v * M_PI / 180.0;
                                     } else if (cn.type == ConstraintType::Radius) {
-                                        if (v > 0.0) cn.value = v * 0.5;
+                                        // Circles are typed as diameter; arcs
+                                        // as radius, matching the R/Ø label.
+                                        if (v > 0.0)
+                                            cn.value = constraintIsArcRadiusIn(*m_activeSketch, cn)
+                                                           ? v : v * 0.5;
                                     } else if (v > 0.0) {
                                         cn.value = v;
                                     }
+                                    // Typing a number is an explicit statement
+                                    // that this measurement should CONTROL the
+                                    // geometry, so it promotes a reference
+                                    // dimension to driving. Placing a dimension
+                                    // stays a pure measurement; committing a
+                                    // value is what opts into driving.
+                                    if (constraintSupportsReference(cn.type))
+                                        cn.isDriving = true;
                                     break;
                                 }
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
@@ -2536,6 +3269,85 @@ void Application::renderViewport() {
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
+                        // Driving toggle. A dimension placed by the Dimension
+                        // tool starts as reference (measures only); this is
+                        // where the user promotes it to control the geometry,
+                        // or demotes a driving one back to an annotation.
+                        // Hidden for geometric constraints, where "reference"
+                        // is meaningless (see constraintSupportsReference).
+                        {
+                            Constraint* cur = nullptr;
+                            for (auto& cn : m_activeSketch->getMutableConstraints())
+                                if (cn.id == m_dimEditingId) { cur = &cn; break; }
+                            if (cur && constraintSupportsReference(cur->type)) {
+                                ImGui::Spacing();
+                                bool drv = cur->isDriving;
+                                if (ImGui::Checkbox("Driving", &drv)) {
+                                    recordSketchMutation([&]{
+                                        for (auto& cn : m_activeSketch->getMutableConstraints()) {
+                                            if (cn.id != m_dimEditingId) continue;
+                                            cn.isDriving = drv;
+                                            break;
+                                        }
+                                        if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
+                                    });
+                                    markDirty();
+                                    m_meshesDirty = true;
+                                }
+                                ImGui::SameLine();
+                                ImGui::TextDisabled(drv ? "(controls geometry)"
+                                                        : "(measures only)");
+                            }
+                            // "Make equal" — converts a two-entity dimension
+                            // into an Equal constraint on the same pair (equal
+                            // length for lines, equal radius for circles/arcs).
+                            // Equal carries no measurement, so it is always a
+                            // driving constraint; the numeric dimension it
+                            // replaces is consumed by the conversion.
+                            int eqA = -1, eqB = -1;
+                            if (cur && dimensionEqualPair(*m_activeSketch, *cur, eqA, eqB)) {
+                                ImGui::Spacing();
+                                if (ImGui::Button("Make equal")) {
+                                    int convId = m_dimEditingId;
+                                    recordSketchMutation([&]{
+                                        for (auto& cn : m_activeSketch->getMutableConstraints()) {
+                                            if (cn.id != convId) continue;
+                                            cn.type = ConstraintType::Equal;
+                                            cn.entityA = eqA;
+                                            cn.entityB = eqB;
+                                            cn.value = 0.0;
+                                            cn.isDriving = true;
+                                            break;
+                                        }
+                                        if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
+                                    });
+                                    markDirty();
+                                    m_meshesDirty = true;
+                                    m_dimEditingId = -1;
+                                    ImGui::CloseCurrentPopup();
+                                }
+                                ImGui::SameLine();
+                                ImGui::TextDisabled("(equal length / radius)");
+                            }
+                        }
+                        // Delete removes the dimension constraint entirely, as
+                        // one undoable step ("Remove …" in History).
+                        ImGui::Spacing();
+                        if (ImGui::Button("Delete") ||
+                            ImGui::IsKeyPressed(ImGuiKey_Delete, false) ||
+                            ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+                            int delId = m_dimEditingId;
+                            recordSketchMutation([&]{
+                                m_activeSketch->removeConstraint(delId);
+                                if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
+                            });
+                            markDirty();
+                            m_meshesDirty = true;
+                            m_dimEditingId = -1;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("(Del)");
                         ImGui::EndPopup();
                     } else {
                         // Popup closed without committing — drop edit state.
@@ -2598,7 +3410,14 @@ void Application::renderViewport() {
             // begins over the viewport, keep the block alive until the button lifts.
             if (viewportHovered && ImGui::IsMouseDown(ImGuiMouseButton_Left))
                 m_viewportInputLatch = true;
-            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            // A two-finger takeover releases the button AND parks the cursor
+            // off-screen (so the widget under the first finger can't fire,
+            // #39). Hold the latch through the gesture: pan/zoom consumption
+            // and the release-frame handlers (placement rollback, box-select
+            // end) live inside this hovered scope and must keep running,
+            // exactly as they did when the cursor stayed frozen at the press.
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                !(m_window && m_window->twoFingerActive()))
                 m_viewportInputLatch = false;
             if (m_viewportInputLatch) viewportHovered = true;
         }
@@ -2619,7 +3438,13 @@ void Application::renderViewport() {
                                   // im-touch has no ItemsPanel; its own tree
                                   // overlay reports hover the same way so a
                                   // press-and-hold on a row opens its menu.
-                                  m_imTouchTreeHovered;
+                                  m_imTouchTreeHovered ||
+                                  // The tab strip: its per-tab Save / Save As /
+                                  // Close menu is right-click-only, so without
+                                  // this there is no touch route to it at all.
+                                  // No sliders live there, so the drag hazard
+                                  // that gates this list doesn't apply.
+                                  m_tabBarHovered;
             if (m_inSketchMode && m_sketchTool &&
                 m_sketchTool->getMode() != SketchToolMode::Select)
                 allowLongPress = false;
@@ -2628,6 +3453,11 @@ void Application::renderViewport() {
                 m_resizeCylActive || anyIopActive())
                 allowLongPress = false;
             if (m_window) m_window->setTouchOverViewport(allowLongPress);
+            // Consume-and-clear: the tab strips set this during their own
+            // render, which may be before or after this pass depending on the
+            // layout. A stationary long-press is stable across frames, so a
+            // one-frame lag is harmless (same reasoning as the Items hover).
+            m_tabBarHovered = false;
             // Strict canvas hover (excludes the Items panel) gates touch
             // drag-to-scroll: a vertical drag over any panel scrolls it, but
             // over the 3D canvas the one-finger drag stays an orbit.
@@ -3665,6 +4495,7 @@ void Application::renderViewport() {
                             }
                             m_gizmoDragging = true;
                             m_gizmoTotalDelta = glm::vec3(0.0f);
+                            m_gizmoPreviewXf = glm::mat4(1.0f);
                             m_gizmoTotalAngle = 0.0f;
                             m_gizmoScaleAccum = glm::vec3(0.0f);
                             m_gizmoTotalScale = glm::vec3(1.0f);
@@ -4072,35 +4903,31 @@ void Application::renderViewport() {
                                     }
                                 }
                             } else if (isMulti) {
-                                // Batched commit: one ReplayOp covering all bodies
-                                // EXCEPT any that follow their sketch by re-derivation
-                                // (those rebuild via the cascade below).
-                                ReplayOp::BodyState beforeState;
-                                for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                    if (rederiveBodies.count(id)) continue;
-                                    beforeState.push_back({id, orig});
-                                }
-                                // "After" = the final transform applied to each
-                                // original — the same shapes the per-frame doc
-                                // preview used to leave behind before the drag
-                                // went GPU-only (copy=false for the rigid modes,
-                                // GTransform copy for scale).
-                                ReplayOp::BodyState afterState;
+                                // Batched commit: one BatchTransformOp covering all
+                                // bodies EXCEPT any that follow their sketch by
+                                // re-derivation (those rebuild via the cascade
+                                // below). A real op (not a baked ReplayOp) so it
+                                // reloads editable and re-applies to the LIVE bodies
+                                // on replay — see BatchTransformOp / the
+                                // "batchtransform bakes" bug.
+                                std::vector<int> batchIds;
+                                for (auto& [id, orig] : m_gizmoDragOriginals)
+                                    if (!rederiveBodies.count(id)) batchIds.push_back(id);
+                                // The drag transform as a gp_GTrsf (covers rigid
+                                // Move/Rotate and non-uniform Scale uniformly). The
+                                // doc bodies are still at their originals (the drag
+                                // preview is GPU-only), so op->execute re-applies
+                                // this to them — exactly as the single-body path does.
+                                gp_GTrsf batchG;
                                 if (gm == GizmoMode::Scale) {
-                                    gp_GTrsf gt;
-                                    gt.SetVectorialPart(gp_Mat(m_gizmoTotalScale.x,0,0,
-                                                               0,m_gizmoTotalScale.y,0,
-                                                               0,0,m_gizmoTotalScale.z));
-                                    gt.SetTranslationPart(gp_XYZ(
+                                    batchG.SetVectorialPart(gp_Mat(
+                                        m_gizmoTotalScale.x,0,0,
+                                        0,m_gizmoTotalScale.y,0,
+                                        0,0,m_gizmoTotalScale.z));
+                                    batchG.SetTranslationPart(gp_XYZ(
                                         pivot.x - m_gizmoTotalScale.x * pivot.x,
                                         pivot.y - m_gizmoTotalScale.y * pivot.y,
                                         pivot.z - m_gizmoTotalScale.z * pivot.z));
-                                    for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                        if (rederiveBodies.count(id)) continue;
-                                        BRepBuilderAPI_GTransform xf(orig, gt, true);
-                                        if (xf.IsDone())
-                                            afterState.push_back({id, xf.Shape()});
-                                    }
                                 } else {
                                     gp_Trsf trsf;
                                     if (gm == GizmoMode::Translate) {
@@ -4113,13 +4940,7 @@ void Application::renderViewport() {
                                                           m_gizmoRotAxis.z)),
                                             ang * M_PI / 180.0);
                                     }
-                                    for (auto& [id, orig] : m_gizmoDragOriginals) {
-                                        if (rederiveBodies.count(id)) continue;
-                                        BRepBuilderAPI_Transform xf(orig, trsf,
-                                                                    /*copy=*/false);
-                                        if (xf.IsDone())
-                                            afterState.push_back({id, xf.Shape()});
-                                    }
+                                    batchG = gp_GTrsf(trsf);
                                 }
                                 std::string label;
                                 std::string desc;
@@ -4146,15 +4967,12 @@ void Application::renderViewport() {
                                                   m_gizmoTotalScale.z * 100.0f);
                                     desc = buf;
                                 }
-                                auto op = std::make_unique<ReplayOp>(
-                                    "batchtransform", label, desc,
-                                    std::move(beforeState), std::move(afterState),
-                                    /*fromReload=*/false);
-                                // Apply the after-state to the doc and stamp it as
-                                // executed — the live drag already left the bodies
-                                // in that state visually.
-                                op->execute(*m_document);
-                                m_history->pushExecuted(std::move(op));
+                                auto op = std::make_unique<BatchTransformOp>();
+                                op->setBodies(std::move(batchIds));
+                                op->setTransform(batchG);
+                                op->setLabel(label);
+                                op->setDescription(desc);
+                                m_history->pushOperation(std::move(op), *m_document);
                             } else if (m_gizmoDragBodyId >= 0 &&
                                        !rederiveBodies.count(m_gizmoDragBodyId)) {
                                 // Single body: keep the TransformOp path so the
@@ -4457,9 +5275,23 @@ void Application::renderViewport() {
                         !m_patternActive && !m_resizeCylActive &&
                         !m_threadActive &&
                         !m_moveModeToggle;   // Move (nav lock): taps don't select
+                    // Touch: commit selection on a GENUINE tap-LIFT (Window::
+                    // consumeSingleTap), not the press frame — else the first
+                    // finger-down of a following nav gesture (one-finger orbit /
+                    // two-finger pan-zoom) re-picks or clears the selection before
+                    // the drag is even recognized (#68). The pick `result` on the
+                    // lift frame is at the tap position (no motion parked it), so
+                    // the same downstream branches select the right thing. Desktop
+                    // keeps click-to-select on press.
+                    float _tapSelX = 0.0f, _tapSelY = 0.0f;
+                    const bool selectClicked =
+                        materializr::touchMode()
+                            ? (m_window && m_window->consumeSingleTap(_tapSelX, _tapSelY))
+                            : ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+                    (void)_tapSelX; (void)_tapSelY;
                     bool regionConsumedClick = false;
                     if (clickSelectionAllowed && regionHit.regionIndex >= 0 &&
-                        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        selectClicked) {
                         SelectionEntry entry;
                         entry.type = SelectionType::SketchRegion;
                         entry.sketchId = regionHit.sketchId;
@@ -4490,7 +5322,7 @@ void Application::renderViewport() {
                     // sits in front of the edge.
                     else if (clickSelectionAllowed &&
                              regionHit.regionIndex < 0 && regionHit.sketchId >= 0 &&
-                             ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                             selectClicked) {
                         // Same generous occlusion tolerance + source-face
                         // exemption as the region branch above — sketches on
                         // body faces are coplanar by intent.
@@ -4676,7 +5508,7 @@ void Application::renderViewport() {
                         // click never selected it, but it looked clickable).
                         m_pickCycleLast = -1;
                     } else if (clickSelectionAllowed && !regionConsumedClick &&
-                               ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                               selectClicked &&
                                !(materializr::touchMode() &&
                                  ImGui::GetTime() < m_suppressFaceClickUntil)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
@@ -5450,6 +6282,13 @@ void Application::renderViewport() {
                         for (auto& [id, orig] : m_sketchGizmoOriginals)
                             m_activeSketch->movePoint(id, orig + delta);
                     }
+                    // Re-solve so dimensional/geometric constraints hold while
+                    // the gizmo drags geometry — otherwise a constrained
+                    // circle/line could be dragged off its dimension and the
+                    // stale value would keep displaying (the select-drag path
+                    // already solves via SketchTool::onMouseMove; the gizmo
+                    // path bypassed it).
+                    if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
 
                     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
                         if (m_sketchGizmoHandle == SketchGizmoHandle::Rotate) {
@@ -5513,12 +6352,19 @@ void Application::renderViewport() {
                                            "Rotation (deg)");
                         ImGui::SetNextItemWidth(150.0f);
                         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-                        bool typedEnter = ImGui::InputText(
-                            "##sketchRotAng", m_sketchGizmoRotateBuf,
-                            sizeof(m_sketchGizmoRotateBuf),
-                            ImGuiInputTextFlags_EnterReturnsTrue |
-                            ImGuiInputTextFlags_CharsDecimal);
-                        if (ImGui::IsItemDeactivatedAfterEdit()) {
+                        float rotPadV = m_sketchGizmoRotateDegrees;
+                        (void)materializr::parseFinite(m_sketchGizmoRotateBuf,
+                                                       rotPadV);
+                        bool typedEnter = materializr::inputNumber(
+                            "##sketchRotAng", &rotPadV, 0.0f, 0.0f, "%.1f",
+                            ImGuiInputTextFlags_EnterReturnsTrue);
+                        if (typedEnter)
+                            std::snprintf(m_sketchGizmoRotateBuf,
+                                          sizeof(m_sketchGizmoRotateBuf),
+                                          "%.6g", rotPadV);
+                        // Pad commit counts as the click-off: the buffer was
+                        // just rewritten, so the same live re-apply runs.
+                        if (typedEnter || ImGui::IsItemDeactivatedAfterEdit()) {
                             // Re-apply the typed value live as the user clicks off
                             // the field, so the sketch reflects what they typed.
                             float deg = m_sketchGizmoRotateDegrees;
@@ -5750,6 +6596,20 @@ void Application::renderViewport() {
                         // it. Snapshot manually for the drag-commit on mouse-up.
                         m_sketchDragBefore = std::make_shared<Sketch>(*m_activeSketch);
                         recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
+                    } else if (m_sketchTool->getMode() == SketchToolMode::Dimension) {
+                        // Picking mutates nothing — no undo record. The commit
+                        // below records the constraint add as one SketchEditOp.
+                        // A click that landed while the ##DimEdit popup was up
+                        // belongs to the popup (dismiss) — never a fresh pick.
+                        if (!m_dimPopupSwallowClick) {
+                            m_sketchTool->onMouseDown(sketchCoord, false);
+                            if (m_sketchTool->dimReadyToCommit())
+                                applyPendingDimension();
+                            // Surface a refused pick instead of letting the
+                            // click look like it simply missed the geometry.
+                            if (const char* why = m_sketchTool->consumeDimRejection())
+                                showToast(why, 2.5);
+                        }
                     } else if (materializr::touchMode()) {
                         // A held circle awaiting its ✗/✓ bubble: drawing the
                         // next shape auto-commits it as-released (the bubble
@@ -6102,7 +6962,8 @@ void Application::renderViewport() {
         m_viewCube->setExtraOffset(0.0f, 0.0f);
     ViewCubeAction vcAction = m_viewCube->render(
         m_viewport->getCamera(), m_invertCubeDrag,
-        m_themeManager && m_themeManager->getTheme() == Theme::Light);
+        m_themeManager && m_themeManager->getTheme() == Theme::Light,
+        m_window && m_window->lastLeftReleaseWasGesture());
     if (vcAction != ViewCubeAction::None) {
         handleViewCubeAction(static_cast<int>(vcAction));
     }
@@ -6331,11 +7192,71 @@ void Application::renderViewport() {
                 m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Export Body to STL…")) {
-                // Per-body STL dump — file-menu Export STL writes every visible
-                // body to one file; this pulls a single part out on its own.
-                exportBodyAsStl(bid);
+            // Export ▸ — the same submenu the Items panel offers, from the
+            // same registry, acting on the whole body selection when this
+            // body is part of one. Two menus for the same action have to
+            // stay in step: the Items panel grew the format list and this
+            // one kept a lone STL item, which read as the feature not
+            // working at all (Steve, 2026-07-28).
+            {
+                std::vector<std::string> fmts;
+                for (const auto& f : PluginRegistry::instance().ioFormats())
+                    if (f.canExport && f.exportDocFn) fmts.push_back(f.name);
+                if (!fmts.empty() && ImGui::BeginMenu("Export")) {
+                    std::vector<int> targets;
+                    if (m_selection) {
+                        for (const auto& e : m_selection->getSelection())
+                            if (e.type == SelectionType::Body && e.bodyId >= 0)
+                                targets.push_back(e.bodyId);
+                    }
+                    const bool multi =
+                        targets.size() > 1 &&
+                        std::find(targets.begin(), targets.end(), bid) != targets.end();
+                    if (!multi) { targets.clear(); targets.push_back(bid); }
+                    if (multi)
+                        ImGui::TextDisabled("%zu selected bodies", targets.size());
+                    for (const auto& fmt : fmts) {
+                        if (ImGui::MenuItem((fmt + "…").c_str())) {
+                            exportBodiesAs(targets, fmt);
+                            m_contextMenuFace.Nullify();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+            }
+            // Baked copy of this body into a fresh project — the "use this
+            // part elsewhere" flow. Single body by design (it names the new
+            // file after the part), so it stays out of the Export submenu.
+            if (ImGui::MenuItem("Export to New Project")) {
+                std::vector<int> targets;
+                if (m_selection) {
+                    for (const auto& e : m_selection->getSelection())
+                        if (e.type == SelectionType::Body && e.bodyId >= 0)
+                            targets.push_back(e.bodyId);
+                }
+                if (std::find(targets.begin(), targets.end(), bid) == targets.end() ||
+                    targets.size() <= 1) {
+                    targets.clear();
+                    targets.push_back(bid);
+                }
+                exportBodiesToNewProject(targets);
                 m_contextMenuFace.Nullify();
+            }
+            // Separate: only when the body actually holds more than one
+            // disconnected solid (air-gapped lumps fused into one body).
+            // Mirrors the Items-panel entry — splits them into individual
+            // bodies, largest keeping this one.
+            TopoDS_Shape bshape;
+            try { bshape = m_document->getBody(bid); } catch (...) {}
+            if (m_history && SeparateBodyOp::solidCount(bshape) > 1) {
+                if (ImGui::MenuItem("Separate")) {
+                    auto op = std::make_unique<SeparateBodyOp>();
+                    op->setBody(bid);
+                    m_history->pushOperation(std::move(op), *m_document);
+                    markDirty();
+                    m_meshesDirty = true;
+                    m_contextMenuFace.Nullify();
+                }
             }
         };
 
@@ -6437,6 +7358,10 @@ void Application::renderViewport() {
             }
             if (ImGui::MenuItem("Export as SVG…")) {
                 exportSketchAsSvg(sid);
+                m_contextMenuSketchId = -1;
+            }
+            if (ImGui::MenuItem("Export as DXF…")) {
+                exportSketchAsDxf(sid);
                 m_contextMenuSketchId = -1;
             }
             ImGui::Separator();
@@ -6548,6 +7473,8 @@ void Application::renderViewport() {
             if (nCur >= 2) {
                 if (ImGui::MenuItem("Concentric"))
                     applySketchConstraint(ConstraintType::Concentric);
+                if (ImGui::MenuItem("Equal radius"))
+                    applySketchConstraint(ConstraintType::Equal);
             }
             // ImGui automatically greys out an empty submenu, but we want to
             // hint at the cause when nothing matches the selection.
@@ -6562,20 +7489,17 @@ void Application::renderViewport() {
 
     // Gizmo hint
     if (m_gizmo->isVisible()) {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-        ImGui::Text("Arrows: Move | Rings: Rotate | Cubes: Scale");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+                                    "Arrows: Move | Rings: Rotate | Cubes: Scale");
     }
 
     // Interactive extrude UI
     if (m_extruding) {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-                    ? "EXTRUDE - Drag in viewport or type distance, then Confirm / Cancel."
-                    : "EXTRUDE - Drag in viewport or type distance. Enter to confirm, Escape to cancel.");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+            materializr::touchMode()
+                ? "EXTRUDE - Drag in viewport or type distance, then Confirm / Cancel."
+                : "EXTRUDE - Drag in viewport or type distance. Enter to confirm, Escape to cancel.");
 
         // Floating distance input panel. im-touch: anchored just off the
         // extrude arrow's tip, like the sketch bubbles; other layouts (or a
@@ -6682,12 +7606,11 @@ void Application::renderViewport() {
 
     // Interactive Push/Pull UI
     if (m_pushPullActive) {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.85f, 1.0f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-                    ? "PUSH/PULL - Positive = extrude, Negative = cut. Drag the arrow, then Confirm / Cancel."
-                    : "PUSH/PULL - Positive = extrude, Negative = cut. Enter to confirm, Escape to cancel.");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(0.3f, 0.85f, 1.0f, 1.0f),
+            materializr::touchMode()
+                ? "PUSH/PULL - Positive = extrude, Negative = cut. Drag the arrow, then Confirm / Cancel."
+                : "PUSH/PULL - Positive = extrude, Negative = cut. Enter to confirm, Escape to cancel.");
 
         // im-touch: anchor the well just off the push/pull arrow's tip,
         // like the sketch bubbles; other layouts (or a tip behind the
@@ -6827,12 +7750,11 @@ void Application::renderViewport() {
         const char* opName = m_edgeOpType == EdgeOpType::Fillet ? "FILLET" : "CHAMFER";
         const char* label = m_edgeOpType == EdgeOpType::Fillet ? "Radius (mm)" : "Distance (mm)";
 
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.5f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-                    ? "%s - Type value or use slider, then Confirm / Cancel."
-                    : "%s - Type value or use slider. Enter to confirm, Escape to cancel.", opName);
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(0.2f, 1.0f, 0.5f, 1.0f),
+            materializr::touchMode()
+                ? "%s - Type value or use slider, then Confirm / Cancel."
+                : "%s - Type value or use slider. Enter to confirm, Escape to cancel.", opName);
 
         // im-touch: anchor the well next to the edge being rounded/cut
         // (latched midpoint — static while values change, same rule as the
@@ -6996,15 +7918,14 @@ void Application::renderViewport() {
     if (m_moveFaceActive) {
         const bool isRot = m_faceXformKind == FaceXform::Rotate;
         const bool isScl = m_faceXformKind == FaceXform::Scale;
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.5f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-                        ? "%s - drag a handle, then Confirm / Cancel."
-                        : "%s - drag a handle. Enter to confirm, Escape to cancel.",
-                    isRot ? "TILT / TWIST FACE (rings about its centre)"
-                          : isScl ? "SCALE FACE (about its centre)"
-                                  : "MOVE FACE (slide in plane)");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(0.2f, 1.0f, 0.5f, 1.0f),
+            materializr::touchMode()
+                ? "%s - drag a handle, then Confirm / Cancel."
+                : "%s - drag a handle. Enter to confirm, Escape to cancel.",
+            isRot ? "TILT / TWIST FACE (rings about its centre)"
+                  : isScl ? "SCALE FACE (about its centre)"
+                          : "MOVE FACE (slide in plane)");
 
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 250.0f * uiScale(),
                                        ImGui::GetWindowPos().y + 50), ImGuiCond_Appearing);
@@ -7028,7 +7949,7 @@ void Application::renderViewport() {
                                         /*allowNegative=*/true, -90.0f, 90.0f))
                 ch = true;
             ImGui::SetNextItemWidth(90);
-            if (ImGui::InputFloat("deg", &deg, 1.0f, 5.0f, "%.1f")) ch = true;
+            if (materializr::inputNumber("deg", &deg, 1.0f, 5.0f, "%.1f")) ch = true;
             ImGui::Checkbox("Snap 1 deg", &m_moveFaceRotSnap);
             if (ch) {
                 if (m_moveFaceRotSnap) deg = std::round(deg);
@@ -7051,7 +7972,7 @@ void Application::renderViewport() {
                                         /*allowNegative=*/true, -180.0f, 180.0f))
                 twch = true;
             ImGui::SetNextItemWidth(90);
-            if (ImGui::InputFloat("deg##tw", &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
+            if (materializr::inputNumber("deg##tw", &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
             if (twch) {
                 if (m_moveFaceRotSnap) twdeg = std::round(twdeg);
                 m_moveFaceTwist = twdeg / 57.2957795f;
@@ -7085,7 +8006,7 @@ void Application::renderViewport() {
                                             400.0f, /*zeroValue=*/100.0f))
                     ch = true;
                 ImGui::SetNextItemWidth(90);
-                if (ImGui::InputFloat("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;
+                if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;
                 if (ch) m_moveFaceScale = std::max(0.1f, pct / 100.0f);
             } else {
                 float a = m_moveFaceScaleA * 100.0f, b = m_moveFaceScaleB * 100.0f;
@@ -7097,7 +8018,7 @@ void Application::renderViewport() {
                                             400.0f, /*zeroValue=*/100.0f))
                     ch = true;
                 ImGui::SetNextItemWidth(90);
-                if (ImGui::InputFloat("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;
+                if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;
                 ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.45f, 1.0f), "Axis B (green)");
                 ImGui::SetNextItemWidth(150);
                 ImGui::TextDisabled("%.0f %%", b);
@@ -7106,7 +8027,7 @@ void Application::renderViewport() {
                                             400.0f, /*zeroValue=*/100.0f))
                     ch = true;
                 ImGui::SetNextItemWidth(90);
-                if (ImGui::InputFloat("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;
+                if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;
                 if (ch) {
                     m_moveFaceScaleA = std::max(0.1f, a / 100.0f);
                     m_moveFaceScaleB = std::max(0.1f, b / 100.0f);
@@ -7149,12 +8070,11 @@ void Application::renderViewport() {
 
     // Sketch mode indicator
     if (m_inSketchMode) {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.2f, 1.0f, 0.4f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-                    ? "SKETCH MODE - Finish Sketch applies, Exit Sketch discards"
-                    : "SKETCH MODE - Press Escape to finish");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(0.2f, 1.0f, 0.4f, 1.0f),
+            materializr::touchMode()
+                ? "SKETCH MODE - Finish Sketch applies, Exit Sketch discards"
+                : "SKETCH MODE - Press Escape to finish");
     }
 
     // Inline dimension input while placing a sketch shape. Suppressed while
@@ -7259,10 +8179,10 @@ void Application::renderViewport() {
                                         ImVec2(uiW(10.0f), uiW(10.0f)));
                     ImGui::TextDisabled("Width (mm)");
                     ImGui::SetNextItemWidth(-1.0f);
-                    ImGui::InputFloat("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
+                    materializr::inputNumber("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
                     ImGui::TextDisabled("Height (mm)");
                     ImGui::SetNextItemWidth(-1.0f);
-                    ImGui::InputFloat("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
+                    materializr::inputNumber("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
                     ImGui::PopStyleVar();
                     if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                     if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;
@@ -7289,21 +8209,24 @@ void Application::renderViewport() {
                     ImGui::SetNextItemWidth(-1.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                         ImVec2(uiW(12.0f), uiW(12.0f)));
-                    bool entered = ImGui::InputText("##sketchDimT", m_sketchDimBuf,
-                        sizeof(m_sketchDimBuf),
-                        ImGuiInputTextFlags_EnterReturnsTrue |
-                        ImGuiInputTextFlags_CharsDecimal |
-                        ImGuiInputTextFlags_AutoSelectAll);
+                    // VALUE-based, like the Rectangle W/H fields above — so
+                    // touch mode gets the number pad instead of the OS
+                    // keyboard. Enter (pad or hardware) and Apply both commit;
+                    // Apply stays for the finger route, since the pad's own
+                    // Enter is the only way digits reach us on a tablet.
+                    const bool entered = materializr::inputNumber(
+                        "##sketchDimT", &m_sketchDimValue, 0.0f, 0.0f, "%.2f",
+                        ImGuiInputTextFlags_EnterReturnsTrue);
                     ImGui::PopStyleVar();
                     ImGui::Spacing();
-                    ImGui::BeginDisabled(m_sketchDimBuf[0] == '\0');
-                    bool applied = ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)));
+                    ImGui::BeginDisabled(m_sketchDimValue <= 0.0f);
+                    const bool applied =
+                        ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)));
                     ImGui::EndDisabled();
-                    if (entered || applied) {
-                        float v = 0.0f;
-                        if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
-                            recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
-                        }
+                    if ((entered || applied) && m_sketchDimValue > 0.0f) {
+                        const float v = m_sketchDimValue;
+                        recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
+                        m_sketchDimValue = 0.0f;
                         m_sketchDimBuf[0] = '\0';
                     }
                 }
@@ -7334,11 +8257,146 @@ void Application::renderViewport() {
     } else {
         // Reset when not placing
         m_sketchDimBuf[0] = '\0';
+        m_sketchDimValue = 0.0f;
         m_sketchDimWasShown = false;
     }
 
     ImGui::End();
     ImGui::PopStyleVar();
+}
+
+bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
+    if (!m_viewport || !m_shapeRenderer || !m_edgeRenderer ||
+        !m_backgroundRenderer || !m_document)
+        return false;
+
+    // Meshes can be stale when a save lands between frames (deferred slot).
+    // Done BEFORE the bounding box so the box can ride on the triangulation.
+    if (m_meshesDirty || !m_dirtyBodyIds.empty()) {
+        rebuildMeshes();
+        m_meshesDirty = false;
+    }
+
+    // Bounding box over the visible bodies (the same set ShapeRenderer holds
+    // meshes for). Nothing visible → no thumbnail; the save just omits the
+    // section and the landing tile shows its placeholder.
+    //
+    // Add-with-triangulation, NOT AddOptimal: this box only frames a 512px
+    // preview, so a slightly loose fit costs nothing visible, while
+    // AddOptimal's exact geometry pass is expensive on precisely the surfaces
+    // this app produces — thread helicoids and lofted B-splines — and it ran
+    // on EVERY Ctrl+S.
+    Bnd_Box bb;
+    for (int id : m_document->getAllBodyIds()) {
+        if (!m_document->isBodyVisible(id)) continue;
+        try {
+            const TopoDS_Shape& s = m_document->getBody(id);
+            if (!s.IsNull()) BRepBndLib::Add(s, bb, Standard_True);
+        } catch (...) {}
+    }
+    if (bb.IsVoid()) return false;
+
+    // Dedicated one-shot FBO — deliberately NOT the live viewport FBO, whose
+    // texture ImGui may already have referenced this frame (destroying it
+    // mid-frame leaves the draw list pointing at a dead texture). Rendered at
+    // 2x and box-downscaled below: cheap antialiasing without MSAA plumbing.
+    const int kThumbPx = 512;
+    const int kRenderPx = kThumbPx * 2;
+    GLuint fbo = 0, colorTex = 0, depthRb = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glGenTextures(1, &colorTex);
+    glBindTexture(GL_TEXTURE_2D, colorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kRenderPx, kRenderPx, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, colorTex, 0);
+    glGenRenderbuffers(1, &depthRb);
+    glBindRenderbuffer(GL_RENDERBUFFER, depthRb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+                          kRenderPx, kRenderPx);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+                              GL_RENDERBUFFER, depthRb);
+    auto cleanup = [&]() {
+        glBindFramebuffer(GL_FRAMEBUFFER, g_windowFramebuffer);
+        if (colorTex) glDeleteTextures(1, &colorTex);
+        if (depthRb) glDeleteRenderbuffers(1, &depthRb);
+        if (fbo) glDeleteFramebuffers(1, &fbo);
+    };
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        cleanup();
+        return false;
+    }
+    glViewport(0, 0, kRenderPx, kRenderPx);
+
+    // The camera is shared with the live viewport — restored by copy below.
+    // Section planes and background colours are re-asserted by renderViewport()
+    // every frame, so this pass may set them freely.
+    Camera saved = m_viewport->getCamera();
+    Camera& cam = m_viewport->getCamera();
+    cam.reset();                       // home orientation (default isometric)
+    cam.setAspect(1.0f);
+    Standard_Real x0, y0, z0, x1, y1, z1;
+    bb.Get(x0, y0, z0, x1, y1, z1);
+    cam.zoomToFit(glm::vec3((float)x0, (float)y0, (float)z0),
+                  glm::vec3((float)x1, (float)y1, (float)z1));
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
+    const bool lightBg = m_themeManager &&
+                         m_themeManager->getTheme() == Theme::Light;
+    if (lightBg) {
+        m_backgroundRenderer->setTopColor(glm::vec3(0.92f, 0.93f, 0.96f));
+        m_backgroundRenderer->setBottomColor(glm::vec3(0.78f, 0.80f, 0.85f));
+    } else {
+        m_backgroundRenderer->setTopColor(glm::vec3(0.22f, 0.22f, 0.28f));
+        m_backgroundRenderer->setBottomColor(glm::vec3(0.12f, 0.12f, 0.15f));
+    }
+    m_backgroundRenderer->render();
+    glEnable(GL_DEPTH_TEST);
+
+    // A live section cut would carve the thumbnail too — always off here.
+    m_shapeRenderer->setSectionPlane(false, glm::vec3(0.0f),
+                                     glm::vec3(0.0f, 1.0f, 0.0f));
+    m_edgeRenderer->setSectionPlane(false, glm::vec3(0.0f),
+                                    glm::vec3(0.0f, 1.0f, 0.0f));
+
+    glm::mat4 view = cam.getViewMatrix();
+    glm::mat4 proj = cam.getProjectionMatrix();
+    m_shapeRenderer->render(view, proj, cam.getPosition());
+    m_edgeRenderer->render(view, proj);
+    m_viewport->getCamera() = saved;
+
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    std::vector<uint8_t> raw(static_cast<size_t>(kRenderPx) * kRenderPx * 4);
+    glReadPixels(0, 0, kRenderPx, kRenderPx, GL_RGBA, GL_UNSIGNED_BYTE,
+                 raw.data());
+    cleanup();
+
+    // 2x2 box downscale + vertical flip (GL reads bottom-up) in one pass.
+    std::vector<uint8_t> rgba(static_cast<size_t>(kThumbPx) * kThumbPx * 4);
+    for (int y = 0; y < kThumbPx; ++y) {
+        // Destination row y (top-down) samples source rows counted from the top,
+        // which sit at (kRenderPx-1 - srcY) in GL's bottom-up buffer.
+        const int sy0 = kRenderPx - 1 - (y * 2);
+        const int sy1 = sy0 - 1;
+        for (int x = 0; x < kThumbPx; ++x) {
+            const int sx = x * 2;
+            for (int c = 0; c < 4; ++c) {
+                const unsigned sum =
+                    raw[(static_cast<size_t>(sy0) * kRenderPx + sx) * 4 + c] +
+                    raw[(static_cast<size_t>(sy0) * kRenderPx + sx + 1) * 4 + c] +
+                    raw[(static_cast<size_t>(sy1) * kRenderPx + sx) * 4 + c] +
+                    raw[(static_cast<size_t>(sy1) * kRenderPx + sx + 1) * 4 + c];
+                rgba[(static_cast<size_t>(y) * kThumbPx + x) * 4 + c] =
+                    static_cast<uint8_t>(sum / 4);
+            }
+        }
+    }
+    return materializr::encodePng(rgba.data(), kThumbPx, kThumbPx, pngOut);
 }
 
 } // namespace materializr

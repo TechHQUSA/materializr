@@ -40,6 +40,11 @@ public:
     // body — undoing the body while the live sketch renders against it crashes
     // (SIGABRT, heap corruption). canUndo() honours it, so the Undo buttons also
     // grey out at the floor. -1 = no floor.
+    // The step editStep() last hard-failed on (reset to -1 at each call) —
+    // lets the sketch-edit cascade DISABLE the un-followable step, retry, and
+    // tell the user WHICH feature needs re-applying instead of reverting the
+    // whole edit with a guess of a message (#53).
+    int lastEditFailStep() const { return m_lastEditFailStep; }
     void setUndoFloor(int step) { m_undoFloor = step; }
     void clearUndoFloor() { m_undoFloor = -1; }
 
@@ -139,6 +144,34 @@ public:
     // doc.clear() would delete non-operation base bodies.
     bool setStepEnabled(int index, bool enabled, Document& doc);
 
+    // Mark every step applied and clear any replay-failure/suspend flags,
+    // WITHOUT re-executing anything. The caller is responsible for having
+    // restored the document bodies to the fully-applied (loaded) state by
+    // other means — used when an interactive edit can't rebuild and we revert
+    // to a saved body snapshot: those steps fail on execute() but were fine on
+    // load (rehydrate ≠ replay), so there is no execute-based path back to the
+    // clean state; this resets the bookkeeping to match the restored bodies.
+    void markFullyApplied() {
+        m_currentIndex = static_cast<int>(m_operations.size()) - 1;
+        m_failedReplayAt = -1;
+        m_lastEditFailStep = -1;
+        ++m_revision;
+    }
+
+    // Session-level edit-state protection for the interactive edit flows,
+    // which run editStep NON-transactionally per preview frame (too hot for
+    // per-frame snapshots). Snapshot every op's edit state once when the
+    // interactive session BEGINS, restore it when the session reverts to its
+    // body snapshot — otherwise ops that executed during doomed preview
+    // replays keep resolution state pointing at discarded geometry, and the
+    // step is wedged until reload (fails where a fresh session succeeds).
+    void snapshotAllEditState() {
+        for (auto& op : m_operations) op->snapshotEditState();
+    }
+    void restoreAllEditState() {
+        for (auto& op : m_operations) op->restoreEditState();
+    }
+
     // Clear history
     void clear();
 
@@ -155,6 +188,7 @@ private:
     int m_currentIndex = -1;
     int m_breakpoint = -1;
     int m_undoFloor = -1;   // see setUndoFloor(): floor for in-sketch undo
+    int m_lastEditFailStep = -1; // see lastEditFailStep()
     unsigned m_revision = 0; // see revision()
     // Step that failed to recompute during the last editStep/redo replay;
     // cleared by manual undo, by a successful retry, or by clear().

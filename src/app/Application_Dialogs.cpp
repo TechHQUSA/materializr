@@ -43,6 +43,12 @@
 #include "ui/ShortcutsPanel.h"
 #include "ui/HelpPanel.h"
 #include "ui/UpdateChecker.h"
+#include "ui/WelcomeScreen.h"
+#include "ui/LandingPage.h"
+#include "app/layout/LayoutCommon.h"  // layoutui::logoTexture for the landing header
+#include "mobile_files.h"             // mobileOpenUri (content: refs on mobile)
+#include <SDL.h>                      // SDL_GetPrefPath: thumbnail cache dir
+#include <cstring>
 #include "modeling/Sketch.h"
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
@@ -67,6 +73,8 @@
 #include "io/StlIO.h"
 #include "io/StlExport.h"
 #include "io/FileDialogs.h"
+#include "io/ImageDecode.h"
+#include <fstream>
 #include "io/ProjectIO.h"
 #include "io/Settings.h"
 #include "modeling/Unfold.h"
@@ -112,6 +120,7 @@ static const char* mouseButtonName(int b) {
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
 #include <gp_XYZ.hxx>
+#include "../ui/NumField.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -123,6 +132,13 @@ namespace materializr {
 
 void Application::renderSettings() {
     if (!m_showSettings) return;
+    if (m_settingsRaise) {
+        // An already-open Settings window can sit BURIED under the full-
+        // screen home page (it only auto-focuses on first appearance) — the
+        // gear then looks dead. Raise on every explicit open request.
+        ImGui::SetNextWindowFocus();
+        m_settingsRaise = false;
+    }
     ImGui::SetNextWindowSize(uiSz(420, 420), ImGuiCond_Appearing);
     if (ImGui::Begin("Settings", &m_showSettings)) {
         bool changed = false; // any change persists the settings file
@@ -155,12 +171,14 @@ void Application::renderSettings() {
 
                     ImGui::Spacing();
                     ImGui::SeparatorText("Session");
-                    if (ImGui::Checkbox("Open last project on launch", &m_autoOpenLastProject)) {
+                    if (ImGui::Checkbox("Reopen last session on launch", &m_autoOpenLastProject)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped("If on, Materializr reopens the project you had open the last "
-                                       "time you quit. Using File → Close Project before quitting "
-                                       "makes the next launch start empty instead.");
+                    ImGui::TextWrapped("If on, Materializr reopens every project you had open when "
+                                       "you quit — one tab each — and skips the home screen. "
+                                       "Closing a project's tab before quitting leaves it out; "
+                                       "projects that have never been saved aren't restored here "
+                                       "(crash recovery offers those separately).");
 
                     ImGui::Spacing();
                     if (ImGui::Checkbox("Check for updates on launch", &m_checkForUpdatesOnLaunch)) {
@@ -224,6 +242,13 @@ void Application::renderSettings() {
                                        "toggles, trackpad navigation. Off: the desktop "
                                        "mouse/keyboard layout — use it with an attached "
                                        "mouse/keyboard. Takes full effect on restart.");
+                    // Numeric entry rides on this flag (ui/NumField.h gates the
+                    // in-app pad on touchMode()), which is not something anyone
+                    // would guess from "Touch mode". Say so here rather than add
+                    // a second setting for it: with a keyboard attached, turning
+                    // this off is already the way back to typing.
+                    ImGui::TextWrapped("Also switches numeric fields between the in-app "
+                                       "number pad and the system keyboard.");
                     if (materializr::touchMode() != m_touchMode) {
                         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
                             "Restart Materializr to apply the new mode.");
@@ -659,6 +684,19 @@ void Application::renderMirrorPopup() {
 
 void Application::renderUpdatePopup() {
     if (!m_showUpdatePopup) return;
+    // Startup dialogs take turns for the popup-stack level (see the Welcome
+    // screen's render site in Application.cpp run(), and the identical gate
+    // on renderProjectRecoveryPrompt/renderSketchRecoveryPrompt): this popup
+    // and the crash-recovery prompts both call OpenPopup() unconditionally
+    // every frame, and two such raw reopens contending for the same level
+    // closes each other every frame forever — neither ever draws, while the
+    // modal dim still blocks all input (see run()'s comment on this class of
+    // bug). The launch-time update check resolves on a background thread and
+    // can flip m_showUpdatePopup true at ANY frame, including while a
+    // recovery prompt is up — hold off exactly like those prompts hold off
+    // for Welcome, until they've resolved.
+    if (m_welcomeScreen && m_welcomeScreen->isVisible()) return;
+    if (m_pendingProjectRecovery || m_pendingSketchRecovery) return;
 
     ImGui::OpenPopup("Check for Updates");
 
@@ -770,7 +808,7 @@ void Application::renderMultiTransformPanel() {
         ImGui::SliderFloat("##slider", &m_multiRotate[i], -180.0f, 180.0f, "%.1f°");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
-        ImGui::InputFloat("##input", &m_multiRotate[i], 0.0f, 0.0f, "%.3f");
+        materializr::inputNumber("##input", &m_multiRotate[i], 0.0f, 0.0f, "%.3f");
         ImGui::PopID();
     }
 
@@ -976,6 +1014,10 @@ void Application::renderResizeCylindricalPanel() {
                            "Invalid diameter for this feature —\n"
                            "a hole can't exceed the surrounding wall.");
     }
+    if (m_resizeCylDeferredPreview) {
+        ImGui::TextDisabled("Threaded body — applies on OK,\n"
+                            "then the thread re-cuts in background.");
+    }
 
     if (!imTouchActionCorner()) {   // im-touch: corner ✓/✗ FABs instead
         ImGui::Spacing();
@@ -1075,7 +1117,7 @@ void Application::renderScalePanel() {
             ImGui::TextColored(axisColors[i], "%s", axisLabels[i]);
             ImGui::SameLine(28);
             ImGui::SetNextItemWidth(95.0f);
-            if (ImGui::InputFloat("##pct", &m_scalePct[i], 0.0f, 0.0f, "%.1f")) {
+            if (materializr::inputNumber("##pct", &m_scalePct[i], 0.0f, 0.0f, "%.1f")) {
                 if (m_scaleUniform) {
                     m_scalePct[0] = m_scalePct[1] = m_scalePct[2] = m_scalePct[i];
                 }
@@ -1619,15 +1661,63 @@ void Application::renderThreadPanel() {
                                        ImGuiWindowFlags_AlwaysAutoResize |
                                        ImGuiWindowFlags_NoMove)) {
                 int dots = static_cast<int>(ImGui::GetTime() * 2.0) % 4;
-                ImGui::Text("Sweeping the helical groove%.*s", dots, "...");
+                ImGui::Text("Cutting the helical groove%.*s", dots, "...");
                 ImGui::Spacing();
                 drawIndeterminateBar();
                 ImGui::Spacing();
-                ImGui::TextDisabled("A few seconds for typical threads.");
+                // Standard sweeps in ~200ms; the maker profiles cut per-turn,
+                // so a long thread is a genuinely heavy op — set expectations.
+                if (m_threadProfile != 0)
+                    ImGui::TextDisabled("Shaped profiles cut per-turn \xE2\x80\x94 "
+                                        "a long thread can take up to a minute.");
+                else
+                    ImGui::TextDisabled("A few seconds for typical threads.");
+                ImGui::Spacing();
+                // Escape hatch: signal the worker (it aborts between turns
+                // and mid-boolean via user-break), abandon the future, and
+                // return to the parameter popup so the values can be tweaked
+                // and re-applied.
+                if (ImGui::Button("Cancel", ImVec2(120, 0)) ||
+                    ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                    if (m_threadApplyCancel) m_threadApplyCancel->store(true);
+                    m_threadZombies.push_back(std::move(m_threadFuture));
+                    m_threadComputing = false;
+                    ImGui::CloseCurrentPopup();
+                }
                 ImGui::EndPopup();
             }
             return; // suppress the parameter popup while computing
         }
+    }
+
+    // Async thread RE-CUT (reflow / cascade): the worker saturates the cores
+    // and the app reads as "not responding" anyway — draw the same blocking
+    // modal honestly instead of a toast, with the same escape hatch.
+    if (!m_threadRecuts.empty()) {
+        ImGui::OpenPopup("Re-cutting thread…");
+        ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+        ImGui::SetNextWindowPos(center, ImGuiCond_Appearing,
+                                ImVec2(0.5f, 0.5f));
+        if (ImGui::BeginPopupModal("Re-cutting thread…", nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize |
+                                   ImGuiWindowFlags_NoMove)) {
+            int dots = static_cast<int>(ImGui::GetTime() * 2.0) % 4;
+            ImGui::Text("Re-cutting the thread on the changed body%.*s",
+                        dots, "...");
+            ImGui::Spacing();
+            drawIndeterminateBar();
+            ImGui::Spacing();
+            ImGui::TextDisabled("Sharp profiles can take a while on long "
+                                "threads.");
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)) ||
+                ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+                cancelThreadRecuts();
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        return; // suppress the parameter popup while re-cutting
     }
     if (!m_threadActive) return;
 
@@ -1681,33 +1771,133 @@ void Application::renderThreadPanel() {
     ImGui::SameLine(); ImGui::Text("mm");
     }
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
-    // beyond ~45% of the radius it eats the core. Clamp + say so.
+    // beyond ~45% of the radius it eats the core. Multi-start Rounded cuts
+    // with the semicircular rope tool whose radius IS the depth, capped at
+    // 0.45·pitch so a land survives between the interleaved grooves — the
+    // panel must advertise the depth the engine will actually cut, not one
+    // it silently truncates. Clamp + say so.
     {
-        float maxDepth = static_cast<float>(
-            std::min(0.65 * m_threadPitch, 0.45 * m_threadRadius));
+        const bool ropeCap = m_threadStarts > 1 &&
+                             m_threadProfile == 4;   // Rounded (combo index)
+        float maxDepth = static_cast<float>(std::min(
+            (ropeCap ? 0.45 : 0.65) * m_threadPitch, 0.45 * m_threadRadius));
         if (m_threadDepth > maxDepth) {
             m_threadDepth = maxDepth;
             std::snprintf(m_threadDepthBuf, sizeof(m_threadDepthBuf), "%.2f",
                           m_threadDepth);
         }
-        ImGui::TextDisabled("Depth caps at 0.65 \xC3\x97 pitch.");
+        ImGui::TextDisabled(ropeCap
+            ? "Depth caps at 0.45 \xC3\x97 pitch (multi-start rounded)."
+            : "Depth caps at 0.65 \xC3\x97 pitch.");
+    }
+
+    // Cross-section profile. Standard is the fast shipped V-thread; the others
+    // are the maker/printing set — clean, but a boolean cut per turn, so a long
+    // thread is slow (the progress bar on Apply shows it working).
+    {
+        const char* kProfiles[] = {"Standard (V)", "Trapezoidal (ACME)",
+                                   "Square", "Buttress", "Rounded (print)"};
+        ImGui::SetNextItemWidth(uiSz(180, 0).x);
+        ImGui::Combo("Profile", &m_threadProfile, kProfiles,
+                     IM_ARRAYSIZE(kProfiles));
+        if (m_threadProfile != 0) {
+            ImGui::Text("Fit clearance"); ImGui::SameLine();
+            ImGui::SetNextItemWidth(90);
+            materializr::inputNumber("##thrClr", &m_threadClearance, 0.05f, 0.1f, "%.2f");
+            if (m_threadClearance < 0.0f) m_threadClearance = 0.0f;
+            ImGui::SameLine(); ImGui::Text("mm");
+            ImGui::SetItemTooltip("Radial gap so a PRINTED thread fits its mate "
+                                  "(0.2\xE2\x80\x93" "0.4mm typical). 0 = exact.");
+        }
+        // Groove width: normally a fixed fraction of the pitch, so a coarse
+        // pitch always means a wide groove. Setting it explicitly decouples
+        // the two — a narrow groove on a long lead (a wire seat, a grip
+        // spiral, a cable channel). Only the straight-flanked profiles size
+        // their groove this way; Standard and Rounded are swept forms.
+        if (ThreadOp::profileTakesGrooveWidth(
+                static_cast<ThreadProfile>(m_threadProfile))) {
+            ImGui::Text("Groove width"); ImGui::SameLine();
+            ImGui::SetNextItemWidth(90);
+            materializr::inputNumber("##thrGWidth", &m_threadGrooveWidth, 0.1f, 0.5f,
+                              "%.2f");
+            if (m_threadGrooveWidth < 0.0f) m_threadGrooveWidth = 0.0f;
+            ImGui::SameLine(); ImGui::Text("mm");
+            ImGui::SetItemTooltip("Width of the cut at the surface. "
+                                  "0 = automatic (a set fraction of the pitch, "
+                                  "which is how threads are normally "
+                                  "proportioned).");
+            const float autoW = static_cast<float>(
+                ThreadOp::profileOpenFraction(
+                    static_cast<ThreadProfile>(m_threadProfile))) *
+                std::max(0.1f, m_threadPitch);
+            if (m_threadGrooveWidth <= 0.0f)
+                ImGui::TextDisabled("automatic: %.2f mm at this pitch", autoW);
+            else if (m_threadGrooveWidth > 0.9f * m_threadPitch)
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                                   "Capped at %.2f mm — a crest must survive "
+                                   "between turns.", 0.9f * m_threadPitch);
+        }
     }
 
     ImGui::Checkbox("Right-handed", &m_threadRightHanded);
 
-    double turns = m_threadLength / std::max(0.1f, m_threadPitch);
-    ImGui::TextDisabled("%.0f turns over the face", turns);
-    if (turns > 300.0) {
+    // Multi-start: N interleaved helixes; crest spacing stays = pitch, each
+    // helix advances N x pitch per turn (a quarter-turn bottle cap = 3-4
+    // starts with a coarse pitch). Stepped field, not a slider (Steve);
+    // im-touch gets bare +/- buttons — a text field would summon the mobile
+    // keyboard for a single-digit value.
+    ImGui::Text("Starts"); ImGui::SameLine();
+    if (imTouchLayout()) {
+        if (ImGui::Button("-##thrStartsDn") && m_threadStarts > 1)
+            --m_threadStarts;
+        ImGui::SameLine(); ImGui::Text("%d", m_threadStarts); ImGui::SameLine();
+        if (ImGui::Button("+##thrStartsUp") && m_threadStarts < 6)
+            ++m_threadStarts;
+    } else {
+        ImGui::SetNextItemWidth(uiSz(120, 0).x);
+        if (materializr::inputNumberInt("##thrStarts", &m_threadStarts, 1, 1))
+            m_threadStarts = std::min(6, std::max(1, m_threadStarts));
+        if (m_threadStarts > 1)
+            ImGui::SetItemTooltip("Multi-start thread: %d interleaved helixes. "
+                                  "One full seat = 1/%d turn.",
+                                  m_threadStarts, m_threadStarts);
+    }
+    if (m_threadStarts > 1) {
+        ImGui::TextDisabled("lead %.2f mm/turn", m_threadStarts *
+                            std::max(0.1f, m_threadPitch));
+        // The single-start sweep shortcuts don't apply to interleaved
+        // helixes — every multi-start thread is a boolean cut.
+        if (m_threadProfile == 0 || m_threadProfile == 4)
+            ImGui::TextDisabled("Multi-start cuts per-groove — slower than "
+                                "a single start.");
+    }
+
+    // "Turns" a user perceives = revolutions of one helix (length/lead);
+    // crest count (length/pitch) is what sets the boolean cost, so the
+    // guards key on it. The engine refuses >300 crests outright, and the
+    // per-turn fallback (which a multi-start cut lands on whenever the
+    // compound tool demotes) tops out at 120 zones — warn before Apply
+    // instead of failing after a minute of cutting.
+    double crests = m_threadLength / std::max(0.1f, m_threadPitch);
+    if (m_threadStarts > 1)
+        ImGui::TextDisabled("%.0f crests over the face; each start winds "
+                            "%.1f turns", crests, crests / m_threadStarts);
+    else
+        ImGui::TextDisabled("%.0f turns over the face", crests);
+    if (crests > 300.0) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
                            "Too many turns (max 300) — raise the pitch.");
+    } else if (m_threadStarts > 1 && crests > 120.0) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                           "Multi-start beyond 120 crests can fail the cut "
+                           "— raise the pitch.");
     }
     ImGui::TextDisabled("Computed on Apply — may take a few seconds.");
-    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f),
-                       "Apply threads LAST.");
-    ImGui::TextWrapped("Make all other cuts (holes, slots, splits, chamfers) "
-                       "first — modeling operations on threaded bodies are "
-                       "refused. To change a threaded part: delete the "
-                       "Thread step in History, edit, then re-thread.");
+    ImGui::TextWrapped("Later cuts (holes, slots, chamfers) reorder beneath "
+                       "the thread automatically; the thread then re-cuts in "
+                       "the background. Sharp profiles on long threads can "
+                       "take a while each re-cut, so threading last is still "
+                       "fastest.");
 
     // Apply / Cancel — im-touch hosts them as corner ✓/✗ FABs instead.
     bool applyClicked = false, cancelClicked = false;
@@ -1719,7 +1909,10 @@ void Application::renderThreadPanel() {
     }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
-    if (applyClicked && turns <= 300.0) {
+    // >300 crests is the engine's hard refusal; the multi-start >120 case is
+    // only a warning (the compound path can still land it — per-turn is the
+    // fallback ceiling, not the front door).
+    if (applyClicked && crests <= 300.0) {
         commitThread();
     } else if (cancelClicked || escPressed) {
         cancelThread();
@@ -1743,19 +1936,122 @@ void Application::renderLoftPanel() {
         ImGuiWindowFlags_AlwaysAutoResize);
 
     bool changed = false;
+
+    auto sketchLabel = [&](int id) {
+        std::string label = "Sketch " + std::to_string(id);
+        if (m_document) {
+            if (auto sk = m_document->getSketch(id)) {
+                label = sk->getName();
+                if (label == "Sketch") label += " " + std::to_string(id);
+            }
+        }
+        return label;
+    };
+
+    // ── Guided ("rails") mode: one closed base + open side-silhouette
+    //    curves. A different machine entirely (GuidedLoftOp), so the panel
+    //    swaps to a read-only summary + the Solid toggle.
+    if (m_loftRailsMode) {
+        ImGui::TextColored(materializr::accentText(), "Guided loft");
+        ImGui::TextWrapped("Base: %s",
+                           m_loftSections.empty() ? "?"
+                               : sketchLabel(m_loftSections[0].sketchId).c_str());
+        for (size_t i = 0; i < m_loftRails.size(); ++i)
+            ImGui::TextWrapped("Rail %zu: %s", i + 1,
+                               sketchLabel(m_loftRails[i].sketchId).c_str());
+        ImGui::TextDisabled("The base profile shrinks/grows to follow the\n"
+                            "rails as it rises; rails meeting a single point\n"
+                            "close to an apex.");
+        ImGui::Separator();
+        if (ImGui::Checkbox("Solid (off = surface shell)", &m_loftSolid))
+            changed = true;
+
+        ImGui::Separator();
+        bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        ImGui::SameLine();
+        bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+        bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        if (changed) updateLoft();
+        if (applyClicked) commitLoft();
+        else if (cancelClicked || escPressed) cancelLoft();
+        ImGui::End();
+        return;
+    }
+
+    // ── Section list: the loft skins these top-to-bottom. ↑/↓ reorder;
+    //    Flip reverses a section's vertex order (fixes pinch/twist against
+    //    its neighbours).
+    ImGui::TextColored(materializr::accentText(), "Sections (%d)",
+                       static_cast<int>(m_loftSections.size()));
+    ImGui::SetItemTooltip("Profiles are skinned in this order — top of the "
+                          "list is one end of the loft. Reorder with the "
+                          "arrows if the surface jumps back and forth. Flip "
+                          "a section if the loft pinches or twists there.");
+    for (int i = 0; i < static_cast<int>(m_loftSections.size()); ++i) {
+        LoftSection& sec = m_loftSections[i];
+        ImGui::PushID(i);
+        // ↑ / ↓ reorder (disabled at the ends).
+        ImGui::BeginDisabled(i == 0);
+        if (ImGui::ArrowButton("up", ImGuiDir_Up)) {
+            std::swap(m_loftSections[i], m_loftSections[i - 1]);
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine(0.0f, 2.0f);
+        ImGui::BeginDisabled(i + 1 == static_cast<int>(m_loftSections.size()));
+        if (ImGui::ArrowButton("down", ImGuiDir_Down)) {
+            std::swap(m_loftSections[i], m_loftSections[i + 1]);
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(sketchLabel(sec.sketchId).c_str());
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - uiSz(50, 0).x);
+        if (ImGui::Checkbox("Flip", &sec.reverse)) changed = true;
+        ImGui::SetItemTooltip("Reverse this profile's vertex order. Use it if "
+                              "the loft pinches to an apex or twists at this "
+                              "section — usually means its start vertex isn't "
+                              "lined up with the neighbouring profiles'.");
+        ImGui::PopID();
+    }
+
+    // Warn when the sections don't sit on (roughly) parallel planes: the loft
+    // skins them in list order, so perpendicular "wall" profiles make the
+    // surface double back through itself — the boundary-fill / guide-rails
+    // feature that case wants doesn't exist yet, and the weave otherwise looks
+    // like a bug rather than a modelling-intent mismatch.
+    if (m_document && m_loftSections.size() >= 2) {
+        gp_Dir n0;
+        bool have0 = false, skewed = false;
+        for (const LoftSection& sec : m_loftSections) {
+            auto sk = m_document->getSketch(sec.sketchId);
+            if (!sk) continue;
+            gp_Dir n = sk->getPlane().Axis().Direction();
+            if (!have0) { n0 = n; have0 = true; continue; }
+            if (std::abs(n.Dot(n0)) < 0.85) { skewed = true; break; }  // >~32°
+        }
+        if (skewed) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + uiSz(260, 0).x);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1.0f),
+                "Sections sit on very different planes. Loft skins them in "
+                "list order (a stack of cross-sections), so this will likely "
+                "fold through itself. For a base + side-wall shape, draw the "
+                "side silhouettes as OPEN curves instead - one closed profile "
+                "plus open curves lofts guided by them as rails.");
+            ImGui::PopTextWrapPos();
+        }
+    }
+
+    ImGui::Separator();
     if (ImGui::Checkbox("Solid (off = surface shell)", &m_loftSolid)) changed = true;
     ImGui::SetItemTooltip("On: ThruSections caps the ends and produces a solid "
                           "body. Off: open shell — useful when one profile is "
                           "open or you want a swept surface.");
     if (ImGui::Checkbox("Ruled surface (off = smooth)", &m_loftRuled)) changed = true;
     ImGui::SetItemTooltip("Ruled draws straight-line ribs between matching "
-                          "vertices on the two profiles. Smooth interpolates a "
+                          "vertices on adjacent profiles. Smooth interpolates a "
                           "curved surface — usually nicer between similar "
                           "profiles, less predictable between dissimilar ones.");
-    if (ImGui::Checkbox("Reverse profile B vertex order", &m_loftReverseB)) changed = true;
-    ImGui::SetItemTooltip("Re-pairs vertices between the two profiles. Use this "
-                          "if the loft pinches to an apex or twists — usually "
-                          "means the wires' start vertices weren't lined up.");
 
     ImGui::Separator();
     bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
@@ -1769,6 +2065,397 @@ void Application::renderLoftPanel() {
     } else if (cancelClicked || escPressed) {
         cancelLoft();
     }
+
+    ImGui::End();
+}
+
+// ─── Reference image (photo underlay on a construction plane) ───────────────
+
+void Application::beginRefImageImport() {
+    materializr::FileDialogs::openFile(
+        "Import Reference Image",
+        {{"Images", "*.png *.jpg *.jpeg *.bmp *.PNG *.JPG *.JPEG *.BMP"}},
+        [this](const std::string& path) {
+            if (path.empty() || !m_document) return;
+            std::ifstream f(path, std::ios::binary);
+            if (!f) {
+                showToast("Could not open the image file.");
+                return;
+            }
+            std::vector<unsigned char> bytes(
+                (std::istreambuf_iterator<char>(f)),
+                std::istreambuf_iterator<char>());
+            int w = 0, h = 0;
+            if (!materializr::probeImageSize(bytes.data(), bytes.size(), w, h)) {
+                showToast("Not a readable image (PNG / JPEG / BMP supported).");
+                return;
+            }
+            // Name from the filename, so the Items panel reads naturally.
+            std::string base = std::filesystem::path(path).stem().string();
+            if (base.empty()) base = "Reference";
+            // Host plane: the GROUND plane at the origin — where a top-down
+            // "photo with a ruler" naturally lives; move/rotate it with the
+            // gizmo like any construction plane afterwards. The world is Y-up
+            // internally (the user-facing "XY" sketch plane is normal +Y —
+            // same pose as Sketch on XY), so normal (0,0,1) would be a wall.
+            int planeId = m_document->addPlane(
+                gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0),
+                              gp_Dir(1, 0, 0))),
+                "Image: " + base);
+            RefImageEntry e;
+            e.fileBytes = std::move(bytes);
+            e.pixW = w;
+            e.pixH = h;
+            e.widthMM = 100.0;      // sane default; calibration refines it
+            e.opacity = 0.6f;
+            m_document->setRefImage(planeId, std::move(e));
+            if (m_selection) {
+                SelectionEntry se;
+                se.type = SelectionType::Plane;
+                se.planeId = planeId;
+                m_selection->select(se);
+            }
+            showToast("Reference image imported — set its real size with "
+                      "Calibrate, then sketch over it.", 6.0);
+            m_meshesDirty = true;
+            // Reference images aren't a history op, so they don't move the
+            // history step — mark the non-history dirty flag so crash-recovery
+            // re-snapshots (else a recovered project loses the image; the
+            // blob lives in the doc, but the sidecar was never rewritten).
+            markDirty();
+        });
+}
+
+void Application::renderRefImagePanel() {
+    // Gate: exactly the case where a construction plane hosting an image is
+    // selected (outside sketch mode). The plane click / Items-panel click is
+    // the selection path — no separate tool state.
+    if (!m_selection || !m_document || m_inSketchMode) return;
+    int planeId = -1;
+    for (const auto& e : m_selection->getSelection()) {
+        if (e.type == SelectionType::Plane && e.planeId >= 0) {
+            planeId = e.planeId;
+            break;
+        }
+    }
+    const RefImageEntry* img =
+        planeId >= 0 ? m_document->getRefImage(planeId) : nullptr;
+    if (!img) {
+        // Selection moved off the image — drop the calibration popup state
+        // and the preview texture so we don't hold a stale GL object.
+        if (m_refImgPreviewTex) {
+            glDeleteTextures(1, &m_refImgPreviewTex);
+            m_refImgPreviewTex = 0;
+            m_refImgPreviewPlane = -1;
+        }
+        m_refImgCalibPlane = -1;
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 300,
+                                   ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(300, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Reference Image", nullptr,
+                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(materializr::accentText(), "%s",
+                       m_document->getPlaneName(planeId).c_str());
+    double heightMM = img->pixW > 0
+        ? img->widthMM * static_cast<double>(img->pixH) / img->pixW
+        : img->widthMM;
+    ImGui::TextDisabled("%d x %d px  ·  %.1f x %.1f mm", img->pixW, img->pixH,
+                        img->widthMM, heightMM);
+
+    float opacity = img->opacity;
+    if (ImGui::SliderFloat("Opacity", &opacity, 0.05f, 1.0f, "%.2f")) {
+        m_document->setRefImageOpacity(planeId, opacity);
+        markDirty();
+    }
+    ImGui::SetItemTooltip("Underlay strength — drop it until your sketch "
+                          "lines read clearly on top of the photo.");
+
+    float widthMM = static_cast<float>(img->widthMM);
+    ImGui::SetNextItemWidth(uiSz(120, 0).x);
+    if (materializr::inputNumber("Width (mm)", &widthMM, 0, 0, "%.2f",
+                          ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (widthMM > 0.01f) {
+            m_document->setRefImageWidthMM(planeId, widthMM);
+            markDirty();
+        }
+    }
+    ImGui::SetItemTooltip("Physical width of the photo's full frame. Height "
+                          "follows the image's aspect ratio. Use Calibrate to "
+                          "derive this from a ruler in the shot.");
+
+    if (ImGui::Button("Calibrate scale...", ImVec2(uiSz(135, 0).x, 0))) {
+        m_refImgCalibPlane = planeId;
+        m_refImgPickCount = 0;
+        m_refImgCalibZoom = 1.0f;
+        m_refImgCalibPan[0] = m_refImgCalibPan[1] = 0.0f;
+    }
+    ImGui::SetItemTooltip("Click two points a known distance apart in the "
+                          "photo (the ruler you photographed), type that "
+                          "distance, and the image scales to real millimetres.");
+    ImGui::SameLine();
+    if (ImGui::Button("Remove", ImVec2(uiSz(90, 0).x, 0))) {
+        // Removing the image removes its host plane too — the plane existed
+        // only to carry the photo. (No history op: reference scaffolding,
+        // same as sketch drafts.)
+        m_document->removePlane(planeId);
+        if (m_selection) m_selection->clear();
+        m_refImgCalibPlane = -1;
+        markDirty();
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Separator();
+    ImGui::TextWrapped("Move / rotate with the gizmo like a construction "
+                       "plane. Sketch on it to trace the photo.");
+    ImGui::End();
+
+    // ── Calibration popup ────────────────────────────────────────────────
+    if (m_refImgCalibPlane != planeId) return;
+
+    // (Re)build the preview texture for this plane's image if needed. The
+    // decode is at most a few hundred ms for a phone photo and happens once
+    // per popup open — acceptable without a spinner.
+    if (m_refImgPreviewPlane != planeId || !m_refImgPreviewTex) {
+        if (m_refImgPreviewTex) {
+            glDeleteTextures(1, &m_refImgPreviewTex);
+            m_refImgPreviewTex = 0;
+        }
+        materializr::DecodedImage dec;
+        if (materializr::decodeImage(img->fileBytes.data(),
+                                     img->fileBytes.size(), dec)) {
+            glGenTextures(1, &m_refImgPreviewTex);
+            glBindTexture(GL_TEXTURE_2D, m_refImgPreviewTex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            // Pin unpack state (same trap as the logo texture): this upload
+            // inherits whatever GL_UNPACK_ROW_LENGTH / alignment a prior frame's
+            // texture upload left set. If it's non-zero the preview reads its
+            // rows at the wrong stride and comes out as garbled static — clean
+            // the first time, corrupt on every later open once something dirties
+            // the state. Save/pin/restore so tightly-packed RGBA reads right.
+            GLint prevRowLen = 0, prevAlign = 4;
+            glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
+            glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, dec.width, dec.height, 0,
+                         GL_RGBA, GL_UNSIGNED_BYTE, dec.rgba.data());
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            m_refImgPreviewW = dec.width;
+            m_refImgPreviewH = dec.height;
+            m_refImgPreviewPlane = planeId;
+        } else {
+            m_refImgCalibPlane = -1;
+            showToast("Could not decode the image for calibration.");
+            return;
+        }
+    }
+
+    bool calibOpen = true;
+    ImGui::SetNextWindowSize(uiSz(540, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Calibrate Image Scale", &calibOpen,
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+                 ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextWrapped("Click two points a KNOWN distance apart (e.g. two "
+                       "marks on the ruler in your photo), then enter that "
+                       "distance.");
+    ImGui::Spacing();
+
+    // Fit the image INSIDE the viewport, preserving aspect — sizing by width
+    // alone let a portrait phone photo (3000×4000 px) blow the popup past the
+    // bottom of the screen. Cap both dimensions against the work area and take
+    // the tighter constraint.
+    const ImGuiViewport* mainVp = ImGui::GetMainViewport();
+    const float maxW = std::min(uiSz(520, 0).x, mainVp->WorkSize.x * 0.55f);
+    const float maxH = mainVp->WorkSize.y * 0.55f;
+    const float aspect = m_refImgPreviewW > 0
+        ? static_cast<float>(m_refImgPreviewH) / m_refImgPreviewW : 1.0f;
+    float dispW = maxW;
+    float dispH = dispW * aspect;
+    if (dispH > maxH) { dispH = maxH; dispW = dispH / aspect; }
+    // Zoomable, pannable preview inside a clipped child: scroll zooms about
+    // the cursor, right-drag pans — a 4000 px phone photo's ruler ticks are
+    // unpickable at fit-to-window scale.
+    ImVec2 viewPos = ImGui::GetCursorScreenPos();
+    ImGui::BeginChild("##calibView", ImVec2(dispW, dispH), false,
+                      ImGuiWindowFlags_NoScrollbar |
+                      ImGuiWindowFlags_NoScrollWithMouse);
+    const float zoom = m_refImgCalibZoom;
+    const float imgW = dispW * zoom, imgH = dispH * zoom;
+    // Clamp pan so the image always covers the viewportable area.
+    auto clampPan = [&](float pan, float imgSz, float viewSz) {
+        if (imgSz <= viewSz) return (viewSz - imgSz) * 0.5f;
+        return std::min(0.0f, std::max(viewSz - imgSz, pan));
+    };
+    m_refImgCalibPan[0] = clampPan(m_refImgCalibPan[0], imgW, dispW);
+    m_refImgCalibPan[1] = clampPan(m_refImgCalibPan[1], imgH, dispH);
+    ImVec2 imgPos(viewPos.x + m_refImgCalibPan[0],
+                  viewPos.y + m_refImgCalibPan[1]);
+    ImGui::SetCursorScreenPos(imgPos);
+    ImGui::Image((ImTextureID)(intptr_t)m_refImgPreviewTex,
+                 ImVec2(imgW, imgH));
+    ImGui::SetCursorScreenPos(viewPos);
+    ImGui::InvisibleButton("##calibClicks", ImVec2(dispW, dispH));
+    const bool hovered = ImGui::IsItemHovered();
+    ImGuiIO& io = ImGui::GetIO();
+    if (hovered && io.MouseWheel != 0.0f) {
+        const float newZoom = std::min(12.0f,
+            std::max(1.0f, zoom * std::pow(1.25f, io.MouseWheel)));
+        if (newZoom != zoom) {
+            // Keep the image point under the cursor fixed while zooming.
+            ImVec2 m = ImGui::GetMousePos();
+            const float fx = (m.x - imgPos.x) / imgW;
+            const float fy = (m.y - imgPos.y) / imgH;
+            m_refImgCalibZoom = newZoom;
+            m_refImgCalibPan[0] = (m.x - viewPos.x) - fx * dispW * newZoom;
+            m_refImgCalibPan[1] = (m.y - viewPos.y) - fy * dispH * newZoom;
+        }
+    }
+    // Panning: right-drag (desktop) or LEFT-drag (a tablet's one finger IS
+    // the left mouse). Picking then happens on RELEASE of a non-drag (a tap),
+    // so panning never places stray points.
+    if (hovered && (ImGui::IsMouseDragging(ImGuiMouseButton_Right) ||
+                    ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6.0f))) {
+        m_refImgCalibPan[0] += io.MouseDelta.x;
+        m_refImgCalibPan[1] += io.MouseDelta.y;
+    }
+    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+        m_refImgPickCount < 2) {
+        ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 6.0f);
+        const bool wasTap = drag.x == 0.0f && drag.y == 0.0f;
+        if (wasTap) {
+            ImVec2 m = ImGui::GetMousePos();
+            float px = (m.x - imgPos.x) / imgW * m_refImgPreviewW;
+            float py = (m.y - imgPos.y) / imgH * m_refImgPreviewH;
+            if (px >= 0 && py >= 0 && px <= m_refImgPreviewW &&
+                py <= m_refImgPreviewH) {
+                m_refImgPickPx[m_refImgPickCount][0] = px;
+                m_refImgPickPx[m_refImgPickCount][1] = py;
+                ++m_refImgPickCount;
+            }
+        }
+    }
+    // Markers + connecting line (in the child's draw list, clipped with it).
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    auto toScreen = [&](int i) {
+        return ImVec2(imgPos.x + m_refImgPickPx[i][0] / m_refImgPreviewW * imgW,
+                      imgPos.y + m_refImgPickPx[i][1] / m_refImgPreviewH * imgH);
+    };
+    for (int i = 0; i < m_refImgPickCount; ++i) {
+        ImVec2 p = toScreen(i);
+        dl->AddCircle(p, 7.0f, IM_COL32(255, 200, 40, 255), 0, 2.5f);
+        dl->AddCircleFilled(p, 2.5f, IM_COL32(255, 200, 40, 255));
+    }
+    if (m_refImgPickCount == 2)
+        dl->AddLine(toScreen(0), toScreen(1), IM_COL32(255, 200, 40, 220), 2.0f);
+    ImGui::EndChild();
+    // Zoom buttons: pinch is routed to the 3D camera on tablets, so the
+    // dialog gets explicit controls (they help on desktop too). Zoom about
+    // the view centre.
+    auto zoomAbout = [&](float factor) {
+        const float newZoom = std::min(12.0f,
+            std::max(1.0f, m_refImgCalibZoom * factor));
+        if (newZoom == m_refImgCalibZoom) return;
+        const float cxv = dispW * 0.5f, cyv = dispH * 0.5f;
+        const float fx = (cxv - m_refImgCalibPan[0]) / imgW;
+        const float fy = (cyv - m_refImgCalibPan[1]) / imgH;
+        m_refImgCalibZoom = newZoom;
+        m_refImgCalibPan[0] = cxv - fx * dispW * newZoom;
+        m_refImgCalibPan[1] = cyv - fy * dispH * newZoom;
+    };
+    if (ImGui::Button("+", ImVec2(uiSz(34, 0).x, 0))) zoomAbout(1.5f);
+    ImGui::SameLine();
+    if (ImGui::Button("-", ImVec2(uiSz(34, 0).x, 0))) zoomAbout(1.0f / 1.5f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Fit")) {
+        m_refImgCalibZoom = 1.0f;
+        m_refImgCalibPan[0] = m_refImgCalibPan[1] = 0.0f;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.0f%%  -  drag to pan, tap to pick, scroll to zoom",
+                        m_refImgCalibZoom * 100.0f);
+
+    ImGui::Text("Points picked: %d / 2", m_refImgPickCount);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset points")) m_refImgPickCount = 0;
+
+    ImGui::SetNextItemWidth(uiSz(120, 0).x);
+    ImGui::InputText("Distance between points (mm)", m_refImgDistBuf,
+                     sizeof(m_refImgDistBuf), ImGuiInputTextFlags_CharsDecimal);
+
+    float distMM = static_cast<float>(std::atof(m_refImgDistBuf));
+    bool canApply = m_refImgPickCount == 2 && distMM > 0.0f;
+    ImGui::BeginDisabled(!canApply);
+    if (ImGui::Button("Apply", ImVec2(120, 0))) {
+        float ddx = m_refImgPickPx[1][0] - m_refImgPickPx[0][0];
+        float ddy = m_refImgPickPx[1][1] - m_refImgPickPx[0][1];
+        float pxDist = std::sqrt(ddx * ddx + ddy * ddy);
+        if (pxDist > 1.0f) {
+            // mm-per-pixel from the picked pair → full-frame physical width.
+            double mmPerPx = static_cast<double>(distMM) / pxDist;
+            m_document->setRefImageWidthMM(planeId, img->pixW * mmPerPx);
+            markDirty();
+            showToast("Image calibrated to real size.");
+        }
+        m_refImgCalibPlane = -1;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel", ImVec2(120, 0))) m_refImgCalibPlane = -1;
+
+    ImGui::End();
+    if (!calibOpen) m_refImgCalibPlane = -1;
+}
+
+
+void Application::renderBoundaryFillPanel() {
+    if (!m_bfillActive) return;
+
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 280,
+                                    ImGui::GetWindowPos().y + 50),
+                            ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(280, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Boundary Fill", nullptr,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::TextColored(materializr::accentText(), "Silhouettes (%d)",
+                       static_cast<int>(m_bfillProfiles.size()));
+    for (const BFillProfile& prof : m_bfillProfiles) {
+        std::string label = "Sketch " + std::to_string(prof.sketchId);
+        if (m_document) {
+            if (auto sk = m_document->getSketch(prof.sketchId)) {
+                label = sk->getName();
+                if (label == "Sketch")
+                    label += " " + std::to_string(prof.sketchId);
+            }
+        }
+        ImGui::BulletText("%s", label.c_str());
+    }
+    ImGui::TextDisabled("Each sketch is the body's outline seen from\n"
+                        "its plane's direction; the solid is what\n"
+                        "matches ALL of them (order doesn't matter).");
+
+    ImGui::Separator();
+    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    ImGui::SameLine();
+    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+
+    if (applyClicked) commitBoundaryFill();
+    else if (cancelClicked || escPressed) cancelBoundaryFill();
 
     ImGui::End();
 }
@@ -3280,7 +3967,7 @@ void Application::renderPrimitivePopup() {
         if (imTouchLayout())
             touchui::amountField(label, label, v, "mm", 3);
         else
-            ImGui::InputDouble(label, v, 0.1, 1.0, "%.3f");
+            materializr::inputNumber(label, v, 0.1, 1.0, "%.3f");
     };
     switch (k) {
     case 0: // Box
@@ -3310,9 +3997,9 @@ void Application::renderPrimitivePopup() {
 
     ImGui::Spacing();
     ImGui::TextColored(materializr::accentText(), "Origin (mm)");
-    ImGui::InputDouble("X", &m_primitivePopupOrigin[0], 0.1, 1.0, "%.3f");
-    ImGui::InputDouble("Y", &m_primitivePopupOrigin[1], 0.1, 1.0, "%.3f");
-    ImGui::InputDouble("Z", &m_primitivePopupOrigin[2], 0.1, 1.0, "%.3f");
+    materializr::inputNumber("X", &m_primitivePopupOrigin[0], 0.1, 1.0, "%.3f");
+    materializr::inputNumber("Y", &m_primitivePopupOrigin[1], 0.1, 1.0, "%.3f");
+    materializr::inputNumber("Z", &m_primitivePopupOrigin[2], 0.1, 1.0, "%.3f");
     ImGui::TextDisabled("Box origin = corner; the rest use it as the axis "
                         "base / centre.");
 
@@ -3991,7 +4678,7 @@ void Application::renderUnfoldDialog() {
     // Thickness sets the bevel/mitre setback; irrelevant for pliable (boundary only).
     if (fm != materializr::FoldMode::None) {
         ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::InputFloat("Thickness (mm)", &m_unfoldThicknessMm, 0.5f, 1.0f, "%.1f")) {
+        if (materializr::inputNumber("Thickness (mm)", &m_unfoldThicknessMm, 0.5f, 1.0f, "%.1f")) {
             m_unfoldThicknessMm = std::clamp(m_unfoldThicknessMm, 0.1f, 50.0f);
             persistSheet();
         }
@@ -4259,6 +4946,534 @@ void Application::renderUnfoldDialog() {
     if (ImGui::Button("Close", ImVec2(90, 0))) m_unfoldDialogActive = false;
 
     ImGui::End();
+}
+
+// ─── Landing page ────────────────────────────────────────────────────────────
+
+namespace {
+// thumbs/<fnv1a64(ref)>.png under the SDL pref path. The hash keys content://
+// URIs and filesystem paths alike; collisions are astronomically unlikely and
+// cost only a wrong tile picture.
+std::string thumbCacheFile(const std::string& ref) {
+    char* base = SDL_GetPrefPath("Materializr", "Materializr");
+    if (!base) return {};
+    std::string dir = std::string(base) + "thumbs";
+    SDL_free(base);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    uint64_t h = 1469598103934665603ull;
+    for (unsigned char c : ref) { h ^= c; h *= 1099511628211ull; }
+    char name[24];
+    std::snprintf(name, sizeof(name), "%016llx", static_cast<unsigned long long>(h));
+    return dir + "/" + name + ".png";
+}
+} // namespace
+
+void Application::cacheProjectThumbnail(const std::string& ref,
+                                        const std::vector<uint8_t>& png) {
+    if (ref.empty() || png.empty()) return;
+    const std::string path = thumbCacheFile(ref);
+    if (path.empty()) return;
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (f) f.write(reinterpret_cast<const char*>(png.data()),
+                   static_cast<std::streamsize>(png.size()));
+}
+
+// Is the cached PNG at least as new as the project it came from? Peeking a
+// thumbnail costs a full gunzip of the whole project (the section sits after
+// the body blocks), so the cache is the difference between "inflate 10
+// projects on every launch" and "inflate each one once, ever". An mtime
+// comparison is two stats and needs no format change; a re-saved project is
+// newer than its cache and gets peeked again.
+bool Application::thumbCacheFresh(const std::string& ref) const {
+    if (ref.rfind("content:", 0) == 0) return true;  // no cheap stat via SAF
+    const std::string path = thumbCacheFile(ref);
+    if (path.empty()) return false;
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return false;
+    auto cached = std::filesystem::last_write_time(path, ec);
+    if (ec) return false;
+    auto src = std::filesystem::last_write_time(ref, ec);
+    if (ec) return true;   // project unreadable — a stale tile beats none
+    return cached >= src;
+}
+
+bool Application::readCachedThumbnail(const std::string& ref,
+                                      std::vector<uint8_t>& png) {
+    const std::string path = thumbCacheFile(ref);
+    if (path.empty()) return false;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    png.assign(std::istreambuf_iterator<char>(f),
+               std::istreambuf_iterator<char>());
+    return !png.empty();
+}
+
+// Upload one decoded RGBA image as a GL texture. Main thread only.
+static GLuint uploadThumbTexture(const DecodedImage& img) {
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, img.width, img.height,
+                 0, GL_RGBA, GL_UNSIGNED_BYTE, img.rgba.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    return tex;
+}
+
+void Application::showLandingPage(bool fromStartup) {
+    if (!m_landingPage) return;
+    m_landingPage->setCanDismiss(!fromStartup);
+    // Tiles go up IMMEDIATELY: refs + names from the MRU, plus any preview the
+    // cache can serve straight away (a small PNG read). Anything that needs
+    // the project file itself is left blank and filled in by a worker — a peek
+    // gunzips the WHOLE project to read one line near the end of the body
+    // blocks, so doing ten of them inline froze startup for seconds on big
+    // projects, and again on every return to the home screen.
+    std::vector<std::string> misses;
+    std::vector<LandingPage::Entry> entries;
+    entries.reserve(m_recentProjects.size());
+    for (const auto& rp : m_recentProjects) {
+        LandingPage::Entry e;
+        e.ref = rp.ref;
+        e.name = rp.name.empty() ? rp.ref : rp.name;
+        std::vector<uint8_t> png;
+        if (thumbCacheFresh(rp.ref) && readCachedThumbnail(rp.ref, png)) {
+            DecodedImage img;
+            if (decodeImage(png.data(), png.size(), img))
+                e.tex = uploadThumbTexture(img);
+        } else if (rp.ref.rfind("content:", 0) != 0) {
+            // Only filesystem refs can be peeked; a content: URI has no cheap
+            // read path through SAF, so it keeps whatever the cache holds
+            // (written when the project was last opened or saved).
+            misses.push_back(rp.ref);
+            if (readCachedThumbnail(rp.ref, png)) {   // stale, but better than
+                DecodedImage img;                     // an empty tile meanwhile
+                if (decodeImage(png.data(), png.size(), img))
+                    e.tex = uploadThumbTexture(img);
+            }
+        }
+        entries.push_back(std::move(e));
+    }
+    m_landingPage->setEntries(std::move(entries));
+    m_landingPage->setVisible(true);
+    startThumbnailPeeks(misses);
+}
+
+// Peek the projects the cache couldn't serve, off the UI thread. Results are
+// dropped in a shared queue and drained by drainThumbnailPeeks() on the main
+// thread, which owns the GL context. The job is shared_ptr-held and carries a
+// cancel flag, so a landing page that closes (or a second show) abandons the
+// old worker's results instead of racing them.
+void Application::startThumbnailPeeks(const std::vector<std::string>& refs) {
+    if (m_thumbJob) m_thumbJob->cancel = true;   // supersede any earlier show
+    m_thumbJob.reset();
+    if (refs.empty()) return;
+    auto job = std::make_shared<ThumbJob>();
+    m_thumbJob = job;
+    // DETACHED, deliberately not std::async: destroying the previous future
+    // would BLOCK the main thread until that worker finished, and the cancel
+    // flag can only be seen between files — mid-inflate of a 100MB project it
+    // would stall exactly the startup this exists to keep smooth. The job is
+    // shared_ptr-owned, so the thread never touches Application state.
+    std::thread([job, refs]() {
+        for (const auto& ref : refs) {
+            if (job->cancel) return;
+            std::vector<uint8_t> png;
+            if (!ProjectIO::peekThumbnail(ref, png)) continue;
+            // Cache it so this file is never inflated again (until re-saved).
+            // Temp-then-rename: this thread is detached, so process exit can
+            // kill it mid-write, and a torn PNG would be served as a real
+            // cache hit forever after.
+            const std::string path = thumbCacheFile(ref);
+            if (!path.empty()) {
+                const std::string tmp = path + ".tmp";
+                bool wrote = false;
+                {
+                    std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+                    if (f) {
+                        f.write(reinterpret_cast<const char*>(png.data()),
+                                static_cast<std::streamsize>(png.size()));
+                        wrote = f.good();
+                    }
+                }
+                std::error_code ec;
+                if (wrote) std::filesystem::rename(tmp, path, ec);
+                else       std::filesystem::remove(tmp, ec);
+            }
+            DecodedImage img;
+            if (!decodeImage(png.data(), png.size(), img)) continue;
+            if (job->cancel) return;
+            std::lock_guard<std::mutex> lk(job->mutex);
+            job->done.push_back({ref, std::move(img)});
+        }
+    }).detach();
+}
+
+// Main thread: hand any finished peeks to the landing page as GL textures.
+void Application::drainThumbnailPeeks() {
+    if (!m_thumbJob || !m_landingPage) return;
+    std::vector<ThumbResult> batch;
+    {
+        std::lock_guard<std::mutex> lk(m_thumbJob->mutex);
+        batch.swap(m_thumbJob->done);
+    }
+    for (auto& r : batch)
+        m_landingPage->setEntryTexture(r.ref, uploadThumbTexture(r.img));
+}
+
+void Application::exportRecentProjectAs(const std::string& ref,
+                                        const std::string& name, bool asStl) {
+    // The deliberate CHEAP export model (Steve, 2026-07-27): read the file's
+    // baked final bodies into a scratch Document and hand them to the normal
+    // exporters. Nothing parametric crosses a file boundary.
+    std::string path = ref;
+#if defined(MZ_MOBILE)
+    if (ref.rfind("content:", 0) == 0) {
+        path = materializr::mobileOpenUri(ref);
+        if (path.empty()) {
+            showToast("Couldn't read \"" + name + "\" - access may have been revoked.");
+            return;
+        }
+    }
+#endif
+    // shared_ptr: the save dialog's callback runs frames later; the scratch
+    // document must outlive this function.
+    auto doc = std::make_shared<Document>();
+    auto res = ProjectIO::load(path, *doc);
+    if (!res.success) {
+        showToast("Couldn't read \"" + name + "\" for export.");
+        return;
+    }
+    if (doc->getAllBodyIds().empty()) {
+        showToast("\"" + name + "\" has no bodies to export.");
+        return;
+    }
+    // Default filename = the project's name minus its extension, with the
+    // same character sanitising the body-STL export applies.
+    std::string base = std::filesystem::path(name).stem().string();
+    if (base.empty()) base = "export";
+    for (char& c : base)
+        if (std::strchr("\\/:*?\"<>|", c)) c = '_';
+
+    if (asStl) {
+        FileDialogs::saveFile("Export STL", base + ".stl",
+            {{"STL Files", "*.stl"}},
+            [this, doc](const std::string& p) {
+                if (p.empty()) return;
+                std::string out = p;
+                if (std::filesystem::path(out).extension() != ".stl") out += ".stl";
+                auto r = StlExport::exportFile(out, *doc);
+                showToast(r.success ? "Exported " +
+                              std::filesystem::path(out).filename().string()
+                                    : "Export failed - see log");
+                if (!r.success)
+                    std::fprintf(stderr, "Export failed: %s\n",
+                                 r.errorMessage.c_str());
+            });
+    } else {
+        FileDialogs::saveFile("Export STEP", base + ".step",
+            {{"STEP Files", "*.step *.stp"}},
+            [this, doc](const std::string& p) {
+                if (p.empty()) return;
+                std::string out = p;
+                std::string ext = std::filesystem::path(out).extension().string();
+                if (ext != ".step" && ext != ".stp") out += ".step";
+                auto r = StepIO::exportFile(out, *doc);
+                showToast(r.success ? "Exported " +
+                              std::filesystem::path(out).filename().string()
+                                    : "Export failed - see log");
+                if (!r.success)
+                    std::fprintf(stderr, "Export failed: %s\n",
+                                 r.errorMessage.c_str());
+            });
+    }
+}
+
+bool Application::landingPageUp() const {
+    return m_landingPage && m_landingPage->isVisible();
+}
+
+void Application::goToHomeScreen() {
+    // The home screen no longer CLOSES anything (Steve, 2026-07-28: "clicking
+    // a tile with a currently open one should open a new tab"). It used to
+    // prompt and close the project on the way in, which meant there was never
+    // an open project left for a tile to displace — the page is now just a
+    // launcher laid over the session you already have. Nothing is lost, so
+    // there is nothing to prompt about; the × takes you back, and opening
+    // anything from here lands in its own tab.
+    showLandingPage(/*fromStartup=*/activeSessionIsScratch());
+}
+
+// ─── Cross-project parts (picker + per-body export) ─────────────────────────
+
+void Application::openPartsPicker(const std::string& ref,
+                                  const std::string& name,
+                                  bool intoNewProject) {
+    std::string path = ref;
+#if defined(MZ_MOBILE)
+    if (ref.rfind("content:", 0) == 0) {
+        path = materializr::mobileOpenUri(ref);
+        if (path.empty()) {
+            showToast("Couldn't read \"" + name + "\" - access may have been revoked.");
+            return;
+        }
+    }
+#endif
+    auto doc = std::make_shared<Document>();
+    auto res = ProjectIO::load(path, *doc);
+    if (!res.success) {
+        showToast("Couldn't read \"" + name + "\".");
+        return;
+    }
+    m_partsPickerBodies.clear();
+    m_partsPickerSketches.clear();
+    for (int id : doc->getAllBodyIds())
+        m_partsPickerBodies.emplace_back(id, true);
+    for (int id : doc->getAllSketchIds())
+        m_partsPickerSketches.emplace_back(id, true);
+    if (m_partsPickerBodies.empty() && m_partsPickerSketches.empty()) {
+        showToast("\"" + name + "\" has no parts to import.");
+        return;
+    }
+    m_partsPickerDoc = std::move(doc);
+    m_partsPickerSource = name;
+    m_partsPickerIntoNew = intoNewProject;
+    m_partsPickerOpen = true;
+}
+
+void Application::renderPartsPickerDialog() {
+    if (!m_partsPickerOpen || !m_partsPickerDoc) return;
+    // Guarded reopen (see the Welcome render site): a raw OpenPopup every
+    // frame stomps any other popup at the same stack level.
+    if (!ImGui::IsPopupOpen("Import Parts")) ImGui::OpenPopup("Import Parts");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(uiSz(360, 0), uiSz(520, 560));
+    if (!ImGui::BeginPopupModal("Import Parts", &m_partsPickerOpen,
+                                ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (!m_partsPickerOpen) m_partsPickerDoc.reset();   // closed via ×
+        return;
+    }
+
+    ImGui::TextColored(dimText(), "From %s", m_partsPickerSource.c_str());
+    ImGui::TextColored(dimText(), m_partsPickerIntoNew
+                                      ? "Parts are copied into a new project."
+                                      : "Parts are copied into the current project.");
+    ImGui::Separator();
+
+    auto checkList = [&](const char* title,
+                         std::vector<std::pair<int, bool>>& items,
+                         const char* prefix, auto nameOf) {
+        if (items.empty()) return;
+        ImGui::TextColored(accentText(), "%s", title);
+        for (auto& [id, on] : items) {
+            ImGui::PushID(prefix);
+            ImGui::PushID(id);
+            std::string label = nameOf(id);
+            if (label.empty()) label = std::string(prefix) + " " + std::to_string(id);
+            ImGui::Checkbox(label.c_str(), &on);
+            ImGui::PopID();
+            ImGui::PopID();
+        }
+        ImGui::Spacing();
+    };
+    checkList("Bodies", m_partsPickerBodies, "Body",
+              [&](int id) { return m_partsPickerDoc->getBodyName(id); });
+    checkList("Sketches", m_partsPickerSketches, "Sketch",
+              [&](int id) { return m_partsPickerDoc->getSketchName(id); });
+
+    if (ImGui::SmallButton("Select all")) {
+        for (auto& [id, on] : m_partsPickerBodies) on = true;
+        for (auto& [id, on] : m_partsPickerSketches) on = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Select none")) {
+        for (auto& [id, on] : m_partsPickerBodies) on = false;
+        for (auto& [id, on] : m_partsPickerSketches) on = false;
+    }
+    ImGui::Separator();
+
+    int nSel = 0;
+    for (auto& [id, on] : m_partsPickerBodies) nSel += on ? 1 : 0;
+    for (auto& [id, on] : m_partsPickerSketches) nSel += on ? 1 : 0;
+
+    ImGui::BeginDisabled(nSel == 0);
+    std::string importLbl = "Import " + std::to_string(nSel) +
+                            (nSel == 1 ? " part" : " parts");
+    bool doImport = ImGui::Button(importLbl.c_str(), uiSz(160, 0));
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    bool doCancel = ImGui::Button("Cancel", uiSz(90, 0));
+
+    if (doImport) {
+        bool proceed = true;
+        if (m_partsPickerIntoNew) {
+            if (isDirty()) {
+                // Clearing the workspace under an async save-prompt would
+                // race it; make the user resolve the open project first.
+                showToast("Save or close the open project first.");
+                proceed = false;
+            } else {
+                doCloseProject();
+            }
+        }
+        if (proceed) {
+            int n = 0;
+            for (auto& [id, on] : m_partsPickerBodies) {
+                if (!on) continue;
+                try {
+                    const TopoDS_Shape& s = m_partsPickerDoc->getBody(id);
+                    if (s.IsNull()) continue;
+                    int nid = m_document->addBody(s, m_partsPickerDoc->getBodyName(id));
+                    m_document->setBodyColor(nid, m_partsPickerDoc->getBodyColor(id));
+                    ++n;
+                } catch (...) {}
+            }
+            for (auto& [id, on] : m_partsPickerSketches) {
+                if (!on) continue;
+                auto src = m_partsPickerDoc->getSketch(id);
+                if (!src) continue;
+                auto cp = std::make_shared<Sketch>(*src);
+                // Sever the source-body/face link (the DuplicateSketchOp
+                // lesson): the copy must never drive or re-bind a body from
+                // ANOTHER project — it builds its region from its own loops.
+                cp->setSourceBody(-1);
+                cp->setSourceFace(TopoDS_Face());
+                cp->setDetachedFromBody(false);
+                int nid = m_document->addSketch(cp, m_partsPickerDoc->getSketchName(id));
+                m_document->setSketchVisible(nid, true);
+                ++n;
+            }
+            m_meshesDirty = true;
+            markDirty();
+            // Frame the arrivals like a project open does (home orientation +
+            // zoom-fit) — otherwise the camera stays wherever it was and the
+            // imported parts can fill the screen or sit out of view.
+            handleViewCubeAction(static_cast<int>(ViewCubeAction::FrontTopRight));
+            if (m_landingPage) m_landingPage->setVisible(false);
+            showToast("Imported " + std::to_string(n) +
+                      (n == 1 ? " part from " : " parts from ") + m_partsPickerSource);
+            m_partsPickerOpen = false;
+        }
+    }
+    if (doCancel) m_partsPickerOpen = false;
+    if (!m_partsPickerOpen) {
+        m_partsPickerDoc.reset();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+void Application::exportBodiesToNewProject(const std::vector<int>& bodyIds) {
+    if (!m_document || bodyIds.empty()) return;
+    // Snapshot BEFORE opening the tab: openNewTab repoints m_document at the
+    // new session, so anything read afterwards would come from the empty one.
+    struct Part { TopoDS_Shape shape; std::string name; glm::vec3 color; };
+    std::vector<Part> parts;
+    for (int id : bodyIds) {
+        TopoDS_Shape s;
+        try { s = m_document->getBody(id); } catch (...) {}
+        if (s.IsNull()) continue;
+        parts.push_back({s, m_document->getBodyName(id),
+                         m_document->getBodyColor(id)});
+    }
+    if (parts.empty()) {
+        showToast("Those bodies have no geometry.");
+        return;
+    }
+    // A NEW TAB rather than a save dialog (Steve, 2026-07-29): the parts land
+    // in a workspace you can look at and keep working on, and saving is a
+    // normal Ctrl+S afterwards if you want a file at all. Writing the file
+    // first forced a naming decision before you could see what you'd got.
+    if (!openNewTab()) return;   // refused (mid-sketch etc.) — already toasted
+
+    for (const auto& p : parts) {
+        const int nid = m_document->addBody(p.shape, p.name);
+        m_document->setBodyColor(nid, p.color);
+    }
+    // Name the tab after the part (single) — it is still UNSAVED, so the path
+    // stays empty and Save goes through the picker.
+    m_currentProjectName = parts.size() == 1 && !parts.front().name.empty()
+                               ? parts.front().name
+                               : std::string();
+    m_currentProjectPath.clear();
+    m_meshesDirty = true;
+    markDirty();
+    // Frame the arrivals the way a project open does — otherwise the camera
+    // sits wherever the source project left it.
+    handleViewCubeAction(static_cast<int>(ViewCubeAction::FrontTopRight));
+    showToast(parts.size() == 1
+                  ? "Opened in a new tab — unsaved."
+                  : std::to_string(parts.size()) +
+                        " parts opened in a new tab — unsaved.");
+}
+
+void Application::renderLandingPage() {
+    if (!m_landingPage || !m_landingPage->isVisible()) return;
+    // Thumbnails peeked off-thread since the last frame become textures here,
+    // where the GL context lives; tiles fill in as they arrive.
+    drainThumbnailPeeks();
+    // ImTextureID is an integer alias in this imgui config; the logo texture
+    // is a plain GL name, so a value cast is exact.
+    m_landingPage->setLogoTexture(
+        static_cast<unsigned int>(layoutui::logoTexture()));
+    const LandingPage::Action act = m_landingPage->render();
+    using AT = LandingPage::ActionType;
+    switch (act.type) {
+    case AT::NewProject:
+        m_landingPage->setVisible(false);
+        // An empty tab is reused; otherwise a new one, so the project behind
+        // the page survives (same rule as the recent tiles below).
+        if (activeSessionIsScratch()) closeProject();
+        else openNewTab();
+        break;
+    case AT::OpenEntry: {
+        m_landingPage->setVisible(false);
+        AppSettings::RecentProject rp;
+        rp.ref = act.ref;
+        rp.name = act.name;
+        // A tile opens in a NEW tab when this one already holds a project
+        // (Steve, 2026-07-28). The home screen is reachable from a live
+        // session via File → Home Screen, so loading in place would displace
+        // work the user only meant to set aside. An untouched empty
+        // workspace is loaded into directly — no point stacking a blank tab.
+        if (!activeSessionIsScratch() && !openNewTab()) break;
+        openRecentProject(rp);   // resolves URIs, bumps the MRU, toasts failures
+        break;
+    }
+    case AT::OpenFileDialog:
+        m_landingPage->setVisible(false);
+        if (!activeSessionIsScratch() && !openNewTab()) break;
+        loadProject();
+        break;
+    case AT::ExportStep:
+        exportRecentProjectAs(act.ref, act.name, /*asStl=*/false);
+        break;   // page stays up — export is a side errand, not a departure
+    case AT::ExportStl:
+        exportRecentProjectAs(act.ref, act.name, /*asStl=*/true);
+        break;
+    case AT::ImportParts:
+        // Page stays up; the modal draws above it and, on import, the page
+        // hides itself (see renderPartsPickerDialog).
+        openPartsPicker(act.ref, act.name, /*intoNewProject=*/true);
+        break;
+    case AT::OpenSettings:
+        // Same staging as the File menu item: the dialog can Cancel cleanly.
+        m_settingsOrbitButton = m_orbitButton;
+        m_settingsPanButton = m_panButton;
+        m_showSettings = true;
+        m_settingsRaise = true;
+        break;   // page stays up beneath the settings window
+    case AT::OpenHelp:
+        if (m_helpPanel) m_helpPanel->setVisible(true);
+        break;   // page stays up beneath the help window
+    case AT::Dismiss:
+        m_landingPage->setVisible(false);
+        break;
+    case AT::None:
+        break;
+    }
 }
 
 } // namespace materializr

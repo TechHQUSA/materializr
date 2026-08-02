@@ -27,11 +27,14 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/ExtrudeOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/FilletOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ChamferOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/BlendCut.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/BooleanOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DeleteOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/TransformOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/BatchTransformOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/PushPullOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Sketch.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SketchTool.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchEditOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DuplicateSketchOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveHoleOp.cpp
@@ -46,8 +49,11 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/AlignOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MirrorOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SplitBodyOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SeparateBodyOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchTransformOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/LoftOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/GuidedLoftOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/BoundaryFillOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SweepOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ConstructionPlaneOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ConstructionAxisOp.cpp
@@ -67,12 +73,27 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/TopoName.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/GenerationLedger.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectIO.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ImageDecode.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ImageEncode.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/FaceLineage.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/BrepIO.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/IgesIO.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ObjExport.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/DxfExport.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/DxfImport.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/ThreeMfExport.cpp
     ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/MeshDecimate.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectRecovery.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Verbose.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ThrowTrace.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Unfold.cpp
     ${CMAKE_SOURCE_DIR}/src/viewport/SectionCap.cpp
+    # Op editors call materializr::inputNumber (ui/NumField.h), whose touch
+    # branch lands in touchui::numberField. Tests never take that branch —
+    # touchMode() is off — but the symbol still has to resolve at link time,
+    # and this list is separate from the app's, so it does not inherit it.
+    ${CMAKE_SOURCE_DIR}/src/ui/TouchWidgets.cpp
 )
 
 target_include_directories(materializr_core PUBLIC
@@ -91,8 +112,10 @@ target_include_directories(materializr_core SYSTEM PUBLIC
 # those even when it leaves the combined OpenCASCADE_VERSION string empty.
 if(OpenCASCADE_MAJOR_VERSION EQUAL 7 AND OpenCASCADE_MINOR_VERSION LESS 8)
     set(OCCT_STL_LIB TKSTL)
+    set(OCCT_IGES_LIB TKIGES)
 else()
     set(OCCT_STL_LIB TKDESTL)
+    set(OCCT_IGES_LIB TKDEIGES)
 endif()
 
 target_link_libraries(materializr_core PUBLIC
@@ -111,6 +134,8 @@ target_link_libraries(materializr_core PUBLIC
     TKBO
     TKBin
     ${OCCT_STL_LIB}  # RWStl (STL read) for StlIO — TKSTL (<7.8) / TKDESTL (>=7.8)
+    ${OCCT_IGES_LIB} # IGESControl for IgesIO (test_exchange_io) — same version gate
+    TKXSBase     # exchange base for the IGES reader/writer
     TKShHealing  # ShapeUpgrade_UnifySameDomain for StlIO
     TKMesh       # BRepMesh_IncrementalMesh for Unfold (curved faces)
     ZLIB::ZLIB
@@ -122,6 +147,55 @@ target_link_libraries(materializr_core PUBLIC
 add_executable(test_document test_document.cpp)
 target_link_libraries(test_document PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_document COMMAND test_document)
+
+# test_separate_body - Separate op splits disconnected solids into bodies
+add_executable(test_separate_body test_separate_body.cpp)
+target_link_libraries(test_separate_body PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_separate_body COMMAND test_separate_body)
+
+# test_stepped_hole_profile - #60: stepped hole doesn't extrude a floating plug
+add_executable(test_stepped_hole_profile test_stepped_hole_profile.cpp)
+target_link_libraries(test_stepped_hole_profile PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_stepped_hole_profile COMMAND test_stepped_hole_profile)
+
+# test_edgeop_highlight_reload - fallback recovers bevel faces without gen=
+add_executable(test_edgeop_highlight_reload test_edgeop_highlight_reload.cpp)
+target_link_libraries(test_edgeop_highlight_reload PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_edgeop_highlight_reload COMMAND test_edgeop_highlight_reload)
+
+# test_topo_contract - THE topological-naming contract: one case per
+# (reference kind x upstream-edit kind), driven through the real replay path.
+add_executable(test_topo_contract test_topo_contract.cpp)
+target_link_libraries(test_topo_contract PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_contract COMMAND test_topo_contract)
+
+# test_thread_profiles - generalized thread cross-sections build valid solids
+# (external + internal) + the fit-clearance path.
+add_executable(test_thread_profiles test_thread_profiles.cpp)
+target_link_libraries(test_thread_profiles PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_thread_profiles COMMAND test_thread_profiles)
+
+# test_thread_reflow - ops on threaded bodies reflow beneath the Thread step
+# (threads-last by reflow, not refusal) and the thread re-cuts on the result.
+add_executable(test_thread_reflow test_thread_reflow.cpp)
+target_link_libraries(test_thread_reflow PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_thread_reflow COMMAND test_thread_reflow)
+
+# test_resize_cylindrical - Edit Diameter confines its change to the resized
+# segment (shrinking one step of a stepped rod must not hollow the neighbour).
+add_executable(test_resize_cylindrical test_resize_cylindrical.cpp)
+target_link_libraries(test_resize_cylindrical PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_resize_cylindrical COMMAND test_resize_cylindrical)
+
+# test_sketch_edit_cascade - editing a sketch drives a hole through a chamfer
+add_executable(test_sketch_edit_cascade test_sketch_edit_cascade.cpp)
+target_link_libraries(test_sketch_edit_cascade PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_edit_cascade COMMAND test_sketch_edit_cascade)
+
+# test_extrude_recovered_profile - seed miss uses saved footprint, not ALL regions
+add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp)
+target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
 
 # test_section_cap - section-view cross-section cap geometry (issue #15)
 add_executable(test_section_cap test_section_cap.cpp)
@@ -137,6 +211,29 @@ add_test(NAME test_history COMMAND test_history)
 add_executable(test_recovery test_recovery.cpp)
 target_link_libraries(test_recovery PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_recovery COMMAND test_recovery)
+
+# test_recovery_popup_turntaking — headless dear imgui popup-stack regression
+# for the "Recover Sketch?" modal rendering empty/stuck when it collides with
+# another raw-every-frame OpenPopup (the launch update-check popup). Pure
+# ImGui mechanics — links imgui_lib directly, no OCCT/materializr_core needed.
+add_executable(test_recovery_popup_turntaking test_recovery_popup_turntaking.cpp)
+target_link_libraries(test_recovery_popup_turntaking PRIVATE imgui_lib gtest gtest_main)
+add_test(NAME test_recovery_popup_turntaking COMMAND test_recovery_popup_turntaking)
+
+# Exchange formats: BREP round-trip, OBJ/DXF/3MF structural checks
+add_executable(test_exchange_io test_exchange_io.cpp)
+target_link_libraries(test_exchange_io PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_exchange_io COMMAND test_exchange_io)
+
+# Face lineage: bevel identity through boolean splits + save/load (#49/#51)
+add_executable(test_face_lineage test_face_lineage.cpp)
+target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_face_lineage COMMAND test_face_lineage)
+
+# Extrude region identity: draw/extrude/draw-more replays correctly (#53)
+add_executable(test_extrude_regions test_extrude_regions.cpp)
+target_link_libraries(test_extrude_regions PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_extrude_regions COMMAND test_extrude_regions)
 
 # test_operations
 add_executable(test_operations test_operations.cpp)
@@ -281,6 +378,18 @@ add_executable(test_topo_pushpull test_topo_pushpull.cpp)
 target_link_libraries(test_topo_pushpull PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_topo_pushpull COMMAND test_topo_pushpull)
 
+# test_topo_pushpull_lineage — PushPull must PROPAGATE face lineage (updateBody
+# clears it); without it every downstream fillet drifts on replay (body-412 bug)
+add_executable(test_topo_pushpull_lineage test_topo_pushpull_lineage.cpp)
+target_link_libraries(test_topo_pushpull_lineage PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_topo_pushpull_lineage COMMAND test_topo_pushpull_lineage)
+
+# test_batch_transform_reload — multi-body gizmo transform must reload as a REAL
+# op that re-applies to live geometry, not a baked snapshot (batchtransform bakes)
+add_executable(test_batch_transform_reload test_batch_transform_reload.cpp)
+target_link_libraries(test_batch_transform_reload PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_batch_transform_reload COMMAND test_batch_transform_reload)
+
 # test_topo_shell — ShellOp opened faces via topo::Ref through a REAL history
 # replay (stale-sketch rollback + cascade override) on an L-body where the
 # geometric fallback mis-picks
@@ -342,6 +451,9 @@ add_test(NAME test_svg_roundtrip COMMAND test_svg_roundtrip)
 # probe_kernel_matrix — one-line-per-case battery of kernel-sensitive modeling
 # ops for diffing behavior across OCCT versions (7.6.x apt vs 7.9.3 vs 8.0.0);
 # fork-isolated cases so crashes/hangs report instead of killing the battery.
+# POSIX-only (fork/waitpid is the crash containment); neither is a ctest, so
+# Windows loses no coverage by skipping them.
+if(NOT WIN32)
 add_executable(probe_kernel_matrix probe_kernel_matrix.cpp)
 target_link_libraries(probe_kernel_matrix PRIVATE materializr_core)
 
@@ -349,3 +461,102 @@ target_link_libraries(probe_kernel_matrix PRIVATE materializr_core)
 # identical case stream on every OCCT version, for cross-kernel diffing).
 add_executable(probe_validity_fuzz probe_validity_fuzz.cpp)
 target_link_libraries(probe_validity_fuzz PRIVATE materializr_core)
+endif()
+
+# test_blend_cut — #55: chamfer across a surface feature via the swept-wedge
+# cut fallback matches chamfer-then-cut exactly; native-success path untouched
+add_executable(test_blend_cut test_blend_cut.cpp)
+target_link_libraries(test_blend_cut PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_blend_cut COMMAND test_blend_cut)
+
+
+# test_audit_hardening — audit residual-finding fixes: settings clamping and
+# .cfg injection, transactional-on-failure ProjectIO::load, SVG vertex budget
+add_executable(test_audit_hardening test_audit_hardening.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/Settings.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SvgImport.cpp)
+target_link_libraries(test_audit_hardening PRIVATE materializr_core gtest gtest_main
+    TKV3d TKService)
+add_test(NAME test_audit_hardening COMMAND test_audit_hardening)
+
+# test_brepio_dos — the BREP length-prefix DoS guard (impossible section count
+# rejected fast, valid file still round-trips, truncated file fails cleanly)
+add_executable(test_brepio_dos test_brepio_dos.cpp)
+target_link_libraries(test_brepio_dos PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_brepio_dos COMMAND test_brepio_dos)
+
+# test_sketch_dimension — DistancePointLine solver, dimension pair resolution,
+# and K-line label-offset persistence (Onshape-style dimension tool).
+# Pulls in SketchTool.h/.cpp (the Dimension pick state machine), which in turn
+# needs TextSketchOp.cpp (handleTextTool) and SvgImport.cpp (handleSvgTool) —
+# neither is in materializr_core, and SvgImport renders SVG text to outline
+# wires via Font_* (TKV3d/TKService), same as test_svg_roundtrip above.
+add_executable(test_sketch_dimension test_sketch_dimension.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/TextSketchOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SvgImport.cpp)
+target_link_libraries(test_sketch_dimension PRIVATE materializr_core gtest gtest_main
+    TKV3d TKService)
+add_test(NAME test_sketch_dimension COMMAND test_sketch_dimension)
+
+# Embedded project thumbnail: THUMB_PNG save/peek round-trip + legacy skip
+add_executable(test_project_thumbnail test_project_thumbnail.cpp)
+target_link_libraries(test_project_thumbnail PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_project_thumbnail COMMAND test_project_thumbnail)
+
+# test_settings_sessions — tab-list persistence + the indexed-list SHRINK trap
+# (the writer preserves keys it didn't emit, which resurrected closed tabs).
+# Settings.cpp is not in materializr_core — compiled in directly, same as
+# test_audit_hardening does.
+add_executable(test_settings_sessions test_settings_sessions.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/Settings.cpp)
+target_link_libraries(test_settings_sessions PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_settings_sessions COMMAND test_settings_sessions)
+
+# test_multibody_export — several disjoint solids export as ONE file with
+# their spacing intact (print-in-place), and visibility selects the subset.
+# StlExport.cpp is not in materializr_core — compiled in directly.
+add_executable(test_multibody_export test_multibody_export.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/StlExport.cpp)
+target_link_libraries(test_multibody_export PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_multibody_export COMMAND test_multibody_export)
+
+# test_batch_transform_builder — a multi-body Move/Rotate relocates the shapes
+# instead of NURBS-converting them (the GTransform path that crashed the app).
+add_executable(test_batch_transform_builder test_batch_transform_builder.cpp)
+target_link_libraries(test_batch_transform_builder PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_batch_transform_builder COMMAND test_batch_transform_builder)
+
+# test_face_centroid — the face-centroid snap (the green centre marker) follows
+# the sketch when the sketch plane is moved or rotated.
+add_executable(test_face_centroid test_face_centroid.cpp)
+target_link_libraries(test_face_centroid PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_face_centroid COMMAND test_face_centroid)
+
+# test_grid_snap — with snap-to-grid on, clicks land on the lattice and the
+# drawn grid IS that lattice. Needs TextSketchOp/SvgImport stubs (in the test).
+add_executable(test_grid_snap test_grid_snap.cpp)
+target_link_libraries(test_grid_snap PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_grid_snap COMMAND test_grid_snap)
+
+# ─── Loader path for a source-built OCCT ─────────────────────────────────────
+# With MZR_OCCT_PREFIX the kernel lives outside the loader's default search
+# path, and the test binaries then die at startup with "libTKBRep.so.7.9:
+# cannot open shared object file". That failure is badly disguised: ctest
+# reports it as ~90 Failed tests in 0.00s, which reads as a catastrophic
+# regression until you open the log.
+#
+# A build RPATH does NOT fix this. The linker emits DT_RUNPATH, and DT_RUNPATH
+# is not transitive — it resolves the binary's own DT_NEEDED entries, but not
+# the libs those pull in, and most of the OCCT toolkits arrive that way. So
+# hand the path to ctest instead, which covers every dependency at once and
+# leaves the shipped binaries untouched.
+#
+# DIRECTORY/TESTS is read here, at the end of the file, so it picks up every
+# test declared above without each one having to opt in. Keep it last.
+if(DEFINED MZR_OCCT_PREFIX)
+    get_property(_mzr_all_tests DIRECTORY PROPERTY TESTS)
+    if(_mzr_all_tests)
+        set_tests_properties(${_mzr_all_tests} PROPERTIES
+            ENVIRONMENT "LD_LIBRARY_PATH=${MZR_OCCT_PREFIX}/lib:$ENV{LD_LIBRARY_PATH}")
+    endif()
+endif()

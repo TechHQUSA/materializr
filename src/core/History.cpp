@@ -16,23 +16,32 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
         return false;
     }
 
-    // THREADS ARE A FINISHING PASS — by user discipline, not by automatic
-    // reflow. The reflow machinery (reflowInsertionIndex +
-    // insertStepAndReplay, kept below for the future hybrid) silently
-    // re-ran a full validated per-turn thread recompute on the main thread
-    // for EVERY op touching a threaded body — Steve: "it is too resource
-    // intensive to just artificially shuffle to the end". An op that
-    // targets a thread-modified body is now REFUSED with guidance instead:
-    // delete the Thread step, make the change, re-thread (the thread step
-    // is parametric and cheap to re-apply).
+    // THREADS ARE A FINISHING PASS — enforced by REFLOW: an op targeting a
+    // thread-modified body is reordered beneath the thread(s) via
+    // insertStepAndReplay (non-thread steps replay first, then the op
+    // against clean geometry, then the threads re-cut parametrically on the
+    // result). Between 2026-06 and 2026-07 this was a hard refusal
+    // ("threads-last discipline") because the re-cut ran a ~minute per-turn
+    // recompute synchronously on the main thread. Two things removed that
+    // cost: ThreadOp's async recut hook (the re-cut lands from a worker;
+    // the body shows unthreaded for a moment) and the swept-profile fast
+    // path (~200ms for Standard/Rounded). If the reflow can't land (baked
+    // reload snapshot on the body / a step failed to replay — state is
+    // restored inside insertStepAndReplay), fall back to the old refusal
+    // with guidance rather than running the op directly against the
+    // thread's helicoid faces (kernel garbage).
     {
         int at = reflowInsertionIndex(*op);
         if (at >= 0) {
-            std::fprintf(stderr, "[History] '%s' declined: this body has "
-                                 "Thread steps. Threads must be applied "
-                                 "LAST — delete the Thread step, make this "
-                                 "change, then re-apply the thread.\n",
-                         op->name().c_str());
+            const std::string nm = op->name();
+            std::fprintf(stderr, "[History] reflowing '%s' beneath the "
+                                 "Thread at step %d (threads re-cut last)\n",
+                         nm.c_str(), at);
+            if (insertStepAndReplay(at, std::move(op), doc)) return true;
+            std::fprintf(stderr, "[History] '%s' declined: reflow beneath "
+                                 "the Thread step failed. Delete the Thread "
+                                 "step, make this change, then re-apply the "
+                                 "thread.\n", nm.c_str());
             if (m_threadsLastDecline) m_threadsLastDecline();
             return false;
         }
@@ -213,6 +222,7 @@ void History::propagateSketchValueEdits(int editedStep, Document& doc) {
 }
 
 bool History::editStep(int index, Document& doc, bool transactional) {
+    m_lastEditFailStep = -1;
     ++m_revision;
     if (index < 0 || index >= static_cast<int>(m_operations.size())) {
         return false;
@@ -237,6 +247,12 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         for (int id : doc.getAllBodyIds()) bodySnap[id] = doc.getBody(id);
         for (int sid : doc.getAllSketchIds())
             if (auto sk = doc.getSketch(sid)) sketchSnap.emplace(sid, *sk);
+        // Op-internal edit state too: ops that SUCCEED during a replay that
+        // later fails have re-resolved their stored edges/refs against bodies
+        // the rollback below is about to discard. Restoring bodies but not
+        // that state wedges the step — the next attempt resolves against
+        // geometry that no longer exists (fails where a fresh session works).
+        for (auto& op : m_operations) op->snapshotEditState();
     }
     auto restoreSnapshot = [&]() {
         std::set<int> want;
@@ -244,6 +260,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         for (int id : doc.getAllBodyIds()) if (!want.count(id)) doc.removeBody(id);
         for (const auto& [sid, sk] : sketchSnap)
             if (auto live = doc.getSketch(sid)) *live = sk;
+        for (auto& op : m_operations) op->restoreEditState();
         m_currentIndex = savedIndex;
     };
 
@@ -296,8 +313,15 @@ bool History::editStep(int index, Document& doc, bool transactional) {
                 // and everything above it (where the next Ctrl+Z would hit
                 // the step below: "undo deleted the whole body"). The UI
                 // re-reads the op, so the value visibly snaps back.
+                //
+                // PREVIEW MODE ONLY: a transactional caller holds a full
+                // pre-edit snapshot, which restores the EXACT prior model —
+                // a lastGoodParams REBUILD merely approximates it (fallback-
+                // built blends are path-dependent: rebuilding "the same"
+                // chamfer can produce different downstream geometry, silently
+                // swapping the model under a failed edit).
                 const std::string& good = op->lastGoodParams();
-                if (i == index && !good.empty() &&
+                if (i == index && !transactional && !good.empty() &&
                     op->deserializeParams(good) && op->execute(doc)) {
                     std::fprintf(stderr,
                         "[history-dbg] editStep: step %d rejected new params, "
@@ -308,6 +332,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
                 std::fprintf(stderr,
                     "[history-dbg] editStep: HARD FAILURE at step %d "
                     "(edited=%d transactional=%d)\n", i, index, transactional);
+                m_lastEditFailStep = i;
                 if (transactional) { restoreSnapshot(); return false; }
                 m_currentIndex = i - 1;
                 m_failedReplayAt = i;

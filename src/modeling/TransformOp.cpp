@@ -2,6 +2,7 @@
 #include "Sketch.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
+#include <BRepBuilderAPI_ModifyShape.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include "../ui/NumField.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -74,6 +76,10 @@ bool TransformOp::execute(Document& doc) {
     try {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
+        // And the input face lineage: updateBody wipes it, and a partial
+        // replay never re-runs the op that minted it — undo restores this.
+        m_prevFaceIds.clear();
+        if (const auto* im = doc.bodyFaceIds(m_bodyId)) m_prevFaceIds = *im;
         // Same for sketch planes anchored to this body — they follow the
         // host face/body through Translate / Rotate so sketches drawn on it
         // stay registered to "where they were drawn" even after a move.
@@ -107,11 +113,28 @@ bool TransformOp::execute(Document& doc) {
 
         // Reloaded legacy step: apply the reconstructed rigid transform straight
         // to the LIVE body so any upstream edit (a fillet on this body) survives.
+        // Rigid/affine move: carry face lineage 1:1 through the transform
+        // (the builder maps each input face to its moved twin). Used by every
+        // build path below — without it a transform severs the ancestry chain
+        // a downstream fillet/chamfer resolves its edges through.
+        auto carryFaceIds = [&](BRepBuilderAPI_ModifyShape& tf) {
+            if (m_prevFaceIds.empty()) return;
+            materializr::topo::FaceIdMap moved;
+            for (auto& e : m_prevFaceIds) {
+                try {
+                    TopoDS_Shape nf = tf.ModifiedShape(e.face);
+                    if (!nf.IsNull()) moved.push_back({nf, e.ids});
+                } catch (...) {}
+            }
+            doc.setBodyFaceIds(m_bodyId, std::move(moved));
+        };
+
         if (m_useRawTrsf) {
             BRepBuilderAPI_Transform tf(m_previousShape, m_rawTrsf, true);
             tf.Build();
             if (!tf.IsDone()) return false;
             doc.updateBody(m_bodyId, tf.Shape());
+            carryFaceIds(tf);
             for (const auto& [sid, prevPln] : m_previousSketchPlanes) {
                 auto sk = doc.getSketch(sid);
                 if (sk) sk->setPlane(prevPln.Transformed(m_rawTrsf));
@@ -133,6 +156,7 @@ bool TransformOp::execute(Document& doc) {
             gtf.Build();
             if (!gtf.IsDone()) return false;
             doc.updateBody(m_bodyId, gtf.Shape());
+            carryFaceIds(gtf);
             return true;
         }
 
@@ -161,6 +185,7 @@ bool TransformOp::execute(Document& doc) {
         }
 
         doc.updateBody(m_bodyId, transform.Shape());
+        carryFaceIds(transform);
 
         // Propagate the SAME gp_Trsf to every sketch anchored to this body
         // so the sketch's plane (and therefore its 2D coordinate frame)
@@ -187,6 +212,12 @@ bool TransformOp::undo(Document& doc) {
 
     try {
         doc.updateBody(m_bodyId, m_previousShape);
+        // Restore the input face lineage captured at execute — updateBody
+        // just wiped it, and if this undo is part of a PARTIAL replay
+        // (editStep starting after the map's producer), nothing upstream
+        // will re-mint it.
+        if (!m_prevFaceIds.empty())
+            doc.setBodyFaceIds(m_bodyId, m_prevFaceIds);
         // Restore the sketch planes we snapshotted in execute(). Even if
         // some sketches have been removed since, we just skip the missing
         // ones — restoration is best-effort.
@@ -228,22 +259,22 @@ void TransformOp::renderProperties() {
         m_type = static_cast<TransformType>(typeIndex);
     }
 
-    ImGui::InputInt("Body ID", &m_bodyId);
+    materializr::inputNumberInt("Body ID", &m_bodyId);
 
     switch (m_type) {
         case TransformType::Translate:
-            ImGui::InputDouble("X", &m_dx, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Y", &m_dy, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Z", &m_dz, 0.1, 1.0, "%.3f");
+            materializr::inputNumber("X", &m_dx, 0.1, 1.0, "%g");
+            materializr::inputNumber("Y", &m_dy, 0.1, 1.0, "%g");
+            materializr::inputNumber("Z", &m_dz, 0.1, 1.0, "%g");
             break;
         case TransformType::Rotate:
-            ImGui::InputDouble("Axis X", &m_ax, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Axis Y", &m_ay, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Axis Z", &m_az, 0.1, 1.0, "%.3f");
-            ImGui::InputDouble("Angle (deg)", &m_angle, 1.0, 15.0, "%.1f");
+            materializr::inputNumber("Axis X", &m_ax, 0.1, 1.0, "%g");
+            materializr::inputNumber("Axis Y", &m_ay, 0.1, 1.0, "%g");
+            materializr::inputNumber("Axis Z", &m_az, 0.1, 1.0, "%g");
+            materializr::inputNumber("Angle (deg)", &m_angle, 1.0, 15.0, "%.1f");
             break;
         case TransformType::Scale:
-            ImGui::InputDouble("Scale Factor", &m_scale, 0.1, 0.5, "%.3f");
+            materializr::inputNumber("Scale Factor", &m_scale, 0.1, 0.5, "%g");
             break;
     }
 }

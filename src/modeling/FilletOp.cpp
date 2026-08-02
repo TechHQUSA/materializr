@@ -1,7 +1,13 @@
+#include "../core/NumFormat.h"
 #include "FilletOp.h"
+#include "BlendCut.h"
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
+#include "FaceSurfSig.h"
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include "../core/Verbose.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -21,6 +27,7 @@
 #include <gp_Vec.hxx>
 #include <cmath>
 #include <imgui.h>
+#include "../ui/NumField.h"
 
 namespace {
 // Representative point on a face (midpoint of its UV bounds). Stable for the
@@ -50,6 +57,39 @@ double faceBlendRadius(const TopoDS_Face& face) {
             default:               return -1.0;
         }
     } catch (...) { return -1.0; }
+}
+
+// Faces present in `result` but NOT in `prev` — the blend faces this fillet
+// created. Reload fallback for the history-hover highlight when a save lacks
+// generated-face indices (churn-dropped `gen=`).
+//
+// Matched by the unbounded SURFACE, not the centroid: when this fillet trims a
+// corner off an adjacent earlier blend, that face keeps its surface but its
+// centroid shifts — a centroid test would wrongly flag it as new and light up
+// earlier steps' blends on hover. Non-analytic faces (no cheap surface
+// signature) fall back to the centroid test, unchanged.
+std::vector<TopoDS_Shape> facesCreatedVsPrev(const TopoDS_Shape& result,
+                                             const TopoDS_Shape& prev) {
+    std::vector<TopoDS_Face> prevF;
+    std::vector<gp_Pnt> prevC;
+    for (TopExp_Explorer ex(prev, TopAbs_FACE); ex.More(); ex.Next()) {
+        const TopoDS_Face pf = TopoDS::Face(ex.Current());
+        gp_Pnt c;
+        if (faceCenter(pf, c)) { prevF.push_back(pf); prevC.push_back(c); }
+    }
+    std::vector<TopoDS_Shape> out;
+    for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+        const TopoDS_Face f = TopoDS::Face(ex.Current());
+        gp_Pnt c;
+        if (!faceCenter(f, c)) continue;
+        bool wasThere = false;
+        for (size_t i = 0; i < prevF.size(); ++i) {
+            if (materializr::sameSurface(prevF[i], f) ||
+                prevC[i].Distance(c) < 1e-4) { wasThere = true; break; }
+        }
+        if (!wasThere) out.push_back(f);
+    }
+    return out;
 }
 } // namespace
 
@@ -110,6 +150,51 @@ bool FilletOp::resolveAnchors(Document& doc, const TopoDS_Shape& base) {
 
 FilletOp::FilletOp() = default;
 
+void FilletOp::rememberResult(const TopoDS_Shape& base,
+                              const TopoDS_Shape& result) {
+    if (base.IsNull() || result.IsNull()) return;
+    for (auto& e : m_storedResults) {
+        if (e.base.IsEqual(base) && std::abs(e.r - m_radius) < 1e-9) {
+            e.result = result;
+            e.genFaces = m_generatedFaces;
+            return;
+        }
+    }
+    m_storedResults.push_back({base, result, m_radius, m_generatedFaces});
+    if (m_storedResults.size() > 8)
+        m_storedResults.erase(m_storedResults.begin() + 1);
+}
+
+void FilletOp::snapshotEditState() {
+    m_editSnap.edges = m_edges;
+    m_editSnap.anchors = m_edgeAnchors;
+    m_editSnap.refs = m_edgeRefs;
+    m_editSnap.pairs = m_edgeFaceIdPairs;
+    m_editSnap.prevFaceIds = m_prevFaceIds;
+    m_editSnap.previousShape = m_previousShape;
+    m_editSnap.resultShape = m_resultShape;
+    m_editSnap.generatedFaces = m_generatedFaces;
+    m_editSnap.genFaceIds = m_genFaceIds;
+    m_editSnap.storedResults = m_storedResults;
+    m_editSnap.radius = m_radius;
+    m_editSnap.valid = true;
+}
+
+void FilletOp::restoreEditState() {
+    if (!m_editSnap.valid) return;
+    m_edges = m_editSnap.edges;
+    m_edgeAnchors = m_editSnap.anchors;
+    m_edgeRefs = m_editSnap.refs;
+    m_edgeFaceIdPairs = m_editSnap.pairs;
+    m_prevFaceIds = m_editSnap.prevFaceIds;
+    m_previousShape = m_editSnap.previousShape;
+    m_resultShape = m_editSnap.resultShape;
+    m_generatedFaces = m_editSnap.generatedFaces;
+    m_genFaceIds = m_editSnap.genFaceIds;
+    m_storedResults = m_editSnap.storedResults;
+    m_radius = m_editSnap.radius;
+}
+
 void FilletOp::setBody(int bodyId) {
     m_bodyId = bodyId;
 }
@@ -127,16 +212,92 @@ bool FilletOp::execute(Document& doc) {
         return false;
     }
 
+    // FAILURE MUST NOT POISON THE OP (see ChamferOp::execute): resolution
+    // rewrites m_edges/anchors/refs against the current body; a failed build
+    // must roll them back or one failed edit wedges every later attempt.
+    struct ResolutionGuard {
+        FilletOp& op;
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        bool committed = false;
+        explicit ResolutionGuard(FilletOp& o)
+            : op(o), edges(o.m_edges), anchors(o.m_edgeAnchors),
+              refs(o.m_edgeRefs), pairs(o.m_edgeFaceIdPairs) {}
+        ~ResolutionGuard() {
+            if (committed) return;
+            op.m_edges = std::move(edges);
+            op.m_edgeAnchors = std::move(anchors);
+            op.m_edgeRefs = std::move(refs);
+            op.m_edgeFaceIdPairs = std::move(pairs);
+        }
+    } guard(*this);
+
     try {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
+
+        // Input lineage, completed so EVERY face has an id (see ChamferOp) —
+        // feeds the lineage-first edge resolution below and the post-build
+        // pair capture, and is restored by undo (partial-replay lifeline).
+        materializr::topo::FaceIdMap inLineage;
+        if (const auto* im = doc.bodyFaceIds(m_bodyId)) inLineage = *im;
+        materializr::topo::complete(inLineage, m_previousShape,
+                                    [&doc]() { return doc.mintFaceId(); });
+
+        // Lineage-FIRST edge resolution (parity with ChamferOp, #52): each
+        // edge named by its two adjacent faces' ancestry ids — immune to
+        // ordinal drift AND alive when the runtime ledger is gone (partial
+        // replay). All-or-nothing; on miss, fall through to the classic
+        // rebind → anchors → topo-refs chain.
+        bool edgesResolvedByLineage = false;
+        if (!m_edgeFaceIdPairs.empty() &&
+            m_edgeFaceIdPairs.size() == m_edges.size()) {
+            TopTools_IndexedDataMapOfShapeListOfShape efm;
+            TopExp::MapShapesAndAncestors(m_previousShape, TopAbs_EDGE,
+                                          TopAbs_FACE, efm);
+            auto faceHas = [&](const TopoDS_Shape& f, int id) {
+                const auto* ids = materializr::topo::idsFor(inLineage, f);
+                return ids && std::find(ids->begin(), ids->end(), id) != ids->end();
+            };
+            std::vector<TopoDS_Edge> found;
+            for (auto [a, b] : m_edgeFaceIdPairs) {
+                TopoDS_Edge hit;
+                for (int i = 1; i <= efm.Extent(); ++i) {
+                    const TopTools_ListOfShape& fs = efm.FindFromIndex(i);
+                    bool hasA = false, hasB = false;
+                    for (const TopoDS_Shape& f : fs) {
+                        if (faceHas(f, a)) hasA = true;
+                        if (faceHas(f, b)) hasB = true;
+                    }
+                    if (!hasA || !hasB) continue;
+                    // DISTINCT-CLAIM (see ChamferOp): fragments of one span
+                    // share the same face-id pair — first-hit collapsed the
+                    // selection onto one edge and starved the rebuild.
+                    bool claimed = false;
+                    for (const auto& u : found)
+                        if (u.IsSame(efm.FindKey(i))) { claimed = true; break; }
+                    if (claimed) continue;
+                    hit = TopoDS::Edge(efm.FindKey(i));
+                    break;
+                }
+                if (hit.IsNull()) { found.clear(); break; }
+                found.push_back(hit);
+            }
+            if (found.size() == m_edges.size()) {
+                m_edges = std::move(found);
+                edgesResolvedByLineage = true;
+            }
+        }
 
         // If an upstream edit regenerated the body, our stored edges have
         // stale TShapes — re-bind them to their successors by carrier
         // geometry so editing (say) a neighbouring fillet's radius doesn't
         // kill this op. Fails (loudly, via editStep) only when an edge was
         // genuinely consumed by the upstream change.
-        if (!SubShapeIndex::rebindEdges(m_previousShape, m_edges)) {
+        if (!edgesResolvedByLineage &&
+            !SubShapeIndex::rebindEdges(m_previousShape, m_edges)) {
             // Ordinal/carrier matching failed — the edges moved (e.g. a sketch
             // DIMENSION edit relocated a filleted corner). Try re-finding them
             // by the sketch vertex they sit over (generative anchoring).
@@ -175,6 +336,22 @@ bool FilletOp::execute(Document& doc) {
             }
         }
 
+        // Deduplicate: fragmented topology unified upstream can resolve several
+        // stored fragment edges onto ONE current edge — feeding MakeFillet the
+        // same edge repeatedly yields an invalid result (#54; chamfer twin).
+        {
+            std::vector<TopoDS_Edge> uniq;
+            for (const auto& e : m_edges) {
+                bool dup = false;
+                for (const auto& u : uniq) if (u.IsSame(e)) { dup = true; break; }
+                if (!dup) uniq.push_back(e);
+            }
+            if (uniq.size() != m_edges.size()) {
+                std::fprintf(stderr, "[Fillet] %zu stored edges resolved to %zu "
+                             "distinct — deduped\n", m_edges.size(), uniq.size());
+                m_edges = std::move(uniq);
+            }
+        }
         // Capture generative anchors from the (now-valid) edges the first time
         // we run — so a later dimension edit can re-find them by sketch feature.
         if (m_edgeAnchors.empty()) computeAnchors(doc);
@@ -190,7 +367,11 @@ bool FilletOp::execute(Document& doc) {
                 m_edgeRefs.push_back(materializr::topo::mint(e, mc));
         }
 
-        // Create fillet on the body shape
+        // Native attempt first. Every pre-existing gate is preserved, but a
+        // failure now NULLIFIES the candidate and falls through to the #55
+        // swept-arc cut fallback below instead of aborting outright.
+        TopoDS_Shape candidate;
+        {
         BRepFilletAPI_MakeFillet fillet(m_previousShape);
 
         for (const auto& edge : m_edges) {
@@ -203,14 +384,11 @@ bool FilletOp::execute(Document& doc) {
                 "[Fillet] BRepFilletAPI.IsDone() returned false (R=%.2f) "
                 "— OCCT refused to build the fillet at this radius.\n",
                 m_radius);
-            return false;
-        }
-
-        TopoDS_Shape candidate = fillet.Shape();
-        if (candidate.IsNull()) {
-            std::fprintf(stderr, "[Fillet] result shape is null (R=%.2f).\n",
-                         m_radius);
-            return false;
+        } else {
+            candidate = fillet.Shape();
+            if (candidate.IsNull())
+                std::fprintf(stderr, "[Fillet] result shape is null (R=%.2f).\n",
+                             m_radius);
         }
 
         // IsDone() is necessary but NOT sufficient: when fillet radii on
@@ -222,12 +400,12 @@ bool FilletOp::execute(Document& doc) {
         // corrupt body never gets committed to the document/history. (The bbox
         // and volume checks below catch grosser blow-outs but pass plenty of
         // invalid-but-plausibly-sized results.)
-        if (!BRepCheck_Analyzer(candidate).IsValid()) {
+        if (!candidate.IsNull() && !BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
                 "[Fillet] result failed BRepCheck_Analyzer (R=%.2f, %zu edges) "
                 "— invalid topology, refusing to commit.\n",
                 m_radius, m_edges.size());
-            return false;
+            candidate.Nullify();
         }
 
         // OCCT's fillet API is permissive — IsDone() returns true even when
@@ -246,7 +424,7 @@ bool FilletOp::execute(Document& doc) {
         //  inside, and not at all on the outside — the old "volume must
         //  not exceed input × 1.01" rule rejected the inside concave
         //  fillets even when geometrically fine.)
-        {
+        if (!candidate.IsNull()) {
             // AddOptimal walks the actual geometry rather than the looser
             // tolerance-padded extents the plain Add uses. Shelled bodies
             // tend to land in OCCT with face seams at ~1e-3 tolerance,
@@ -270,46 +448,134 @@ bool FilletOp::execute(Document& doc) {
                         m_radius,
                         ix1 - ix0, iy1 - iy0, iz1 - iz0,
                         ox1 - ox0, oy1 - oy0, oz1 - oz0);
-                    return false;
+                    candidate.Nullify();
                 }
             }
 
             GProp_GProps gpOut;
             BRepGProp::VolumeProperties(candidate, gpOut);
-            if (gpOut.Mass() < 1e-6) {
+            if (!candidate.IsNull() && gpOut.Mass() < 1e-6) {
                 std::fprintf(stderr,
                     "[Fillet] result volume ~= 0 (R=%.2f mm).\n",
                     m_radius);
-                return false;
+                candidate.Nullify();
             }
         }
 
-        // Publish the generation map (input edge -> blend faces) so the "gen"
-        // naming strategy can name a blend face by its generating edge — the
-        // general-kernel path for op-produced faces. Captured on every execute,
-        // so a rebuild's ledger reflects the current geometry.
-        m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
+        if (!candidate.IsNull()) {
+            // Publish the generation map (input edge -> blend faces) so the
+            // "gen" naming strategy can name a blend face by its generating
+            // edge — the general-kernel path for op-produced faces. Captured
+            // on every execute, so a rebuild's ledger reflects the current
+            // geometry.
+            m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
+            m_ledger.captureAdd(fillet, m_previousShape, TopAbs_FACE);
 
-        // Record the blend faces generated from each input edge so a later face
-        // click can be traced back to this fillet for re-editing.
-        m_generatedFaces.clear();
-        for (const auto& edge : m_edges) {
-            try {
-                const TopTools_ListOfShape& gen = fillet.Generated(edge);
-                // Range-based loop instead of TopTools_ListIteratorOfListOfShape,
-                // whose header was removed in OCCT 8.0 (still works on 7.x).
-                for (const TopoDS_Shape& s : gen) {
-                    if (s.ShapeType() == TopAbs_FACE)
-                        m_generatedFaces.push_back(s);
-                }
-            } catch (...) {}
+            // Record the blend faces generated from each input edge so a later
+            // face click can be traced back to this fillet for re-editing.
+            m_generatedFaces.clear();
+            for (const auto& edge : m_edges) {
+                try {
+                    const TopTools_ListOfShape& gen = fillet.Generated(edge);
+                    // Range-based loop instead of
+                    // TopTools_ListIteratorOfListOfShape, whose header was
+                    // removed in OCCT 8.0 (still works on 7.x).
+                    for (const TopoDS_Shape& s : gen) {
+                        if (s.ShapeType() == TopAbs_FACE)
+                            m_generatedFaces.push_back(s);
+                    }
+                } catch (...) {}
+            }
         }
+        } // native attempt
+
+        if (candidate.IsNull()) {
+            // #55: the native blend can't resolve against a surface feature
+            // crossing the edge. Build the same removal as a swept-arc
+            // boolean cut — collinear fragment selections merge into one
+            // span, so the round passes straight through the feature,
+            // exactly as if the fillet had preceded it in history. Only
+            // reached after the native build failed, so models where
+            // MakeFillet works never take this path. Convex straight edges
+            // between planar faces only (a cut can't ADD material, so
+            // concave fillets never come from here).
+            std::vector<TopoDS_Shape> blends;
+            TopoDS_Shape cutRes;
+            if (materializr::blendcut::cutFillet(m_previousShape, m_edges,
+                    m_radius, m_ledger, cutRes, blends)) {
+                candidate = cutRes;
+                m_generatedFaces = std::move(blends);
+                std::fprintf(stderr, "[Fillet] native blend failed — built "
+                             "as a swept-arc cut across the feature "
+                             "(#55, R=%.2f)\n", m_radius);
+            }
+        }
+        // LAST RESORT before failing: exact previously-successful params on
+        // the exact same input body → adopt the stored result (see ChamferOp;
+        // the "put the value back" case is the boolean fallback's worst case
+        // — everywhere-coincident geometry — yet the answer already exists).
+        if (candidate.IsNull()) {
+            for (auto it = m_storedResults.rbegin();
+                 it != m_storedResults.rend(); ++it) {
+                if (it->base.IsNull() || it->result.IsNull()) continue;
+                if (!m_previousShape.IsEqual(it->base)) continue;
+                if (std::abs(m_radius - it->r) > 1e-9) continue;
+                candidate = it->result;
+                m_generatedFaces = it->genFaces;
+                std::fprintf(stderr, "[Fillet] rebuild failed at known-good "
+                             "params — adopting the stored result (same "
+                             "input body, R=%.2f)\n", m_radius);
+                break;
+            }
+        }
+        if (candidate.IsNull()) return false;
 
         // Update the body with the filleted shape (kept on the op too, so
         // serializeParams can index the generated faces against the result).
         m_resultShape = candidate;
+        // Record this execute's naming so the NEXT run never guesses: each
+        // edge as its adjacent faces' lineage ids (see ChamferOp).
+        {
+            TopTools_IndexedDataMapOfShapeListOfShape efm;
+            TopExp::MapShapesAndAncestors(m_previousShape, TopAbs_EDGE,
+                                          TopAbs_FACE, efm);
+            std::vector<std::pair<int,int>> pairs;
+            for (const auto& e : m_edges) {
+                int a = -1, b = -1;
+                if (efm.Contains(e))
+                    for (const TopoDS_Shape& f : efm.FindFromKey(e)) {
+                        const auto* ids = materializr::topo::idsFor(inLineage, f);
+                        if (!ids || ids->empty()) continue;
+                        if (a < 0) a = ids->front();
+                        else if (b < 0 && ids->front() != a) b = ids->front();
+                    }
+                if (a < 0 || b < 0) { pairs.clear(); break; }
+                pairs.push_back({a, b});
+            }
+            if (pairs.size() == m_edges.size()) m_edgeFaceIdPairs = std::move(pairs);
+        }
+        m_prevFaceIds = inLineage;   // undo restores (partial-replay lifeline)
         doc.updateBody(m_bodyId, m_resultShape);
         doc.setBodyLedger(m_bodyId, &m_ledger);
+        {
+            // Face lineage (see ChamferOp): carry ancestry, stamp blends with
+            // stable ids (reused across re-executes).
+            materializr::topo::FaceIdMap next = materializr::topo::propagate(
+                {{&inLineage, m_previousShape}}, m_ledger, m_resultShape);
+            if (m_genFaceIds.size() != m_generatedFaces.size()) {
+                m_genFaceIds.clear();
+                for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                    m_genFaceIds.push_back(doc.mintFaceId());
+            }
+            for (size_t i = 0; i < m_generatedFaces.size(); ++i)
+                materializr::topo::addId(next, m_generatedFaces[i], m_genFaceIds[i]);
+            materializr::topo::complete(next, m_resultShape,
+                                        [&doc]() { return doc.mintFaceId(); });
+            doc.setBodyFaceIds(m_bodyId, std::move(next));
+        }
+        // Remember this build for the adopt-stored-result path (see above).
+        rememberResult(m_previousShape, m_resultShape);
+        guard.committed = true;   // success — keep the (re)resolved state
         return true;
     } catch (...) {
         return false;
@@ -323,6 +589,10 @@ bool FilletOp::undo(Document& doc) {
 
     try {
         doc.updateBody(m_bodyId, m_previousShape);
+        // Restore the input lineage captured at execute — updateBody wiped
+        // it, and a partial replay won't re-run the op that minted it.
+        if (!m_prevFaceIds.empty())
+            doc.setBodyFaceIds(m_bodyId, m_prevFaceIds);
         return true;
     } catch (...) {
         return false;
@@ -330,7 +600,7 @@ bool FilletOp::undo(Document& doc) {
 }
 
 std::string FilletOp::description() const {
-    return "Fillet R" + std::to_string(m_radius) + " on " +
+    return "Fillet R" + materializr::numStr(m_radius) + " on " +
            std::to_string(m_edges.size()) + " edge(s)";
 }
 
@@ -338,7 +608,7 @@ void FilletOp::renderProperties() {
     ImGui::Text("Fillet");
     ImGui::Separator();
 
-    ImGui::InputDouble("Radius", &m_radius, 0.1, 1.0, "%.3f");
+    materializr::inputNumber("Radius", &m_radius, 0.1, 1.0, "%g");
 
     ImGui::Text("Edges: %d selected", static_cast<int>(m_edges.size()));
     ImGui::Text("Body ID: %d", m_bodyId);
@@ -374,6 +644,17 @@ std::string FilletOp::serializeParams() const {
     }
     // Generative anchors (additive; old readers ignore the key). See EdgeAnchor.
     std::string anc = EdgeAnchor::serialize(m_edgeAnchors);
+    if (!m_genFaceIds.empty()) {
+        blob += ";genids=";
+        for (size_t i = 0; i < m_genFaceIds.size(); ++i)
+            blob += (i ? "," : "") + std::to_string(m_genFaceIds[i]);
+    }
+    if (!m_edgeFaceIdPairs.empty()) {
+        blob += ";edgefaces=";
+        for (size_t i = 0; i < m_edgeFaceIdPairs.size(); ++i)
+            blob += (i ? "," : "") + std::to_string(m_edgeFaceIdPairs[i].first)
+                  + ":" + std::to_string(m_edgeFaceIdPairs[i].second);
+    }
     if (!anc.empty()) blob += ";anchor=" + anc;
     // Topological edge names (additive, LAST — length-prefixed opaque blobs
     // read to end-of-string). Persisting them keeps a SEAM fillet/chamfer
@@ -425,6 +706,24 @@ bool FilletOp::deserializeParams(const std::string& blob) {
         else if (key == "body")   { m_bodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "edges")  { m_edgeIndices = SubShapeIndex::parse(val); any = true; }
         else if (key == "gen")    { m_genFaceIndices = SubShapeIndex::parse(val); any = true; }
+        else if (key == "genids") { m_genFaceIds = SubShapeIndex::parse(val); any = true; }
+        else if (key == "edgefaces") {
+            m_edgeFaceIdPairs.clear();
+            size_t q = 0;
+            while (q < val.size()) {
+                size_t c = val.find(',', q);
+                std::string tokp = val.substr(q, c == std::string::npos
+                                                     ? std::string::npos : c - q);
+                size_t col = tokp.find(':');
+                if (col != std::string::npos)
+                    m_edgeFaceIdPairs.push_back(
+                        {std::atoi(tokp.c_str()),
+                         std::atoi(tokp.c_str() + col + 1)});
+                if (c == std::string::npos) break;
+                q = c + 1;
+            }
+            any = true;
+        }
         else if (key == "anchor") {
             EdgeAnchor::parse(val, m_edgeAnchors);
             any = true;
@@ -466,11 +765,30 @@ bool FilletOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/) 
             m_generatedFaces = std::move(gen);
         }
     }
+    // Fallback for a save without generated-face indices (churn-dropped gen=):
+    // recover the blend faces geometrically so the history-hover highlight
+    // still previews. See ChamferOp.
+    if (m_generatedFaces.empty() && !m_resultShape.IsNull() &&
+        !m_previousShape.IsNull())
+        m_generatedFaces = facesCreatedVsPrev(m_resultShape, m_previousShape);
+    // Seed the known-good cache with the LOADED build (entry 0, never
+    // evicted): the original save is the answer for "put the value back".
+    rememberResult(m_previousShape, m_resultShape);
     return true;
 }
 
-void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
+void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                                     const materializr::topo::FaceIdMap* lineage) {
     if (currentBody.IsNull()) return;
+    // Lineage first — see ChamferOp::refreshGeneratedFaces.
+    if (lineage && !m_genFaceIds.empty()) {
+        std::vector<TopoDS_Shape> mine;
+        for (const auto& e : *lineage)
+            for (int id : e.ids)
+                if (std::find(m_genFaceIds.begin(), m_genFaceIds.end(), id) !=
+                    m_genFaceIds.end()) { mine.push_back(e.face); break; }
+        if (!mine.empty()) { m_generatedFaces = std::move(mine); return; }
+    }
 
     // The saved indices were captured against THIS fillet's local result shape;
     // resolving them against the final body (which may have more faces from
@@ -496,6 +814,18 @@ void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
     if (!m_genFaceIndices.empty() &&
         SubShapeIndex::resolveAll(currentBody, m_genFaceIndices, TopAbs_FACE, idxFaces)) {
         for (const auto& s : idxFaces) {
+            // A fillet blend is a cylinder / torus / sphere, or a free-form
+            // (bspline) blend — NEVER a plane or a cone. Reject those: they're
+            // ordinal-index drift onto unrelated faces once downstream ops
+            // reorder the body's face map (e.g. a later countersink chamfer's
+            // cone), which the -1 "unclassifiable" radius below would otherwise
+            // wave straight through, letting the fillet steal the chamfer's
+            // face (#49).
+            try {
+                GeomAbs_SurfaceType t =
+                    BRepAdaptor_Surface(TopoDS::Face(s)).GetType();
+                if (t == GeomAbs_Plane || t == GeomAbs_Cone) continue;
+            } catch (...) { continue; }
             double r = faceBlendRadius(TopoDS::Face(s));
             if (r >= 0.0 && std::fabs(r - m_radius) > rtol) continue; // wrong fillet
             bool dup = false;
@@ -511,7 +841,11 @@ void FilletOp::refreshGeneratedFaces(const TopoDS_Shape& currentBody) {
 }
 
 bool FilletOp::ownsFace(const TopoDS_Shape& face) const {
-    if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return false;
+    return ownsFaceScore(face) > 0;
+}
+
+int FilletOp::ownsFaceScore(const TopoDS_Shape& face) const {
+    if (face.IsNull() || face.ShapeType() != TopAbs_FACE) return 0;
     // A fillet blend is NEVER a plane (straight edges blend to cylinders,
     // curved/corner cases to tori/spheres/bsplines). Rehydrated generated-face
     // indices can mis-resolve after an old-save reload (ordinal drift) and
@@ -519,18 +853,19 @@ bool FilletOp::ownsFace(const TopoDS_Shape& face) const {
     // fillet editor instead of the face's own properties.
     try {
         BRepAdaptor_Surface bs(TopoDS::Face(face));
-        if (bs.GetType() == GeomAbs_Plane) return false;
+        if (bs.GetType() == GeomAbs_Plane) return 0;
     } catch (...) {}
     for (const auto& f : m_generatedFaces) {
-        if (f.IsSame(face)) return true;
+        if (f.IsSame(face)) return 2;   // exact identity on the live body
     }
     // Geometric fallback for when the body's faces were rebuilt (e.g. after a
-    // replay) and are no longer IsSame to the stored ones.
+    // replay) and are no longer IsSame to the stored ones — a WEAKER match, so
+    // an exact owner elsewhere in history wins over this (#49).
     gp_Pnt q;
-    if (!faceCenter(TopoDS::Face(face), q)) return false;
+    if (!faceCenter(TopoDS::Face(face), q)) return 0;
     for (const auto& f : m_generatedFaces) {
         gp_Pnt p;
-        if (faceCenter(TopoDS::Face(f), p) && p.Distance(q) < 1e-4) return true;
+        if (faceCenter(TopoDS::Face(f), p) && p.Distance(q) < 1e-4) return 1;
     }
-    return false;
+    return 0;
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include "TopoName.h"
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <string>
@@ -48,6 +49,10 @@ private:
     int m_sketchId = -1;
     TopoDS_Face m_targetFace;       // live face ref (fresh ops)
     std::vector<int> m_faceIndices; // SubShapeIndex ordinals (reloaded ops)
+    // Topological name for the target face (see MoveFaceOp): minted on the
+    // first execute, resolved when the handle goes stale because an upstream
+    // edit rebuilt/moved the face — a stale handle stamps at the OLD plane.
+    materializr::topo::Ref m_targetRef;
     std::vector<int> m_regionFilter; // region indices; empty = all
     double m_depth = 1.0;
     Mode m_mode = Mode::Engrave;

@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <map>
 
 namespace materializr {
 namespace touchui {
@@ -92,6 +94,35 @@ void drawIconCentered(ImDrawList* dl, const ImVec2& center, float size,
         for (const auto& c : ctr)
             dl->AddRect(ImVec2(c.x - hs, c.y - hs), ImVec2(c.x + hs, c.y + hs),
                         col, 0.0f, 0, th);
+        return;
+    }
+    // MZ_ICON_THREAD sentinel (U+E005): a side-on flat-head screw with a
+    // threaded shaft tapering to a point — reads as "cut threads", where the
+    // old refresh-arrows glyph read as "reload".
+    if (std::strcmp(icon, "\xee\x80\x85") == 0) {
+        const float th   = std::max(1.5f, size * 0.075f);
+        const float hw   = size * 0.32f;              // flat-head half-width
+        const float sw   = size * 0.15f;              // shaft half-width
+        const float topY = center.y - size * 0.44f;   // top of head
+        const float neck = center.y - size * 0.28f;   // head/shaft join
+        const float botY = center.y + size * 0.26f;   // shaft end / tip start
+        const float tipY = center.y + size * 0.46f;   // point
+        // Flat head.
+        dl->AddRectFilled(ImVec2(center.x - hw, topY),
+                          ImVec2(center.x + hw, neck), col, 1.0f);
+        // Shaft sides + pointed tip.
+        dl->AddLine(ImVec2(center.x - sw, neck), ImVec2(center.x - sw, botY), col, th);
+        dl->AddLine(ImVec2(center.x + sw, neck), ImVec2(center.x + sw, botY), col, th);
+        dl->AddLine(ImVec2(center.x - sw, botY), ImVec2(center.x, tipY), col, th);
+        dl->AddLine(ImVec2(center.x + sw, botY), ImVec2(center.x, tipY), col, th);
+        // Diagonal thread hatches across the shaft.
+        const int nT = 4;
+        const float dy = size * 0.045f;
+        for (int i = 0; i < nT; ++i) {
+            float y = neck + (botY - neck) * (i + 0.5f) / nT;
+            dl->AddLine(ImVec2(center.x - sw, y + dy),
+                        ImVec2(center.x + sw, y - dy), col, th * 0.9f);
+        }
         return;
     }
     ImFont* font = ImGui::GetFont();
@@ -397,10 +428,10 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
     return pressed;
 }
 
-float numberPadWidth(float keySide) {
+float numberPadWidth(float keyW) {
     const float s = uiScale();
-    if (keySide <= 0.0f) keySide = 52.0f * s;
-    return 3.0f * keySide + 2.0f * 6.0f * s;
+    if (keyW <= 0.0f) keyW = 68.0f * s;
+    return 3.0f * keyW + 2.0f * 6.0f * s;
 }
 
 void valueReadout(const char* id, const char* text, bool dim, float width) {
@@ -426,12 +457,17 @@ void valueReadout(const char* id, const char* text, bool dim, float width) {
     ImGui::PopID();
 }
 
-bool numberPad(const char* id, char* buf, size_t bufSize, float keySide,
-               bool allowSign) {
+bool numberPad(const char* id, char* buf, size_t bufSize, float keyW,
+               float keyH, bool allowSign) {
     const float s = uiScale();
-    if (keySide <= 0.0f) keySide = 52.0f * s;
+    if (keyW <= 0.0f) keyW = 68.0f * s;
+    if (keyH <= 0.0f) keyH = 42.0f * s;
     bool changed = false;
     ImGui::PushID(id);
+    // Nudge the glyphs UP a couple of px. ImGui centres a button label on the
+    // full frame height, which reads as sitting low once the keys are short
+    // and wide — the digit ends up optically below the middle of the key.
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.40f));
     static const char kRows[4][4] = {"789", "456", "123", ".0<"};
     for (int r = 0; r < 4; ++r) {
         for (int c = 0; c < 3; ++c) {
@@ -441,7 +477,7 @@ bool numberPad(const char* id, char* buf, size_t bufSize, float keySide,
             if (key == '<') std::snprintf(lbl, sizeof(lbl), "%s", ICON_IC_ERASE);
             else { lbl[0] = key; lbl[1] = '\0'; }
             ImGui::PushID(r * 3 + c);
-            if (ImGui::Button(lbl, ImVec2(keySide, keySide))) {
+            if (ImGui::Button(lbl, ImVec2(keyW, keyH))) {
                 size_t len = std::strlen(buf);
                 if (key == '<') {
                     if (len > 0) { buf[len - 1] = '\0'; changed = true; }
@@ -458,7 +494,7 @@ bool numberPad(const char* id, char* buf, size_t bufSize, float keySide,
     }
     if (allowSign) {
         // Full-width ± toggling a leading minus (push/pull: negative = cut).
-        if (ImGui::Button("+ / -", ImVec2(numberPadWidth(keySide), keySide))) {
+        if (ImGui::Button("+ / -", ImVec2(numberPadWidth(keyW), keyH))) {
             const size_t len = std::strlen(buf);
             if (buf[0] == '-') {
                 std::memmove(buf, buf + 1, len);   // includes the NUL
@@ -469,6 +505,7 @@ bool numberPad(const char* id, char* buf, size_t bufSize, float keySide,
             changed = true;
         }
     }
+    ImGui::PopStyleVar();   // ButtonTextAlign
     ImGui::PopID();
     return changed;
 }
@@ -507,6 +544,145 @@ bool amountField(const char* id, const char* label, double* v,
     ImGui::PopID();
     (void)padPos;   // pad-anchor no longer used (native keyboard)
     return changed;
+}
+
+bool numberField(const char* id, const char* label, double* v, const char* fmt,
+                 bool* opened, const char* hint) {
+    const float s = uiScale();
+    bool committed = false;
+
+    // Per-field entry buffer, keyed by ImGui id so a field scrolled away and
+    // back doesn't inherit another field's half-typed digits. s_open is the
+    // ONE unfolded field: opening a second collapses the first, which keeps
+    // the panel from growing by a pad per field. s_justOpened defers the
+    // scroll-into-view by a frame, so it runs once the pad has a real height.
+    struct Entry { char buf[32]; };
+    static std::map<ImGuiID, Entry> s_entries;
+    static ImGuiID s_open = 0;
+    static ImGuiID s_justOpened = 0;
+
+    ImGui::PushID(id);
+    const ImGuiID key = ImGui::GetID("##numfield");
+    const bool openHere = (s_open == key);
+
+    // Honour ImGui's label conventions, which InputDouble got for free and a
+    // plain TextUnformatted does not: "##id" means NO visible label (printing
+    // it verbatim leaked raw ids like "##sketchDimT" into the UI), and
+    // "Name##id" shows only "Name".
+    if (label && *label) {
+        const char* lblEnd = ImGui::FindRenderedTextEnd(label);
+        if (lblEnd > label) ImGui::TextUnformatted(label, lblEnd);
+    }
+
+    // The well doubles as the readout: while unfolded it shows the LIVE typed
+    // buffer, not the stored value. A separate calculator-style readout above
+    // the keys cost ~50*s of height and pushed the digits being typed out of
+    // view whenever the panel had to scroll to reach the keys — the field
+    // itself is the obvious place to show them, and it's already on screen.
+    const bool hintState = hint && *v <= 0.0;   // empty-is-meaningful fields
+    char shown[64];
+    if (openHere) {
+        const Entry& e = s_entries[key];
+        std::snprintf(shown, sizeof(shown), "%s",
+                      e.buf[0] ? e.buf : (hintState ? hint : "0"));
+    } else if (hintState) {
+        std::snprintf(shown, sizeof(shown), "%s", hint);
+    } else {
+        std::snprintf(shown, sizeof(shown), fmt ? fmt : "%g", *v);
+    }
+
+    // Fit the pad to the panel rather than the other way round. A fixed key
+    // width wider than the host panel doesn't just overflow — the well is
+    // sized to match it, and ImGui centres a button's label, so the label
+    // lands outside the clip rect and the field renders BLANK.
+    //
+    // Sizes are deliberately modest: the pad lives inside a scrolling
+    // properties panel UNDER as many as six other fields, so every row it
+    // spends is a row the caller has to scroll past.
+    const float gap   = 4.0f * s;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const float keyW  = std::min(std::max((avail - 2.0f * gap) / 3.0f, 38.0f * s),
+                                 78.0f * s);
+    // 24, not the 42 this started at. The pad lives in a scrolling properties
+    // column under as many as six other fields, so every unit of key HEIGHT is
+    // a unit the caller has to scroll past — and a number pad is the one
+    // keyboard where nobody needs a big target per key, because the keys are
+    // huge in the width axis and there are only twelve of them. Still ~48px on
+    // a tablet (uiScale ~2), comfortably above the 44pt touch-target floor.
+    const float keyH  = 24.0f * s;
+    const float padW  = numberPadWidth(keyW);
+
+    // A plain button, so the pad unfolds on an explicit tap and NOTHING else —
+    // the old keyboard's habit of appearing whenever a dialog opened is the
+    // specific behaviour this must not repeat.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f * s, 6.0f * s));
+    if (openHere)
+        ImGui::PushStyleColor(ImGuiCol_Text, accentFill());
+    else if (hintState)
+        ImGui::PushStyleColor(ImGuiCol_Text, textDim());
+    if (ImGui::Button(shown, ImVec2(avail, 0.0f))) {
+        if (openHere) {
+            s_open = 0;               // tapping the open field folds it again
+        } else {
+            Entry e{};
+            if (!hintState)   // hint fields start EMPTY: nothing typed = keep
+                std::snprintf(e.buf, sizeof(e.buf), fmt ? fmt : "%g", *v);
+            s_entries[key] = e;
+            s_open = key;
+            s_justOpened = key;
+            if (opened) *opened = true;
+        }
+    }
+    if (openHere || (!openHere && hintState)) ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+
+    // Park the well at the TOP of the view on the frame after it unfolds, so
+    // the whole pad has the panel's height below it. Scrolling the pad's
+    // BOTTOM into view instead (the obvious reading of "keep it visible")
+    // pushes the well — and so the digits being typed — off the top.
+    if (openHere && s_justOpened == key) {
+        ImGui::SetScrollHereY(0.0f);
+        s_justOpened = 0;
+    }
+
+    if (openHere) {
+        Entry& e = s_entries[key];
+
+        // allowSign=false: the pad's own sign key is a full-width row, and a
+        // separate Enter row under it made the block taller than the panel had
+        // room for. The three share one row instead.
+        numberPad("##pad", e.buf, sizeof(e.buf), keyW, keyH, /*allowSign=*/false);
+
+        const float thirdW = (padW - 2.0f * gap) / 3.0f;
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.5f, 0.40f));
+        if (ImGui::Button("+ / -", ImVec2(thirdW, keyH))) {
+            const size_t len = std::strlen(e.buf);
+            if (e.buf[0] == '-') {
+                std::memmove(e.buf, e.buf + 1, len);       // includes the NUL
+            } else if (len + 1 < sizeof(e.buf)) {
+                std::memmove(e.buf + 1, e.buf, len + 1);
+                e.buf[0] = '-';
+            }
+        }
+        ImGui::SameLine(0.0f, gap);
+        if (ImGui::Button(MZ_ICON_CLOSE, ImVec2(thirdW, keyH))) {
+            s_open = 0;               // fold, *v untouched
+        }
+        ImGui::SameLine(0.0f, gap);
+        // Enter commits. Parsing here rather than per keystroke is what makes
+        // the caller see one change instead of one per digit — a history-step
+        // editor rebuilds once on commit, not on every tap.
+        if (ImGui::Button("Enter", ImVec2(thirdW, keyH))) {
+            char* end = nullptr;
+            const double parsed = std::strtod(e.buf, &end);
+            if (end != e.buf) { *v = parsed; committed = true; }
+            s_open = 0;
+        }
+        ImGui::PopStyleVar();   // ButtonTextAlign
+    }
+
+    ImGui::PopID();
+    return committed;
 }
 
 bool amountField(const char* id, const char* label, float* v,

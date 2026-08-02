@@ -186,6 +186,22 @@ void SelectionHighlight::render(const SelectionManager& sel, const Document& doc
     }
 }
 
+void SelectionHighlight::highlightShapes(const std::vector<TopoDS_Shape>& shapes,
+                                         const glm::mat4& view,
+                                         const glm::mat4& projection,
+                                         const glm::vec3& color) {
+    if (!m_program) return;
+    const glm::mat4 vp = projection * view;
+    for (const auto& s : shapes) {
+        if (s.IsNull()) continue;
+        switch (s.ShapeType()) {
+            case TopAbs_FACE: renderFace(s, vp, color); break;
+            case TopAbs_EDGE: renderEdge(s, vp, color); break;
+            default:          renderBody(s, vp, color); break; // SOLID/SHELL/COMPOUND
+        }
+    }
+}
+
 // Free an entry's persistent GPU buffers (rebuild or eviction).
 void SelectionHighlight::freeEntryGL(CacheEntry& e) {
     if (e.vao) glDeleteVertexArrays(1, &e.vao);

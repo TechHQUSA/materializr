@@ -123,7 +123,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
     };
 
     if (m_sketchMode) {
-        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim.
+        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim, 12=Dimension.
         add(MZ_ICON_SELECT,  "Select",  ToolAction::SelectSketch, m_activeSketchMode == 1,
             "Pick sketch elements (points, lines, regions). Drag a selection to move it.");
         add(MZ_ICON_LINE,    "Line",    ToolAction::Line,         m_activeSketchMode == 2,
@@ -159,6 +159,9 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "width in the popup, tap to place.");
         add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
             "Trim a sketch segment at its nearest intersections.");
+        add(MZ_ICON_MEASURE, "Dimension", ToolAction::SketchDimension,
+            m_activeSketchMode == 12,
+            "Dimension: tap entities, tap to place the label, type the value.");
         // Sketch-element transforms — mirror the classic sketch toolbar so all
         // three layouts behave identically. Like classic, they're always here
         // in a sketch and simply no-op if nothing is selected. (The rail
@@ -271,7 +274,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         if (m_canEditDiameter) {
             add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
                 "Set the hole or boss to an exact diameter.");
-            add(MZ_ICON_ROTATE, "Thread", ToolAction::Thread, false,
+            add(MZ_ICON_THREAD, "Thread", ToolAction::Thread, false,
                 "Cut a helical screw thread into the picked cylindrical face — "
                 "external on a boss, internal in a hole.");
         }
@@ -283,20 +286,27 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 if (e.type == SelectionType::Face && !e.shape.IsNull()) {
                     pickedFace = e.shape; break;
                 }
-            if (!pickedFace.IsNull())
-                for (const auto& op : m_history->operations())
-                    if (op && op->isEnabled() && op->ownsFace(pickedFace)) {
-                        if (op->typeId() == "fillet")
-                            add(MZ_ICON_FILLET, "Edit Fillet",
-                                ToolAction::EditFilletChamfer, false,
-                                "Change this fillet's radius without re-picking edges.");
-                        else if (op->typeId() == "chamfer")
-                            add(MZ_ICON_CHAMFER, "Edit Chamfer",
-                                ToolAction::EditFilletChamfer, false,
-                                "Change this chamfer's distance without re-picking edges.");
-                        else continue;
-                        break;
-                    }
+            if (!pickedFace.IsNull()) {
+                // Pick the op that BEST owns the face — highest ownsFaceScore
+                // (exact IsSame beats the geometric fallback), latest on ties.
+                // The old first-match loop let an earlier fuzzy over-match (a
+                // big fillet) win over the actual chamfer (#49).
+                const Operation* best = nullptr; int bestScore = 0;
+                for (const auto& op : m_history->operations()) {
+                    if (!op || !op->isEnabled()) continue;
+                    if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
+                    int sc = op->ownsFaceScore(pickedFace);
+                    if (sc > 0 && sc >= bestScore) { bestScore = sc; best = op.get(); }
+                }
+                if (best && best->typeId() == "fillet")
+                    add(MZ_ICON_FILLET, "Edit Fillet",
+                        ToolAction::EditFilletChamfer, false,
+                        "Change this fillet's radius without re-picking edges.");
+                else if (best && best->typeId() == "chamfer")
+                    add(MZ_ICON_CHAMFER, "Edit Chamfer",
+                        ToolAction::EditFilletChamfer, false,
+                        "Change this chamfer's distance without re-picking edges.");
+            }
         }
         // Move/Rotate/Scale transform a flat face (its feature follows); on a
         // curved/fillet face they freak out or do nothing — hide them. #28
@@ -641,6 +651,9 @@ ToolAction Toolbar::renderSketchTools() {
         "extrude a logo or engrave it onto a face.");
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip("Trim a sketch segment at the nearest intersections.");
+    if (skBtn("Dimension", 12))    action = ToolAction::SketchDimension;
+    tip("Dimension tool (D): click a line, circle, point pair, or two lines, "
+        "place the label, then type the value.");
 
     // Transforms operate on the current sketch-element selection (Select tool +
     // click/Ctrl+click on points and lines). No-op if nothing is selected.
@@ -697,7 +710,7 @@ ToolAction Toolbar::renderSketchTools() {
     if (ImGui::Button("Finish Sketch", ImVec2(-1, bh(30))))
         action = ToolAction::FinishSketch;
     tip("Leave sketch mode and return to the 3D viewport. Keeps the sketch.");
-    if (ImGui::Button("Exit Sketch (discard)", ImVec2(-1, bh(30))))
+    if (ImGui::Button("Exit Sketch", ImVec2(-1, bh(30))))
         action = ToolAction::ExitSketchDiscard;
     tip("Discard the current sketch entirely and leave sketch mode. Rewinds "
         "history to before the sketch was entered; the body returns to its "
@@ -874,21 +887,24 @@ ToolAction Toolbar::renderFaceTools() {
             }
         }
         if (!pickedFace.IsNull()) {
+            // Best owner, not first: highest ownsFaceScore (exact > fuzzy),
+            // latest on ties — see the rail twin above and #49.
             const auto& ops = m_history->operations();
+            const Operation* best = nullptr; int bestScore = 0;
             for (const auto& op : ops) {
-                if (op && op->isEnabled() && op->ownsFace(pickedFace)) {
-                    const char* label = (op->typeId() == "fillet")
-                                            ? "Edit Fillet"
-                                            : (op->typeId() == "chamfer")
-                                                  ? "Edit Chamfer"
-                                                  : nullptr;
-                    if (label && ImGui::Button(label, ImVec2(-1, bh(30))))
-                        action = ToolAction::EditFilletChamfer;
-                    tip(op->typeId() == "fillet"
-                            ? "Change this fillet's radius without re-picking edges."
-                            : "Change this chamfer's distance without re-picking edges.");
-                    break;
-                }
+                if (!op || !op->isEnabled()) continue;
+                if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
+                int sc = op->ownsFaceScore(pickedFace);
+                if (sc > 0 && sc >= bestScore) { bestScore = sc; best = op.get(); }
+            }
+            if (best) {
+                const char* label = best->typeId() == "fillet" ? "Edit Fillet"
+                                                               : "Edit Chamfer";
+                if (ImGui::Button(label, ImVec2(-1, bh(30))))
+                    action = ToolAction::EditFilletChamfer;
+                tip(best->typeId() == "fillet"
+                        ? "Change this fillet's radius without re-picking edges."
+                        : "Change this chamfer's distance without re-picking edges.");
             }
         }
     }

@@ -41,6 +41,9 @@ public:
     static TopoDS_Face sharedReferenceFace(const TopoDS_Shape& body,
                                            const std::vector<TopoDS_Edge>& edges);
     const std::vector<TopoDS_Edge>& getEdges() const { return m_edges; }
+    // The bevel faces this chamfer produced on the live body — what ownsFace
+    // matches and what the history-step preview highlights.
+    const std::vector<TopoDS_Shape>& getGeneratedFaces() const { return m_generatedFaces; }
     // Body shape from the last execute()'s pre-state — used by the interactive
     // edit-by-clicking-face flow to preview an updated distance against the
     // body as it stood BEFORE this chamfer was applied.
@@ -54,6 +57,7 @@ public:
     void renderProperties() override;
     std::string typeId() const override { return "chamfer"; }
     bool ownsFace(const TopoDS_Shape& face) const override;
+    int ownsFaceScore(const TopoDS_Shape& face) const override;
     OperationDiff captureDiff() const override;
     std::vector<int> plannedBodyIds() const override { return {m_bodyId}; }
     std::string serializeParams() const override;
@@ -62,7 +66,8 @@ public:
     // Re-resolve generated-face indices against the body's CURRENT shape (e.g.
     // after downstream transforms moved the geometry). Called by the loader
     // after all ops are rehydrated so ownsFace() works on the final body.
-    void refreshGeneratedFaces(const TopoDS_Shape& currentBody);
+    void refreshGeneratedFaces(const TopoDS_Shape& currentBody,
+                               const materializr::topo::FaceIdMap* lineage = nullptr);
 
 private:
     int m_bodyId = -1;
@@ -78,6 +83,61 @@ private:
     TopoDS_Shape m_resultShape;
     std::vector<int> m_edgeIndices;
     std::vector<int> m_genFaceIndices;
+    // Stable lineage ids of this chamfer's bevel faces (FaceLineage.h) —
+    // minted at first execute, reused on re-execute, serialized (genids=).
+    std::vector<int> m_genFaceIds;
+    // Deterministic replay (topo naming, #52): the asymmetric reference
+    // face's lineage id, and each edge named by its two adjacent faces' ids.
+    // Persisted (refid= / edgefaces=); resolved against the input body's
+    // lineage map BEFORE any geometric guessing.
+    int m_refFaceId = -1;
+    std::vector<std::pair<int,int>> m_edgeFaceIdPairs;
+    // Input face lineage captured at execute; undo restores it so a PARTIAL
+    // replay (editStep starting after the map's producer) still has ancestry
+    // for the ops it re-runs.
+    materializr::topo::FaceIdMap m_prevFaceIds;
+
+    // Known-good builds: (input body, params) → result, kept for the loaded
+    // original plus recent in-session successes. When a REBUILD at exact
+    // previously-successful values on the exact same input fails — the "put
+    // it back to 15" case, where the new blend is everywhere coincident with
+    // features built on the original bevel, the worst case for the boolean
+    // fallback — adopt the stored result outright: identical input +
+    // identical params ⇒ that stored shape IS the answer. A single slot
+    // wasn't enough: a successful 16-edit overwrote the original 15 answer,
+    // so "back to 15" had nothing to adopt. Bounded; entry 0 (the loaded
+    // original) is never evicted. Shape handles are cheap (shared TShapes).
+    struct StoredResult {
+        TopoDS_Shape base, result;
+        double d = -1.0, d2 = -2.0;
+        std::vector<TopoDS_Shape> genFaces;
+    };
+    std::vector<StoredResult> m_storedResults;
+    void rememberResult(const TopoDS_Shape& base, const TopoDS_Shape& result);
+
+    // Transactional edit-state rollback (see Operation::snapshotEditState):
+    // everything a doomed replay's execute() may have rewritten.
+    struct EditSnap {
+        std::vector<TopoDS_Edge> edges;
+        std::vector<EdgeAnchor::Anchor> anchors;
+        std::vector<materializr::topo::Ref> refs;
+        std::vector<std::pair<int,int>> pairs;
+        materializr::topo::FaceIdMap prevFaceIds;
+        TopoDS_Shape previousShape, resultShape;
+        std::vector<TopoDS_Shape> generatedFaces;
+        std::vector<int> genFaceIds;
+        std::vector<StoredResult> storedResults;
+        double distance = 0.0, distance2 = -1.0;
+        int refFaceId = -1;
+        bool valid = false;
+    };
+    EditSnap m_editSnap;
+
+public:
+    void snapshotEditState() override;
+    void restoreEditState() override;
+
+private:
 
     // Generative anchors (EdgeAnchor.h) — same scheme as FilletOp.
     int m_sourceSketchId = -1;

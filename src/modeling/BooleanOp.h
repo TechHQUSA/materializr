@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Operation.h"
 #include "GenerationLedger.h"
+#include "FaceLineage.h"
 #include "../core/Document.h"
 #include <TopoDS_Shape.hxx>
 #include <string>
@@ -54,6 +55,16 @@ private:
     // For undo
     TopoDS_Shape m_previousTargetShape;
     TopoDS_Shape m_previousToolShape;
+    // Input face lineage of both bodies, captured at execute; undo restores
+    // them so a PARTIAL replay (editStep starting after this boolean) still
+    // has ancestry for the ops it re-runs.
+    materializr::topo::FaceIdMap m_prevTargetFaceIds;
+    materializr::topo::FaceIdMap m_prevToolFaceIds;
+    // Ids minted to complete the published map (faces with no inherited
+    // ancestry — e.g. when the inputs carried no lineage at all). REUSED
+    // across re-executes while the uncovered-face count is unchanged, so a
+    // downstream op's stored face-id pairs stay valid through a replay.
+    std::vector<int> m_mintedIds;
     // Generation map of the last execute(): input FACES (of BOTH the target
     // and the tool) -> the faces/edges they produced. Lets the "gen" naming
     // strategy name a boolean SEAM sub-shape by the two faces that made it.

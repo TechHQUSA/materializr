@@ -38,6 +38,18 @@ public:
     // it so the user can re-edit it. Default: operations own no faces.
     virtual bool ownsFace(const TopoDS_Shape& /*face*/) const { return false; }
 
+    // Match QUALITY for the Edit Fillet/Chamfer picker: 0 = not owned,
+    // 2 = exact (the face IsSame one of this op's generated faces on the live
+    // body), 1 = a post-rebuild geometric-centre fallback match. The picker
+    // prefers the highest score so a fuzzy over-match from an unrelated op
+    // (e.g. a big multi-edge fillet whose blend sits near a later countersink
+    // chamfer) can't steal a face its true owner claims exactly — the old
+    // first-op-in-history-wins loop mis-attributed exactly that case (#49).
+    // Default mirrors ownsFace() so non-fillet/chamfer ops need no override.
+    virtual int ownsFaceScore(const TopoDS_Shape& face) const {
+        return ownsFace(face) ? 1 : 0;
+    }
+
     // Report the body changes this op made, read from its stored undo data.
     // Non-destructive (unlike undo()). Default: no body changes (e.g. a sketch
     // edit). Used to persist the operation history in the project file.
@@ -72,6 +84,10 @@ public:
     // restore them.
     struct ReloadState {
         std::vector<int> created;
+        // The created bodies' shapes AFTER this step — lets a sketch-driven
+        // extrude derive WHICH regions it originally used from its own saved
+        // result's footprint on the sketch plane (#53, old-file recovery).
+        std::vector<std::pair<int, TopoDS_Shape>> createdAfter;
         std::vector<std::pair<int, TopoDS_Shape>> modifiedBefore;
         // The same modified bodies AFTER this step — sub-shape-referencing ops
         // resolve their generated-geometry indices (e.g. fillet blend faces
@@ -120,6 +136,19 @@ public:
     // parameter serialisation (no rescue possible — they fail-and-suspend).
     const std::string& lastGoodParams() const { return m_lastGoodParams; }
     void rememberGoodParams() { m_lastGoodParams = serializeParams(); }
+
+    // Transactional edit-state rollback (History::editStep). A doomed replay
+    // executes ops that individually SUCCEED before a later step fails; those
+    // executes mutate op-internal resolution state (a fillet/chamfer rewrites
+    // its stored edges/anchors/refs against the mid-replay bodies). Restoring
+    // the BODY snapshot alone leaves that state pointing at geometry that no
+    // longer exists, so the next edit attempt fails where a fresh session
+    // succeeds (the "one failed edit wedges the step until reload" bug).
+    // History snapshots every op before a transactional replay and restores
+    // them on failure. Default: stateless (most ops re-derive everything from
+    // the document); ops holding resolved sub-shape state override both.
+    virtual void snapshotEditState() {}
+    virtual void restoreEditState() {}
 
     // Wall-clock time this op was constructed (or restored to a stored value
     // on project load). Used by the HistoryPanel to bucket steps into

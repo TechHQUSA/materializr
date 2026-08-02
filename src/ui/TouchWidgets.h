@@ -64,8 +64,8 @@ bool timelineBox(const char* id, const char* icon, bool current, bool editing,
 // text in a framed well. `dim` styles placeholder/default values. `width`
 // should match the pad below it (numberPadWidth) so they read as one unit.
 void valueReadout(const char* id, const char* text, bool dim, float width);
-// Total width of a numberPad with the given key side (3 keys + 2 gaps).
-float numberPadWidth(float keySide = 0.0f);
+// Total width of a numberPad with the given key width (3 keys + 2 gaps).
+float numberPadWidth(float keyW = 0.0f);
 
 // In-app numeric keypad (7 8 9 / 4 5 6 / 1 2 3 / . 0 ⌫) editing `buf` in
 // place. Exists because the NATIVE mobile keyboard is a dead end for the
@@ -74,8 +74,12 @@ float numberPadWidth(float keySide = 0.0f);
 // dot anyway. Pure ImGui buttons: no SDL_StartTextInput, no IME, no focus.
 // `allowSign` adds a full-width ± key (push/pull's negative = cut).
 // Returns true when a key changed the buffer this frame.
-bool numberPad(const char* id, char* buf, size_t bufSize, float keySide = 0.0f,
-               bool allowSign = false);
+//
+// Keys are WIDER THAN TALL by default. A square grid is the phone-dialler
+// shape, but this pad lives in a side panel: height is the scarce axis and
+// width is the one going spare, so the keys spend the width they have.
+bool numberPad(const char* id, char* buf, size_t bufSize, float keyW = 0.0f,
+               float keyH = 0.0f, bool allowSign = false);
 
 // One-line numeric AMOUNT field for the im-touch layout: label + the value
 // in a tappable well; tapping opens a number-pad popup (big readout, keys,
@@ -89,6 +93,45 @@ bool amountField(const char* id, const char* label, double* v,
                  const char* suffix = "mm", int decimals = 1,
                  bool allowSign = false, double minV = 0.0, double maxV = 0.0,
                  const ImVec2* padPos = nullptr);
+
+// Touch numeric entry: a tappable well showing the current value, which
+// UNFOLDS the pad inline beneath itself. Returns true when the pad commits.
+//
+// Fourth attempt, and each earlier one ruled something out:
+//
+//  1. A full self-designed keyboard — clunky once it had to cover digits AND
+//     symbols AND letters, and it appeared whenever a dialog opened rather
+//     than when a field was focused. Hence digits only (letters keep the
+//     native keyboard, see inputNumber), and it unfolds only on a tap.
+//  2. The native keyboard (aab4bfb) — fixed a field-width bug but left
+//     tablets at the mercy of whatever the OS shows: a half-screen slab on
+//     stock Android, and on iOS one that froze the app when raised from the
+//     SDL loop.
+//  3. A pad in an ImGui popup — the popup had to be positioned by hand, which
+//     meant computing its height to keep it on screen (it was clipped off the
+//     bottom when that estimate ran low), flipping it above the field so it
+//     didn't cover the value being edited, and it could not be moved. On
+//     im-touch it also nested a popup inside the step-props popup.
+//
+// Unfolding in place deletes that entire category: no position to compute, no
+// clipping, nothing to cover the field, and the host panel scrolls it into
+// view like any other content. Only one field is unfolded at a time.
+//
+// The pad carries digits, decimal and backspace, plus sign, Enter (commit) and
+// ✗ (collapse, leaving the value untouched).
+// `opened`, when non-null, is set true on the frame the pad UNFOLDS. Some
+// callers must snapshot state at the moment editing begins rather than when it
+// commits — the sketch constraint fields take a copy of the whole sketch there
+// to serve as the undo "before". That was ImGui::IsItemActivated() on the
+// InputText they used to be; this is the equivalent.
+// `hint`, when non-null, marks a field whose EMPTY state is meaningful (the
+// im-touch circle bubble: no typed value = keep the dragged diameter). While
+// *v <= 0 the collapsed well shows the hint dimmed instead of "0", and the
+// pad unfolds with an EMPTY entry — Enter with nothing typed commits nothing
+// and just folds, preserving the "keep the drag" contract.
+bool numberField(const char* id, const char* label, double* v,
+                 const char* fmt = "%g", bool* opened = nullptr,
+                 const char* hint = nullptr);
 bool amountField(const char* id, const char* label, float* v,
                  const char* suffix = "mm", int decimals = 1,
                  bool allowSign = false, float minV = 0.0f, float maxV = 0.0f,

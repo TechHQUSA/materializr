@@ -16,13 +16,18 @@
 #include "modeling/SketchTransformOp.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
+#include "io/FileDialogs.h"   // Import → From Project… picker
+#include "app/ProjectSession.h" // Tabs submenu reads session names
+#include <filesystem>
 #include "ui/AboutDialog.h"
 #include "ui/HelpPanel.h"
+#include "ui/LandingPage.h"   // File → New Project dismisses the landing page
 #include "ui/LogoTexture.h"
 #include "ui/ShortcutsPanel.h"
 #include "ui/ThemeManager.h"
 #include "ui/Toolbar.h"
 #include "ui/TouchIcons.h"
+#include "ui/UiTheme.h"   // accentText for the touch tabs sheet heading
 #include "viewport/Viewport.h"
 #include "gl_common.h"
 #include "touch_mode.h"
@@ -42,6 +47,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <algorithm>   // std::max — tab-row width reservation
 
 namespace materializr {
 
@@ -56,9 +62,22 @@ ImTextureID logoTexture() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        // Pin the unpack state before the upload. This texture is created
+        // lazily on the first frame it's drawn, inheriting whatever GL pixel-
+        // store state the prior frame left set — if some earlier texture upload
+        // left GL_UNPACK_ROW_LENGTH non-zero (or a non-4 alignment), the logo
+        // reads its rows at the wrong stride and comes out garbled, and since
+        // the texture is static that corruption sticks for the whole session.
+        GLint prevRowLen = 0, prevAlign = 4;
+        glGetIntegerv(GL_UNPACK_ROW_LENGTH, &prevRowLen);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &prevAlign);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, materializr::kLogoTexW,
                      materializr::kLogoTexH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                      materializr::kLogoTexRGBA);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, prevRowLen);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, prevAlign);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
     return (ImTextureID)(intptr_t)tex;
@@ -156,9 +175,191 @@ void Application::touchUndo() {
     if (m_history->canUndo()) undoWithCascade();
 }
 
+// ─── Tab UI helpers (shared by all three layouts' tab affordances) ──────────
+
+bool Application::bodyExists(int bodyId) const {
+    if (bodyId < 0 || !m_document) return false;
+    const auto ids = m_document->getAllBodyIds();
+    return std::find(ids.begin(), ids.end(), bodyId) != ids.end();
+}
+
+std::string Application::sessionDisplayLabel(size_t i) const {
+    if (i >= m_sessions.size()) return "Untitled";
+    // Same fallback chain as projectDisplayName(): explicit name → file
+    // basename → Untitled. The active tab reads the LIVE working copies;
+    // inactive tabs read their stashed ones.
+    const std::string& name = (i == m_activeSession) ? m_currentProjectName
+                                                     : m_sessions[i]->projectName;
+    const std::string& path = (i == m_activeSession) ? m_currentProjectPath
+                                                     : m_sessions[i]->projectPath;
+    if (!name.empty()) return name;
+    if (!path.empty()) return std::filesystem::path(path).filename().string();
+    return "Untitled";
+}
+
+bool Application::sessionDirty(size_t i) const {
+    if (i >= m_sessions.size()) return false;
+    if (i == m_activeSession) return isDirty();
+    const ProjectSession& s = *m_sessions[i];
+    return (s.history && s.history->currentStep() != s.savedAtHistoryStep) ||
+           s.unsavedNonHistoryChanges;
+}
+
+bool Application::activateTabFor(size_t i) {
+    return i == m_activeSession || switchToSession(i);
+}
+
+void Application::renderTabMenuItems(size_t i) {
+    // Actions on a non-active tab activate it first; a refused switch
+    // (mid-sketch etc.) already toasted, so the action just doesn't happen.
+    if (ImGui::MenuItem("Save")) {
+        if (activateTabFor(i)) saveProjectQuick();
+    }
+    if (ImGui::MenuItem("Save As...")) {
+        if (activateTabFor(i)) saveProject();
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Close Tab")) {
+        if (activateTabFor(i))
+            guardedOpen([this]() { closeSession(m_activeSession); });
+    }
+}
+
+bool Application::openNewTab() {
+    const size_t idx = createSession();
+    if (switchToSession(idx)) return true;
+    closeSession(idx);   // refused switch: drop the orphan background tab
+    return false;
+}
+
+void Application::renderNewTabMenuBody() {
+    if (ImGui::MenuItem("New Project")) openNewTab();
+    // The open flavors land IN the new tab. Cancelling the picker leaves an
+    // empty tab behind (browser-style about:blank) — one click to close.
+    if (ImGui::MenuItem("Open Project...")) {
+        if (openNewTab()) loadProject();
+    }
+    if (ImGui::BeginMenu("Open Recent", !m_recentProjects.empty())) {
+        // Snapshot: openRecentProject() mutates m_recentProjects.
+        std::vector<AppSettings::RecentProject> snapshot = m_recentProjects;
+        for (size_t i = 0; i < snapshot.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            if (ImGui::MenuItem(snapshot[i].name.c_str())) {
+                if (openNewTab()) openRecentProject(snapshot[i]);
+            }
+            if (ImGui::IsItemHovered() && !snapshot[i].ref.empty())
+                ImGui::SetTooltip("%s", snapshot[i].ref.c_str());
+            ImGui::PopID();
+        }
+        ImGui::EndMenu();
+    }
+}
+
+void Application::renderViewportTabBar() {
+    // Classic only: the strip lives INSIDE the Viewport window, above the 3D
+    // image, styled like the dock tab bars — but it is a plain ImGui tab bar,
+    // not a dock node, so tabs cannot be dragged into the Tools/Items docks.
+    const ImGuiTabBarFlags barFlags = ImGuiTabBarFlags_FittingPolicyScroll;
+    if (!ImGui::BeginTabBar("##projectTabs", barFlags)) return;
+    // On a sync frame (the active session changed OUTSIDE this bar — menus,
+    // Ctrl+Tab, a refused switch), ImGui's internal selection still points at
+    // the OLD tab for this frame. Interpreting that stale "visible" as a user
+    // click would silently switch right back — so clicks are ignored for the
+    // whole sync frame while SetSelected drags ImGui to the real active tab.
+    const bool syncing = m_tabSelectionSync;
+    m_tabSelectionSync = false;
+    // Report hover so a press-and-hold here becomes the right-click that
+    // BeginPopupContextItem below is waiting for (see m_tabBarHovered).
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows |
+                               ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+        m_tabBarHovered = true;
+    bool closedOne = false;
+    for (size_t i = 0; i < m_sessions.size() && !closedOne; ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        ImGuiTabItemFlags tif = ImGuiTabItemFlags_NoReorder;
+        if (i == m_activeSession && syncing)
+            tif |= ImGuiTabItemFlags_SetSelected;
+        if (sessionDirty(i)) tif |= ImGuiTabItemFlags_UnsavedDocument;
+        bool open = true;
+        const bool visible =
+            ImGui::BeginTabItem(sessionDisplayLabel(i).c_str(), &open, tif);
+        if (ImGui::BeginPopupContextItem("tabctx")) {
+            renderTabMenuItems(i);
+            ImGui::EndPopup();
+        }
+        if (visible) {
+            ImGui::EndTabItem();
+            // Outside sync frames, a visible non-active tab = a user click.
+            // A refused switch re-arms the sync so the visual snaps back.
+            if (!syncing && i != m_activeSession) {
+                if (!switchToSession(i)) m_tabSelectionSync = true;
+            }
+        }
+        if (!open) {
+            // The tab's × — same guarded flow as the menu item.
+            if (activateTabFor(i))
+                guardedOpen([this]() { closeSession(m_activeSession); });
+            closedOne = true;   // indices may have shifted; finish this frame
+        }
+        ImGui::PopID();
+    }
+    if (!closedOne &&
+        ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing |
+                                      ImGuiTabItemFlags_NoTooltip))
+        ImGui::OpenPopup("##newTabMenu");
+    if (ImGui::BeginPopup("##newTabMenu")) {
+        renderNewTabMenuBody();
+        ImGui::EndPopup();
+    }
+    ImGui::EndTabBar();
+}
+
+void Application::renderTouchTabsSheet() {
+    // Im-touch: opened by tapping the project-name chip. Rows switch tabs;
+    // each row's ⋮ opens the shared Save / Save As / Close menu; the last
+    // row starts a fresh tab.
+    if (!ImGui::BeginPopup("##TouchTabs")) return;
+    ImGui::TextColored(materializr::accentText(), "Open projects");
+    ImGui::Separator();
+    for (size_t i = 0; i < m_sessions.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        std::string label = sessionDisplayLabel(i);
+        if (sessionDirty(i)) label += " \xe2\x80\xa2";
+        // The row and its ... are SEPARATE hit areas. Previously the row was a
+        // full-width MenuItem with the ... drawn on top of it, so a tap on the
+        // ... hit the MenuItem underneath: it switched tabs and — because a
+        // MenuItem closes its popup on activation — took the sheet down with
+        // it, so the menu could never appear. Reserve the width, and use a
+        // Selectable (which does NOT auto-close) so the two can coexist.
+        const ImGuiStyle& st = ImGui::GetStyle();
+        const float moreW = ImGui::CalcTextSize(MZ_ICON_MORE).x +
+                            st.FramePadding.x * 2.0f;
+        const float rowW  = std::max(1.0f, ImGui::GetContentRegionAvail().x -
+                                               moreW - st.ItemSpacing.x);
+        if (ImGui::Selectable(label.c_str(), i == m_activeSession,
+                              ImGuiSelectableFlags_None, ImVec2(rowW, 0.0f))) {
+            switchToSession(i);
+            ImGui::CloseCurrentPopup();   // MenuItem did this implicitly
+        }
+        ImGui::SameLine(0.0f, st.ItemSpacing.x);
+        if (ImGui::Button(MZ_ICON_MORE, ImVec2(moreW, 0.0f)))
+            ImGui::OpenPopup("touchtabctx");
+        if (ImGui::BeginPopup("touchtabctx")) {
+            renderTabMenuItems(i);
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+    ImGui::Separator();
+    // Same trio the desktop "+" offers — opens land in the new tab.
+    renderNewTabMenuBody();
+    ImGui::EndPopup();
+}
+
 // The four menu bodies, shared by classic's menu bar and the modern/im-touch
 // overflow popup — one item list each, so the layouts cannot drift.
 void Application::renderFileMenuItems(bool withSettings) {
+    if (ImGui::MenuItem("Home Screen")) goToHomeScreen();
     if (ImGui::MenuItem("Open Project...", "Ctrl+O")) loadProject();
     // Open Recent — persisted, most-recent-first. Greyed when empty.
     if (ImGui::BeginMenu("Open Recent", !m_recentProjects.empty())) {
@@ -181,7 +382,29 @@ void Application::renderFileMenuItems(bool withSettings) {
     }
     if (ImGui::MenuItem("Save Project", "Ctrl+S")) saveProjectQuick();
     if (ImGui::MenuItem("Save Project As...")) saveProject();
-    if (ImGui::MenuItem("New Project")) closeProject();
+    // A new project opens in its own tab (non-destructive — the current
+    // project keeps its tab); the landing page's New Project tile still
+    // resets in place, where the leaving-home guard has already run.
+    if (ImGui::MenuItem("New Project")) {
+        if (m_landingPage) m_landingPage->setVisible(false);
+        openNewTab();
+    }
+    ImGui::Separator();
+    if (ImGui::BeginMenu("Tabs", m_sessions.size() > 1)) {
+        for (size_t i = 0; i < m_sessions.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            if (ImGui::MenuItem(sessionDisplayLabel(i).c_str(),
+                                i == m_activeSession ? "(current)" : nullptr,
+                                i == m_activeSession))
+                switchToSession(i);
+            ImGui::PopID();
+        }
+        ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Close Tab")) {
+        // Same prompt-then-act path as every destructive project action.
+        guardedOpen([this]() { closeSession(m_activeSession); });
+    }
     ImGui::Separator();
 
     // Build Import submenu from IOFormat contributions
@@ -198,6 +421,19 @@ void Application::renderFileMenuItems(bool withSettings) {
                 fmt.importFn(*m_pluginContext, "");
             }
             ImGui::PopID();
+        }
+        ImGui::Separator();
+        // Cross-project parts: pick another project file, then choose which
+        // of its bodies/sketches to copy in (baked, non-parametric).
+        if (ImGui::MenuItem("From Project...")) {
+            FileDialogs::openFile("Import from Project",
+                {{"Materializr Projects", "*.mzr *.materializr"}},
+                [this](const std::string& p) {
+                    if (p.empty()) return;
+                    openPartsPicker(p,
+                        std::filesystem::path(p).filename().string(),
+                        /*intoNewProject=*/false);
+                });
         }
         ImGui::EndMenu();
     }
@@ -226,6 +462,7 @@ void Application::renderFileMenuItems(bool withSettings) {
             m_settingsOrbitButton = m_orbitButton;
             m_settingsPanButton = m_panButton;
             m_showSettings = true;
+            m_settingsRaise = true;
         }
     }
     ImGui::Separator();

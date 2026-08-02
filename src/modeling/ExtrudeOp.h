@@ -1,6 +1,8 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include "GenerationLedger.h"
+#include "FaceLineage.h"
 #include <TopoDS_Shape.hxx>
 #include <string>
 
@@ -66,7 +68,30 @@ private:
     // For undo
     int m_createdBodyId = -1;
     TopoDS_Shape m_previousTargetShape; // for boolean undo
+    // Face lineage through the boolean modes: the target's ancestry must
+    // survive an extrude-cut/union or every downstream lineage consumer
+    // (chamfer/fillet edge pairs) goes blind past this step. Ledger feeds
+    // the gen naming scheme; m_prevFaceIds is restored by undo (partial
+    // replay never re-runs the upstream minters); m_mintedIds keeps the
+    // completion ids STABLE across re-executes.
+    materializr::topo::GenerationLedger m_boolLedger;
+    materializr::topo::FaceIdMap m_prevFaceIds;
+    std::vector<int> m_mintedIds;
     // Optional: id of the sketch this extrude was built from. Used by the
     // cascade-on-sketch-edit path to re-derive m_profile and re-execute.
     int m_sketchId = -1;
+    // WHICH regions of that sketch this extrude used (#53): one point INSIDE
+    // each picked region, in sketch-2D. rebuildProfileFromSketch selects only
+    // regions containing these — without them it takes EVERY region of the
+    // sketch's current state, which breaks replay for the normal
+    // draw/extrude/draw-more-in-the-same-sketch workflow (four extrudes all
+    // re-deriving the same final compound). Captured at execute; persisted
+    // (regions=); derived from the saved body's footprint for old files.
+    std::vector<std::pair<double,double>> m_regionPts;
+    // Transient (rebuilt on every load): the saved body's footprint faces,
+    // translated onto the sketch plane. Used as the profile when the
+    // recorded regions no longer exist in the sketch's current state (the
+    // user later deleted/moved that geometry) — historically correct, and
+    // never the catastrophic every-region fallback (#53).
+    TopoDS_Shape m_recoveredProfile;
 };
