@@ -42,7 +42,7 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
     // (subscribed below) which flips this plugin's dirty flag so the next
     // frame's render pass picks up the new plane.
     auto action = [](materializr::PluginContext& c) {
-        c.requestInteractiveOp("ConstructionPlane");
+        c.requestInteractiveOp(materializr::InteractiveOp::ConstructionPlane);
     };
     ctx.registerToolbarButton({"Construction Plane", "Create",
         materializr::SelectionContext::Always, 50,
@@ -64,6 +64,14 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
         });
     ctx.events().subscribe<materializr::PlaneChangedEvent>(
         [](const materializr::PlaneChangedEvent&) {
+            if (g_state) g_state->dirty = true;
+        });
+    // A different TAB is now in front: this cache belongs to the old
+    // document. No Plane event fires for that (neither document changed —
+    // the active one did), so without this the previous project's planes
+    // keep drawing over the new one.
+    ctx.events().subscribe<materializr::ActiveDocumentChangedEvent>(
+        [](const materializr::ActiveDocumentChangedEvent&) {
             if (g_state) g_state->dirty = true;
         });
 

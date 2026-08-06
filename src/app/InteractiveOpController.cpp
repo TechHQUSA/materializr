@@ -12,6 +12,29 @@ namespace materializr {
 
 bool InteractiveOpController::begin(const IopContext& ctx) {
     int body = onBegin(ctx);
+    if (body == -1) return false;   // refused
+    if (previewModel() == PreviewModel::HistoryEdit) {
+        // No document snapshot here: the controller supplied its own pre-state
+        // (the edited op's), and the whole-document guard is
+        // HistoryEditPreview's job. Everything else is the controller's.
+        m_bodyId = body;
+        m_active = true;
+        m_commitRequested = false;
+        update(ctx);
+        return true;
+    }
+    if (previewModel() == PreviewModel::LiveOp) {
+        // Nothing to snapshot: the live instance's own undo() is the restore
+        // path, and the target may not exist yet (a free-space extrude mints
+        // its body). kNoTargetBody means "started, no body of my own".
+        m_bodyId = (body == kNoTargetBody) ? -1 : body;
+        m_active = true;
+        m_commitRequested = false;
+        m_liveOp.reset();
+        m_liveApplied = false;
+        update(ctx);
+        return true;
+    }
     if (body < 0) return false;
     try {
         m_snapshot = ctx.doc.getBody(body);
@@ -25,7 +48,12 @@ bool InteractiveOpController::begin(const IopContext& ctx) {
 }
 
 void InteractiveOpController::update(const IopContext& ctx) {
-    if (!m_active || m_bodyId < 0) return;
+    if (!m_active) return;
+    // HistoryEdit controllers override update/commit/cancel outright — the
+    // policy is entirely op-specific. Reaching the base here means one forgot.
+    if (previewModel() == PreviewModel::HistoryEdit) return;
+    if (previewModel() == PreviewModel::LiveOp) { updateLive(ctx); return; }
+    if (m_bodyId < 0) return;
     if (!wantsLivePreview(ctx)) {
         // Live preview suppressed (recomputing it per change would freeze the
         // UI). Keep the snapshot shown and mark preview "ok" so Confirm still
@@ -54,8 +82,56 @@ void InteractiveOpController::update(const IopContext& ctx) {
     }
 }
 
+// LiveOp preview: ONE instance, toggled against the document. Undo whatever
+// it currently has applied, push the new values in, run it again. History is
+// not involved until commit — and because it is the same instance every
+// frame, any body it creates keeps the same id (the whole point).
+void InteractiveOpController::updateLive(const IopContext& ctx) {
+    if (m_liveApplied && m_liveOp) {
+        try { m_liveOp->undo(ctx.doc); } catch (...) {}
+        m_liveApplied = false;
+    }
+    if (!m_liveOp) {
+        try { m_liveOp = buildOp(ctx); } catch (...) { m_liveOp.reset(); }
+    }
+    m_previewOk = false;
+    if (m_liveOp && wantsLivePreview(ctx)) {
+        try {
+            if (syncLiveOp(*m_liveOp) && m_liveOp->execute(ctx.doc)) {
+                m_liveApplied = true;
+                m_previewOk = true;
+            }
+        } catch (...) { m_liveApplied = false; }
+    }
+    markPreviewDirty(ctx);
+}
+
 void InteractiveOpController::commit(const IopContext& ctx) {
     if (!m_active) return;
+    if (previewModel() == PreviewModel::HistoryEdit) { cleanup(); return; }
+    if (previewModel() == PreviewModel::LiveOp) {
+        // A different op to record? Undo the preview and push it properly,
+        // so History executes it against the un-previewed document.
+        std::unique_ptr<Operation> alt;
+        try { alt = buildCommitOp(ctx); } catch (...) {}
+        if (alt) {
+            if (m_liveApplied && m_liveOp) {
+                try { m_liveOp->undo(ctx.doc); } catch (...) {}
+                m_liveApplied = false;
+            }
+            m_liveOp.reset();
+            ctx.history.pushOperation(std::move(alt), ctx.doc);
+        } else if (m_liveApplied && m_liveOp) {
+            // The preview IS the result — record it without re-running it.
+            ctx.history.pushExecuted(std::move(m_liveOp));
+        }
+        // Anything else (nothing applied — a zero-distance gesture) records
+        // nothing, which is right: the document is already untouched.
+        ctx.selection.clear();
+        ctx.markMeshesDirty();
+        cleanup();
+        return;
+    }
     // Roll back the preview; History::pushOperation re-runs the op cleanly
     // against the snapshot.
     ctx.doc.updateBody(m_bodyId, m_snapshot);
@@ -65,7 +141,7 @@ void InteractiveOpController::commit(const IopContext& ctx) {
     }
     std::unique_ptr<Operation> op = buildOp(ctx);
     if (op) {
-        if (!wantsLivePreview(ctx) && ctx.progress && ctx.deferHeavy) {
+        if (wantsDeferredCommit(ctx) && ctx.progress && ctx.deferHeavy) {
             // Heavy op (live preview was off): defer it to run BETWEEN frames
             // with a progress reporter so the window stays alive and the user
             // can cancel. A cancel makes execute() fail → pushOperation refuses
@@ -90,7 +166,12 @@ void InteractiveOpController::commit(const IopContext& ctx) {
 }
 
 void InteractiveOpController::cancel(const IopContext& ctx) {
-    if (m_bodyId >= 0 && !m_snapshot.IsNull()) {
+    if (previewModel() == PreviewModel::HistoryEdit) { cleanup(); return; }
+    if (previewModel() == PreviewModel::LiveOp) {
+        if (m_liveApplied && m_liveOp) {
+            try { m_liveOp->undo(ctx.doc); } catch (...) {}
+        }
+    } else if (m_bodyId >= 0 && !m_snapshot.IsNull()) {
         ctx.doc.updateBody(m_bodyId, m_snapshot);
     }
     ctx.markMeshesDirty();
@@ -101,8 +182,13 @@ void InteractiveOpController::cleanup() {
     m_active = false;
     m_commitRequested = false;
     m_previewOk = false;
+    // A latched handle must not survive the op — the viewport reads this to
+    // suppress camera orbit and picking, so leaving it set would wedge both.
+    m_draggingHandle = false;
     m_bodyId = -1;
     m_snapshot.Nullify();
+    m_liveOp.reset();
+    m_liveApplied = false;
     onCleanup();
 }
 

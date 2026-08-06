@@ -51,6 +51,8 @@ void SketchTool::setMode(SketchToolMode mode) {
     m_rectDimStage = 0;
     m_rectDimH = 0.0f;
     m_mirrorActive = false; // switching tools aborts any in-progress mirror
+    // Entering or leaving Dimension mode always starts a fresh pick sequence.
+    clearDimState();
 }
 
 SketchToolMode SketchTool::getMode() const {
@@ -64,9 +66,12 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
     m_charged = {};
     m_hoverCandidate = {};
 
-    // Trim picks by proximity to existing geometry; snapping the cursor first
-    // would pull the click toward unrelated nearby points/edges and pick wrong.
-    glm::vec2 snapped = (m_mode == SketchToolMode::Trim) ? pos : snap(pos);
+    // Trim (and Dimension) pick by proximity to existing geometry; snapping
+    // the cursor first would pull the click toward unrelated nearby
+    // points/edges and pick wrong.
+    glm::vec2 snapped = (m_mode == SketchToolMode::Trim || m_mode == SketchToolMode::Dimension)
+                             ? pos
+                             : snap(pos);
 
     // Rectangle stage-1 (width typed-in, cursor still drives height): the
     // click that commits the second corner should use the LOCKED width on the
@@ -120,12 +125,22 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
         case SketchToolMode::Svg:
             handleSvgTool(snapped);
             break;
+        case SketchToolMode::Dimension:
+            handleDimensionTool(snapped);
+            break;
         default:
             break;
     }
 }
 
 void SketchTool::onMouseMove(glm::vec2 pos) {
+    // Dimension mode has no drag/preview snapping of its own — just record the
+    // raw cursor for the ghost-label / hover-highlight overlay and bail before
+    // the snapping logic below (which doesn't apply to picking entities).
+    if (m_mode == SketchToolMode::Dimension) {
+        m_currentPos = pos;
+        return;
+    }
     // Trim uses the raw cursor for picking; snapping would pull the click toward
     // unrelated nearby targets and pick the wrong element.
     glm::vec2 newPos = (m_mode == SketchToolMode::Trim) ? pos : snap(pos);
@@ -267,6 +282,17 @@ void SketchTool::onConfirm() {
 }
 
 void SketchTool::onCancel() {
+    // Dimension mode: Escape backs out of an in-progress pick/placement
+    // first; only once nothing is pending does it fall through to exiting
+    // the tool (the app maps that by switching to Select).
+    if (m_mode == SketchToolMode::Dimension) {
+        if (m_dimPhase != DimPhase::PickFirst || m_dimReady) {
+            clearDimState();
+        } else {
+            setMode(SketchToolMode::Select);
+        }
+        return;
+    }
     // If only the first click of a line chain was made and we created its
     // anchor point fresh (no existing point was reused), drop that orphan so
     // a cancelled draw doesn't leave a stray yellow endpoint marker behind.
@@ -919,9 +945,34 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                                         * static_cast<float>(a.radius);
         if (allowSnaps && glm::length(pos - mid) < pointSnapThreshold) return mid;
     }
-    // Host face centroid (if sketch was started on a face).
+    // Centres of face-reference circles (hole rims, and the crest arcs of a
+    // threaded rod's cap): the TRUE axis point. Runs before the centroid
+    // snap below — on an asymmetric face (thread runout bites a chunk out
+    // of a cap) the area centroid sits visibly OFF the axis, and Steve
+    // hunting the cylinder centre kept landing on that shifted point.
+    if (allowSnaps && m_inferenceLevel != InferenceLevel::Off) {
+        for (const auto& fc : m_sketch->getFaceReferences().circles) {
+            if (glm::length(pos - fc.center) < pointSnapThreshold)
+                return fc.center;
+        }
+    }
+    // The host body's TRUE centre (thread axis ∩ sketch plane, recomputed on
+    // every sketch entry — new AND re-edit). It outranks the area centroid,
+    // and while it exists the centroid snap is suppressed ENTIRELY: on a
+    // threaded cap the centroid sits ~0.3mm off-axis, and with both points
+    // live the snap flip-flopped between them ("face center vs object
+    // center"), grabbing the wrong one whenever the cursor leaned its way.
+    glm::vec2 trueCenter;
+    const bool hasTrueCenter = m_sketch->getCenterPoint(trueCenter);
+    if (allowSnaps && hasTrueCenter &&
+        glm::length(pos - trueCenter) < pointSnapThreshold) {
+        return trueCenter;
+    }
+    // Host face centroid (if sketch was started on a face) — only when no
+    // true centre is known.
     glm::vec2 faceCenter;
-    if (allowSnaps && m_sketch->getSourceFaceCentroid(faceCenter) &&
+    if (allowSnaps && !hasTrueCenter &&
+        m_sketch->getSourceFaceCentroid(faceCenter) &&
         glm::length(pos - faceCenter) < pointSnapThreshold) {
         return faceCenter;
     }
@@ -1486,6 +1537,31 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         return unsnapped;
     };
 
+    // Land a guide result ON the snap lattice. With snap-to-grid on, the grid
+    // is an explicit precision request, and a DIRECTIONAL guide (perpendicular
+    // / parallel / axis-from-point / angle / tangent) only says which WAY to
+    // go — it has no business deciding where between two grid lines you end
+    // up. gridAlongLine below only rounds the guide's dominant axis and solves
+    // the other one on the line, so the free coordinate came out at whatever
+    // the geometry happened to give: a perpendicular off a chain landed at
+    // x=9.0033 on a 0.1 mm grid, a guide pair at y=12.2012. Over a few
+    // segments that reads as the grid wandering arbitrarily (Steve,
+    // 2026-07-31: "I cannot draw a line on that snap grid").
+    //
+    // CONTACT guides are the exception and must stay exact: an OnLine landing
+    // is a point ON an existing edge, which is a topological claim — buildWires
+    // splits that segment at the contact point to route a loop through it, and
+    // a point rounded a few microns off the edge silently stops closing the
+    // region. Those keep gridAlongLine's on-the-line result.
+    auto onLattice = [&](glm::vec2 p) {
+        if (!m_snapToGridEnabled || m_gridStep <= 0.0f) return p;
+        return glm::vec2(std::round(p.x / m_gridStep) * m_gridStep,
+                         std::round(p.y / m_gridStep) * m_gridStep);
+    };
+    auto isContact = [](InferenceGuide::Kind k) {
+        return k == InferenceGuide::OnLine;
+    };
+
     // Intersection cap is WIDER than the single-line posCap: each cand only
     // enters the list after passing its own perpDist tolerance, so a two-cand
     // pair is already user-deliberate (both inferences fired cleanly). The
@@ -1542,6 +1618,22 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                k == InferenceGuide::OnLineExtension;
     };
     if (bestI >= 0) {
+        // A pair of purely directional guides is quantized outright — both
+        // relationships are about direction, so the lattice decides position.
+        // With ONE contact guide in the pair the point has to stay on that
+        // edge, so quantize ALONG it instead (the directional half then holds
+        // approximately, which is the right way round: the edge landing is
+        // topology, the direction is a hint). Two contacts crossing is a real
+        // vertex — leave it exactly where the geometry puts it.
+        const bool ci = isContact(cands[bestI].kind);
+        const bool cj = isContact(cands[bestJ].kind);
+        if (!ci && !cj) {
+            bestIsect = onLattice(bestIsect);
+        } else if (ci != cj) {
+            const auto& con = ci ? cands[bestI] : cands[bestJ];
+            bestIsect = gridAlongLine(con.anchor, con.dir, con.isSegment,
+                                      con.segLen, bestIsect);
+        }
         emitWithSnap(cands[bestI], bestIsect);
         emitWithSnap(cands[bestJ], bestIsect);
         // A pair intersection is a deliberate composite of two guides — never
@@ -1561,6 +1653,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     if (bestK >= 0) {
         const auto& c = cands[bestK];
         glm::vec2 snapped = gridAlongLine(c.anchor, c.dir, c.isSegment, c.segLen, c.proj);
+        if (!isContact(c.kind)) snapped = onLattice(snapped);
         emitWithSnap(c, snapped);
         // Preserve a borrowed direction (parallel/perp/tangent/on-line) exactly;
         // only flatten genuinely free near-axis results.
@@ -1613,8 +1706,8 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                     }
                     // Grid-along-line so the ray's endpoint lands on a lattice
                     // step instead of sub-grid drift.
-                    snappedPos = gridAlongLine(m_firstClick, dir, false,
-                                                0.0f, snappedPos);
+                    snappedPos = onLattice(gridAlongLine(m_firstClick, dir, false,
+                                                         0.0f, snappedPos));
                     m_activeInferences.push_back(
                         {InferenceGuide::AngleSnap, m_firstClick,
                          snappedPos, -1});
@@ -2034,9 +2127,42 @@ void SketchTool::handleArcTool(glm::vec2 pos) {
                 int existing = findCoincidentPoint(p, -1);
                 return (existing >= 0) ? existing : m_sketch->addPoint(p);
             };
-            int centerId = reuseOrAdd(center);
+            // ENDPOINTS weld — that is the point of clicking near existing
+            // geometry, and both were snapped before they got here, so the weld
+            // lands on the same point and moves nothing.
             int startId  = reuseOrAdd(start);
             int endId    = reuseOrAdd(end);
+
+            // The CENTRE must not. It is a DERIVED point (the circumcentre),
+            // not something the user aimed at, and welding it to whatever
+            // happens to sit within 0.3mm silently breaks the invariant the
+            // renderer draws with: it sweeps `arc.radius` about the centre
+            // POINT between the endpoint ANGLES, so the curve only touches its
+            // endpoints while |start-centre| == radius == |end-centre|. Welding
+            // moved the centre and left radius computed from the old one, so
+            // the arc placed itself a fraction off the ends it was anchored to
+            // — "shifts over and is no longer anchored" (Steve, 2026-07-30).
+            // Reuse only a point that IS the centre to within float noise,
+            // which keeps concentric geometry sharing a point without ever
+            // moving the arc.
+            int centerId = -1;
+            // `near` is a <windef.h> macro — see MoveHoleOp::classifyRimEdges.
+            // This TU happens not to pull windows.h in today, so it compiles;
+            // renamed anyway so an include change can't turn it into a
+            // baffling MSVC syntax error later.
+            if (const int nearId = findCoincidentPoint(center, -1); nearId >= 0) {
+                if (const auto* np = m_sketch->getPoint(nearId))
+                    if (glm::length(np->pos - center) < 1e-4f) centerId = nearId;
+            }
+            if (centerId < 0) centerId = m_sketch->addPoint(center);
+
+            // Radius from the FINAL positions, not the pre-weld ones: if an
+            // endpoint did move, the stored radius has to move with it or the
+            // same detachment reappears from the other end.
+            if (const auto* cp = m_sketch->getPoint(centerId)) {
+                if (const auto* sp = m_sketch->getPoint(startId))
+                    radius = glm::length(sp->pos - cp->pos);
+            }
 
             // Store the endpoints in the order whose CCW sweep passes
             // through the user's MID click. addArc keeps only (center,
@@ -3085,6 +3211,347 @@ void SketchTool::undoLastStamp() {
     std::fprintf(stderr, "[Stamp] removed last placement (%zu elements, %zu stamp(s) left)\n",
                  ids.size(), m_stampStack.size() - 1);
     m_stampStack.pop_back();
+}
+
+// --- Dimension tool ---------------------------------------------------
+
+DimPick SketchTool::hitTestDimEntity(glm::vec2 pos) const {
+    DimPick out;
+    if (!m_sketch) return out;
+    int nearPt = findCoincidentPoint(pos, -1);
+    if (nearPt >= 0) {
+        // Text glyph geometry is not dimensionable — fall through and let a
+        // real line/circle/arc at this position win instead (a fromText hit
+        // must not abort the whole hit test).
+        const SketchPoint* p = m_sketch->getPoint(nearPt);
+        if (p && !p->fromText) {
+            // A circle / arc CENTRE resolves to its circle, not the bare
+            // point: dimensioning to a lone centre almost always means the
+            // circle (diameter, or a gap to another circle). Picking the
+            // point would instead make a centre-to-centre distance, which is
+            // rarely what's wanted and blocks the rim-gap dim.
+            for (const auto& c : m_sketch->getCircles())
+                if (c.centerPointId == nearPt) return {DimEntityKind::Circle, c.id};
+            for (const auto& a : m_sketch->getArcs())
+                if (a.centerPointId == nearPt) return {DimEntityKind::Arc, a.id};
+            return {DimEntityKind::Point, nearPt};
+        }
+    }
+    const float tol = std::max(m_gridStep * 0.5f, 0.5f) * snapScale();
+    // Lines (segment distance), skipping fromText — same math as handleSelectTool.
+    float bestD = 0.0f; int bestLine = -1;
+    for (const auto& l : m_sketch->getLines()) {
+        if (l.fromText) continue;
+        const SketchPoint* a = m_sketch->getPoint(l.startPointId);
+        const SketchPoint* b = m_sketch->getPoint(l.endPointId);
+        if (!a || !b) continue;
+        glm::vec2 ab = b->pos - a->pos;
+        float len2 = glm::dot(ab, ab);
+        if (len2 < 1e-12f) continue;
+        float t = glm::clamp(glm::dot(pos - a->pos, ab) / len2, 0.0f, 1.0f);
+        float d = glm::distance(a->pos + ab * t, pos);
+        if (d < tol && (bestLine < 0 || d < bestD)) { bestLine = l.id; bestD = d; }
+    }
+    if (bestLine >= 0) return {DimEntityKind::Line, bestLine};
+    // Circle then arc perimeters — same as handleSelectTool.
+    float bestCd = 0.0f; int bestCircle = -1;
+    for (const auto& c : m_sketch->getCircles()) {
+        const SketchPoint* ctr = m_sketch->getPoint(c.centerPointId);
+        if (!ctr) continue;
+        float d = std::abs(glm::distance(pos, ctr->pos) - static_cast<float>(c.radius));
+        if (d < tol && (bestCircle < 0 || d < bestCd)) { bestCircle = c.id; bestCd = d; }
+    }
+    if (bestCircle >= 0) return {DimEntityKind::Circle, bestCircle};
+    float bestAd = 0.0f; int bestArc = -1;
+    for (const auto& a : m_sketch->getArcs()) {
+        const SketchPoint* ctr = m_sketch->getPoint(a.centerPointId);
+        if (!ctr) continue;
+        float d = std::abs(glm::distance(pos, ctr->pos) - static_cast<float>(a.radius));
+        if (d < tol && (bestArc < 0 || d < bestAd)) { bestArc = a.id; bestAd = d; }
+    }
+    if (bestArc >= 0) return {DimEntityKind::Arc, bestArc};
+    return out;
+}
+
+void SketchTool::handleDimensionTool(glm::vec2 pos) {
+    if (!m_sketch) return;
+    m_currentPos = pos;
+    switch (m_dimPhase) {
+        case DimPhase::PickFirst: {
+            DimPick hit = hitTestDimEntity(pos);
+            if (hit.kind == DimEntityKind::None) return;
+            m_dimPickA = hit;
+            if (hit.kind == DimEntityKind::Line ||
+                hit.kind == DimEntityKind::Circle ||
+                hit.kind == DimEntityKind::Arc)
+                // Tentative single-entity dim (line length / circle diameter),
+                // but stay open for a second pick: a second circle/arc turns
+                // this into a centre-to-centre distance, a second line into a
+                // distance/angle. Empty space commits the tentative dim.
+                m_dimPending = resolveDimension(*m_sketch, hit, DimPick{});
+            else
+                m_dimPending = PendingDimension{}; // lone point: no dim yet
+            m_dimPhase = DimPhase::PickSecondOrPlace;
+            return;
+        }
+        case DimPhase::PickSecondOrPlace: {
+            DimPick hit = hitTestDimEntity(pos);
+            if (hit.kind != DimEntityKind::None) {
+                if (hit.kind == m_dimPickA.kind && hit.id == m_dimPickA.id) {
+                    m_dimRejectReason = "Same entity — pick a different one.";
+                    return;
+                }
+                PendingDimension pair = resolveDimension(*m_sketch, m_dimPickA, hit);
+                if (pair.valid) { m_dimPending = pair; m_dimPhase = DimPhase::PlaceLabel; return; }
+                // Invalid combo: picks unchanged, but say why rather than
+                // letting the click look like a miss.
+                m_dimRejectReason =
+                    (m_dimPickA.kind == DimEntityKind::Line && hit.kind == DimEntityKind::Line)
+                        ? "These lines can't be dimensioned to each other "
+                          "(they meet, or are collinear)."
+                        : "That pair can't be dimensioned.";
+                return;
+            }
+            // Empty space: places the tentative single-entity dim (line length).
+            if (m_dimPending.valid) { m_dimLabelPos = pos; m_dimReady = true; return; }
+            // Lone point + empty space: nothing to measure yet.
+            m_dimRejectReason = "A single point has no dimension — "
+                                "pick a second entity.";
+            return;
+        }
+        case DimPhase::PlaceLabel: {
+            m_dimLabelPos = pos;
+            m_dimReady = true;
+            return;
+        }
+    }
+}
+
+void SketchTool::clearDimState() {
+    m_dimPhase = DimPhase::PickFirst;
+    m_dimPickA = DimPick{};
+    m_dimPending = PendingDimension{};
+    m_dimReady = false;
+}
+
+PendingDimension SketchTool::resolveDimension(const Sketch& sk, DimPick a, DimPick b) {
+    PendingDimension out;
+    auto lineById = [&sk](int id) -> const SketchLine* {
+        for (const auto& l : sk.getLines()) if (l.id == id) return &l;
+        return nullptr;
+    };
+    auto lineEnds = [&sk, &lineById](int id, glm::vec2& s, glm::vec2& e) {
+        const SketchLine* l = lineById(id);
+        if (!l) return false;
+        const SketchPoint* sp = sk.getPoint(l->startPointId);
+        const SketchPoint* ep = sk.getPoint(l->endPointId);
+        if (!sp || !ep) return false;
+        s = sp->pos; e = ep->pos;
+        return true;
+    };
+    auto perpDist = [](glm::vec2 p, glm::vec2 s, glm::vec2 e) -> double {
+        glm::vec2 d = e - s;
+        float len = glm::length(d);
+        if (len < 1e-10f) return -1.0;
+        glm::vec2 r = p - s;
+        return std::abs(static_cast<double>(d.x) * r.y -
+                        static_cast<double>(d.y) * r.x) / len;
+    };
+    // Centre point id of a picked circle or arc (both store centerPointId).
+    auto centerPointId = [&sk](DimPick pk) -> int {
+        if (pk.kind == DimEntityKind::Circle)
+            for (const auto& c : sk.getCircles())
+                if (c.id == pk.id) return c.centerPointId;
+        if (pk.kind == DimEntityKind::Arc)
+            for (const auto& a : sk.getArcs())
+                if (a.id == pk.id) return a.centerPointId;
+        return -1;
+    };
+
+    // Single-entity dims.
+    if (b.kind == DimEntityKind::None) {
+        if (a.kind == DimEntityKind::Circle) {
+            for (const auto& c : sk.getCircles())
+                if (c.id == a.id) { out = {ConstraintType::Radius, a.id, -1, c.radius, true}; break; }
+            return out;
+        }
+        if (a.kind == DimEntityKind::Arc) {
+            for (const auto& ar : sk.getArcs())
+                if (ar.id == a.id) { out = {ConstraintType::Radius, a.id, -1, ar.radius, true}; break; }
+            return out;
+        }
+        if (a.kind == DimEntityKind::Line) {
+            const SketchLine* l = lineById(a.id);
+            glm::vec2 s, e;
+            if (l && lineEnds(a.id, s, e))
+                out = {ConstraintType::Distance, l->startPointId, l->endPointId,
+                       static_cast<double>(glm::distance(s, e)), true};
+            return out;
+        }
+        return out; // lone point: invalid
+    }
+
+    auto isCurve = [](DimEntityKind k) {
+        return k == DimEntityKind::Circle || k == DimEntityKind::Arc;
+    };
+    auto radiusOf = [&sk](DimPick pk) -> double {
+        if (pk.kind == DimEntityKind::Circle)
+            for (const auto& c : sk.getCircles())
+                if (c.id == pk.id) return c.radius;
+        if (pk.kind == DimEntityKind::Arc)
+            for (const auto& a : sk.getArcs())
+                if (a.id == pk.id) return a.radius;
+        return -1.0;
+    };
+    // Two circles/arcs → rim-to-rim gap (centre distance minus both radii),
+    // the clearance a machinist reads between the two circle edges — NOT the
+    // centre distance. entityA/entityB stay the circle ids so the solver can
+    // recompute the gap as radii change.
+    if (isCurve(a.kind) && isCurve(b.kind)) {
+        int ca = centerPointId(a), cb = centerPointId(b);
+        const SketchPoint* pa = sk.getPoint(ca);
+        const SketchPoint* pb = sk.getPoint(cb);
+        double rA = radiusOf(a), rB = radiusOf(b);
+        if (pa && pb && ca != cb && rA >= 0.0 && rB >= 0.0)
+            out = {ConstraintType::CircleGap, a.id, b.id,
+                   static_cast<double>(glm::distance(pa->pos, pb->pos)) - rA - rB,
+                   true};
+        return out;
+    }
+
+    // A circle/arc paired with a line or a point dimensions from its CENTRE.
+    // hitTestDimEntity deliberately resolves a centre-point click to the
+    // circle itself (so the rim-gap dim stays reachable), which left the
+    // centre unpickable and made hole-centre-to-edge — the most common
+    // dimension on a machining drawing — impossible to create at all.
+    // Substituting the centre point here recovers it without a modifier key,
+    // so it works the same on touch.
+    if (isCurve(a.kind) && (b.kind == DimEntityKind::Line ||
+                            b.kind == DimEntityKind::Point)) {
+        int ca = centerPointId(a);
+        if (ca < 0) return out;
+        a = {DimEntityKind::Point, ca};
+    } else if (isCurve(b.kind) && (a.kind == DimEntityKind::Line ||
+                                   a.kind == DimEntityKind::Point)) {
+        int cb = centerPointId(b);
+        if (cb < 0) return out;
+        b = {DimEntityKind::Point, cb};
+    }
+
+    // Normalize point-first for the mixed pair.
+    if (a.kind == DimEntityKind::Line && b.kind == DimEntityKind::Point) std::swap(a, b);
+
+    if (a.kind == DimEntityKind::Point && b.kind == DimEntityKind::Point) {
+        const SketchPoint* pa = sk.getPoint(a.id);
+        const SketchPoint* pb = sk.getPoint(b.id);
+        if (pa && pb)
+            out = {ConstraintType::Distance, a.id, b.id,
+                   static_cast<double>(glm::distance(pa->pos, pb->pos)), true};
+        return out;
+    }
+    if (a.kind == DimEntityKind::Point && b.kind == DimEntityKind::Line) {
+        const SketchPoint* p = sk.getPoint(a.id);
+        glm::vec2 s, e;
+        if (p && lineEnds(b.id, s, e)) {
+            // Reject a point that IS an endpoint of the target line: the
+            // perpendicular distance is then 0 by construction, so a
+            // DistancePointLine constraint pinned at 0 has no direction to
+            // correct along — applyCorrection's ~value/2 nudge on the point
+            // and the line's endpoints cancels itself out every iteration
+            // and flings the other endpoint outward instead of converging.
+            const SketchLine* bl = lineById(b.id);
+            if (bl && (a.id == bl->startPointId || a.id == bl->endPointId)) return out;
+            double d = perpDist(p->pos, s, e);
+            if (d >= 0.0) out = {ConstraintType::DistancePointLine, a.id, b.id, d, true};
+        }
+        return out;
+    }
+    if (a.kind == DimEntityKind::Line && b.kind == DimEntityKind::Line) {
+        glm::vec2 as, ae, bs, be;
+        if (!lineEnds(a.id, as, ae) || !lineEnds(b.id, bs, be)) return out;
+        glm::vec2 da = ae - as, db = be - bs;
+        if (glm::length(da) < 1e-10f || glm::length(db) < 1e-10f) return out;
+        // Signed angle of B relative to A, wrapped to [-π, π] — same
+        // convention as the solver's Angle error term.
+        double ang = std::atan2(db.y, db.x) - std::atan2(da.y, da.x);
+        while (ang >  M_PI) ang -= 2.0 * M_PI;
+        while (ang < -M_PI) ang += 2.0 * M_PI;
+        // Parallel (or anti-parallel) within kDimParallelTolRad: distance
+        // dim, pinned to one of the SECOND line's endpoints measured to the
+        // FIRST line (the first pick stays the reference for both branches).
+        // Endpoint choice matters visually: in chained sketches (rectangles)
+        // an endpoint is a shared corner and its perpendicular foot can land
+        // outside the first segment, hanging the label off to the side over
+        // unrelated geometry. Prefer the endpoint whose foot falls INSIDE
+        // the first segment, and skip endpoints the first line owns
+        // (zero-distance pick in disguise).
+        double folded = std::min(std::abs(ang), M_PI - std::abs(ang));
+        if (folded <= kDimParallelTolRad) {
+            const SketchLine* lb = lineById(b.id);
+            const SketchLine* la = lineById(a.id);
+            if (!lb || !la) return out;
+            // Chained segments (sharing a vertex) that read as parallel are
+            // near-collinear polyline continuations — a "distance between
+            // these lines" dim is ill-defined there. Reject the pair.
+            if (lb->startPointId == la->startPointId || lb->startPointId == la->endPointId ||
+                lb->endPointId == la->startPointId || lb->endPointId == la->endPointId)
+                return out;
+            glm::vec2 dA = ae - as;
+            float lenA2 = glm::dot(dA, dA); // >0: parallel branch already
+                                            // rejected degenerate lines
+            int bestPt = -1;
+            double bestScore = -1.0;
+            const int candIds[2] = {lb->startPointId, lb->endPointId};
+            const glm::vec2 candPos[2] = {bs, be};
+            for (int i = 0; i < 2; ++i) {
+                if (candIds[i] == la->startPointId || candIds[i] == la->endPointId)
+                    continue;
+                float t = glm::dot(candPos[i] - as, dA) / lenA2;
+                // Score: distance of the foot parameter from the segment
+                // interior — 0 while inside [0,1], grows outside. Lower wins.
+                double outside = (t < 0.0f) ? -t : (t > 1.0f ? t - 1.0f : 0.0);
+                if (bestPt < 0 || outside < bestScore) {
+                    bestPt = i;
+                    bestScore = outside;
+                }
+            }
+            if (bestPt < 0) return out; // both endpoints belong to line A
+            double d = perpDist(candPos[bestPt], as, ae);
+            // d≈0 means the lines are collinear (chained polyline segments):
+            // a zero-distance dim is meaningless and destabilises the solver.
+            if (d >= 1e-6)
+                out = {ConstraintType::DistancePointLine, candIds[bestPt], a.id, d, true};
+        } else {
+            out = {ConstraintType::Angle, a.id, b.id, ang, true};
+        }
+        return out;
+    }
+    return out; // circle/arc pairs and circle+point: out of scope
+}
+
+bool SketchTool::linesParallelWithinDimTol(const Sketch& sk, int lineIdA, int lineIdB) {
+    auto lineEnds = [&sk](int id, glm::vec2& s, glm::vec2& e) {
+        for (const auto& l : sk.getLines()) {
+            if (l.id != id) continue;
+            const SketchPoint* sp = sk.getPoint(l.startPointId);
+            const SketchPoint* ep = sk.getPoint(l.endPointId);
+            if (!sp || !ep) return false;
+            s = sp->pos; e = ep->pos;
+            return true;
+        }
+        return false;
+    };
+    glm::vec2 as, ae, bs, be;
+    if (!lineEnds(lineIdA, as, ae) || !lineEnds(lineIdB, bs, be)) return false;
+    glm::vec2 da = ae - as, db = be - bs;
+    if (glm::length(da) < 1e-10f || glm::length(db) < 1e-10f) return false;
+    // Same signed-angle-then-fold test as resolveDimension's line-line
+    // branch, so "parallel enough" means the same thing everywhere.
+    double ang = std::atan2(db.y, db.x) - std::atan2(da.y, da.x);
+    while (ang >  M_PI) ang -= 2.0 * M_PI;
+    while (ang < -M_PI) ang += 2.0 * M_PI;
+    double folded = std::min(std::abs(ang), M_PI - std::abs(ang));
+    return folded <= kDimParallelTolRad;
 }
 
 } // namespace materializr

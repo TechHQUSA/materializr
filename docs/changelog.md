@@ -3,6 +3,149 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [1.6.0] — 2026-08-02
+
+### Added
+
+- **Tabbed workspaces**: several projects open at once, each with its own
+  history, camera and crash recovery. Ctrl+Tab switches; the "+" button offers
+  New / Open / Open Recent; closing the last tab returns to the home screen.
+  Tabs appear in all three layouts.
+- **Home screen** with project thumbnails: recent projects show a rendered
+  preview of the model rather than a filename. Project files carry the
+  thumbnail with them, and **parts from another project** can be opened
+  alongside what you already have.
+- **Multi-start threads**: interleaved helixes, bottle-cap style, with a
+  stepped Starts field and a depth cap that matches what actually gets cut.
+  Groove width is now set explicitly instead of being derived from the pitch.
+- **Number pad for touch**: numeric fields unfold a pad in place instead of
+  raising the OS keyboard — digits, sign, decimal, backspace and Enter, across
+  every numeric field in the app. Follows the Touch mode setting, so a device
+  with a keyboard keeps using it.
+- **Export any format per body**, and export a multi-selection: the viewport's
+  body menu and the Items panel both offer the full format list.
+- Ctrl+click in the Items panel extends a selection across types.
+
+### Fixed
+
+- **The snap grid wandered**: clicks now land on the lattice, and the grid the
+  viewport draws IS that lattice. Directional inference guides can choose which
+  lattice point you land on but can no longer take you off it, and the drawn
+  grid is anchored in the sketch plane's own frame instead of world space,
+  where it sat 10–50% of a cell out of step.
+- **Moving several bodies at once could close the app** — and was slow enough
+  to stall the UI for over a second per drag. A multi-body move relocates the
+  bodies instead of rebuilding every surface as a NURBS.
+- **Walls vanishing** when a rectangle was drawn on a busy sketch face:
+  coincident straight edges collapse to one instead of breaking the loop
+  walker.
+- **Saving while drawing a sketch discarded it.** The in-progress sketch is
+  registered with the document before the file is written.
+- **The face-centre marker didn't follow a moved sketch**, sitting exactly as
+  far behind as the sketch had moved.
+- **Construction planes drew behind bodies** instead of in front.
+- **Arcs shifted after placement** — the centre no longer welds itself off its
+  own endpoints.
+- A sketch whose host body was deleted is treated as free-floating rather than
+  aiming operations at a body that no longer exists.
+- **macOS: Save, Save As and every export did nothing** — no dialog, no error.
+  Command is now the shortcut key throughout, including Undo/Redo/Select-All,
+  which were alone on Control.
+- **Truncated or malformed BREP files** are refused before the kernel reader
+  opens them, rather than faulting inside it (a hard crash on Windows).
+- Escaped exceptions cost a frame instead of the session, and a stale body
+  lookup no longer exits the app silently.
+
+### Changed
+
+- ImGui is pinned to a release tag and appimagetool to a checksummed release,
+  so a given Materializr version builds the same way twice.
+- Windows builds with `/EHa`, which the codebase already assumed, so kernel
+  faults are catchable rather than fatal.
+
+## [1.5.1] — 2026-07-26
+
+### Added
+
+- **Sketch dimension tool** (`D` or toolbar): measure or drive line lengths,
+  circle diameters, arc radii, point/line distances, angles, rim-to-rim gaps
+  and hole-centre offsets. Reference by default (bracketed grey labels that
+  measure without moving anything); typing a value or ticking *Driving* makes
+  the solver hold the geometry to the number. Contributed by @TechHQUSA.
+- **Thread profiles**: trapezoidal (ACME/leadscrew), square, buttress and
+  rounded join the standard V profile — external and internal — plus a radial
+  fit clearance for 3D-printed bolt+nut pairs.
+- **Polygon tool readout**: live radius and side count while placing.
+- The Thread tool gets its own icon instead of sharing the rotate arrows.
+
+### Fixed
+
+- **Parts showing through walls** on complex assemblies: the renderer no
+  longer displaces faces to break depth ties, so faces and edges sit exactly
+  where they should at every zoom level.
+- **Multi-body transforms bake on reload**: moving several bodies at once now
+  reloads as an editable history step; upstream edits propagate and undo
+  restores every body.
+- **Fillets drifting after push/pull edits**: push/pull hands face identity
+  through to downstream features, so fillets/chamfers stay on their edges
+  across replay.
+- **Threads**: cut correctly on unioned bodies; run through end chamfers like
+  a real bolt lead-in; resizing one segment of a stepped rod no longer carves
+  the neighbour; internal rounded threads keep a continuous smooth bore at
+  any length; re-cuts are cancellable mid-boolean.
+- **Section view** no longer stalls on threaded bodies — computes in the
+  background and can be cancelled.
+- **Malformed BREP files** with absurd section counts are rejected instantly
+  instead of hanging the importer.
+
+## [1.5.0] — 2026-07-18
+
+### Highlights
+
+- **File exchange, wholesale.** BREP import/export, OBJ export, 3MF export and
+  DXF sketch export join the roster, DXF **import** stamps laser/CNC profiles
+  straight into a sketch, and IGES finally applies the Y-up/Z-up axis
+  conversion. Project files prefer the shorter **`.mzr`** extension
+  (`.materializr` stays interchangeable).
+- **Reference images.** Drop a picture into the viewport and model against it,
+  with GL upload state pinned and recovery snapshots on import.
+- **New modeling ops:** **Guided Loft** (loft steered by guide curves),
+  N-section loft, **Boundary Fill**, and **Separate** (split a body's
+  disconnected solids into individual bodies).
+- **Chamfer/fillet, rebuilt.** True corner miters and hips, interior-gap
+  coverage detection, swept-wedge/arc fallbacks when a blend crosses a surface
+  feature, asymmetric-distance retries — and **topological naming** backed by
+  face lineage, so bevel/blend identity survives booleans, reloads and
+  history edits instead of drifting onto the wrong face.
+- **History that follows.** Extrude remembers its regions and the cascade
+  disables steps that can't follow (up to 8 before reverting); hovering a
+  history step highlights its geometry in the viewport.
+- **Desktop QoL:** Linux HiDPI interface scale, click-drag line tool with
+  on-release segment commits, movable operation panels, Push/Pull correctly
+  gated off curved faces.
+- **Android Play compliance:** target SDK 35, 16 KB page support, and an app
+  bundle (AAB) build alongside the per-ABI APKs.
+
+### Fixed
+
+- **macOS startup crash on new systems** (#12): the bundled SDL2 is now built
+  from source against a current SDK with a macOS 14.0 deployment floor —
+  1.3.0–1.4.3 dmgs aborted in dyld init on macOS 26.5.x.
+- **Audit hardening** (#65): Sweep/Loft/Extrude boolean results are
+  validity-gated before committing to the document, SVG import gets text and
+  global-vertex budgets, settings integers are clamped and `.cfg` writes
+  sanitized against newline injection, and a failed project load leaves an
+  empty document instead of half a project.
+- Shell: honestly reports fillet-ringed faces it can't hollow instead of
+  producing a silent sealed hollow, with a mirror-body fallback for box faces
+  (#30).
+- Stepped-hole sketches no longer extrude a floating plug from the inner
+  circle (#60); duplicated-sketch, soft-keyboard and snap fixes carried
+  forward from the 1.4.x line.
+- Recovery autosave debounces on quiescence instead of ticking every 5
+  seconds; two-finger touch gestures no longer click the widget under the
+  first finger.
+
 ## [1.4.3] — 2026-07-07
 
 Rolls up the whole `1.4.0 … 1.4.3` line (the intermediate patch releases shipped

@@ -40,8 +40,32 @@ void Toolbar::setSelectionManager(const SelectionManager* sel) {
     m_selection = sel;
 }
 
+bool Toolbar::catalogOffers(ToolAction a) const {
+    for (const auto& t : m_catalog)
+        if (t.pluginIndex < 0 && t.action == a) return true;
+    return false;
+}
+
+ToolAction Toolbar::renderCatalogRemainder(
+        std::initializer_list<ToolAction> handled) {
+    ToolAction action = ToolAction::None;
+    for (const auto& t : m_catalog) {
+        if (t.pluginIndex >= 0 || t.action == ToolAction::None) continue;
+        bool done = false;
+        for (ToolAction h : handled) if (h == t.action) { done = true; break; }
+        if (done) continue;
+        if (ImGui::Button(t.label, ImVec2(-1, bh(30)))) action = t.action;
+        if (t.tip) tip(t.tip);
+    }
+    return action;
+}
+
 ToolAction Toolbar::render() {
     ToolAction action = ToolAction::None;
+
+    // Snapshot the catalogue for this frame — see catalogOffers() in the
+    // header for why classic reads it at all.
+    m_catalog = railTools();
 
     ImGui::Begin("Tools", nullptr, ImGuiWindowFlags_NoCollapse);
 
@@ -64,7 +88,7 @@ ToolAction Toolbar::render() {
             // selected so the user can move/rotate/scale the whole body, but
             // the whole-body plugin contributions (Split / Duplicate / Pattern)
             // are skipped — they don't apply in face-selection context.
-            action = renderBodyTools(/*includePluginButtons=*/false);
+            action = renderBodyTools(/*primaryContext=*/false);
         }
     } else if (m_selection->hasSelectedBodies()) {
         action = renderBodyTools();
@@ -123,7 +147,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
     };
 
     if (m_sketchMode) {
-        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim.
+        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim, 12=Dimension.
         add(MZ_ICON_SELECT,  "Select",  ToolAction::SelectSketch, m_activeSketchMode == 1,
             "Pick sketch elements (points, lines, regions). Drag a selection to move it.");
         add(MZ_ICON_LINE,    "Line",    ToolAction::Line,         m_activeSketchMode == 2,
@@ -159,6 +183,9 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "width in the popup, tap to place.");
         add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
             "Trim a sketch segment at its nearest intersections.");
+        add(MZ_ICON_MEASURE, "Dimension", ToolAction::SketchDimension,
+            m_activeSketchMode == 12,
+            "Dimension: tap entities, tap to place the label, type the value.");
         // Sketch-element transforms — mirror the classic sketch toolbar so all
         // three layouts behave identically. Like classic, they're always here
         // in a sketch and simply no-op if nothing is selected. (The rail
@@ -201,15 +228,25 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         addPlugins((1 << static_cast<int>(SelectionContext::NoSelection)) |
                    (1 << static_cast<int>(SelectionContext::Always)));
     } else if (m_selection->hasSelectedSketchRegions()) {
-        // Push/Pull vs Extrude by attachment: a region whose sketch still drives
-        // a body pushes/pulls THAT body; a standalone region extrudes into its
-        // own new body. (A face selection below keeps both.)
-        if (m_selSketchAttached)
+        // BOTH, always. Attachment picks the ORDER, not the menu: a region
+        // whose sketch still drives a body leads with Push (modify in place),
+        // a standalone one leads with Extrude (new body). It used to be
+        // either/or, which hid Extrude from every sketch drawn on a face —
+        // exactly when "make this a separate body instead of fusing it" is
+        // wanted (Steve, 2026-08-05). The face branch below and the classic
+        // layout already offered both; only this rail didn't.
+        if (m_selSketchAttached) {
             add(MZ_ICON_PUSHPULL, "Push",     ToolAction::PushPull, false,
                 "Push/pull the region into or out of the host body.");
-        else
+            add(MZ_ICON_EXTRUDE,  "Extrude",  ToolAction::ExtrudeSketch, false,
+                "Extrude the region into a NEW body, leaving the host "
+                "body unchanged.");
+        } else {
             add(MZ_ICON_EXTRUDE,  "Extrude",  ToolAction::ExtrudeSketch, false,
                 "Extrude the region into a new solid body.");
+            add(MZ_ICON_PUSHPULL, "Push",     ToolAction::PushPull, false,
+                "Push/pull the region into or out of the body beneath it.");
+        }
         add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
             "Cut the region's shape out of the body beneath it.");
         add(MZ_ICON_EDIT,     "Edit",     ToolAction::EditSketch, false,
@@ -232,14 +269,20 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
     } else if (m_selection->hasSelectedSketches()) {
         add(MZ_ICON_EDIT,     "Edit",     ToolAction::EditSketch, false,
             "Reopen the selected sketch for editing.");
-        // A body-attached sketch pushes/pulls its host body; a standalone one
-        // extrudes into a new body. (Mirrors the region case above.)
-        if (m_selSketchAttached)
+        // Both, ordered by attachment — mirrors the region case above.
+        if (m_selSketchAttached) {
             add(MZ_ICON_PUSHPULL, "Push",    ToolAction::PushPull, false,
                 "Push/pull the sketch's regions into or out of the host body.");
-        else
-            add(MZ_ICON_EXTRUDE,  "Extrude",  ToolAction::ExtrudeSketch, false,
+            add(MZ_ICON_EXTRUDE,  "Extrude", ToolAction::ExtrudeSketch, false,
+                "Extrude the sketch's regions into a NEW body, leaving the "
+                "host body unchanged.");
+        } else {
+            add(MZ_ICON_EXTRUDE,  "Extrude", ToolAction::ExtrudeSketch, false,
                 "Extrude the sketch's regions into a solid body.");
+            add(MZ_ICON_PUSHPULL, "Push",    ToolAction::PushPull, false,
+                "Push/pull the sketch's regions into or out of the body "
+                "beneath them.");
+        }
         add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
             "Cut the sketch's shape out of the body beneath it.");
         add(MZ_ICON_LATHE,    "Lathe",    ToolAction::Revolve, false,
@@ -262,7 +305,22 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Extrude the face into new material.");
             add(MZ_ICON_SHELL,    "Shell",   ToolAction::Shell, false,
                 "Hollow the body, leaving this face open.");
+            // Scale Face is its OWN entry, not the Transform Scale button —
+            // that one scales the face itself (MoveFaceOp), this re-slopes the
+            // side walls toward a scaled copy of it. Both are wanted; sharing
+            // one button meant only one of them was reachable, and for a while
+            // this one wasn't reachable at all.
+            add(MZ_ICON_SCALE, "Scale Face", ToolAction::ScaleFace, false,
+                "Re-slope the side walls toward a scaled copy of this face — "
+                "under 100% tapers it in, over 100% flares it out.");
         }
+        // Taper takes cylindrical and conical faces too (it drafts along their
+        // own axis), so it is NOT gated on the face being flat.
+        add(MZ_ICON_SPLIT, "Draft", ToolAction::Taper, false,
+            "Draft angle for moulding or printing: tilt the selected face(s) "
+            "by an angle about a fixed neutral plane. Unlike Rotate it takes "
+            "SEVERAL faces at one angle (all four walls of a box) and works on "
+            "curved faces too \xE2\x80\x94 a cylinder drafts into a cone.");
         add(MZ_ICON_REPAIR,   "Repair",  ToolAction::RemoveFace, false,
             "Delete the face and heal the body over it.");
         add(MZ_ICON_PROJECT,  "Project", ToolAction::ProjectSketch, false,
@@ -271,7 +329,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         if (m_canEditDiameter) {
             add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
                 "Set the hole or boss to an exact diameter.");
-            add(MZ_ICON_ROTATE, "Thread", ToolAction::Thread, false,
+            add(MZ_ICON_THREAD, "Thread", ToolAction::Thread, false,
                 "Cut a helical screw thread into the picked cylindrical face — "
                 "external on a boss, internal in a hole.");
         }
@@ -291,15 +349,15 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 const Operation* best = nullptr; int bestScore = 0;
                 for (const auto& op : m_history->operations()) {
                     if (!op || !op->isEnabled()) continue;
-                    if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
+                    if (op->kind() != Operation::Kind::Fillet && op->kind() != Operation::Kind::Chamfer) continue;
                     int sc = op->ownsFaceScore(pickedFace);
                     if (sc > 0 && sc >= bestScore) { bestScore = sc; best = op.get(); }
                 }
-                if (best && best->typeId() == "fillet")
+                if (best && best->kind() == Operation::Kind::Fillet)
                     add(MZ_ICON_FILLET, "Edit Fillet",
                         ToolAction::EditFilletChamfer, false,
                         "Change this fillet's radius without re-picking edges.");
-                else if (best && best->typeId() == "chamfer")
+                else if (best && best->kind() == Operation::Kind::Chamfer)
                     add(MZ_ICON_CHAMFER, "Edit Chamfer",
                         ToolAction::EditFilletChamfer, false,
                         "Change this chamfer's distance without re-picking edges.");
@@ -314,6 +372,13 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Tilt the face — or twist it with the ring about its normal.");
             add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
                 "Scale the face about its centre (uniform or per-axis).");
+        } else if (m_selFaceIsHoleWall) {
+            // The one curved face #28 shouldn't hide Move on: a hole's bore.
+            // Clicking the inside wall means the whole hole (both rims travel
+            // together); grabbing a rim EDGE is how you move just one side.
+            add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
+                "Slide the whole hole across the face it pierces \xE2\x80\x94 "
+                "select a rim edge instead to tilt or reshape one end.");
         }
         add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
             "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
@@ -347,6 +412,19 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "Round the selected edges with a radius.");
         add(MZ_ICON_CHAMFER, "Chamfer", ToolAction::Chamfer, false,
             "Cut the selected edges to a flat bevel.");
+        // Move on an EDGE selection means the hole that rim belongs to. #28
+        // hides Move on curved FACES, which is why a round hole's wall isn't
+        // clickable — but its rim is a single circular EDGE, so selecting that
+        // is unambiguous. Only offered when the edges resolve to exactly one
+        // hole; an ordinary edge gets nothing rather than a surprise body move.
+        // Sits UNDER Fillet/Chamfer (Steve, 2026-08-03): those two are what an
+        // edge selection is usually for, and they're always present, so a
+        // conditional button above them made the pair jump position.
+        if (m_selEdgeIsHoleRim)
+            add(MZ_ICON_MOVE, "Move", ToolAction::Move, false,
+                "Move this hole: drag one rim to tilt the bore, one straight "
+                "side to reshape it, or select both rims to slide the whole "
+                "hole.");
         if (m_canEditDiameter)
             add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
                 "Set the hole or boss to an exact diameter.");
@@ -418,15 +496,15 @@ void Toolbar::renderPrimitivesMenu() {
         "10 mm / R5 mm shape at the world origin.");
     if (ImGui::BeginPopup("PrimitivesMenu")) {
         if (ImGui::MenuItem("Box"))
-            m_pluginCtx->requestInteractiveOp("PrimitiveBox");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveBox);
         if (ImGui::MenuItem("Cylinder"))
-            m_pluginCtx->requestInteractiveOp("PrimitiveCylinder");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveCylinder);
         if (ImGui::MenuItem("Sphere"))
-            m_pluginCtx->requestInteractiveOp("PrimitiveSphere");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveSphere);
         if (ImGui::MenuItem("Cone"))
-            m_pluginCtx->requestInteractiveOp("PrimitiveCone");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveCone);
         if (ImGui::MenuItem("Torus"))
-            m_pluginCtx->requestInteractiveOp("PrimitiveTorus");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveTorus);
         ImGui::EndPopup();
     }
 }
@@ -465,17 +543,17 @@ void Toolbar::renderAddPlaneMenu() {
     tip("Create a construction plane derived from the current selection.");
     if (ImGui::BeginPopup("AddPlaneMenu")) {
         if (midplane && ImGui::MenuItem("Midplane (between the 2 selected)"))
-            m_pluginCtx->requestInteractiveOp("Midplane");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::Midplane);
         if (haveCyl) {
             if (ImGui::MenuItem("Tangent to cylinder"))
-                m_pluginCtx->requestInteractiveOp("TangentPlane");
+                m_pluginCtx->requestInteractiveOp(InteractiveOp::TangentPlane);
             if (ImGui::MenuItem("Perpendicular to cylinder axis"))
-                m_pluginCtx->requestInteractiveOp("PlaneNormalToAxis");
+                m_pluginCtx->requestInteractiveOp(InteractiveOp::PlaneNormalToAxis);
             if (ImGui::MenuItem("Through cylinder axis (longitudinal)"))
-                m_pluginCtx->requestInteractiveOp("PlaneThroughAxis");
+                m_pluginCtx->requestInteractiveOp(InteractiveOp::PlaneThroughAxis);
         } else if (haveAxis || straightEdge) {
             if (ImGui::MenuItem(straightEdge ? "Normal to edge" : "Normal to axis"))
-                m_pluginCtx->requestInteractiveOp("PlaneNormalToAxis");
+                m_pluginCtx->requestInteractiveOp(InteractiveOp::PlaneNormalToAxis);
         }
         ImGui::EndPopup();
     }
@@ -516,15 +594,15 @@ void Toolbar::renderAddAxisMenu() {
     tip("Create a construction axis derived from the current selection.");
     if (ImGui::BeginPopup("AddAxisMenu")) {
         if (haveCyl && ImGui::MenuItem("From cylinder axis"))
-            m_pluginCtx->requestInteractiveOp("AxisFromCylinder");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::AxisFromCylinder);
         if (straightEdge && ImGui::MenuItem("Along edge"))
-            m_pluginCtx->requestInteractiveOp("AxisAlongEdge");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::AxisAlongEdge);
         if (twoVerts && ImGui::MenuItem("Through two vertices"))
-            m_pluginCtx->requestInteractiveOp("AxisTwoPoints");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::AxisTwoPoints);
         if (faceNormal && ImGui::MenuItem("Normal to face"))
-            m_pluginCtx->requestInteractiveOp("AxisNormalToFace");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::AxisNormalToFace);
         if (twoPlanes && ImGui::MenuItem("Intersection of two planes"))
-            m_pluginCtx->requestInteractiveOp("AxisTwoPlanes");
+            m_pluginCtx->requestInteractiveOp(InteractiveOp::AxisTwoPlanes);
         ImGui::EndPopup();
     }
 }
@@ -648,6 +726,9 @@ ToolAction Toolbar::renderSketchTools() {
         "extrude a logo or engrave it onto a face.");
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip("Trim a sketch segment at the nearest intersections.");
+    if (skBtn("Dimension", 12))    action = ToolAction::SketchDimension;
+    tip("Dimension tool (D): click a line, circle, point pair, or two lines, "
+        "place the label, then type the value.");
 
     // Transforms operate on the current sketch-element selection (Select tool +
     // click/Ctrl+click on points and lines). No-op if nothing is selected.
@@ -753,7 +834,7 @@ ToolAction Toolbar::renderNoSelectionTools() {
     return action;
 }
 
-ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
+ToolAction Toolbar::renderBodyTools(bool primaryContext) {
     ToolAction action = ToolAction::None;
 
     ImGui::TextColored(materializr::accentText(), "Transform");
@@ -794,7 +875,7 @@ ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
     // least two bodies are actually selected. Previously OR-ing them both
     // unconditionally meant boolean ops appeared with a single body picked,
     // which can't do anything.
-    if (includePluginButtons) {
+    if (primaryContext) {
         int mask = (1 << static_cast<int>(SelectionContext::HasBodies));
         if (m_selection && m_selection->selectedBodyCount() >= 2) {
             mask |= (1 << static_cast<int>(SelectionContext::MultipleBodies));
@@ -803,8 +884,10 @@ ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
     }
 
     // Fabrication: flatten the selected body into a 2D pattern (laser / CNC /
-    // cut-out templates). Shown for a single selected body.
-    if (m_selection && m_selection->selectedBodyCount() == 1) {
+    // cut-out templates). Body context only — under a FACE selection this
+    // renderer is a fall-through for the Transform row, and the face's own
+    // "Unfold Faces" button already covers it.
+    if (primaryContext && m_selection && m_selection->selectedBodyCount() == 1) {
         ImGui::Spacing();
         ImGui::TextColored(materializr::accentText(), "Fabrication");
         ImGui::Separator();
@@ -815,6 +898,19 @@ ToolAction Toolbar::renderBodyTools(bool includePluginButtons) {
             "metal / wood to set how folds are processed.");
     }
 
+    // Measure is deliberately NOT rendered here: it lives in the View menu in
+    // every layout (the rail keeps a button because it has no menu bar).
+    //
+    // Only when this IS the body context. Under a face selection render()
+    // falls through to here purely for the Transform row, and the catalogue
+    // is then full of FACE tools that renderFaceTools has already placed —
+    // running the net would render every one of them a second time.
+    if (primaryContext && action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::Move, ToolAction::Rotate,
+                                         ToolAction::Scale, ToolAction::Mirror,
+                                         ToolAction::Revolve, ToolAction::Unfold,
+                                         ToolAction::Measure});
+
     return action;
 }
 
@@ -824,84 +920,78 @@ ToolAction Toolbar::renderFaceTools() {
     ImGui::TextColored(materializr::accentText(), "Face Operations");
     ImGui::Separator();
 
-    if (ImGui::Button("Sketch on Face", ImVec2(-1, bh(30))))
-        action = ToolAction::SketchOnFace;
-    tip("Start a new sketch lying on the picked face.");
-    if (ImGui::Button("Push / Pull", ImVec2(-1, bh(30))))
-        action = ToolAction::PushPull;
-    tip("Drag the face along its normal to extrude (+) or cut (−) into the body.");
-    // (Move Face / Taper / Scale Face moved onto the Transform buttons —
-    // with a face selected, Move = slide, Rotate = tilt, Scale = scale face.)
-    // Extrude From a face → make a new body that's the face's silhouette
-    // swept along its normal. Push/Pull modifies the source body; Extrude
-    // always creates a separate body. Same ToolAction the sketch toolbar
-    // uses; the handler dispatches by selection type.
-    if (ImGui::Button("Extrude From", ImVec2(-1, bh(30))))
-        action = ToolAction::ExtrudeSketch;
-    tip("Make a NEW body by extruding this face's silhouette (source body unchanged).");
-    if (ImGui::Button("Shell", ImVec2(-1, bh(30))))
-        action = ToolAction::Shell;
-    tip("Hollow the body, removing the picked face. Wall thickness in the popup.");
-    if (ImGui::Button("Repair Geometry", ImVec2(-1, bh(30))))
-        action = ToolAction::RemoveFace;
-    tip("Delete the picked face(s) and heal the surrounding faces back together "
-        "— take a baked fillet/chamfer back to a sharp edge so it can be "
+    // Every gate below is the catalogue's (railTools()); the wording, order
+    // and the Transform row are classic's own. The face branch is where the
+    // two lists diverged most — Push/Pull, Extrude and Shell are flat-face
+    // only, Taper is not, and each rule used to be written out twice.
+    auto btn = [&](ToolAction a, const char* label, const char* t) {
+        if (!catalogOffers(a)) return;
+        if (ImGui::Button(label, ImVec2(-1, bh(30)))) action = a;
+        tip(t);
+    };
+
+    btn(ToolAction::SketchOnFace, "Sketch on Face",
+        "Start a new sketch lying on the picked face.");
+    btn(ToolAction::PushPull, "Push / Pull",
+        "Drag the face along its normal to extrude (+) or cut (\xE2\x88\x92) into the body.");
+    // Extrude From a face = a new body that is the face's silhouette swept
+    // along its normal. Push/Pull modifies the source body; Extrude always
+    // creates a separate one. (Move Face / Taper / Scale Face are their own
+    // entries; Move/Rotate/Scale below transform the face itself.)
+    btn(ToolAction::ExtrudeSketch, "Extrude From",
+        "Make a NEW body by extruding this face's silhouette (source body unchanged).");
+    btn(ToolAction::Shell, "Shell",
+        "Hollow the body, removing the picked face. Wall thickness in the popup.");
+    btn(ToolAction::ScaleFace, "Scale Face",
+        "Re-slope the side walls toward a scaled copy of this face \xE2\x80\x94 under "
+        "100% tapers it in, over 100% flares it out. Blend length in the popup.");
+    btn(ToolAction::Taper, "Draft",
+        "Draft angle for moulding or printing: tilt the picked face(s) by an "
+        "angle about a fixed neutral plane. Unlike Rotate it takes SEVERAL "
+        "faces at one angle (all four walls of a box) and works on cylindrical "
+        "and conical faces too \xE2\x80\x94 a cylinder drafts into a cone.");
+    btn(ToolAction::RemoveFace, "Repair Geometry",
+        "Delete the picked face(s) and heal the surrounding faces back together "
+        "\xE2\x80\x94 take a baked fillet/chamfer back to a sharp edge so it can be "
         "re-applied, or clean a round/hole off an imported part.");
-    if (ImGui::Button("Projection", ImVec2(-1, bh(30))))
-        action = ToolAction::ProjectSketch;
-    tip("Project a sketch onto this face along the sketch's normal, then "
+    btn(ToolAction::ProjectSketch, "Projection",
+        "Project a sketch onto this face along the sketch's normal, then "
         "engrave (cut in) or emboss (raise out) to a depth - wrap a logo "
         "or text onto a cylinder. Sketch, mode and depth in the popup; "
         "click sketch regions in the viewport to project only those.");
-    if (m_canEditDiameter &&
-        ImGui::Button("Edit Diameter", ImVec2(-1, bh(30))))
-        action = ToolAction::EditDiameter;
-    tip("Resize a cylindrical hole / pin to an exact diameter.");
-    if (m_canEditDiameter &&
-        ImGui::Button("Thread", ImVec2(-1, bh(30))))
-        action = ToolAction::Thread;
-    tip("Cut a helical screw thread into the picked cylindrical face — "
+    btn(ToolAction::EditDiameter, "Edit Diameter",
+        "Resize a cylindrical hole / pin to an exact diameter.");
+    btn(ToolAction::Thread, "Thread",
+        "Cut a helical screw thread into the picked cylindrical face \xE2\x80\x94 "
         "external on a boss, internal in a hole. Pitch / depth / handedness "
         "in the popup.");
-
-    if (ImGui::Button("Unfold Faces", ImVec2(-1, bh(30))))
-        action = ToolAction::Unfold;
-    tip("Flatten the SELECTED faces into a 2D pattern (cut + fold lines) for a "
+    btn(ToolAction::Unfold, "Unfold Faces",
+        "Flatten the SELECTED faces into a 2D pattern (cut + fold lines) for a "
         "laser/CNC/printed template. Pick the faces of one panel (e.g. a skin) "
-        "— unfolding a whole closed body rarely makes sense.");
-
-    // "Edit Fillet / Chamfer" appears only when the picked face was actually
-    // produced by a fillet or chamfer op. We ask each Operation via
-    // ownsFace() — the same hook the History panel uses elsewhere.
-    if (m_selection && m_history) {
-        TopoDS_Shape pickedFace;
-        for (const auto& e : m_selection->getSelection()) {
-            if (e.type == SelectionType::Face && !e.shape.IsNull()) {
-                pickedFace = e.shape; break;
-            }
-        }
-        if (!pickedFace.IsNull()) {
-            // Best owner, not first: highest ownsFaceScore (exact > fuzzy),
-            // latest on ties — see the rail twin above and #49.
-            const auto& ops = m_history->operations();
-            const Operation* best = nullptr; int bestScore = 0;
-            for (const auto& op : ops) {
-                if (!op || !op->isEnabled()) continue;
-                if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
-                int sc = op->ownsFaceScore(pickedFace);
-                if (sc > 0 && sc >= bestScore) { bestScore = sc; best = op.get(); }
-            }
-            if (best) {
-                const char* label = best->typeId() == "fillet" ? "Edit Fillet"
-                                                               : "Edit Chamfer";
-                if (ImGui::Button(label, ImVec2(-1, bh(30))))
-                    action = ToolAction::EditFilletChamfer;
-                tip(best->typeId() == "fillet"
-                        ? "Change this fillet's radius without re-picking edges."
-                        : "Change this chamfer's distance without re-picking edges.");
-            }
+        "\xE2\x80\x94 unfolding a whole closed body rarely makes sense.");
+    // "Edit Fillet / Chamfer" - the catalogue already ran the ownsFaceScore
+    // probe that decides whether the picked face came from one, and which.
+    // Classic used to run a second, identical probe of its own.
+    if (catalogOffers(ToolAction::EditFilletChamfer)) {
+        const RailTool* e = nullptr;
+        for (const auto& t : m_catalog)
+            if (t.pluginIndex < 0 && t.action == ToolAction::EditFilletChamfer) { e = &t; break; }
+        if (e) {
+            if (ImGui::Button(e->label, ImVec2(-1, bh(30))))
+                action = ToolAction::EditFilletChamfer;
+            if (e->tip) tip(e->tip);
         }
     }
+
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({
+            ToolAction::SketchOnFace, ToolAction::PushPull, ToolAction::ExtrudeSketch,
+            ToolAction::Shell, ToolAction::ScaleFace, ToolAction::Taper,
+            ToolAction::RemoveFace, ToolAction::ProjectSketch, ToolAction::EditDiameter,
+            ToolAction::Thread, ToolAction::Unfold, ToolAction::EditFilletChamfer,
+            // Move/Rotate/Scale come from the shared Transform row that
+            // render() falls through to (renderBodyTools).
+            ToolAction::Move, ToolAction::Rotate, ToolAction::Scale});
 
     // Frozen-round hint: a fillet-shaped face with no editable op behind it
     // (an older save's baked geometry). "Edit Fillet" can't appear for it, so
@@ -932,18 +1022,36 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     ImGui::TextWrapped("Tip: hover a sketch region to highlight it, click to select, Ctrl+click to add to selection.");
     ImGui::Separator();
 
-    if (ImGui::Button("Edit Sketch", ImVec2(-1, bh(30))))
-        action = ToolAction::EditSketch;
-    tip("Re-enter sketch mode to revise this sketch's geometry.");
-    if (ImGui::Button("Extrude From", ImVec2(-1, bh(30))))
+    if (catalogOffers(ToolAction::EditSketch)) {
+        if (ImGui::Button("Edit Sketch", ImVec2(-1, bh(30))))
+            action = ToolAction::EditSketch;
+        tip("Re-enter sketch mode to revise this sketch's geometry.");
+    }
+    // Push/Pull before Extrude From, matching this layout's Region and Face
+    // panels. It was missing here entirely — the mirror of the rail's old
+    // "attached sketch gets no Extrude" gap (see railTools) — so a whole
+    // sketch could only ever spawn a new body, never modify its host in
+    // place. Both tools now exist in every layout for every sketch selection.
+    if (catalogOffers(ToolAction::PushPull)) {
+        if (ImGui::Button("Push / Pull", ImVec2(-1, bh(30))))
+            action = ToolAction::PushPull;
+        tip("Drag the arrow to push the sketch's regions into the body beneath "
+            "them, or pull them out of it. Modifies that body in place — use "
+            "Extrude From for a separate body.");
+    }
+    if (catalogOffers(ToolAction::ExtrudeSketch) &&
+        ImGui::Button("Extrude From", ImVec2(-1, bh(30))))
         action = ToolAction::ExtrudeSketch;
-    tip("Make a new body by extruding the sketch's closed regions. "
+    tip("Make a NEW body by extruding the sketch's closed regions, leaving "
+        "any host body unchanged. "
         "Whole-sketch extrude assumes ONE outer boundary - for multi-shape "
         "sketches (SVG imports, text), click individual regions in the "
         "viewport (Ctrl+click for several) and extrude those instead.");
-    if (ImGui::Button("Subtract Sketch", ImVec2(-1, bh(30))))
-        action = ToolAction::SubtractSketch;
-    tip("Cut the extruded regions out of the body the sketch was drawn on.");
+    if (catalogOffers(ToolAction::SubtractSketch)) {
+        if (ImGui::Button("Subtract Sketch", ImVec2(-1, bh(30))))
+            action = ToolAction::SubtractSketch;
+        tip("Cut the extruded regions out of the body the sketch was drawn on.");
+    }
     ImGui::TextWrapped("Subtract cuts the extruded profile into the body the "
                        "sketch was drawn on (preview shown in red).");
 
@@ -965,6 +1073,13 @@ ToolAction Toolbar::renderSketchSelectedTools() {
         action = ToolAction::Rotate;
     tip("Show the Rotate gizmo on the selected sketch. Drag a ring to spin the "
         "sketch around its centroid.");
+
+    // Whatever else the catalogue offers here — Lathe (Revolve) lived in the
+    // rails only until this net existed.
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::EditSketch, ToolAction::PushPull,
+                                         ToolAction::ExtrudeSketch, ToolAction::SubtractSketch,
+                                         ToolAction::Move, ToolAction::Rotate});
 
     // Plugin buttons for HasSketches context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasSketches));
@@ -992,6 +1107,10 @@ ToolAction Toolbar::renderPlaneSelectedTools() {
     tip("Show the Rotate gizmo. Drag a ring to spin the plane around its "
         "origin; snap is 5° increments when snap-to-grid is on.");
 
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::SketchOnFace, ToolAction::Move,
+                                         ToolAction::Rotate});
+
     // Midplane between two selected construction planes; axis from their
     // intersection.
     renderAddPlaneMenu();
@@ -1014,6 +1133,9 @@ ToolAction Toolbar::renderAxisSelectedTools() {
     tip("Show the Move gizmo on this axis. Drag an arrow to translate "
         "the axis origin; the direction is preserved.");
 
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::Move});
+
     renderAddPlaneMenu();
     return action;
 }
@@ -1029,28 +1151,34 @@ ToolAction Toolbar::renderSketchRegionTools() {
 
     // Push/Pull routes through the app's interactive arrow gizmo (default 0,
     // drag to extrude/cut) — same as a body face.
-    if (ImGui::Button("Push / Pull", ImVec2(-1, bh(30))))
-        action = ToolAction::PushPull;
-    tip("Drag the arrow to extrude this region into a body, or cut it into the parent.");
-
-    if (ImGui::Button("Extrude From", ImVec2(-1, bh(30))))
-        action = ToolAction::ExtrudeSketch;
-    tip("Make a NEW body from this region (Ctrl+click several regions to "
-        "extrude them together). The source sketch/body is left unchanged.");
-
+    if (catalogOffers(ToolAction::PushPull)) {
+        if (ImGui::Button("Push / Pull", ImVec2(-1, bh(30))))
+            action = ToolAction::PushPull;
+        tip("Drag the arrow to extrude this region into a body, or cut it into the parent.");
+    }
+    if (catalogOffers(ToolAction::ExtrudeSketch)) {
+        if (ImGui::Button("Extrude From", ImVec2(-1, bh(30))))
+            action = ToolAction::ExtrudeSketch;
+        tip("Make a NEW body from this region (Ctrl+click several regions to "
+            "extrude them together). The source sketch/body is left unchanged.");
+    }
     // Subtract: cut this region out of the body the sketch sits on, with a red
-    // preview of the removed volume. Disabled when the sketch has no source body.
-    if (ImGui::Button("Subtract", ImVec2(-1, bh(30))))
-        action = ToolAction::SubtractSketch;
-    tip("Cut this region into the body the sketch was drawn on (preview in red).");
+    // preview of the removed volume.
+    if (catalogOffers(ToolAction::SubtractSketch)) {
+        if (ImGui::Button("Subtract", ImVec2(-1, bh(30))))
+            action = ToolAction::SubtractSketch;
+        tip("Cut this region into the body the sketch was drawn on (preview in red).");
+    }
 
     // Any remaining HasSketchRegions plugin buttons.
     renderPluginButtons(1 << static_cast<int>(SelectionContext::HasSketchRegions));
 
     // Edit the sketch this region belongs to — re-enter sketch mode to revise it.
-    if (ImGui::Button("Edit Sketch", ImVec2(-1, bh(30))))
-        action = ToolAction::EditSketch;
-    tip("Re-enter sketch mode to revise this region's parent sketch.");
+    if (catalogOffers(ToolAction::EditSketch)) {
+        if (ImGui::Button("Edit Sketch", ImVec2(-1, bh(30))))
+            action = ToolAction::EditSketch;
+        tip("Re-enter sketch mode to revise this region's parent sketch.");
+    }
 
     // Move / Rotate the region's PARENT sketch in 3D — same gizmo path as
     // the whole-sketch case. A region selection is just a finger pointing at
@@ -1069,6 +1197,11 @@ ToolAction Toolbar::renderSketchRegionTools() {
     tip("Show the Rotate gizmo on the parent sketch. Drag a ring to spin the "
         "sketch around its centroid.");
 
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::PushPull, ToolAction::ExtrudeSketch,
+                                         ToolAction::SubtractSketch, ToolAction::EditSketch,
+                                         ToolAction::Move, ToolAction::Rotate});
+
     ImGui::Spacing();
     ImGui::TextWrapped("Drag positive distance to extrude, negative to cut into the body the sketch sits on.");
 
@@ -1080,14 +1213,32 @@ ToolAction Toolbar::renderEdgeTools() {
 
     ImGui::TextColored(materializr::accentText(), "Edge Ops");
     ImGui::Separator();
-    if (ImGui::Button("Fillet", ImVec2(-1, bh(30))))  action = ToolAction::Fillet;
-    tip("Round the picked edge(s). Set radius in the popup.");
-    if (ImGui::Button("Chamfer", ImVec2(-1, bh(30)))) action = ToolAction::Chamfer;
-    tip("Bevel the picked edge(s). Set distance in the popup.");
-    if (m_canEditDiameter &&
-        ImGui::Button("Edit Diameter", ImVec2(-1, bh(30))))
-        action = ToolAction::EditDiameter;
-    tip("Resize the cylindrical face this edge belongs to.");
+    // Availability comes from the catalogue (railTools()); the wording and
+    // placement below are classic's own. "Move Hole" used to be gated on a
+    // duplicate copy of the rim test here and shipped to the rails only.
+    if (catalogOffers(ToolAction::Fillet)) {
+        if (ImGui::Button("Fillet", ImVec2(-1, bh(30)))) action = ToolAction::Fillet;
+        tip("Round the picked edge(s). Set radius in the popup.");
+    }
+    if (catalogOffers(ToolAction::Chamfer)) {
+        if (ImGui::Button("Chamfer", ImVec2(-1, bh(30)))) action = ToolAction::Chamfer;
+        tip("Bevel the picked edge(s). Set distance in the popup.");
+    }
+    if (catalogOffers(ToolAction::Move)) {
+        if (ImGui::Button("Move Hole", ImVec2(-1, bh(30)))) action = ToolAction::Move;
+        tip("Move the hole this rim belongs to: drag one rim to tilt the bore, "
+            "one straight side to reshape it, or select both rims to slide the "
+            "whole hole.");
+    }
+    if (catalogOffers(ToolAction::EditDiameter)) {
+        if (ImGui::Button("Edit Diameter", ImVec2(-1, bh(30))))
+            action = ToolAction::EditDiameter;
+        tip("Resize the cylindrical face this edge belongs to.");
+    }
+    // Anything the catalogue gained that classic has no bespoke button for.
+    if (action == ToolAction::None)
+        action = renderCatalogRemainder({ToolAction::Fillet, ToolAction::Chamfer,
+                                         ToolAction::Move, ToolAction::EditDiameter});
 
     // Construction plane / axis from this edge.
     renderAddPlaneMenu();

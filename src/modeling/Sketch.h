@@ -8,6 +8,7 @@
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Pnt.hxx>
 
 namespace materializr {
 
@@ -114,6 +115,21 @@ public:
         const std::vector<glm::vec2>& ctrl, int segsPerSpan = 12,
         bool closed = false);
 
+    // The point of `plane` NEAREST `near` whose sketch coordinates are both
+    // multiples of `step` — i.e. a point of the snap lattice.
+    //
+    // Snapping rounds sketch (u,v), measured from the PLANE ORIGIN along the
+    // plane's X/Y directions, so the lattice is only defined in that frame.
+    // Rounding world XYZ and projecting onto the plane is a different (and
+    // wrong) thing: the projection of a world lattice point lands at an
+    // arbitrary fraction of a cell in-plane. Anything that has to agree with
+    // where clicks land — above all the grid the viewport DRAWS — must round
+    // here rather than roll its own.
+    // `nearPt`, not `near` — <windef.h> defines `near` as an empty macro, which
+    // silently erases the parameter on MSVC. See the definition in Sketch.cpp.
+    static gp_Pnt latticeAnchor(const gp_Pln& plane, const gp_Pnt& nearPt,
+                                double step);
+
     // Element removal
     void removeElement(int id);
     // Remove points that no geometry references any more (e.g. a line's two
@@ -187,12 +203,25 @@ public:
     // Cleared when the sketch and body are moved together (re-linked).
     void setDetachedFromBody(bool d) { m_detached = d; }
     bool isDetachedFromBody() const { return m_detached; }
-    void setSourceFace(const TopoDS_Face& face) { m_sourceFace = face; m_centroidValid = false; }
+    void setSourceFace(const TopoDS_Face& face) { m_sourceFace = face; m_centroid3dValid = false; }
     const TopoDS_Face& getSourceFace() const { return m_sourceFace; }
 
     // Area centroid of the host face's outer wire, projected into sketch-plane
     // 2D. Returns false if there is no source face. Computed once and cached.
     bool getSourceFaceCentroid(glm::vec2& out) const;
+
+    // The host body's TRUE centre in sketch-plane 2D (e.g. the Thread step's
+    // axis piercing the plane). NOT serialized — recomputed on every sketch
+    // entry (new AND re-edit) by the app. While set, it outranks and
+    // SUPPRESSES the area-centroid snap: on a threaded cap the centroid sits
+    // just off-axis, and with both live the snap flip-flopped between them.
+    void setCenterPoint(glm::vec2 c) { m_centerPoint = c; m_hasCenterPoint = true; }
+    void clearCenterPoint() { m_hasCenterPoint = false; }
+    bool getCenterPoint(glm::vec2& out) const {
+        if (!m_hasCenterPoint) return false;
+        out = m_centerPoint;
+        return true;
+    }
 
     // Reference geometry pulled from the source face on sketch entry — the
     // face's corner vertices, edge endpoints, edge midpoints, and straight
@@ -317,6 +346,8 @@ private:
     int m_sourceBodyId = -1;
     bool m_detached = false;   // link to driven body deliberately broken
     TopoDS_Face m_sourceFace;
+    glm::vec2 m_centerPoint{0.0f};      // host body's true centre (2D); see
+    bool m_hasCenterPoint = false;      // setCenterPoint — session-only
 
     std::vector<SketchPoint> m_points;
     std::vector<SketchLine> m_lines;
@@ -328,8 +359,15 @@ private:
     int m_nextConstraintId = 1;
     FaceReference m_faceRefs;
 
-    mutable bool m_centroidValid = false;
-    mutable glm::vec2 m_centroid{0};
+    // Cached in 3D, deliberately. The centroid belongs to the FACE, so its
+    // world position is fixed until the face itself is replaced; only its
+    // sketch-2D coordinates depend on the plane. Caching the 2D value meant a
+    // plane change silently invalidated it — and setPlane is exactly what
+    // moving a sketch does, so the centre marker (and the snap that follows it)
+    // stayed behind by the distance moved. Projecting on read is two dot
+    // products; recomputing the centroid is a BRepGProp pass over the face.
+    mutable bool m_centroid3dValid = false;
+    mutable gp_Pnt m_centroid3d;
 
     // buildRegions cache (see the public declaration for rationale).
     mutable std::vector<Region> m_regionCache;

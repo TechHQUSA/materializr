@@ -26,6 +26,8 @@
 #include "ui/TouchIcons.h"
 #include "ui/TouchTheme.h"
 #include "ui/TouchWidgets.h"
+#include "ui/LandingPage.h"   // edge tabs stand down while the landing page is up
+#include <imgui_internal.h>   // GetTopMostPopupModal: edge tabs yield to modals
 #include "touch_mode.h"
 #include "ui_scale.h"
 
@@ -102,9 +104,45 @@ void Application::renderModernLayout() {
             ImGui::SetCursorPos(ImVec2(lx + chip + 10.0f * s,
                                        (topH - ImGui::GetTextLineHeight()) * 0.5f));
             ImGui::TextColored(touchui::textPrimary(), "Materializr");
-            std::string pn = projectDisplayName();
-            ImGui::SameLine();
-            ImGui::TextColored(touchui::textDim(), "/ %s", pn.c_str());
+            // The old "/ projectname" breadcrumb is now the tab row: one pill
+            // per open project (dirty dot included), right-click/long-press
+            // for Save / Save As / Close, and a trailing "+".
+            const float pillH = 30.0f * s;
+            ImGui::SameLine(0.0f, 12.0f * s);
+            ImGui::SetCursorPosY((topH - pillH) * 0.5f);
+            for (size_t i = 0; i < m_sessions.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                std::string label = sessionDisplayLabel(i);
+                if (sessionDirty(i)) label += " \xe2\x80\xa2";
+                const bool active = (i == m_activeSession);
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::GetColorU32(active ? touchui::rowBg()
+                                              : touchui::panelBg()));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    ImGui::GetColorU32(active ? touchui::textPrimary()
+                                              : touchui::textDim()));
+                if (ImGui::Button(label.c_str(), ImVec2(0, pillH)) && !active)
+                    switchToSession(i);
+                ImGui::PopStyleColor(2);
+                // Hover on the pill itself feeds the long-press gate, so a
+                // press-and-hold reaches this menu on touch (m_tabBarHovered).
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+                    m_tabBarHovered = true;
+                if (ImGui::BeginPopupContextItem("tabctx")) {
+                    renderTabMenuItems(i);
+                    ImGui::EndPopup();
+                }
+                ImGui::SameLine(0.0f, 6.0f * s);
+                ImGui::SetCursorPosY((topH - pillH) * 0.5f);
+                ImGui::PopID();
+            }
+            if (touchui::iconButton("newtab", MZ_ICON_ADD, pillH))
+                ImGui::OpenPopup("##newTabMenu");
+            tip("New tab: empty, open a file, or a recent project");
+            if (ImGui::BeginPopup("##newTabMenu")) {
+                renderNewTabMenuBody();
+                ImGui::EndPopup();
+            }
         }
 
         // Right-aligned controls: [Finish, Discard,] Undo, Redo,
@@ -343,15 +381,15 @@ void Application::renderModernLayout() {
                 if (ImGui::BeginPopup("##railPrimitive")) {
                     if (m_pluginContext) {
                         if (ImGui::MenuItem("Box"))
-                            m_pluginContext->requestInteractiveOp("PrimitiveBox");
+                            m_pluginContext->requestInteractiveOp(InteractiveOp::PrimitiveBox);
                         if (ImGui::MenuItem("Cylinder"))
-                            m_pluginContext->requestInteractiveOp("PrimitiveCylinder");
+                            m_pluginContext->requestInteractiveOp(InteractiveOp::PrimitiveCylinder);
                         if (ImGui::MenuItem("Sphere"))
-                            m_pluginContext->requestInteractiveOp("PrimitiveSphere");
+                            m_pluginContext->requestInteractiveOp(InteractiveOp::PrimitiveSphere);
                         if (ImGui::MenuItem("Cone"))
-                            m_pluginContext->requestInteractiveOp("PrimitiveCone");
+                            m_pluginContext->requestInteractiveOp(InteractiveOp::PrimitiveCone);
                         if (ImGui::MenuItem("Torus"))
-                            m_pluginContext->requestInteractiveOp("PrimitiveTorus");
+                            m_pluginContext->requestInteractiveOp(InteractiveOp::PrimitiveTorus);
                     }
                     ImGui::EndPopup();
                 }
@@ -621,6 +659,12 @@ void Application::renderModernLayout() {
 // Geometry comes from m_touchVp* (the panel/viewport boundaries), set by
 // renderModernLayout earlier this frame.
 void Application::renderModernEdgeTabs() {
+    // The tabs belong to the panel edges — when the landing page covers the
+    // shell there are no edges to pop, and while a modal is up the dim layer
+    // owns the screen. Both input and visual skip entirely (long-standing
+    // bug: the old foreground-drawn chevrons floated over everything).
+    if (m_landingPage && m_landingPage->isVisible()) return;
+    if (ImGui::GetTopMostPopupModal() != nullptr) return;
     const float s = uiScale();
     const float tabW = 16.0f * s, tabH = 72.0f * s;
     const float midY = m_touchVpY + m_touchVpH * 0.5f;
@@ -681,10 +725,14 @@ void Application::renderModernEdgeTabs() {
                 *dragged = false;
             }
 
-            // Foreground draw list: always renders on top of ALL windows
-            // (incl. the viewport), so the chevron can never be hidden behind
-            // a window even if the z-order is off.
-            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            // The tab window's OWN draw list — it already rises above the
+            // viewport on creation (see the flags note above), and unlike the
+            // foreground list it lets dialogs/panels opened later stack above
+            // the chevron naturally. (The foreground list made the wedges
+            // float over every dialog — the bug this replaces. If "no
+            // chevrons on cold start" ever returns on the tablet, the window
+            // z-order fix regressed — fix THAT, don't move this back.)
+            ImDrawList* dl = ImGui::GetWindowDrawList();
             const float cx = side < 0 ? p.x : p.x + tabW;
             const ImVec2 c(cx, p.y + tabH * 0.5f);
             const float pi = 3.1415926f;

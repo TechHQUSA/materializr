@@ -13,6 +13,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <imgui.h>
+#include "../ui/NumField.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -128,15 +129,15 @@ bool TaperOp::undo(Document& doc) {
 
 std::string TaperOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "Taper %.1f deg (%d face(s))",
+    std::snprintf(buf, sizeof(buf), "Draft %.1f deg (%d face(s))",
                   m_angleDeg, m_faces.Size());
     return buf;
 }
 
 void TaperOp::renderProperties() {
-    ImGui::Text("Taper");
+    ImGui::Text("Draft");
     ImGui::Separator();
-    ImGui::InputDouble("Angle (deg)", &m_angleDeg, 0.5, 5.0, "%.1f");
+    materializr::inputNumber("Angle (deg)", &m_angleDeg, 0.5, 5.0, "%.1f");
     ImGui::Text("Faces: %d", m_faces.Size());
     ImGui::Text("Body ID: %d", m_bodyId);
 }

@@ -2,6 +2,7 @@
 #include "gl_common.h"
 #include <SDL.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
@@ -63,6 +64,8 @@ inline void resetFpuForOcct() {
 #include "ui/PropertiesPanel.h"
 #include "ui/AboutDialog.h"
 #include "ui/WelcomeScreen.h"
+#include "ui/LandingPage.h"
+#include "app/ProjectSession.h"
 #include "ui_layout_bridge.h"
 #include <fstream>
 #include "ios_storekit.h"
@@ -71,6 +74,7 @@ inline void resetFpuForOcct() {
 #include "ui/MeasureTool.h"
 #include "ui/UpdateChecker.h"
 #include "modeling/Sketch.h"
+#include "modeling/ThreadOp.h"
 #include "modeling/CopyOp.h"
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
@@ -87,6 +91,7 @@ inline void resetFpuForOcct() {
 #include "modeling/ShellOp.h"
 #include "modeling/DeleteOp.h"
 #include "modeling/SketchEditOp.h"
+#include "modeling/MoveHoleOp.h"
 #include "modeling/SketchTransformOp.h"
 #include "modeling/ResizeCylindricalOp.h"
 #include "io/StepIO.h"
@@ -104,6 +109,7 @@ inline void resetFpuForOcct() {
 #include "core/EventBus.h"
 #include "core/Events.h"
 #include "core/Verbose.h"
+#include "core/ThrowTrace.h"
 #include "core/NumParse.h"
 #include "plugin/PluginContext.h"
 #include "plugin/PluginRegistry.h"
@@ -169,6 +175,22 @@ namespace materializr { namespace force_link { void linkAll(); } }
 
 namespace materializr {
 
+namespace {
+// Tapping the tool that is ALREADY active puts it down — back to Select/Move —
+// instead of re-arming the same tool. Every sketch tool button used to call
+// setMode() unconditionally, so a drawing tool could only be left by explicitly
+// reaching for Select; on a tablet, where the reflex is to tap the lit button
+// again, that reads as the tool being stuck (#71).
+//
+// setMode() already cancels any in-progress shape and clears the placement
+// state, so a second tap on a half-drawn shape abandons it — the same outcome
+// as Escape, which is what that reflex expects.
+void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
+    if (!tool) return;
+    tool->setMode(tool->getMode() == mode ? SketchToolMode::Select : mode);
+}
+} // namespace
+
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
     m_window = std::make_unique<Window>(1600, 900, "Materializr");
@@ -180,9 +202,13 @@ Application::Application(bool safeMode, float uiScaleOverride)
     // PlaneRenderer ownership moved to ConstructionPlanePlugin (registered
     // as a plugin render pass). Application no longer touches it directly.
     m_backgroundRenderer = std::make_unique<BackgroundRenderer>();
-    m_document = std::make_unique<Document>();
-    m_history = std::make_unique<History>();
-    m_selection = std::make_unique<SelectionManager>();
+    // First project session ("tab"). The session owns document/history/
+    // selection; m_document & co are mirrors into it (see Application.h).
+    m_sessions.push_back(std::make_unique<ProjectSession>());
+    m_activeSession = 0;
+    m_document = m_sessions[0]->document.get();
+    m_history = m_sessions[0]->history.get();
+    m_selection = m_sessions[0]->selection.get();
     m_eventBus = std::make_unique<EventBus>();
 
     // Cascade: when a SketchEditOp commits via a user-driven path that
@@ -235,12 +261,12 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_selectionHighlight = std::make_unique<SelectionHighlight>();
     m_boxSelect = std::make_unique<BoxSelect>();
     m_sectionView = std::make_unique<SectionView>();
-    m_sectionView->setDocument(m_document.get());
     m_statusBar = std::make_unique<StatusBar>();
     m_themeManager = std::make_unique<ThemeManager>();
     m_propertiesPanel = std::make_unique<PropertiesPanel>();
     m_aboutDialog = std::make_unique<AboutDialog>();
     m_welcomeScreen = std::make_unique<WelcomeScreen>();
+    m_landingPage = std::make_unique<LandingPage>();
 #if defined(MZ_IOS)
     // StoreKit observer must attach at launch (Apple requirement) so a
     // Supporter purchase interrupted in a previous run is redelivered; the
@@ -250,12 +276,11 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_shortcutsPanel = std::make_unique<ShortcutsPanel>();
     m_helpPanel = std::make_unique<HelpPanel>();
     m_measureTool = std::make_unique<MeasureTool>();
-    m_measureTool->setDocument(m_document.get());
-    m_measureTool->setSelectionManager(m_selection.get());
 
-    // Wire up references
-    m_toolbar->setSelectionManager(m_selection.get());
-    m_toolbar->setHistory(m_history.get());
+    // Wire up references. Everything that consumes the ACTIVE SESSION's
+    // document/history/selection is wired in wireDocumentConsumers() (called
+    // below, and again on every tab switch); only session-independent wiring
+    // stays inline here.
     m_toolbar->setPluginContext(m_pluginContext.get());
     // Touch mode gates the UI scale and the whole input/UX model, and it must be
     // known before fonts and widget sizes are baked below. Resolve it from the
@@ -283,16 +308,26 @@ Application::Application(bool safeMode, float uiScaleOverride)
         // hard-coded pixel widths grow with the font instead of clipping.
         materializr::setUiScale(m_window->uiScale());
     }
-    m_history->setThreadsLastDeclineCallback([this]{ showThreadsLastToast(); });
+    // The recut hook reads m_document dynamically ([this] capture), so it is
+    // tab-safe installed once; the per-History callbacks live in
+    // wireDocumentConsumers().
     installThreadRecutHook();
-    m_historyPanel->setHistory(m_history.get());
-    m_historyPanel->setDocument(m_document.get());
-    m_historyPanel->setEventBus(m_eventBus.get());
-    m_itemsPanel->setDocument(m_document.get());
-    m_itemsPanel->setSelectionManager(m_selection.get());
-    m_itemsPanel->setHistory(m_history.get());
     m_itemsPanel->setDirtyCallback([this]() { markDirty(); });
     m_itemsPanel->setExportStlCallback([this](int bodyId) { exportBodyAsStl(bodyId); });
+    // The Export submenu's format list comes straight from the registry, so a
+    // new export plugin appears there without touching ItemsPanel.
+    m_itemsPanel->setExportFormatsProvider([]() {
+        std::vector<std::string> names;
+        for (const auto& f : PluginRegistry::instance().ioFormats())
+            if (f.canExport && f.exportDocFn) names.push_back(f.name);
+        return names;
+    });
+    m_itemsPanel->setExportBodiesCallback(
+        [this](const std::vector<int>& ids, const std::string& fmt) {
+            exportBodiesAs(ids, fmt);
+        });
+    m_itemsPanel->setExportToProjectCallback(
+        [this](const std::vector<int>& ids) { exportBodiesToNewProject(ids); });
     m_itemsPanel->setEditSketchCallback([this](int sketchId) { editSketch(sketchId); });
     m_itemsPanel->setExportSketchSvgCallback([this](int sketchId) { exportSketchAsSvg(sketchId); });
     m_itemsPanel->setExportSketchDxfCallback([this](int sketchId) { exportSketchAsDxf(sketchId); });
@@ -300,12 +335,6 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_itemsPanel->setCombineSketchesCallback(
         [this](const std::vector<int>& ids) { combineSketches(ids); });
     m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
-    m_statusBar->setDocument(m_document.get());
-    m_statusBar->setSelectionManager(m_selection.get());
-    m_propertiesPanel->setHistory(m_history.get());
-    m_propertiesPanel->setDocument(m_document.get());
-    m_propertiesPanel->setSelectionManager(m_selection.get());
-    m_propertiesPanel->setEventBus(m_eventBus.get());
     m_propertiesPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
     m_propertiesPanel->setLinkInfoCallback(
@@ -345,17 +374,214 @@ Application::Application(bool safeMode, float uiScaleOverride)
     renderSplashFrame("Almost there");
     setupCommands();
 
-    // Wire EventBus into core services
+    // Session-dependent wiring: panels, event-bus binds, plugin context.
+    wireDocumentConsumers();
+    materializr::force_link::linkAll();
+    PluginRegistry::instance().initAll(*m_pluginContext);
+}
+
+void Application::wireDocumentConsumers() {
+    // Everything that caches a Document/History/SelectionManager pointer.
+    // Re-run in full on every adoptSession — a consumer missing from this
+    // list keeps operating on the PREVIOUS tab's project, which is the
+    // defining bug class of the tabs design. Guards allow the ctor to call
+    // this before every panel exists.
+    if (m_sectionView) m_sectionView->setDocument(m_document);
+    if (m_measureTool) {
+        m_measureTool->setDocument(m_document);
+        m_measureTool->setSelectionManager(m_selection);
+    }
+    if (m_toolbar) {
+        m_toolbar->setSelectionManager(m_selection);
+        m_toolbar->setHistory(m_history);
+    }
+    if (m_historyPanel) {
+        m_historyPanel->setHistory(m_history);
+        m_historyPanel->setDocument(m_document);
+        m_historyPanel->setEventBus(m_eventBus.get());
+    }
+    if (m_itemsPanel) {
+        m_itemsPanel->setDocument(m_document);
+        m_itemsPanel->setSelectionManager(m_selection);
+        m_itemsPanel->setHistory(m_history);
+    }
+    if (m_statusBar) {
+        m_statusBar->setDocument(m_document);
+        m_statusBar->setSelectionManager(m_selection);
+    }
+    if (m_propertiesPanel) {
+        m_propertiesPanel->setHistory(m_history);
+        m_propertiesPanel->setDocument(m_document);
+        m_propertiesPanel->setSelectionManager(m_selection);
+        m_propertiesPanel->setEventBus(m_eventBus.get());
+    }
+    // Core services of THIS session bind to the app-wide event bus, and the
+    // per-History callbacks are re-applied (they are instance state, not
+    // type state — a fresh session's History has none).
     m_document->setEventBus(m_eventBus.get());
     m_history->setEventBus(m_eventBus.get());
     m_selection->setEventBus(m_eventBus.get());
+    m_history->setThreadsLastDeclineCallback([this]{ showThreadsLastToast(); });
+    if (m_pluginContext && m_viewport)
+        m_pluginContext->_bind(m_document, m_history, m_selection,
+                               m_eventBus.get(), &m_viewport->getCamera(),
+                               &m_meshesDirty, &m_inSketchMode);
+    // Tell everything that caches DOCUMENT-DERIVED state to rebuild. The
+    // setters above only reach consumers Application knows by name; plugins
+    // own their render caches in file-local statics this function cannot
+    // see, and no Plane/Axis/Body event fires on a tab switch (nothing about
+    // either document changed — the ACTIVE one did). Publishing here means a
+    // future plugin gets the invalidation for free by subscribing.
+    if (m_eventBus) m_eventBus->publish(ActiveDocumentChangedEvent{});
+}
 
-    // Plugin system
-    m_pluginContext->_bind(m_document.get(), m_history.get(), m_selection.get(),
-                          m_eventBus.get(), &m_viewport->getCamera(), &m_meshesDirty,
-                          &m_inSketchMode);
-    materializr::force_link::linkAll();
-    PluginRegistry::instance().initAll(*m_pluginContext);
+void Application::stashActiveSessionState() {
+    // The mirrors themselves (m_document & co) need no stashing — they
+    // already point into the active session; only the working copies do.
+    if (m_activeSession >= m_sessions.size()) return;
+    ProjectSession& out = *m_sessions[m_activeSession];
+    out.projectPath = m_currentProjectPath;
+    out.projectName = m_currentProjectName;
+    out.savedAtHistoryStep = m_savedAtHistoryStep;
+    out.unsavedNonHistoryChanges = m_unsavedNonHistoryChanges;
+    if (m_viewport) out.camera = m_viewport->getCamera();
+}
+
+void Application::applySessionState(size_t idx) {
+    m_tabSelectionSync = true;   // tab bars re-assert the visual selection
+    m_activeSession = idx;
+    ProjectSession& in = *m_sessions[idx];
+    m_document = in.document.get();
+    m_history = in.history.get();
+    m_selection = in.selection.get();
+    m_currentProjectPath = in.projectPath;
+    m_currentProjectName = in.projectName;
+    m_savedAtHistoryStep = in.savedAtHistoryStep;
+    m_unsavedNonHistoryChanges = in.unsavedNonHistoryChanges;
+    if (m_viewport) {
+        m_viewport->getCamera() = in.camera;
+        // The copied camera carries the aspect of wherever it was stashed
+        // (or a fresh session's default) — squished/stretched rendering
+        // until a real resize without this (Steve's "taller and skinnier
+        // mug", 2026-07-28).
+        m_viewport->syncCameraAspect();
+    }
+    wireDocumentConsumers();
+}
+
+void Application::adoptSession(size_t idx) {
+    if (idx >= m_sessions.size()) return;
+    // Snapshot the outgoing project's recovery file while its state is still
+    // live in the mirrors — inactive tabs don't tick the debounced writer.
+    if (idx != m_activeSession) writeSessionRecoveryNow();
+    stashActiveSessionState();
+    applySessionState(idx);
+}
+
+int Application::nextFreeRecoveryIndex() const {
+    // Smallest index no open session uses. Recycling keeps every snapshot
+    // inside the startup scan's namespace — the bound that makes recovery
+    // files impossible to orphan by de-linking (Steve's concern, 2026-07-28).
+    // Past that many simultaneous tabs the last index is shared, best-effort.
+    for (int i = 0; i < materializr::kMaxSessionsPerSlot; ++i) {
+        bool used = false;
+        for (const auto& s : m_sessions)
+            if (s->recoveryIndex == i) { used = true; break; }
+        if (!used) return i;
+    }
+    return materializr::kMaxSessionsPerSlot - 1;
+}
+
+bool Application::activeSessionIsScratch() const {
+    // An untouched empty workspace — the tab a fresh launch or a "+" click
+    // leaves you in. Anything else (a named project, geometry, sketches, or
+    // history) counts as occupied, so opening a project from the home screen
+    // gets its own tab rather than replacing what's there.
+    if (!m_currentProjectPath.empty()) return false;
+    if (!m_document) return true;
+    if (!m_document->getAllBodyIds().empty()) return false;
+    if (!m_document->getAllSketchIds().empty()) return false;
+    return !m_history || m_history->stepCount() == 0;
+}
+
+size_t Application::createSession() {
+    auto s = std::make_unique<ProjectSession>();
+    s->recoveryIndex = nextFreeRecoveryIndex();
+    m_sessions.push_back(std::move(s));
+    return m_sessions.size() - 1;
+}
+
+bool Application::switchToSession(size_t idx) {
+    if (idx >= m_sessions.size()) return false;
+    if (idx == m_activeSession) return true;
+    // Mid-gesture state doesn't survive a document swap. A half-drawn sketch
+    // is the user's call to resolve — refuse loudly rather than silently
+    // committing or dropping it. A thread re-cut owns its body until it
+    // lands; blocking on it here would freeze the switch for seconds.
+    if (m_inSketchMode) {
+        showToast("Finish or cancel the sketch before switching tabs.");
+        return false;
+    }
+    if (!m_threadRecuts.empty()) {
+        showToast("Wait for the thread re-cut to finish before switching tabs.");
+        return false;
+    }
+    cancelAllInteractivePreviews();
+    // The section cut is view state aimed at the OUTGOING project's geometry;
+    // carried across it would carve the wrong model. Off on every switch.
+    m_sectionEnabled = false;
+    m_sectionDirty = true;
+
+    adoptSession(idx);
+
+    // Shelve the outgoing tab's GPU meshes on EVERY platform (uniform by
+    // design — an invisible tab holds no GPU memory) and queue the incoming
+    // tab's full rebuild for the next frame. Same discipline as project load.
+    if (m_shapeRenderer) m_shapeRenderer->clear();
+    if (m_edgeRenderer) m_edgeRenderer->clear();
+    if (m_selectionHighlight) m_selectionHighlight->clearCaches();
+    if (m_sketchRenderer) m_sketchRenderer->clearCache();
+    m_dirtyBodyIds.clear();
+    m_meshesDirty = true;
+    return true;
+}
+
+void Application::closeSession(size_t idx) {
+    if (idx >= m_sessions.size()) return;
+    // The closing tab's snapshot is no longer unfinished work, and its
+    // recovery index returns to the pool by virtue of the session vanishing.
+    materializr::clearProjectRecovery(m_sessions[idx]->recoveryIndex);
+    const bool wasActive = (idx == m_activeSession);
+    m_sessions.erase(m_sessions.begin() + static_cast<long>(idx));
+    bool closedLast = false;
+    if (m_sessions.empty()) {
+        // Always at least one tab: a fresh empty workspace takes its place.
+        m_sessions.push_back(std::make_unique<ProjectSession>());
+        closedLast = true;
+    }
+    if (wasActive) {
+        // No stash — the outgoing session is gone. Apply a neighbor and run
+        // the same GPU-shelving discipline as a normal switch.
+        cancelAllInteractivePreviews();
+        m_sectionEnabled = false;
+        m_sectionDirty = true;
+        applySessionState(std::min(idx, m_sessions.size() - 1));
+        if (m_shapeRenderer) m_shapeRenderer->clear();
+        if (m_edgeRenderer) m_edgeRenderer->clear();
+        if (m_selectionHighlight) m_selectionHighlight->clearCaches();
+        if (m_sketchRenderer) m_sketchRenderer->clearCache();
+        m_dirtyBodyIds.clear();
+        m_meshesDirty = true;
+        // An intentional close — clean, or dirty-and-discarded through the
+        // prompt — with no other project open lands on the HOME PAGE, not in
+        // a bare untitled workspace (Steve, 2026-07-28). With other tabs
+        // still open, the neighbor takes over instead, browser-style.
+        if (closedLast) showLandingPage(/*fromStartup=*/true);
+    } else if (m_activeSession > idx) {
+        // The vector shifted under the active index; the session object (and
+        // the mirrors into it) are untouched.
+        --m_activeSession;
+    }
 }
 
 Application::~Application() {
@@ -610,6 +836,15 @@ void Application::initImGui() {
     io.IniFilename = iniPath;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    // Ctrl+Tab belongs to the PROJECT TABS (see handleShortcuts). ImGui binds
+    // the same chord to its window-cycling overlay by default, so both fired
+    // on one press: the project switched AND the dock-window ring came up.
+    // Claim the key by clearing ImGui's binding rather than leaving two
+    // handlers racing — panel focus is a click away, project tabs are not.
+    if (ImGuiContext* gc = ImGui::GetCurrentContext()) {
+        gc->ConfigNavWindowingKeyNext = ImGuiKey_None;
+        gc->ConfigNavWindowingKeyPrev = ImGuiKey_None;
+    }
     // loadAppSettings() ran before the ImGui context existed, so its
     // applyAppSettings couldn't reach io yet — push the loaded double-click
     // window now that there's a context.
@@ -777,8 +1012,10 @@ void Application::setupCommands() {
 }
 
 void Application::showThreadsLastToast() {
-    m_toastText = "Threads are applied LAST. Delete the Thread step, make "
-                  "this change, then re-thread.";
+    // Fallback only: the normal path REFLOWS the op beneath the Thread step
+    // (History::pushOperation) — this fires when that reflow can't land.
+    m_toastText = "Couldn't reorder this change beneath the Thread step. "
+                  "Delete the Thread step, make the change, then re-thread.";
     m_toastExpiry = ImGui::GetTime() + 5.0;
 }
 
@@ -812,6 +1049,11 @@ void Application::renderTransientToast() {
     ImGui::PopStyleColor();
 }
 
+// Renderer-only slot for a controller's ghost preview (Push/Pull's tinted tool
+// volume). Negative and far outside any real body id — there is no Document
+// body behind it, and nothing else may claim it.
+static constexpr int kGhostPreviewId = -7777;
+
 materializr::IopContext Application::iopContext() {
     return materializr::IopContext{
         *m_document, *m_history, *m_selection,
@@ -820,7 +1062,36 @@ materializr::IopContext Application::iopContext() {
         [this](std::function<void()> t) { m_deferredHeavyTask = std::move(t); },
         // im-touch hosts the Confirm/Cancel as corner FABs — the scaffold
         // then skips its in-panel buttons (Enter/Esc still work).
-        imTouchLayout() && !m_inSketchMode};
+        // NOTE: aggregate init, so this list must stay in DECLARATION order —
+        // cornerCommitUi sits before toast/refuseMesh in IopContext.
+        imTouchLayout() && !m_inSketchMode,
+        [this](const char* m) { showToast(m); },
+        [this](const char* op) { return refuseMeshSelection(op); },
+        m_snapToGrid, m_sketchGridStep,
+        materializr::IopPanelPlace{uiScale(), imTouchLayout(),
+                                   m_actionAnchorValid, m_actionAnchorX,
+                                   m_actionAnchorY},
+        [this](int sid) { ensureSketchSourceFace(sid); },
+        [this](const TopoDS_Face& f, const gp_Pln& p) {
+            return findBodyUnderRegion(f, p);
+        },
+        [this](int bid) { markBodyDirty(bid); },
+        [this](int bid) {
+            return m_shapeRenderer && m_shapeRenderer->findSlotByBody(bid) >= 0;
+        },
+        [this](const TopoDS_Shape& tool, bool cut) {
+            if (!m_shapeRenderer) return;
+            int slot = m_shapeRenderer->setBodyMesh(kGhostPreviewId, tool);
+            if (slot < 0) return;
+            m_shapeRenderer->setSubtractPreview(slot, cut);
+            m_shapeRenderer->setColor(slot, glm::vec3(0.55f, 0.75f, 1.0f));
+        },
+        [this] { if (m_shapeRenderer) m_shapeRenderer->removeBody(kGhostPreviewId); },
+        [this](int bid) {
+            for (const auto& [sid, bodies] : sketchBodyLinks())
+                if (bodies.count(bid)) return sid;
+            return -1;
+        }};
 }
 
 // Seed the placement rotation (shared by the Text and SVG tools) so the
@@ -853,46 +1124,38 @@ void Application::cancelActiveIops() {
 }
 
 bool Application::anyInteractivePreviewActive() const {
-    return anyIopActive() || m_extruding || m_pushPullActive ||
-           m_patternActive || m_resizeCylActive || m_threadActive;
+    return anyIopActive() || m_extrudeCtl.active() || m_ppCtl.active() ||
+           m_patternActive || m_threadActive;
 }
 
 void Application::cancelAllInteractivePreviews() {
     cancelActiveIops();
     // Legacy history-replay previews write the document every frame; a
     // controller preview running beside one corrupts both restore paths.
-    if (m_extruding) cancelInteractiveExtrude();
-    if (m_pushPullActive) cancelPushPull();
+    if (m_extrudeCtl.active()) cancelInteractiveExtrude();
+    if (m_ppCtl.active()) cancelPushPull();
     if (m_patternActive) cancelPattern();
-    if (m_resizeCylActive) cancelResizeCylindrical();
     if (m_threadActive) cancelThread();
     // Fillet / chamfer preview — was missing from this list, so switching
     // tools mid-fillet left the previewed body stuck (the new op then
     // snapshotted it as its "pre-state" and Cancel restored the preview,
     // not the original). (Steve: "switching tools, the action that was
     // never committed gets a weird half-cancel I can't undo".)
-    if (m_edgeOpActive) cancelInteractiveEdgeOp();
-    if (m_moveFaceActive) cancelMoveFace();
+    if (m_edgeCtl.active()) cancelInteractiveEdgeOp();
 }
 
-// im-touch corner-hosted action commit UI — see Application.h. EdgeOp and
-// MoveFace previews aren't in anyInteractivePreviewActive(), so they're
-// listed explicitly here (same set cancelAllInteractivePreviews covers).
+// im-touch corner-hosted action commit UI — see Application.h. The EdgeOp
+// preview isn't in anyInteractivePreviewActive(), so it's listed explicitly
+// here (same set cancelAllInteractivePreviews covers).
 bool Application::imTouchActionCorner() const {
     return imTouchLayout() && !m_inSketchMode &&
-           (anyInteractivePreviewActive() || m_edgeOpActive || m_moveFaceActive);
+           (anyInteractivePreviewActive() || m_edgeCtl.active());
 }
 
 void Application::confirmActiveAction() {
-    if (m_extruding)       { commitInteractiveExtrude(); return; }
-    if (m_pushPullActive)  { commitPushPull(); return; }
+    if (m_extrudeCtl.active())       { commitInteractiveExtrude(); return; }
+    if (m_ppCtl.active())  { commitPushPull(); return; }
     if (m_patternActive)   { commitPattern(); return; }
-    if (m_resizeCylActive) {
-        // Same gate as the panel's disabled Confirm: a failed preview
-        // means there's nothing valid to commit.
-        if (!m_resizeCylPreviewFailed) commitResizeCylindrical();
-        return;
-    }
     if (m_threadActive) {
         // Same guard as the thread panel's Apply: refuse absurd turn counts
         // (the compute would run for minutes) instead of bypassing it.
@@ -900,21 +1163,18 @@ void Application::confirmActiveAction() {
             commitThread();
         return;
     }
-    if (m_edgeOpActive)    { commitInteractiveEdgeOp(); return; }
-    if (m_moveFaceActive)  { commitMoveFace(); return; }
+    if (m_edgeCtl.active())    { commitInteractiveEdgeOp(); return; }
     auto ctx = iopContext();
     for (auto* c : m_iops)
         if (c->active()) { c->commit(ctx); return; }
 }
 
 void Application::cancelActiveAction() {
-    if (m_extruding)       { cancelInteractiveExtrude(); return; }
-    if (m_pushPullActive)  { cancelPushPull(); return; }
+    if (m_extrudeCtl.active())       { cancelInteractiveExtrude(); return; }
+    if (m_ppCtl.active())  { cancelPushPull(); return; }
     if (m_patternActive)   { cancelPattern(); return; }
-    if (m_resizeCylActive) { cancelResizeCylindrical(); return; }
     if (m_threadActive)    { cancelThread(); return; }
-    if (m_edgeOpActive)    { cancelInteractiveEdgeOp(); return; }
-    if (m_moveFaceActive)  { cancelMoveFace(); return; }
+    if (m_edgeCtl.active())    { cancelInteractiveEdgeOp(); return; }
     auto ctx = iopContext();
     for (auto* c : m_iops)
         if (c->active()) { c->cancel(ctx); return; }
@@ -1281,11 +1541,18 @@ void Application::loadAppSettings() {
                               "have been revoked.");
                     return;
                 }
+                const bool viaFallback = materializr::mobileLastOpenWasFallback();
                 loadProjectWithProgress(tmp);
                 if (!m_currentProjectPath.empty()) {   // load succeeded
-                    m_currentProjectPath = p;
+                    // Backup copy (original gone/disowned): leave the project
+                    // unlinked so a save picks a destination instead of
+                    // truncating a document we never read. See openRecentProject.
+                    m_currentProjectPath = viaFallback ? std::string() : p;
                     std::string nm = materializr::mobileLastDocName();
                     if (!nm.empty()) m_currentProjectName = nm;
+                    if (viaFallback)
+                        showToast("Opened a local backup - the original is "
+                                  "gone. Save to keep it.");
                 }
                 return;
             }
@@ -1344,6 +1611,112 @@ void Application::loadAppSettings() {
     }();
     if (!m_supporter && !m_safeMode && !firstRun)
         m_welcomeScreen->setVisible(true);
+
+    // Landing page vs. session restore. "Open last project on launch" now means
+    // RESTORE MY TABS: with it on, every project that was open when you quit
+    // comes back in its own tab and the home screen is skipped entirely (Steve,
+    // 2026-07-28 — the setting had become dead weight once the landing page
+    // started superseding the old single-project auto-open, and a tab-aware
+    // resume is what it should have meant all along). With it off, the landing
+    // page is the start screen. Safe mode gets neither: recovery owns the
+    // moment, and the toggle was forced off above. Startup modals are popups
+    // and render above the page, so the dialog turn-taking above is unaffected.
+    if (!m_safeMode) {
+        std::vector<std::string> restore;
+        if (m_autoOpenLastProject) {
+            for (const auto& p : s.sessionPaths)
+                if (!p.empty()) restore.push_back(p);
+            // Settings written by a build that predates tabs have no
+            // sessionPaths — fall back to the single last project.
+            if (restore.empty() && !s.lastProjectPath.empty())
+                restore.push_back(s.lastProjectPath);
+        }
+        if (restore.empty()) {
+            m_deferredHeavyTask = nullptr;  // nothing to resume; home screen
+            showLandingPage(/*fromStartup=*/true);
+        } else {
+            // Replaces the single-project auto-open queued above; same deferred
+            // slot, so the loads run between frames with the window already up
+            // and the loading bar able to pump.
+            size_t active = static_cast<size_t>(s.sessionActive);
+            m_deferredHeavyTask = [this, restore, active]() {
+                restoreSessionTabs(restore, active);
+            };
+        }
+    }
+}
+
+// Reopen a previous session's tabs. The FIRST project loads into the startup
+// session (there is always exactly one, empty); each later one gets a new tab.
+// A project that no longer exists is skipped with a toast rather than aborting
+// the whole restore — a moved file should cost you that tab, not the session.
+void Application::restoreSessionTabs(const std::vector<std::string>& paths,
+                                     size_t activeIndex) {
+    if (paths.empty()) return;
+    std::vector<size_t> opened;
+    int failed = 0;
+    for (size_t i = 0; i < paths.size(); ++i) {
+        if (i > 0) {
+            const size_t idx = createSession();
+            if (!switchToSession(idx)) { closeSession(idx); ++failed; continue; }
+        }
+        bool ok = false;
+#if defined(MZ_MOBILE)
+        // A persisted SAF document URI, not a filesystem path — resolve it
+        // through the grant first, then restore the URI as the live identity
+        // so quick-save still writes back to the real document. A backup copy
+        // (original gone) leaves the tab unlinked, same rule as Open Recent.
+        if (paths[i].rfind("content:", 0) == 0) {
+            const std::string tmp = materializr::mobileOpenUri(paths[i]);
+            const bool viaFallback = materializr::mobileLastOpenWasFallback();
+            if (!tmp.empty()) {
+                loadProjectWithProgress(tmp);
+                ok = !m_currentProjectPath.empty();
+                if (ok) {
+                    m_currentProjectPath = viaFallback ? std::string() : paths[i];
+                    std::string nm = materializr::mobileLastDocName();
+                    if (!nm.empty()) m_currentProjectName = nm;
+                }
+            }
+        } else
+#endif
+        {
+            loadProjectWithProgress(paths[i]);
+            // loadProject* leaves m_currentProjectPath empty on failure —
+            // that's the only signal it reports.
+            ok = !m_currentProjectPath.empty();
+        }
+        if (!ok) {
+            ++failed;
+            if (i > 0) closeSession(m_activeSession);
+            continue;
+        }
+        opened.push_back(m_activeSession);
+    }
+    // Restore focus to whichever tab was in front, by position among the tabs
+    // that actually came back. Indices stay valid through the loop above: it
+    // only ever appends, and the only closes are of the tab it just made.
+    if (!opened.empty()) {
+        size_t want = activeIndex < opened.size() ? activeIndex : 0;
+        switchToSession(opened[want]);
+        // The startup session is pre-existing and empty; if its project was
+        // the one that went missing, it would otherwise linger as a stray
+        // "Untitled" tab standing in for a file that no longer exists. Focus
+        // moved first, so this close only shifts the active index.
+        if (std::find(opened.begin(), opened.end(), size_t{0}) == opened.end() &&
+            m_sessions.size() > 1)
+            closeSession(0);
+    }
+    if (failed > 0)
+        showToast(failed == 1 ? "1 project from your last session is missing."
+                              : "Some projects from your last session are "
+                                "missing.");
+    // Everything failed: don't strand the user in an empty tab.
+    if (opened.empty()) showLandingPage(/*fromStartup=*/false);
+    // The per-project loads above each persisted settings MID-restore, so the
+    // file still describes the half-built tab list (including any tab that
+    // turned out to be missing). Rewrite it against the finished state.
+    saveAppSettings();
 }
 
 void Application::applyRenderingSettings() {
@@ -1413,6 +1786,15 @@ AppSettings Application::currentSettings() const {
     s.autoOpenLastProject = m_autoOpenLastProject;
     s.recentProjects = m_recentProjects;
     s.lastProjectPath = m_currentProjectPath; // empty after closeProject()
+    // Every open tab, in tab order, so "restore my session" can bring them all
+    // back. The ACTIVE tab's path lives in m_currentProjectPath (the session's
+    // own copy is only refreshed when it's stashed on the way out), so read it
+    // from there; unsaved tabs contribute "" and are skipped on restore.
+    s.sessionPaths.clear();
+    for (size_t i = 0; i < m_sessions.size(); ++i)
+        s.sessionPaths.push_back(i == m_activeSession ? m_currentProjectPath
+                                                      : m_sessions[i]->projectPath);
+    s.sessionActive = static_cast<int>(m_activeSession);
     s.lastFileDir = materializr::FileDialogs::getLastDir();
     s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
     s.includePrereleases = m_includePrereleases;
@@ -1767,29 +2149,32 @@ void Application::handleToolAction(int action) {
             if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Select);
             break;
         case ToolAction::Line:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Line);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Line);
             break;
         case ToolAction::Circle:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Circle);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Circle);
             break;
         case ToolAction::Rectangle:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Rectangle);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Rectangle);
             break;
         case ToolAction::Arc:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Arc);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Arc);
             break;
         case ToolAction::Spline:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Spline);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Spline);
             break;
         case ToolAction::Polygon:
             if (m_inSketchMode) {
                 // Side count comes from the toolbar's Polygon popout.
                 m_sketchTool->setPolygonSides(m_toolbar->getRequestedPolygonSides());
-                m_sketchTool->setMode(SketchToolMode::Polygon);
+                toggleSketchMode(m_sketchTool.get(), SketchToolMode::Polygon);
             }
             break;
         case ToolAction::Trim:
-            if (m_inSketchMode) m_sketchTool->setMode(SketchToolMode::Trim);
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Trim);
+            break;
+        case ToolAction::SketchDimension:
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Dimension);
             break;
         case ToolAction::SketchText:
             if (m_inSketchMode) {
@@ -1987,6 +2372,9 @@ void Application::handleToolAction(int action) {
                 beginMoveFace();
                 break;
             }
+            // Edges that form one hole's rim: the selection picks the verb
+            // (tilt / reshape / slide). Same button, as with faces.
+            if (beginMoveHoleFromEdges()) break;
             // Bodies / standalone sketches / construction planes all get the
             // Move gizmo — the viewport gizmo-visibility block handles whichever
             // selection type is active. SketchRegion picks count as the parent
@@ -2058,8 +2446,11 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
-            // A selected face turns Scale into a face scale (the loft engine,
-            // scaling the top about the face centre).
+            // A selected face scales the FACE (MoveFaceOp with a scale) — the
+            // third of the Move / Rotate / Scale trio that arrived with Move
+            // Face, and what this button has always done. Scale Face is a
+            // different op with its own button in Face Operations (Steve,
+            // 2026-08-04: "let's make it its own for clarity's sake").
             {
                 bool faceSel = false;
                 for (const auto& e : m_selection->getSelection())
@@ -2103,16 +2494,14 @@ void Application::handleToolAction(int action) {
         }
 
         case ToolAction::EditDiameter: {
-            // Detection populates the resize-* fields when it returns true,
-            // so begin() can use them straight away.
-            if (detectCylindricalResizeCandidate()) beginResizeCylindrical();
+            beginIop(m_resizeCylCtl);   // resolves its own pick from the selection
             break;
         }
         case ToolAction::Thread: {
-            // Same detector as Edit Diameter — it fills the m_resizeCyl*
-            // fields (axis, radius, extent, hole-vs-boss) that the thread
-            // popup copies from.
-            if (detectCylindricalResizeCandidate()) beginThread();
+            // Same detector as Edit Diameter, and now the same VALUE — Thread
+            // used to read the resize state's members as its input.
+            const auto pick = detectCylindricalResizeCandidate();
+            if (pick.ok) beginThread(pick);
             break;
         }
 
@@ -2170,7 +2559,8 @@ void Application::handleToolAction(int action) {
             for (int i = 0; i < static_cast<int>(ops.size()); ++i) {
                 const auto& op = ops[i];
                 if (!op || !op->isEnabled()) continue;
-                if (op->typeId() != "fillet" && op->typeId() != "chamfer") continue;
+                if (op->kind() != Operation::Kind::Fillet &&
+                    op->kind() != Operation::Kind::Chamfer) continue;
                 int sc = op->ownsFaceScore(pickedFace);
                 if (sc > 0 && sc >= bestScore) { bestScore = sc; bestI = i; }
             }
@@ -2195,7 +2585,7 @@ void Application::handleShortcuts() {
     // ImGui has text input focus. Always false on Android (no modifier keys).
     bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        if (!m_edgeOpActive && !m_extruding && !m_pushPullActive) {
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
             // editor convention — and Steve's muscle memory); the next
             // Ctrl+Z then undoes committed elements as usual.
@@ -2238,12 +2628,20 @@ void Application::handleShortcuts() {
                     // the now-reverted sketch instead of staying at its last shape.
                     if (m_activeSketchId >= 0) cascadeFromSketchEdit(m_activeSketchId);
                 }
+                // The undo can remove/renumber the very entities the
+                // Dimension tool has picked or is mid-pick on — stale ids
+                // referencing geometry that may no longer exist. Drop them
+                // rather than let the next click resolve against ghosts.
+                if (m_inSketchMode && m_sketchTool &&
+                    m_sketchTool->getMode() == SketchToolMode::Dimension) {
+                    m_sketchTool->clearDimState();
+                }
                 m_meshesDirty = true;
             }
         }
     }
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
-        if (!m_edgeOpActive && !m_extruding && !m_pushPullActive) {
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
             if (m_history->canRedo()) {
                 m_history->redo(*m_document);
                 const Operation* redone =
@@ -2259,6 +2657,11 @@ void Application::handleShortcuts() {
                 if (int sid = sketchIdEditedBy(redone);
                     sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
                     cascadeFromSketchEdit(sid);
+                // Same stale-pick hazard as the undo path above.
+                if (m_inSketchMode && m_sketchTool &&
+                    m_sketchTool->getMode() == SketchToolMode::Dimension) {
+                    m_sketchTool->clearDimState();
+                }
                 m_meshesDirty = true;
             }
         }
@@ -2321,11 +2724,33 @@ void Application::handleShortcuts() {
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_E)) {
         exportStepFile();
     }
+    // Ctrl+S = SAVE, matching what the File menu has always advertised next to
+    // "Save Project". It used to call saveProject() — the Save-As picker — so
+    // the shortcut popped a file dialog for a project that already had a file,
+    // while the menu item it was printed beside saved in place (Steve,
+    // 2026-07-28). saveProjectQuick falls back to the picker on its own when
+    // the project has never been saved.
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
-        saveProject();
+        saveProjectQuick();
     }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_O)) {
         loadProject();
+    }
+    // Ctrl+Tab cycles the open tabs (Shift reverses). No-op with one tab, and
+    // inert while the landing page owns the screen — switching the session
+    // behind a full-screen page changes nothing visible but leaves the next
+    // click acting on a tab the user can't see (Steve, 2026-07-28).
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Tab) && m_sessions.size() > 1 &&
+        !landingPageUp()) {
+        const size_t n = m_sessions.size();
+        switchToSession(io.KeyShift ? (m_activeSession + n - 1) % n
+                                    : (m_activeSession + 1) % n);
+    }
+    // Plain D — Dimension tool in sketch mode (Onshape-style). Ctrl+D stays
+    // Duplicate (handled below); text-input focus swallows the key.
+    if (m_inSketchMode && m_sketchTool && !io.KeyCtrl && !io.WantTextInput &&
+        ImGui::IsKeyPressed(ImGuiKey_D, false)) {
+        m_sketchTool->setMode(SketchToolMode::Dimension);
     }
     // Ctrl+D — Duplicate in place. Branches on selection type:
     //   Body   → CopyOp (full history support, undoable via Ctrl+Z)
@@ -2498,18 +2923,12 @@ void Application::handleShortcuts() {
             m_sketchGizmoDragSketches.clear();
             m_planeGizmoDrag.clear();
             m_axisGizmoDrag.clear();
-        } else if (m_pushPullActive) {
-            cancelPushPull();
-        } else if (anyIopActive()) {
+        } else if (anyIopActive()) {   // push/pull included — it's in m_iops now
             for (auto* c : m_iops)
                 if (c->active()) { c->cancel(iopContext()); break; }
-        } else if (m_resizeCylActive) {
-            cancelResizeCylindrical();
-        } else if (m_edgeOpActive) {
-            cancelInteractiveEdgeOp();
-        } else if (m_moveFaceActive) {
-            cancelMoveFace();
-        } else if (m_extruding) {
+        } else if (false) {
+        } else if (false) {   // edge ops ride the generic m_iops chain now
+        } else if (m_extrudeCtl.active()) {
             cancelInteractiveExtrude();
         } else if (m_inSketchMode) {
             // Two-step Escape inside sketch mode:
@@ -2521,29 +2940,55 @@ void Application::handleShortcuts() {
             //   2nd press (or 1st press when nothing is in progress) →
             //      exit sketch mode entirely (same as Finish Sketch but
             //      without an explicit click).
-            if (m_sketchTool && m_sketchTool->isPlacing()) {
+            // Dimension mode is picking entities, not "placing" a shape —
+            // isPlacing() never goes true for it, so without this branch
+            // Escape here always fell straight through to exitSketchMode()
+            // and SketchTool::onCancel's Dimension branch (clear picks /
+            // fall back to Select) was unreachable from the keyboard. Route
+            // Dimension explicitly first; onCancel() implements both halves
+            // itself (mid-pick -> clear picks, stay in Dimension; idle ->
+            // Select mode), so a SECOND Escape lands here again with the
+            // mode now Select, isPlacing() still false, and exits the sketch
+            // as usual.
+            //
+            // The ##DimEdit value-entry popup (Application_Viewport.cpp)
+            // ALSO wants Escape (to dismiss itself and keep the measured
+            // value, staying in Dimension/idle-picking, per spec). It runs
+            // during renderViewport(), which happens before this shortcut
+            // handler each frame, and it clears m_dimEditingId as part of
+            // closing — so by the time we get here a naive check can no
+            // longer tell the popup was even open. m_dimPopupConsumedEsc is
+            // set by that render pass on any Escape seen while the popup was
+            // up; consume it here and do NOTHING else, so this press closes
+            // ONLY the popup. The mode-level step above happens on the NEXT
+            // Escape, once the popup is actually gone.
+            if (m_dimPopupConsumedEsc) {
+                m_dimPopupConsumedEsc = false;
+            } else if (m_sketchTool && m_sketchTool->getMode() == SketchToolMode::Dimension) {
+                m_sketchTool->onCancel();
+            } else if (m_sketchTool && m_sketchTool->isPlacing()) {
                 m_sketchTool->onCancel();
             } else {
                 exitSketchMode();
             }
         }
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_edgeOpActive) {
-        (void)materializr::parseFinite(m_edgeOpInputBuf, m_edgeOpValue);
-        updateInteractiveEdgeOp();
-        commitInteractiveEdgeOp();
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_edgeCtl.active()) {
+        m_edgeCtl.confirmFromKey(iopContext());
+        m_meshesDirty = true;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_extruding) {
-        (void)materializr::parseFinite(m_extrudeInputBuf, m_extrudeDistance);
-        updateInteractiveExtrude();
-        commitInteractiveExtrude();
+    // Extrude has no scaffold panel (which is where the other iops catch
+    // Enter), so its Enter-to-confirm lives here — same as Move Face's.
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_extrudeCtl.active()) {
+        m_extrudeCtl.confirmFromKey(iopContext());
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_pushPullActive) {
-        (void)materializr::parseFinite(m_pushPullInputBuf, m_pushPullDistance);
-        updatePushPull();
-        commitPushPull();
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_ppCtl.active()) {
+        m_ppCtl.confirmFromKey(iopContext());
+        m_meshesDirty = true;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_moveFaceActive) {
+    // Move Face has no scaffold panel (which is where the other iops catch
+    // Enter), so its Enter-to-confirm lives here.
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_moveFaceCtl.active()) {
         commitMoveFace();
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
@@ -2644,6 +3089,11 @@ void Application::rebuildMeshes() {
     float deflection, angularDeflection;
     meshQualityParams(deflection, angularDeflection);
 
+    // Diagnostic: a full rebuild that takes seconds on the MAIN thread is a
+    // freeze — say so, with the trigger state.
+    const uint32_t rmStart = m_meshesDirty ? SDL_GetTicks() : 0;
+    const bool rmWasFull = m_meshesDirty;
+
     if (m_meshesDirty) {
         // Full rebuild — clear everything and re-tessellate every visible
         // body. Used on project load, mesh-quality change, theme switch.
@@ -2667,8 +3117,9 @@ void Application::rebuildMeshes() {
                                                    angularDeflection);
             if (idx >= 0) {
                 m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-                if (m_extruding && m_extrudeMode == ExtrudeMode::Subtract &&
-                    id == m_extrudePreviewBodyId) {
+                if (m_extrudeCtl.active() &&
+                    m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                    id == m_extrudeCtl.previewBodyId()) {
                     m_shapeRenderer->setSubtractPreview(idx, true);
                 }
             }
@@ -2680,6 +3131,12 @@ void Application::rebuildMeshes() {
                 m_edgeRenderer->setBodyEdges(id, shape, deflection);
         }
         m_dirtyBodyIds.clear();
+        if (rmWasFull) {
+            const uint32_t took = SDL_GetTicks() - rmStart;
+            if (took > 500)
+                std::fprintf(stderr, "[Perf] full mesh rebuild took %.2fs "
+                                     "on the main thread\n", took / 1000.0);
+        }
         return;
     }
 
@@ -2706,8 +3163,9 @@ void Application::rebuildMeshes() {
                                                angularDeflection);
         if (idx >= 0) {
             m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-            if (m_extruding && m_extrudeMode == ExtrudeMode::Subtract &&
-                id == m_extrudePreviewBodyId) {
+            if (m_extrudeCtl.active() &&
+                m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                id == m_extrudeCtl.previewBodyId()) {
                 m_shapeRenderer->setSubtractPreview(idx, true);
             }
         }
@@ -2850,6 +3308,42 @@ std::string Application::projectDisplayName() const {
     return pn;
 }
 
+// A save taken while a sketch is being drawn must not lose that sketch.
+//
+// m_activeSketch is a live shared_ptr the Document does not know about until
+// sketch mode ENDS (the registration in exitSketchMode). Saving straight from
+// sketch mode therefore serialised SKETCH_COUNT 0 — the geometry was simply
+// absent from the file — and the accompanying SketchEditOp step serialised with
+// no params, because SketchEditOp::serializeWithDocument resolves its target via
+// Document::findSketchId, which cannot resolve an unregistered pointer. The
+// result reloaded as a frozen ReplayOp that reproduces nothing. Drawing a circle
+// and pressing Ctrl+S was enough to lose it.
+//
+// Registering here rather than force-finishing the sketch is deliberate: a save
+// should never change what the user is editing, and they stay in sketch mode.
+// exitSketchMode stays correct afterwards — its add is guarded on
+// m_activeSketchId < 0, so it will not add the same sketch twice, and its
+// "existing sketch emptied during this edit" branch still removes it.
+void Application::flushActiveSketchToDocument() {
+    if (!m_document || !m_activeSketch) return;
+    if (m_activeSketchId >= 0) return;                // already in the Document
+    if (m_activeSketch->elementCount() == 0) return;  // nothing worth keeping
+    m_activeSketchId = m_document->addSketch(m_activeSketch);
+    markDirty();
+}
+
+// Call ONLY after ProjectIO::save() reports success. The crash-recovery draft
+// is a promise "if we crash, restore this" — clearing it here, not inside
+// flushActiveSketchToDocument(), means a failed/interrupted disk write still
+// leaves the draft in place to recover from. Clearing it right after the
+// in-memory Document registration (the original shape of this fix) deleted
+// the sole recovery copy before the sketch was durably on disk at all.
+void Application::acknowledgeSketchDraftCommitted() {
+    if (!m_inSketchMode || !m_activeSketch || m_activeSketchId < 0) return;
+    materializr::clearSketchDraft();
+    m_lastDraftElemCount = -1;
+}
+
 void Application::saveProject() {
     // Seed the picker with the CURRENT project's name (a resave keeps its
     // name instead of silently reverting to "project.materializr").
@@ -2870,6 +3364,12 @@ void Application::saveProject() {
         {{"Materializr Project", "*.mzr *.materializr"}, {"All Files", "*"}},
         [this](const std::string& chosenPath) {
             if (chosenPath.empty()) return;
+            // Only commit the in-progress sketch once the user has actually
+            // confirmed a destination — flushing before the picker opened
+            // meant merely opening-then-cancelling Save As permanently
+            // registered the sketch and flipped the dirty flag with no file
+            // ever written.
+            flushActiveSketchToDocument();
             std::string path = chosenPath;
 #if !defined(MZ_MOBILE)
             // Keep a project extension. The file is gzip-compressed, so
@@ -2884,8 +3384,23 @@ void Application::saveProject() {
             }
 #endif
             ProjectHistory hist = captureProjectHistory();
-            auto result = ProjectIO::save(path, *m_document, &hist);
+            std::vector<uint8_t> thumb;
+            captureProjectThumbnailPNG(thumb);
+            auto result = ProjectIO::save(path, *m_document, &hist,
+                                          thumb.empty() ? nullptr : &thumb);
             if (result.success) {
+#if !defined(MZ_MOBILE)
+                // On mobile (Android SAF / iOS export sheet) `path` here is
+                // only a temp cache file — FileDialogs::poll() commits it to
+                // the user's actual chosen document in a SEPARATE step
+                // AFTER this callback returns (mobileCommitSave(), whose
+                // result isn't even threaded back here). Clearing the
+                // recovery draft on this "success" would delete the only
+                // recovery copy before the real destination write has even
+                // been attempted. Desktop has no such gap: `path` IS the
+                // final destination and this write is durable.
+                acknowledgeSketchDraftCommitted();
+#endif
                 m_currentProjectPath = path;
                 m_currentProjectName =
                     std::filesystem::path(path).filename().string();
@@ -2918,6 +3433,10 @@ void Application::saveProject() {
 #endif
                     if (name.empty()) name = std::filesystem::path(path).filename().string();
                     addRecentProject(ref, name);
+                    // Keyed by the SAME ref the recents list uses, so the
+                    // landing tile finds it (matters on Android, where the
+                    // identity is the content: URI, not the temp path).
+                    cacheProjectThumbnail(ref, thumb);
                 }
                 std::fprintf(stdout, "Project saved to %s\n", path.c_str());
                 if (m_closeAfterSave) {
@@ -2941,6 +3460,7 @@ void Application::saveProject() {
 }
 
 void Application::saveProjectQuick() {
+    flushActiveSketchToDocument();
     // An explicit save expresses "keep what's committed" — captureProjectHistory
     // cancels any live preview first, so a mid-preview save can't persist the
     // preview body and its phantom history step. (Historically that leaked and
@@ -2956,11 +3476,16 @@ void Application::saveProjectQuick() {
         const char* home = std::getenv("HOME");
         std::string tmp = std::string(home ? home : ".") + "/.mz_qsave.materializr";
         ProjectHistory hist = captureProjectHistory();
-        auto result = ProjectIO::save(tmp, *m_document, &hist);
+        std::vector<uint8_t> thumb;
+        captureProjectThumbnailPNG(thumb);
+        auto result = ProjectIO::save(tmp, *m_document, &hist,
+                                      thumb.empty() ? nullptr : &thumb);
         if (result.success &&
             materializr::mobileCommitSaveToRef(m_currentProjectPath, tmp)) {
+            acknowledgeSketchDraftCommitted();
             markSaved();
             saveAppSettings();
+            cacheProjectThumbnail(m_currentProjectPath, thumb);
             showToast("Saved " + projectDisplayName());
         } else if (!result.success) {
             std::fprintf(stderr, "Save failed: %s\n", result.errorMessage.c_str());
@@ -2975,10 +3500,15 @@ void Application::saveProjectQuick() {
         return;
     }
     ProjectHistory hist = captureProjectHistory();
-    auto result = ProjectIO::save(m_currentProjectPath, *m_document, &hist);
+    std::vector<uint8_t> thumb;
+    captureProjectThumbnailPNG(thumb);
+    auto result = ProjectIO::save(m_currentProjectPath, *m_document, &hist,
+                                  thumb.empty() ? nullptr : &thumb);
     if (result.success) {
+        acknowledgeSketchDraftCommitted();
         markSaved();
         saveAppSettings(); // persist lastProjectPath for auto-open
+        cacheProjectThumbnail(m_currentProjectPath, thumb);
         std::fprintf(stdout, "Project saved to %s\n", m_currentProjectPath.c_str());
         if (m_closeAfterSave) {
             if (m_postSaveAction == PostSaveAction::CloseProject) {
@@ -3221,7 +3751,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
     // (potentially after downstream Transforms). Re-resolve each fillet/chamfer's
     // generated-face indices against the final body so ownsFace() matches the
     // face positions the user actually sees and can click.
-    refreshAllEdgeOpFaces();
+    materializr::refreshAllEdgeOpFaces(*m_history, *m_document);
 
     // Retrofit generative anchors onto fillets/chamfers loaded from a project
     // that predates the feature (their saved params carry no anchor= key). Do
@@ -3297,7 +3827,16 @@ void Application::ensureSketchSourceFace(int sketchId) {
     // hole wires into its regions).
     if (sk->isDetachedFromBody()) return;
     int bid = sk->getSourceBody();
-    if (bid < 0) return;
+    if (bid < 0) {
+        // Severed link (a pick that failed body attribution saved
+        // sourceBody=-1): try to re-adopt — the body owning a planar face
+        // coplanar with the sketch plane is the host. Heals old files.
+        bid = findBodyUnderRegionlessPlane(sk->getPlane());
+        if (bid < 0) return;
+        sk->setSourceBody(bid);
+        std::fprintf(stderr, "[Sketch] re-adopted severed body link -> %d\n",
+                     bid);
+    }
     TopoDS_Shape body;
     try { body = m_document->getBody(bid); } catch (...) { return; }
     if (body.IsNull()) return;
@@ -3346,6 +3885,33 @@ void Application::ensureSketchSourceFace(int sketchId) {
     TopoDS_Face f = matchPass(/*requireHoles=*/true);
     if (f.IsNull()) f = matchPass(/*requireHoles=*/false);
     if (!f.IsNull()) sk->setSourceFace(f);
+}
+
+// The body owning a planar face coplanar with `pln` (normals parallel,
+// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose
+// body link was severed. First match wins — coplanar-face ambiguity across
+// bodies is rare and any match beats a dead link.
+int Application::findBodyUnderRegionlessPlane(const gp_Pln& pln) const {
+    if (!m_document) return -1;
+    const gp_Dir sN = pln.Axis().Direction();
+    const gp_Pnt sO = pln.Location();
+    for (int bid : m_document->getAllBodyIds()) {
+        TopoDS_Shape body;
+        try { body = m_document->getBody(bid); } catch (...) { continue; }
+        if (body.IsNull()) continue;
+        for (TopExp_Explorer ex(body, TopAbs_FACE); ex.More(); ex.Next()) {
+            Handle(Geom_Plane) gpln = Handle(Geom_Plane)::DownCast(
+                BRep_Tool::Surface(TopoDS::Face(ex.Current())));
+            if (gpln.IsNull()) continue;
+            const gp_Pln fPln = gpln->Pln();
+            if (std::abs(sN.Dot(fPln.Axis().Direction())) < 0.9999) continue;
+            gp_Vec d(fPln.Location(), sO);
+            if (std::abs(d.Dot(gp_Vec(fPln.Axis().Direction()))) > 0.05)
+                continue;
+            return bid;
+        }
+    }
+    return -1;
 }
 
 int Application::findBodyUnderRegion(const TopoDS_Face& region,
@@ -3441,6 +4007,8 @@ bool Application::loadProjectAt(const std::string& path) {
     // history replay above.)
     // Persist as the last-open project so the next launch can auto-reopen it.
     saveAppSettings();
+    // A project is on screen now — the landing page's job is done.
+    if (m_landingPage) m_landingPage->setVisible(false);
     return true;
 }
 
@@ -3519,13 +4087,35 @@ void Application::openRecentProject(const AppSettings::RecentProject& r) {
             removeRecentProject(ref);
             return;
         }
+        // A BACKUP copy, served because the document is gone or disowned —
+        // real content, but not what that URI holds now. Keeping the URI as
+        // the save target would let the next quick-save truncate a document
+        // we never read (or recreate one the user deliberately deleted), so
+        // the project comes back UNLINKED: saving prompts for a destination.
+        const bool viaFallback = materializr::mobileLastOpenWasFallback();
         if (loadProjectAt(tmp)) {
             addRecentProject(ref, name);  // bump to front
+            // The resolved temp is peekable even though the content: ref is
+            // not — harvest the embedded thumbnail into the cache so this
+            // project's landing tile fills in from the next show onward.
+            {
+                std::vector<uint8_t> png;
+                if (ProjectIO::peekThumbnail(tmp, png))
+                    cacheProjectThumbnail(ref, png);
+            }
 #if defined(__ANDROID__)
-            // Track the DOCUMENT as the project identity so quick-save writes
-            // back to the real file (loadProjectAt stored the cache temp).
-            m_currentProjectPath = ref;
-            m_currentProjectName = name;
+            if (viaFallback) {
+                m_currentProjectPath.clear();   // Save → picker, not overwrite
+                m_currentProjectName = name;
+                showToast("Opened a local backup of \"" + name +
+                          "\" - the original is gone. Save to keep it.");
+            } else {
+                // Track the DOCUMENT as the project identity so quick-save
+                // writes back to the real file (loadProjectAt stored the
+                // cache temp).
+                m_currentProjectPath = ref;
+                m_currentProjectName = name;
+            }
             saveAppSettings();            // lastProjectPath -> the real ref
 #endif
         }
@@ -3774,6 +4364,70 @@ void Application::exportBodyAsStl(int bodyId) {
 #endif
 }
 
+void Application::exportBodiesAs(const std::vector<int>& bodyIds,
+                                 const std::string& formatName) {
+    if (!m_document || bodyIds.empty()) return;
+    // Find the format's document exporter in the registry. exportFn is no use
+    // here: it runs its own file dialog whose callback reads ctx.document()
+    // frames later, which would export the WHOLE project instead of the
+    // chosen bodies.
+    const IOFormatContribution* fmt = nullptr;
+    for (const auto& f : PluginRegistry::instance().ioFormats()) {
+        if (f.name == formatName && f.exportDocFn) { fmt = &f; break; }
+    }
+    if (!fmt) { showToast("Can't export to " + formatName + "."); return; }
+
+    // A scratch document holding BAKED copies of the chosen bodies, at their
+    // real positions — that's what makes a print-in-place assembly come out
+    // as one file with the parts still where they belong. shared_ptr because
+    // the dialog's callback runs frames later.
+    auto scratch = std::make_shared<Document>();
+    for (int id : bodyIds) {
+        TopoDS_Shape s;
+        try { s = m_document->getBody(id); } catch (...) {}
+        if (s.IsNull()) continue;
+        const int nid = scratch->addBody(s, m_document->getBodyName(id));
+        scratch->setBodyColor(nid, m_document->getBodyColor(id));
+    }
+    if (scratch->getAllBodyIds().empty()) {
+        showToast("Nothing to export — those bodies have no geometry.");
+        return;
+    }
+
+    // Default filename: the body's name for one, the project's for a set.
+    std::string base;
+    if (bodyIds.size() == 1) base = m_document->getBodyName(bodyIds.front());
+    if (base.empty()) base = m_currentProjectName;
+    if (base.empty()) base = "export";
+    if (const auto dot = base.rfind('.'); dot != std::string::npos && dot > 0)
+        base = base.substr(0, dot);          // drop a project extension
+    for (char& ch : base)
+        if (std::strchr("/\\:*?\"<>|", ch)) ch = '_';
+    const std::string ext = fmt->extensions.empty() ? "dat" : fmt->extensions.front();
+    const std::string defaultFile = base + "." + ext;
+
+    auto write = [scratch, fmt, ext](std::string path) {
+        if (path.empty()) return false;
+        if (std::filesystem::path(path).extension() != "." + ext) path += "." + ext;
+        const bool ok = fmt->exportDocFn(*scratch, path);
+        std::fprintf(ok ? stdout : stderr, "%s %s\n",
+                     ok ? "Exported" : "Export FAILED:", path.c_str());
+        return ok;
+    };
+    const std::string title = bodyIds.size() > 1
+        ? "Export " + std::to_string(bodyIds.size()) + " Bodies"
+        : "Export Body";
+#if defined(MZ_MOBILE)
+    FileDialogs::mobileExportShareOrSave(defaultFile, "application/octet-stream",
+                                         [write](const std::string& p) { return write(p); });
+#else
+    std::string filter = "*." + ext;
+    FileDialogs::saveFile(title, defaultFile,
+                          {{formatName + " Files", filter}},
+                          [write](std::string path) { (void)write(std::move(path)); });
+#endif
+}
+
 void Application::exportSketchAsSvg(int sketchId) {
     if (!m_document || sketchId < 0) return;
     auto sketch = m_document->getSketch(sketchId);
@@ -3964,6 +4618,13 @@ void Application::enterSketchMode() {
     m_sketchEntryHistoryStep = m_history ? m_history->currentStep() : -1;
     if (m_history) m_history->setUndoFloor(m_sketchEntryHistoryStep);  // no undo past sketch entry
     m_toolbar->setSketchMode(true);
+    // Fresh sketch session: drop any stale Dimension edit-popup state left
+    // over from a previous session (e.g. Esc/undo left m_dimEditingId set
+    // without the popup ever closing) so it can't reopen against a
+    // constraint id from a different sketch.
+    m_dimOpenEditRequested = false;
+    m_dimEditingId = -1;
+    m_dimPopupConsumedEsc = false;
     alignCameraToActiveSketch();
 }
 
@@ -3986,6 +4647,13 @@ void Application::enterSketchOnPlane(const gp_Pln& plane) {
     m_sketchEntryHistoryStep = m_history ? m_history->currentStep() : -1;
     if (m_history) m_history->setUndoFloor(m_sketchEntryHistoryStep);  // no undo past sketch entry
     m_toolbar->setSketchMode(true);
+    // Fresh sketch session: drop any stale Dimension edit-popup state left
+    // over from a previous session (e.g. Esc/undo left m_dimEditingId set
+    // without the popup ever closing) so it can't reopen against a
+    // constraint id from a different sketch.
+    m_dimOpenEditRequested = false;
+    m_dimEditingId = -1;
+    m_dimPopupConsumedEsc = false;
     alignCameraToActiveSketch();
 }
 
@@ -3998,6 +4666,25 @@ bool Application::faceIsPlanar(const TopoDS_Face& face) const {
 }
 
 void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
+    // A pick that failed body attribution (bodyId -1) severs the sketch-body
+    // link for the sketch's whole life: sourceFace can't rebind after
+    // reload, the centroid/centre snaps die, and Subtract loses its target
+    // (Steve's cap sketch saved with sourceBody=-1 — every centre fix was
+    // inert on it). Recover the link: the body CONTAINING the picked face
+    // is the source.
+    if (sourceBodyId < 0 && m_document) {
+        for (int id : m_document->getAllBodyIds()) {
+            TopoDS_Shape b;
+            try { b = m_document->getBody(id); } catch (...) { continue; }
+            if (b.IsNull()) continue;
+            for (TopExp_Explorer fx(b, TopAbs_FACE); fx.More(); fx.Next()) {
+                if (fx.Current().IsSame(face)) { sourceBodyId = id; break; }
+            }
+            if (sourceBodyId >= 0) break;
+        }
+        std::fprintf(stderr, "[Sketch] on-face pick had no body id — "
+                             "recovered body=%d\n", sourceBodyId);
+    }
     // Sketching needs a FLAT face. A curved face (cylinder / sphere / fillet)
     // has no single plane — we'd otherwise drop the sketch onto a tangent plane
     // at an arbitrary point on the curve, which isn't useful and a construction
@@ -4092,6 +4779,259 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         if (found) {
             gp_Ax3 ax(pln.Position().Location(), n, bestX);
             pln = gp_Pln(ax);
+        } else {
+            // No straight edge (a circular cap, a threaded rod's top): the
+            // surface's intrinsic X is arbitrary — a boolean-generated plane
+            // can be rotated any which way, so the sketch grid sat visibly
+            // askew from the ground grid. Align to the projection of a world
+            // axis instead (world X unless it's nearly parallel to the
+            // normal, then world Y).
+            gp_Vec wx(1.0, 0.0, 0.0);
+            if (std::abs(gp_Vec(n).Dot(wx)) > 0.9) wx = gp_Vec(0.0, 1.0, 0.0);
+            gp_Vec proj = wx - gp_Vec(n) * (wx * gp_Vec(n));
+            if (proj.Magnitude() > 1e-9) {
+                gp_Ax3 ax(pln.Position().Location(), n, gp_Dir(proj));
+                pln = gp_Pln(ax);
+            }
+        }
+    }
+
+    // Whether the plane origin below ends up on the face's true centre —
+    // the refs builder then adds (0,0) as a snappable point so the centre
+    // is directly clickable.
+    bool faceCenterAnchored = false;
+
+    // THREADED body cap: the Thread step in history knows the TRUE axis
+    // (kept accurate through resize/move/cascade by the face-ref and
+    // coaxial re-resolution), so anchor there DIRECTLY — it outranks any
+    // geometric fitting. Fitting is unreliable on threaded caps: a cap cut
+    // inside the groove span has NO crest arc on its boundary, and the
+    // only exact circle left is the sweep's construction arc, centred at
+    // the surface's parametric origin ~0.3 mm off-axis — the fitted anchor
+    // adopted it and the true centre stopped snapping (2026-07-21
+    // regression, Steve's second poke).
+    {
+        glm::vec2 c2;
+        if (threadAxisCenter2d(sourceBodyId, pln, c2)) {
+            const gp_Ax3& ax = pln.Position();
+            const gp_Pnt& O = ax.Location();
+            const gp_Dir Xd = ax.XDirection();
+            const gp_Dir Yd = ax.YDirection();
+            gp_Pnt p(O.X() + Xd.X() * c2.x + Yd.X() * c2.y,
+                     O.Y() + Xd.Y() * c2.x + Yd.Y() * c2.y,
+                     O.Z() + Xd.Z() * c2.x + Yd.Z() * c2.y);
+            pln = gp_Pln(gp_Ax3(p, ax.Direction(), Xd));
+            faceCenterAnchored = true;
+        }
+    }
+
+    // Re-anchor the plane ORIGIN to the face's natural centre. A boolean-
+    // generated plane's origin is arbitrary, and everything hangs off it:
+    // typed coordinates, the snap-to-grid lattice, the drawn face grid. If
+    // the face boundary is dominated by concentric circular edges (a rod
+    // cap — including a threaded one, whose crest arcs survive the groove
+    // runout — or an annulus), their shared centre is the body axis: put
+    // (0,0) there. Faces without a dominant circle keep the surface origin.
+    if (!faceCenterAnchored) {
+        const gp_Ax3& ax = pln.Position();
+        const gp_Dir n = ax.Direction();
+        struct Cluster { gp_Pnt center; double sweep = 0.0; };
+        std::vector<Cluster> clusters;
+        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+            BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
+            if (c.GetType() != GeomAbs_Circle) continue;
+            gp_Circ circ = c.Circle();
+            // In-plane circles only: axis parallel to the sketch normal and
+            // centre on the plane.
+            if (std::abs(circ.Axis().Direction().Dot(n)) < 0.9999) continue;
+            gp_Pnt cc = circ.Location();
+            gp_Vec toC(ax.Location(), cc);
+            if (std::abs(toC.Dot(gp_Vec(n))) > 1e-3) continue;
+            double sweep = std::abs(c.LastParameter() - c.FirstParameter());
+            bool merged = false;
+            for (auto& cl : clusters) {
+                if (cl.center.Distance(cc) < 1e-4) {
+                    cl.sweep += sweep;
+                    merged = true;
+                    break;
+                }
+            }
+            if (!merged) clusters.push_back({cc, sweep});
+        }
+        const Cluster* best = nullptr;
+        for (const auto& cl : clusters)
+            if (!best || cl.sweep > best->sweep) best = &cl;
+        if (best && best->sweep >= M_PI) {
+            pln = gp_Pln(gp_Ax3(best->center, n, ax.XDirection()));
+            faceCenterAnchored = true;
+        }
+
+        // Swept / lofted caps defeat the analytic scan: every boundary edge
+        // is a BSPLINE even when geometrically circular (probe_capface: a
+        // swept-thread rod's top face is 4 BSplines with the plane origin
+        // 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then
+        // TRIM to the outermost band — the crest arcs lie exactly on the
+        // body radius while the groove runout dips inward, so the trimmed
+        // refit converges on the true axis.
+        if (!faceCenterAnchored) {
+            const gp_Pnt O = ax.Location();
+            const gp_Dir Xd = ax.XDirection();
+            const gp_Dir Yd = ax.YDirection();
+            std::vector<std::pair<double, double>> pts;
+            try {
+                TopoDS_Wire ow = BRepTools::OuterWire(face);
+                if (!ow.IsNull()) {
+                    for (TopExp_Explorer ex(ow, TopAbs_EDGE); ex.More();
+                         ex.Next()) {
+                        BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
+                        const int N = 40;
+                        for (int i = 0; i <= N; ++i) {
+                            double u = c.FirstParameter() +
+                                       (c.LastParameter() -
+                                        c.FirstParameter()) * i / N;
+                            gp_Pnt p = c.Value(u);
+                            gp_Vec v(O, p);
+                            pts.emplace_back(v.Dot(gp_Vec(Xd)),
+                                             v.Dot(gp_Vec(Yd)));
+                        }
+                    }
+                }
+            } catch (...) { pts.clear(); }
+            // Algebraic (Kasa) circle fit: x²+y² = 2ax + 2by + c.
+            auto fit = [](const std::vector<std::pair<double, double>>& q,
+                          double& a, double& b, double& r) -> bool {
+                if (q.size() < 8) return false;
+                double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+                double sz = 0, sxz = 0, syz = 0;
+                const double m = static_cast<double>(q.size());
+                for (const auto& p : q) {
+                    const double x = p.first, y = p.second;
+                    const double z = x * x + y * y;
+                    sx += x; sy += y; sxx += x * x; syy += y * y;
+                    sxy += x * y; sz += z; sxz += x * z; syz += y * z;
+                }
+                // Solve [sxx sxy sx; sxy syy sy; sx sy m]·[A B C]ᵀ =
+                // [sxz syz sz]ᵀ with A=2a, B=2b, C=r²−a²−b².
+                const double d = sxx * (syy * m - sy * sy) -
+                                 sxy * (sxy * m - sy * sx) +
+                                 sx * (sxy * sy - syy * sx);
+                if (std::abs(d) < 1e-12) return false;
+                const double A = (sxz * (syy * m - sy * sy) -
+                                  sxy * (syz * m - sy * sz) +
+                                  sx * (syz * sy - syy * sz)) / d;
+                const double B = (sxx * (syz * m - sz * sy) -
+                                  sxz * (sxy * m - sy * sx) +
+                                  sx * (sxy * sz - syz * sx)) / d;
+                const double C = (sxx * (syy * sz - sy * syz) -
+                                  sxy * (sxy * sz - sx * syz) +
+                                  sxz * (sxy * sy - syy * sx)) / d;
+                a = A * 0.5; b = B * 0.5;
+                const double r2 = C + a * a + b * b;
+                if (r2 <= 0.0) return false;
+                r = std::sqrt(r2);
+                return true;
+            };
+            // RANSAC over LOCAL sample triples. Least-squares-then-trim
+            // converges to the wrong centre here (verified in simulation:
+            // the one-sided groove dip biases the initial fit, and trimming
+            // then keeps the wrong band, landing 0.6 mm off with a
+            // plausible residual). But the boundary CONTAINS exact circular
+            // arcs — the crest flat crosses the top plane as a true arc of
+            // the body radius (and the root flat as a concentric one) — so
+            // circles through nearby sample triples hit the axis exactly.
+            // Best-inlier circle wins at a TIGHT tolerance (the samples are
+            // exact BRep evaluations); Kasa-refit the inliers. Straight
+            // edges produce near-infinite radii — capped against the
+            // boundary size — and sloppy fits die on the tight RMS gate.
+            const size_t np = pts.size();
+            if (np >= 24) {
+                double xLo = 1e300, xHi = -1e300, yLo = 1e300, yHi = -1e300;
+                for (const auto& p : pts) {
+                    xLo = std::min(xLo, p.first);  xHi = std::max(xHi, p.first);
+                    yLo = std::min(yLo, p.second); yHi = std::max(yHi, p.second);
+                }
+                const double diag = std::hypot(xHi - xLo, yHi - yLo);
+                const double tol = 1e-3;
+                size_t bestInl = 0;
+                double bx = 0, by = 0, br = 0;
+                for (size_t k : {size_t(2), size_t(5), size_t(10)}) {
+                    for (size_t i = 0; i < np; ++i) {
+                        const auto& p1 = pts[i];
+                        const auto& p2 = pts[(i + k) % np];
+                        const auto& p3 = pts[(i + 2 * k) % np];
+                        const double d =
+                            2.0 * (p1.first * (p2.second - p3.second) +
+                                   p2.first * (p3.second - p1.second) +
+                                   p3.first * (p1.second - p2.second));
+                        if (std::abs(d) < 1e-12) continue;
+                        const double z1 = p1.first * p1.first +
+                                          p1.second * p1.second;
+                        const double z2 = p2.first * p2.first +
+                                          p2.second * p2.second;
+                        const double z3 = p3.first * p3.first +
+                                          p3.second * p3.second;
+                        const double ux = (z1 * (p2.second - p3.second) +
+                                           z2 * (p3.second - p1.second) +
+                                           z3 * (p1.second - p2.second)) / d;
+                        const double uy = (z1 * (p3.first - p2.first) +
+                                           z2 * (p1.first - p3.first) +
+                                           z3 * (p2.first - p1.first)) / d;
+                        const double r = std::hypot(p1.first - ux,
+                                                    p1.second - uy);
+                        if (r < 0.1 || r > 2.0 * diag) continue;
+                        // Only ENCLOSING circles qualify — no boundary
+                        // sample may lie outside. Steve's real cap carries
+                        // TWO exact arcs: the crest arc on the true axis
+                        // AND a sweep-construction arc (r 7.38, centred
+                        // 0.64 mm off-axis at the surface origin) that WON
+                        // by 44 inliers to 43, anchoring the grid off-
+                        // kilter. The crest circle encloses every sample;
+                        // the impostor leaves the whole crest band outside.
+                        size_t inl = 0;
+                        bool enclosing = true;
+                        for (const auto& p : pts) {
+                            const double d2 = std::hypot(p.first - ux,
+                                                         p.second - uy);
+                            if (std::abs(d2 - r) < tol) ++inl;
+                            if (d2 > r + 0.02) { enclosing = false; break; }
+                        }
+                        if (!enclosing) continue;
+                        if (inl > bestInl) {
+                            bestInl = inl; bx = ux; by = uy; br = r;
+                        }
+                    }
+                }
+                // The winning circle must be a DOMINANT boundary feature,
+                // not an incidental one — a rounded-rectangle face's corner
+                // fillet is a perfect exact arc (12% of samples) whose
+                // centre is NOT where anyone wants the origin. The threaded
+                // cap's crest arc carries ~26% of samples; a plain circular
+                // boundary carries ~all of them.
+                if (bestInl >= 16 && bestInl * 5 >= np) {
+                    std::vector<std::pair<double, double>> inliers;
+                    for (const auto& p : pts)
+                        if (std::abs(std::hypot(p.first - bx,
+                                                p.second - by) - br) < tol)
+                            inliers.push_back(p);
+                    double fa, fb, fr;
+                    if (fit(inliers, fa, fb, fr)) {
+                        double rms = 0.0;
+                        for (const auto& p : inliers) {
+                            const double dr = std::hypot(p.first - fa,
+                                                         p.second - fb) - fr;
+                            rms += dr * dr;
+                        }
+                        rms = std::sqrt(rms / inliers.size());
+                        if (rms <= 1e-3) {
+                            gp_Pnt c3d(O.X() + Xd.X() * fa + Yd.X() * fb,
+                                       O.Y() + Xd.Y() * fa + Yd.Y() * fb,
+                                       O.Z() + Xd.Z() * fa + Yd.Z() * fb);
+                            pln = gp_Pln(gp_Ax3(c3d, n, Xd));
+                            faceCenterAnchored = true;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -4102,7 +5042,22 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     // Remember which body this face belongs to so a later Subtract (and other
     // body-relative ops) know what to cut from. Every face-sketch entry point
     // routes through here, so setting it here keeps the source body consistent.
-    m_activeSketch->setSourceBody(sourceBodyId);
+    //
+    // EXCEPT on a mesh body, which is a REFERENCE body: an imported STL is a
+    // tessellation, not a modelled solid. You sketch on it to trace and snap
+    // against real geometry — that still works, the face references gathered
+    // below are what provide it — but it is not a modelling host. It has no
+    // analytic topology to cut into, and it can never be re-derived, so a
+    // parametric link to it is a promise we cannot keep.
+    //
+    // Binding to it made every body-relative op aim at the mesh: drawing a
+    // profile on an STL face and extruding it pushed/pulled INTO the STL
+    // instead of making a new body (Steve, 2026-08-03). Left free-floating, the
+    // extrude takes the targetBody < 0 path and creates a new body, which is
+    // what tracing a reference part is for.
+    const bool meshHost = sourceBodyId >= 0 && m_document &&
+                          m_document->isBodyMesh(sourceBodyId);
+    m_activeSketch->setSourceBody(meshHost ? -1 : sourceBodyId);
 
     {
         // `pln` was computed above and already handles planar faces whose surface
@@ -4164,6 +5119,16 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         }
         m_activeSketch->setPlane(pln);
         m_activeSketch->setSourceFace(face);
+        // The plane origin IS the true centre when anchored — publish it as
+        // the sketch's centre snap (outranks + suppresses the area
+        // centroid; see SketchTool).
+        if (faceCenterAnchored)
+            m_activeSketch->setCenterPoint(glm::vec2(0.0f));
+        std::fprintf(stderr, "[Sketch] on-face: body=%d anchored=%d "
+                             "origin=(%.4f, %.4f, %.4f)\n",
+                     sourceBodyId, faceCenterAnchored ? 1 : 0,
+                     pln.Location().X(), pln.Location().Y(),
+                     pln.Location().Z());
 
         // Walk the face's vertices and edges, project them onto the sketch
         // plane in 2D, and stash them on the Sketch as reference geometry.
@@ -4339,6 +5304,11 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             // The originating face.
             processFace(face);
 
+            // The re-anchored plane origin IS the face's true centre (the
+            // circular-boundary axis) — make it a snappable point so
+            // "start the circle at the centre" is one click.
+            if (faceCenterAnchored) dedup(refs.points, glm::vec2(0.0f));
+
             // Neighbouring faces: any face sharing one of the host face's edges.
             // Their projected geometry (side-wall edges, bordering faces) becomes
             // snappable too. One-time walk on sketch entry, so cost is fine.
@@ -4378,6 +5348,13 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     m_sketchEntryHistoryStep = m_history ? m_history->currentStep() : -1;
     if (m_history) m_history->setUndoFloor(m_sketchEntryHistoryStep);  // no undo past sketch entry
     m_toolbar->setSketchMode(true);
+    // Fresh sketch session: drop any stale Dimension edit-popup state left
+    // over from a previous session (e.g. Esc/undo left m_dimEditingId set
+    // without the popup ever closing) so it can't reopen against a
+    // constraint id from a different sketch.
+    m_dimOpenEditRequested = false;
+    m_dimEditingId = -1;
+    m_dimPopupConsumedEsc = false;
     alignCameraToActiveSketch();
 }
 
@@ -4428,12 +5405,30 @@ void Application::applySketchConstraint(ConstraintType type) {
             break;
         }
         case ConstraintType::Parallel:
-        case ConstraintType::Perpendicular:
-        case ConstraintType::Equal: {
+        case ConstraintType::Perpendicular: {
             // Each subsequent line gets bound to the first.
             std::vector<int> v(selLns.begin(), selLns.end());
             for (size_t i = 1; i < v.size(); ++i) {
                 pushConstraint(type, v[0], v[i]);
+                ++added;
+            }
+            break;
+        }
+        case ConstraintType::Equal: {
+            // Equal binds LINES (equal length) or CIRCLES/ARCS (equal radius),
+            // whichever the selection holds — each subsequent entity bound to
+            // the first of its kind. A mixed selection constrains lines to
+            // lines and curves to curves independently.
+            std::vector<int> lns(selLns.begin(), selLns.end());
+            for (size_t i = 1; i < lns.size(); ++i) {
+                pushConstraint(ConstraintType::Equal, lns[0], lns[i]);
+                ++added;
+            }
+            std::vector<int> curves;
+            for (int id : m_sketchTool->getSelectedCircles()) curves.push_back(id);
+            for (int id : m_sketchTool->getSelectedArcs())    curves.push_back(id);
+            for (size_t i = 1; i < curves.size(); ++i) {
+                pushConstraint(ConstraintType::Equal, curves[0], curves[i]);
                 ++added;
             }
             break;
@@ -4563,6 +5558,181 @@ void Application::applySketchConstraint(ConstraintType type) {
     if (added > 0) markDirty();
 }
 
+void Application::applyPendingDimension() {
+    if (!m_inSketchMode || !m_activeSketch || !m_sketchTool) return;
+    // Value copy: clearDimState() below resets the tool's live m_dimPending
+    // to defaults, so a reference here would read back type=Distance,
+    // measured=0.0 by the time the prefill code runs.
+    const PendingDimension pd = m_sketchTool->getPendingDimension();
+    if (!pd.valid || !m_sketchTool->dimReadyToCommit()) return;
+
+    // Label offset = placed position minus the auto anchor the renderer uses.
+    // The renderer resolves anchor per type; store the raw placed position
+    // relative to the dimension's geometric anchor (computed the same way the
+    // label pass does — see dimensionAutoAnchor in Application_Viewport.cpp).
+    glm::vec2 anchor = dimensionAutoAnchor(pd);
+    glm::vec2 off = m_sketchTool->getDimLabelPos() - anchor;
+
+    int editId = -1;
+    // Popup prefill value: the new-add path prefills from the freshly
+    // measured geometry (pd.measured). A dedup MATCH instead keeps whatever
+    // value the constraint already carried (see the loop below) — so
+    // re-picking an existing dimension just to move its label doesn't
+    // clobber a value the user hand-typed earlier — EXCEPT a reversed-order
+    // Angle match, which must renegotiate the value for correctness (see
+    // the angleSwapped comment below); that path prefills from the fresh
+    // pd.measured like a new add.
+    double prefillValue = pd.measured;
+    recordSketchMutation([&] {
+        // Dedup: same type on the same (unordered) entity pair replaces the
+        // label placement instead of stacking a duplicate constraint —
+        // matches applyDimension's policy. Deliberately does NOT overwrite
+        // c.value with pd.measured on a match: pd.measured is a live
+        // re-measurement of the CURRENT geometry, which can differ from a
+        // value the user already typed into the edit popup, and clobbering
+        // it here would silently discard that typed value with no undo step
+        // to recover it (bitwise-equal values skip recordSketchMutation's
+        // history push). The one exception is angleSwapped below, where
+        // keeping the old value would be actively wrong, not just imprecise.
+        bool replaced = false;
+        // Mirrored DistancePointLine pair-identity: a line-line parallel
+        // pick resolves to (point = second line's start endpoint, line =
+        // first line). Picking the SAME two lines in the opposite order
+        // resolves to the mirror pair (point = first line's start endpoint,
+        // line = second line) — a different (point,line) id pair driving
+        // the geometrically same gap between the two lines. Recognise that
+        // as the same dimension so re-picking in reversed order updates the
+        // existing constraint instead of stacking a duplicate.
+        auto isMirroredDPL = [&](const Constraint& c) -> bool {
+            if (c.type != ConstraintType::DistancePointLine ||
+                pd.type != ConstraintType::DistancePointLine) return false;
+            const SketchLine* cLine = nullptr;   // line carrying c (c.entityB)
+            const SketchLine* pdLine = nullptr;  // line carrying pd (pd.entityB)
+            for (const auto& l : m_activeSketch->getLines()) {
+                if (l.id == c.entityB) cLine = &l;
+                if (l.id == pd.entityB) pdLine = &l;
+            }
+            if (!cLine || !pdLine) return false;
+            bool pdPointOnCLine = (pd.entityA == cLine->startPointId ||
+                                    pd.entityA == cLine->endPointId);
+            bool cPointOnPdLine = (c.entityA == pdLine->startPointId ||
+                                    c.entityA == pdLine->endPointId);
+            if (!(pdPointOnCLine && cPointOnPdLine)) return false;
+            // Endpoint cross-membership alone isn't enough: a triangle
+            // altitude dimensioned from each of two non-parallel sides in
+            // turn (P-on-L2 then P-on-L1, sharing no special relationship
+            // beyond "each point happens to be an endpoint of the other
+            // line") satisfies the membership check above but is NOT the
+            // same physical gap — treating it as a match would silently
+            // overwrite the first dimension's constraint with the second
+            // pick's entity ids while keeping the first's stale value.
+            // Mirrored derivation is only actually the same measurement
+            // when the two lines are parallel (see resolveDimension's
+            // line-line branch, which is the only place that produces this
+            // point/line pairing shape in the first place).
+            return SketchTool::linesParallelWithinDimTol(*m_activeSketch, cLine->id, pdLine->id);
+        };
+        for (auto& c : m_activeSketch->getMutableConstraints()) {
+            if (c.type != pd.type) continue;
+            bool same = (c.entityA == pd.entityA && c.entityB == pd.entityB);
+            bool distSwapped = (c.type == ConstraintType::Distance &&
+                                 c.entityA == pd.entityB && c.entityB == pd.entityA);
+            bool angleSwapped = (c.type == ConstraintType::Angle &&
+                                  c.entityA == pd.entityB && c.entityB == pd.entityA);
+            // CircleGap is symmetric in its two circles — a reversed re-pick
+            // of the same pair is the same dimension.
+            bool gapSwapped = (c.type == ConstraintType::CircleGap &&
+                                c.entityA == pd.entityB && c.entityB == pd.entityA);
+            bool mirroredDPL = !same && !distSwapped && !angleSwapped && isMirroredDPL(c);
+            if (same || distSwapped || angleSwapped || gapSwapped || mirroredDPL) {
+                // Reversed-order matches (Angle swap, mirrored
+                // DistancePointLine) adopt the NEW pick's entity order/ids
+                // so the constraint stays consistent with how it was just
+                // re-picked.
+                if (distSwapped || angleSwapped || gapSwapped || mirroredDPL) {
+                    c.entityA = pd.entityA;
+                    c.entityB = pd.entityB;
+                }
+                // Value: left untouched everywhere the stored number stays
+                // geometrically correct under the (possibly new) entity
+                // order — same-order matches, a swapped Distance/mirrored
+                // DPL (both are order-independent magnitudes: a distance or
+                // a perpendicular gap reads the same regardless of which
+                // point/line ended up as entityA/entityB). Angle is NOT
+                // order-independent: c.value is defined as "entityB's angle
+                // relative to entityA's", so swapping which line is which
+                // without renegotiating the number would have the solver
+                // enforce the NEGATED relative angle against the wrong
+                // reference line — a silent geometry flip, not just a label
+                // move. pd.measured was freshly computed for the NEW order,
+                // so it's the only value consistent with the swapped roles.
+                if (angleSwapped) c.value = pd.measured;
+                c.labelOffX = off.x;
+                c.labelOffY = off.y;
+                editId = c.id;
+                prefillValue = c.value;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            Constraint c{};
+            c.type = pd.type;
+            c.entityA = pd.entityA;
+            c.entityB = pd.entityB;
+            c.value = pd.measured;
+            c.labelOffX = off.x;
+            c.labelOffY = off.y;
+            // Dimensions are REFERENCE by default: placing one measures the
+            // geometry without moving it. The solver skips it and it costs no
+            // degree of freedom, so annotating a sketch can never drag it out
+            // of shape or flip it to Over-constrained. The label's edit popup
+            // has a "Driving" checkbox to promote it when the user actually
+            // wants the number to control the geometry.
+            //
+            // Only here — Constraint::isDriving defaults to true, so the
+            // right-click Add Constraint menu and every geometric constraint
+            // are unaffected.
+            c.isDriving = false;
+            editId = m_activeSketch->addConstraint(c);
+        }
+        if (m_sketchSolver) {
+            m_sketchSolver->setSketch(m_activeSketch.get());
+            m_sketchSolver->solve(*m_activeSketch);
+        }
+    });
+    m_sketchTool->clearDimState();
+
+    // Open the existing edit popup, prefilled from prefillValue — the
+    // freshly measured geometry for a new dimension, or the KEPT existing
+    // value for a dedup match (see the comment above; a match never writes
+    // pd.measured into c.value, so the popup must prefill from what's
+    // actually stored, not from the re-measurement). Enter drives the
+    // geometry, Esc keeps the prefilled value.
+    if (editId >= 0) {
+        m_dimEditingId = editId;
+        if (pd.type == ConstraintType::Angle)
+            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
+                          prefillValue * 180.0 / M_PI);
+        else if (pd.type == ConstraintType::Radius)
+            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
+                          prefillValue * 2.0); // edited as diameter
+        else
+            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f", prefillValue);
+        m_dimEditingFocus = true;
+        m_dimOpenEditRequested = true; // viewport calls OpenPopup("##DimEdit") next frame
+        // No m_meshesDirty here: for a new dimension pd.measured is the
+        // geometry's CURRENT value (resolveDimension reads it off the live
+        // picks) so this commit never moves anything for the solver to
+        // re-tessellate — same as applySketchConstraint's Distance/Angle
+        // path just above, which doesn't set it either. For a dedup match
+        // the value is untouched entirely. The ##DimEdit popup's own commit
+        // handler sets m_meshesDirty when a typed value actually changes
+        // geometry.
+        markDirty();
+    }
+}
+
 void Application::recordSketchMutation(const std::function<void()>& mutator) {
     if (!m_activeSketch) { mutator(); return; }
     // Signature includes counts AND element IDs so that swaps (trim line→line,
@@ -4608,6 +5778,17 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
             mix(vb);
             std::memcpy(&vb, &c.valueY, sizeof(vb));
             mix(vb);
+            // Label offsets too: a dedup-replace that only re-places a
+            // label (value bitwise-equal) must still register as a
+            // mutation, or the re-placement gets no undo step.
+            std::memcpy(&vb, &c.labelOffX, sizeof(vb));
+            mix(vb);
+            std::memcpy(&vb, &c.labelOffY, sizeof(vb));
+            mix(vb);
+            // Driving/reference too — promoting a dimension changes no
+            // number, so without this the toggle hashes identically and
+            // recordSketchMutation skips the history push entirely.
+            mix(static_cast<size_t>(c.isDriving ? 1 : 0));
         }
         return h;
     };
@@ -4736,6 +5917,44 @@ void Application::frameSelection() {
     }
 }
 
+bool Application::threadAxisCenter2d(int bodyId, const gp_Pln& pln,
+                                     glm::vec2& out) const {
+    if (!m_history) return false;
+    // bodyId < 0 = "any threaded body": a sketch whose body link was severed
+    // (saved with sourceBody=-1) still deserves its centre — among all
+    // thread axes piercing the plane, the one closest to the plane origin
+    // is the host (the sketch was created ON that face).
+    const gp_Ax3& ax = pln.Position();
+    const gp_Dir n = ax.Direction();
+    bool found = false;
+    float bestD = 1e30f;
+    for (int i = 0; i <= m_history->currentStep(); ++i) {
+        const Operation* s = m_history->getStep(i);
+        if (!s || !s->isEnabled() || s->kind() != Operation::Kind::Thread) continue;
+        const ThreadOp* th = dynamic_cast<const ThreadOp*>(s);
+        if (!th) continue;
+        if (bodyId >= 0 && th->getBodyId() != bodyId) continue;
+        const gp_Ax2& tax = th->getAxis();
+        if (std::abs(tax.Direction().Dot(n)) < 0.9999)
+            continue; // the axis must pierce the plane squarely (caps)
+        const double denom = gp_Vec(tax.Direction()).Dot(gp_Vec(n));
+        if (std::abs(denom) < 1e-9) continue;
+        const gp_Pnt& O = ax.Location();
+        const gp_Pnt& A = tax.Location();
+        const double t = gp_Vec(A, O).Dot(gp_Vec(n)) / denom;
+        gp_Pnt p(A.X() + tax.Direction().X() * t,
+                 A.Y() + tax.Direction().Y() * t,
+                 A.Z() + tax.Direction().Z() * t);
+        gp_Vec v(O, p);
+        glm::vec2 c(static_cast<float>(v.Dot(gp_Vec(ax.XDirection()))),
+                    static_cast<float>(v.Dot(gp_Vec(ax.YDirection()))));
+        const float d = glm::length(c);
+        if (!found || d < bestD) { found = true; bestD = d; out = c; }
+        if (bodyId >= 0) break; // explicit body: first matching axis wins
+    }
+    return found;
+}
+
 void Application::editSketch(int sketchId) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
@@ -4749,6 +5968,32 @@ void Application::editSketch(int sketchId) {
     m_sketchSolver = std::make_unique<SketchSolver>();
     m_activeSketchId = sketchId;
 
+    // Recompute the host body's TRUE-centre snap for this session. The
+    // centre marker (and face references) aren't serialized, so a RE-EDITED
+    // sketch otherwise only offers the area-centroid snap — off-axis on a
+    // threaded cap, and immune to every fresh-sketch fix ("nothing changed
+    // at all": Steve was re-editing an existing sketch). The stored plane
+    // must NOT be re-anchored (geometry lives in it); the centre lands at
+    // its true 2D coordinates instead of (0,0).
+    sketch->clearCenterPoint();
+    {
+        glm::vec2 c2;
+        // sourceBody may legitimately be -1 (severed link, e.g. a pick
+        // that failed body attribution) — threadAxisCenter2d then matches
+        // any thread axis piercing the plane.
+        if (threadAxisCenter2d(sketch->getSourceBody(), sketch->getPlane(),
+                               c2)) {
+            sketch->setCenterPoint(c2);
+            std::fprintf(stderr, "[Sketch] edit %d: body=%d true centre at "
+                                 "(%.4f, %.4f)\n",
+                         sketchId, sketch->getSourceBody(), c2.x, c2.y);
+        } else {
+            std::fprintf(stderr, "[Sketch] edit %d: body=%d no thread-axis "
+                                 "centre (centroid snap stays)\n",
+                         sketchId, sketch->getSourceBody());
+        }
+    }
+
     m_sketchTool->setSketch(m_activeSketch.get());
     m_sketchTool->setSolver(m_sketchSolver.get());
     m_sketchSolver->setSketch(m_activeSketch.get());
@@ -4760,6 +6005,13 @@ void Application::editSketch(int sketchId) {
     m_sketchEntryHistoryStep = m_history ? m_history->currentStep() : -1;
     if (m_history) m_history->setUndoFloor(m_sketchEntryHistoryStep);  // no undo past sketch entry
     m_toolbar->setSketchMode(true);
+    // Fresh sketch session: drop any stale Dimension edit-popup state left
+    // over from a previous session (e.g. Esc/undo left m_dimEditingId set
+    // without the popup ever closing) so it can't reopen against a
+    // constraint id from a different sketch.
+    m_dimOpenEditRequested = false;
+    m_dimEditingId = -1;
+    m_dimPopupConsumedEsc = false;
     m_selection->clear();
     alignCameraToActiveSketch();
 }
@@ -4867,19 +6119,31 @@ void Application::alignCameraToActiveSketch() {
         }
     }
 
-    // Snap the look-at point to the nearest world-grid intersection PROJECTED
-    // onto the sketch plane. The grid in the viewport then draws lines that
-    // pass through actual world-grid positions on this plane (so a "1 mm"
-    // grid step lands on whole-mm boundaries even when the face's centre is
-    // at fractional world coords). The same snapped point doubles as the
-    // camera target — when the user later orbits out of ortho, the orbit
-    // pivots around this stable, world-aligned anchor close to the face.
+    // Snap the look-at point onto the SNAP LATTICE, so the grid drawn in the
+    // viewport passes through the positions clicks actually land on. The
+    // rounding has to happen in the sketch plane's own (u,v) frame, because
+    // that is the frame both halves are defined in: SketchTool::snap() rounds
+    // sketch coordinates — measured from the PLANE ORIGIN along XDirection /
+    // YDirection — to multiples of the step, and the grid shader lays its
+    // lines at multiples of the step measured from this anchor.
+    //
+    // Rounding world XYZ and projecting onto the plane (what this did) is not
+    // the same thing: the projection of a world lattice point is not a lattice
+    // point in-plane, so the drawn grid ended up offset from the snap lattice
+    // by (plane origin mod step) — an arbitrary fraction of a cell, since a
+    // face's plane origin sits at whatever world coords the geometry put it.
+    // Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as
+    // slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a
+    // line on the snap grid" (Steve, 2026-07-31).
+    //
+    // The anchor doubles as the camera target, and staying on the lattice
+    // keeps that just as stable — it moves by at most half a cell.
     {
-        float step = std::max(m_sketchGridStep, 0.01f);
-        glm::vec3 rounded(std::round(lookAt.x / step) * step,
-                          std::round(lookAt.y / step) * step,
-                          std::round(lookAt.z / step) * step);
-        lookAt = rounded - normal * glm::dot(rounded - planeOrigin, normal);
+        gp_Pnt a = Sketch::latticeAnchor(
+            pln, gp_Pnt(lookAt.x, lookAt.y, lookAt.z),
+            static_cast<double>(std::max(m_sketchGridStep, 0.01f)));
+        lookAt = glm::vec3(static_cast<float>(a.X()), static_cast<float>(a.Y()),
+                           static_cast<float>(a.Z()));
     }
     m_sketchSnappedAnchor = lookAt;
 
@@ -5039,6 +6303,11 @@ void Application::exitSketchMode() {
     m_sketchTool->setMode(SketchToolMode::None);
     m_sketchTool->setSketch(nullptr);
     m_sketchTool->setSolver(nullptr);
+    // Drop any stale Dimension edit-popup state so it can't reopen (with a
+    // now-dangling constraint id) on the next sketch session.
+    m_dimOpenEditRequested = false;
+    m_dimEditingId = -1;
+    m_dimPopupConsumedEsc = false;
 
     // Persist the sketch into the document if it has any geometry. New sketches get added;
     // edits to existing sketches are already reflected via the shared_ptr.
@@ -5106,8 +6375,14 @@ void Application::renderSketchRecoveryPrompt() {
     // strands the dialog in the top-left corner for good.
     ImVec2 c = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    // NoSavedSettings: this window's geometry is meaningless across launches
+    // (it's re-centred every frame above), so never let a degenerate Pos/Size
+    // — e.g. from some future popup-stack collision like the update-popup one
+    // this class of bug already caused once — get written to imgui.ini and
+    // self-perpetuate as the window's starting size on the next launch.
     if (ImGui::BeginPopupModal("Recover Sketch?", nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+                               ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextUnformatted(
             "An unfinished sketch from your last session was found.");
         ImGui::TextDisabled(
@@ -5167,8 +6442,8 @@ void Application::writeProjectRecoveryIfDue() {
     // and never below the history tip (the file only persists applied steps, so a
     // below-tip save would silently drop the redo tail).
     if (m_history && m_history->canRedo()) return;
-    if (anyInteractivePreviewActive() || m_inSketchMode || m_edgeOpActive ||
-        m_moveFaceActive) return;
+    if (anyInteractivePreviewActive() || m_inSketchMode || m_edgeCtl.active())
+        return;
     const int bodies = m_document ? m_document->bodyCount() : 0;
     const int curStep = m_history ? m_history->currentStep() : -1;
     if (bodies == 0 && curStep < 0) return;    // empty new document: nothing to lose
@@ -5205,12 +6480,37 @@ void Application::writeProjectRecoveryIfDue() {
     // Don't cancel a live preview on a background recovery tick — that would
     // revert the user's in-progress drag. The recovery file may then capture a
     // preview, which is acceptable for crash recovery (best-effort snapshot).
+    //
+    // And don't BLOCK on an in-flight async thread re-cut: capture drains
+    // recuts (flushThreadRecuts), which on a background tick reads as the
+    // whole app going "not responding" for the length of a boolean thread
+    // cut. Skip this tick — the body is mid-recompute anyway, and the next
+    // tick lands right after the recut does.
+    if (!m_threadRecuts.empty()) return;
     ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
     if (materializr::writeProjectRecovery(*m_document, &hist, m_currentProjectPath,
-                                          bodies, curStep + 1)) {
+                                          bodies, curStep + 1,
+                                          currentSession().recoveryIndex)) {
         m_lastRecoveryWrite = now;
         m_lastRecoveryStep = curStep;
     }
+}
+
+void Application::writeSessionRecoveryNow() {
+    // Forced (undebounced) snapshot of the ACTIVE session — called when a tab
+    // is about to deactivate. An inactive session cannot change, so this one
+    // write keeps its recovery file exact until it becomes active again;
+    // combined with the debounced writer above, EVERY open project survives a
+    // crash, not just the front tab.
+    if (!isDirty() || !m_document) return;
+    if (m_history && m_history->canRedo()) return;   // same below-tip guard
+    if (!m_threadRecuts.empty()) return;
+    ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
+    materializr::writeProjectRecovery(
+        *m_document, &hist, m_currentProjectPath,
+        m_document->bodyCount(),
+        (m_history ? m_history->currentStep() : -1) + 1,
+        currentSession().recoveryIndex);
 }
 
 void Application::renderProjectRecoveryPrompt() {
@@ -5222,8 +6522,10 @@ void Application::renderProjectRecoveryPrompt() {
     // Pinned centred every frame — see the Android note on the sketch prompt.
     ImVec2 c = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    // NoSavedSettings — see the identical note on renderSketchRecoveryPrompt.
     if (ImGui::BeginPopupModal("Recover Project?", nullptr,
-                               ImGuiWindowFlags_AlwaysAutoResize)) {
+                               ImGuiWindowFlags_AlwaysAutoResize |
+                               ImGuiWindowFlags_NoSavedSettings)) {
         materializr::ProjectRecoveryMeta meta;
         materializr::readProjectRecoveryMeta(meta);
         ImGui::TextUnformatted(
@@ -5236,16 +6538,27 @@ void Application::renderProjectRecoveryPrompt() {
                             meta.bodyCount, meta.stepCount);
         ImGui::TextDisabled(
             "Materializr didn't close cleanly (a crash, hang, or restart).");
+        // One snapshot per tab the dead instance had open — the summary above
+        // describes the newest; all of them come back, a tab each.
+        const int nOrphans = materializr::projectRecoveryOrphanCount();
+        if (nOrphans > 1)
+            ImGui::TextDisabled("%d projects in total — each reopens in its "
+                                "own tab.", nOrphans);
         ImGui::Spacing();
-        if (ImGui::Button("Restore it", ImVec2(140, 0))) {
+        if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
+                          ImVec2(140, 0))) {
             restoreProjectRecoveryNow();
             m_pendingProjectRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Discard", ImVec2(140, 0))) {
-            // The candidate is the dead session's orphaned snapshot — our own
-            // live slot is separate and untouched.
+            // These are the dead session's orphaned snapshots — our own live
+            // slot is separate and untouched. Discard means ALL of them, to
+            // match the restore: leaving the rest to resurface on the next
+            // launch after the user said no is just nagging.
+            for (const auto& p : materializr::projectRecoveryOrphanPaths())
+                materializr::clearProjectRecoveryAt(p);
             materializr::clearProjectRecoveryCandidate();
             m_pendingProjectRecovery = false;
             ImGui::CloseCurrentPopup();
@@ -5255,30 +6568,67 @@ void Application::renderProjectRecoveryPrompt() {
 }
 
 void Application::restoreProjectRecoveryNow() {
-    materializr::ProjectRecoveryMeta meta;
-    materializr::readProjectRecoveryMeta(meta);
-    // The dead session's orphaned snapshot — NOT projectRecoveryPath(), which
-    // is this instance's own (live, empty-so-far) slot.
-    const std::string recPath = materializr::projectRecoveryRestorePath();
-    // Load the snapshot through the normal project loader (rebuilds bodies +
-    // editable history). loadProjectAt sets m_currentProjectPath to the sidecar
-    // and marks it saved — override both with the project's ORIGINAL identity so
-    // the user can't overwrite the sidecar and unsaved work stays unsaved/dirty.
-    if (recPath.empty() || !loadProjectAt(recPath)) {
-        std::fprintf(stderr, "[Recovery] failed to load project snapshot\n");
-        materializr::clearProjectRecoveryCandidate();
-        return;
+    // EVERY orphan comes back, one per tab — a crash with four tabs open used
+    // to hand them back one launch at a time (Steve, 2026-07-28). The newest
+    // (the prompt's candidate) goes first so it lands in the tab the user is
+    // already looking at.
+    std::vector<std::string> paths = materializr::projectRecoveryOrphanPaths();
+    const std::string newest = materializr::projectRecoveryRestorePath();
+    if (!newest.empty()) {
+        auto it = std::find(paths.begin(), paths.end(), newest);
+        if (it != paths.end()) std::rotate(paths.begin(), it, it + 1);
+        else paths.insert(paths.begin(), newest);
     }
-    // Consumed: drop the orphan so it isn't offered again next launch. The
-    // restored state is re-snapshotted into OUR slot within seconds (the
-    // markDirty below makes writeProjectRecoveryIfDue fire).
-    materializr::clearProjectRecoveryCandidate();
-    m_currentProjectPath = meta.projectPath; // "" if it was never saved
-    markDirty();                             // unsaved since the snapshot
-    saveAppSettings();                       // fix lastProjectPath off the sidecar
-    m_lastRecoveryStep = -2;                 // force a fresh snapshot going forward
-    std::fprintf(stdout, "[Recovery] restored project (%d bodies, %d steps)\n",
-                 meta.bodyCount, meta.stepCount);
+    if (paths.empty()) return;
+
+    int restored = 0, failed = 0;
+    size_t firstTab = m_activeSession;   // where the newest snapshot lands
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const std::string& recPath = paths[i];
+        materializr::ProjectRecoveryMeta meta;
+        materializr::readProjectRecoveryMetaAt(recPath, meta);
+        // Each snapshot after the first gets its own tab. A refused switch
+        // can't happen here (nothing is mid-sketch at startup), but honour it
+        // anyway rather than restoring into the wrong tab.
+        if (restored > 0) {
+            const size_t idx = createSession();
+            if (!switchToSession(idx)) { closeSession(idx); ++failed; continue; }
+        }
+        // Load through the normal project loader (rebuilds bodies + editable
+        // history). loadProjectAt sets m_currentProjectPath to the sidecar and
+        // marks it saved — override both with the project's ORIGINAL identity
+        // so the user can't overwrite the sidecar and unsaved work stays
+        // unsaved/dirty.
+        if (!loadProjectAt(recPath)) {
+            std::fprintf(stderr, "[Recovery] failed to load snapshot %s\n",
+                         recPath.c_str());
+            materializr::clearProjectRecoveryAt(recPath);
+            if (restored > 0) closeSession(m_activeSession);
+            ++failed;
+            continue;
+        }
+        // Consumed: drop the orphan so it isn't offered again next launch. The
+        // restored state is re-snapshotted into OUR slot within seconds (the
+        // markDirty below makes writeProjectRecoveryIfDue fire).
+        materializr::clearProjectRecoveryAt(recPath);
+        m_currentProjectPath = meta.projectPath; // "" if it was never saved
+        markDirty();                             // unsaved since the snapshot
+        m_lastRecoveryStep = -2;                 // force a fresh snapshot
+        ++restored;
+        std::fprintf(stdout, "[Recovery] restored project (%d bodies, %d steps)"
+                             " into tab %zu\n",
+                     meta.bodyCount, meta.stepCount, m_activeSession);
+    }
+    // Land on the tab the PROMPT described (the newest snapshot), not
+    // whichever one happened to load last.
+    if (restored > 1 && firstTab < m_sessions.size()) switchToSession(firstTab);
+    materializr::clearProjectRecoveryCandidate();  // whatever is left of it
+    saveAppSettings();                             // fix lastProjectPath off the sidecar
+    if (restored > 1)
+        showToast("Recovered " + std::to_string(restored) + " projects.");
+    if (failed > 0)
+        showToast(std::to_string(failed) + " recovered project(s) "
+                  "couldn't be reopened.");
 }
 
 void Application::run() {
@@ -5288,6 +6638,12 @@ void Application::run() {
     // A whole-project recovery snapshot surviving means the last session ended
     // unexpectedly with unsaved work — offer to restore that too.
     m_pendingProjectRecovery = materializr::hasProjectRecovery();
+    if (materializr::isVerbose())
+        std::fprintf(stderr,
+                     "[Recovery] startup scan: pending=%d orphans=%d path=%s\n",
+                     m_pendingProjectRecovery ? 1 : 0,
+                     materializr::projectRecoveryOrphanCount(),
+                     materializr::projectRecoveryRestorePath().c_str());
 
     // Opt-in perf instrumentation (MZR_PERF=1): once a second, report how many
     // frames we actually RENDERED vs how many loop iterations ran, plus which
@@ -5301,7 +6657,41 @@ void Application::run() {
     // even if the WM is slow to hand the new window focus. See foreground below.
     const uint32_t runStartMs = SDL_GetTicks();
 
-    while (true) {
+    // FRAME-LEVEL EXCEPTION FIREWALL.
+    //
+    // main() wraps app.run() in a catch that returns 1. On desktop that reads
+    // as a crash; on Android it is far worse and far more confusing: SDL_main
+    // returning makes SDLActivity finish itself, so the window simply vanishes
+    // with NO signal, NO tombstone and NO ANR — Android logs it as
+    // "app-request". It looks exactly like a crash and is impossible to
+    // diagnose from the outside. One real instance: tapping Apply Changes on a
+    // recovery-restored project let a std::runtime_error("Body not found: 1")
+    // out of a stale body lookup, and the app quietly exited with the user's
+    // unsaved work.
+    //
+    // Document::getBody and friends throw on a missing id, and stale ids
+    // outlive a replay in more places than can be audited once and trusted
+    // (refreshAllEdgeOpFaces already carries a comment about this same throw
+    // aborting the app on load). So: one escaped exception costs a FRAME, not
+    // the session. The loop re-enters and the user gets a toast.
+    //
+    // The catch is not a licence to ignore these — it logs to stderr (logcat on
+    // Android), which is how the caller gets found. Anything appearing here is
+    // a bug to fix at its source.
+    for (;;) {
+      try {
+        while (true) {
+        // Main-loop stall watchdog: a gap of seconds between iterations IS
+        // the "not responding" freeze — print it so the journal names the
+        // stall instead of us guessing which subsystem blocked.
+        {
+            static uint32_t lastIterMs = 0;
+            const uint32_t nowMs = SDL_GetTicks();
+            if (lastIterMs != 0 && nowMs - lastIterMs > 1000)
+                std::fprintf(stderr, "[Perf] main loop stalled %.2fs\n",
+                             (nowMs - lastIterMs) / 1000.0);
+            lastIterMs = nowMs;
+        }
         // Apply/discard any landed async thread re-cuts before this frame.
         pollThreadRecuts();
 
@@ -5326,8 +6716,8 @@ void Application::run() {
             // the whole time it was open (e.g. a push/pull left mid-edit) —
             // wasteful on the iGPU, a battery/thermal sink on mobile.
             bool interactive =
-                m_inSketchMode || m_pushPullActive || m_gizmoDragging ||
-                m_edgeOpActive || m_resizeCylActive || m_moveFaceActive ||
+                m_inSketchMode || m_ppCtl.active() || m_gizmoDragging ||
+                m_edgeCtl.active() || m_moveFaceCtl.active() ||
                 m_revolveActive;
             if (!interactive)
                 for (auto* c : m_iops) if (c && c->active()) { interactive = true; break; }
@@ -5342,11 +6732,10 @@ void Application::run() {
             if (nowMs - perfLastMs >= 1000) {
                 std::string st;
                 if (m_inSketchMode)            st += "sketch ";
-                if (m_pushPullActive)          st += "pushpull ";
+                if (m_ppCtl.active())          st += "pushpull ";
                 if (m_gizmoDragging)           st += "gizmo ";
-                if (m_edgeOpActive)            st += "edgeop ";
-                if (m_moveFaceActive)          st += "moveface ";
-                if (m_resizeCylActive)         st += "resizecyl ";
+                if (m_edgeCtl.active())            st += "edgeop ";
+                if (m_moveFaceCtl.active())       st += "moveface ";
                 if (m_revolveActive)           st += "revolve ";
                 if (m_deferredHeavyTask)       st += "heavy ";
                 if (!m_toastText.empty())      st += "toast ";
@@ -5532,7 +6921,7 @@ void Application::run() {
                 if (m_history && m_history->canRedo()) {
                     // hold off — keep checking each interval
                 } else if (anyInteractivePreviewActive() || m_inSketchMode ||
-                           m_edgeOpActive || m_moveFaceActive) {
+                           m_edgeCtl.active()) {
                     // hold off — an autosave must never cancel (or serialize) a
                     // live tool preview / an in-progress sketch out from under
                     // the user (a half-baked uncommitted-sketch state has
@@ -5586,13 +6975,25 @@ void Application::run() {
         // viewport (NoBringToFrontOnFocus) and its panels aren't submitted, so
         // it's invisible — it only preserves the node tree.
         renderDockspace();
+        // Synced unconditionally, once per frame, before any layout reads it —
+        // ItemsPanel's Delete/Edit-Sketch/Combine gating on the sketch being
+        // drawn must never see a stale value from a frame where the panel (or
+        // a different layout) didn't render.
+        if (m_itemsPanel) m_itemsPanel->setActiveSketchContext(m_inSketchMode, m_activeSketchId);
         // Per-layout chrome (src/app/layout/<name>/). A new layout gets a case
         // here; everything below this dispatch is layout-agnostic or gated on
-        // the layout helpers.
+        // the layout helpers. While the landing page is up the modern and
+        // im-touch shells stand down completely (their floating chrome would
+        // draw over the page); classic keeps its menu bar — the one piece of
+        // chrome that is useful above the page — and drops the rest below.
         switch (m_uiLayout) {
             case UiLayout::Classic: renderMenuBar();        break;
-            case UiLayout::Modern:  renderModernLayout();   break;
-            case UiLayout::ImTouch: renderImTouchLayout();  break;
+            case UiLayout::Modern:
+                if (!landingPageUp()) renderModernLayout();
+                break;
+            case UiLayout::ImTouch:
+                if (!landingPageUp()) renderImTouchLayout();
+                break;
         }
         renderSmallScreenWarning();
 
@@ -5625,15 +7026,26 @@ void Application::run() {
                 static bool s_frozenRound = false;
                 static bool s_selSketchAttached = false;
                 static bool s_selFacePlanar = false;
+                static bool s_selFaceIsHoleWall = false;
+                static bool s_selEdgeIsHoleRim = false;
+                // Tab switches swap in a DIFFERENT SelectionManager/History
+                // whose revision counters can coincide with the memoized ones
+                // (they all start at 0) — key the memo on the session too.
+                static size_t s_memoSession = ~size_t(0);
+                if (s_memoSession != m_activeSession) {
+                    s_memoSession = m_activeSession;
+                    s_selRev = ~0u;
+                    s_histRev = ~0u;
+                }
                 const unsigned selRev  = m_selection->revision();
                 const unsigned histRev = m_history->revision();
                 if (selRev != s_selRev || histRev != s_histRev ||
-                    m_resizeCylActive != s_resizeActive) {
+                    m_resizeCylCtl.active() != s_resizeActive) {
                     s_selRev = selRev;
                     s_histRev = histRev;
-                    s_resizeActive = m_resizeCylActive;
-                    s_canEditDiameter = !m_resizeCylActive &&
-                                        detectCylindricalResizeCandidate();
+                    s_resizeActive = m_resizeCylCtl.active();
+                    s_canEditDiameter = !m_resizeCylCtl.active() &&
+                                        detectCylindricalResizeCandidate().ok;
                     // "Frozen round" hint: a selected fillet-shaped face
                     // (cylinder / torus) that NO enabled op owns reloaded as
                     // baked geometry — there's no editable FilletOp behind it.
@@ -5642,15 +7054,28 @@ void Application::run() {
                     // Diameter handles it), not a round, so it's excluded.
                     s_frozenRound = false;
                     s_selFacePlanar = false;
+                    s_selFaceIsHoleWall = false;
                     TopoDS_Shape pf;
+                    int pfBody = -1;
                     for (const auto& e : m_selection->getSelection())
                         if (e.type == SelectionType::Face && !e.shape.IsNull()) {
-                            pf = e.shape; break;
+                            pf = e.shape; pfBody = e.bodyId; break;
                         }
                     if (!pf.IsNull() && pf.ShapeType() == TopAbs_FACE) {
                         try {
                             TopoDS_Face f = TopoDS::Face(pf);
                             s_selFacePlanar = faceIsPlanar(f);  // gates Push (#28)
+                            // A round hole's WALL: #28 hides Move on curved
+                            // faces, so a full-cylinder bore could never be
+                            // moved by clicking its inside — probe buildVoid,
+                            // and offer whole-hole Move when it recognizes one.
+                            // (A square hole's walls are planar, so they reach
+                            // the same slide through the ordinary Move gate.)
+                            if (!s_selFacePlanar && pfBody >= 0) {
+                                TopoDS_Shape v; gp_Vec n; bool pocket = false;
+                                s_selFaceIsHoleWall = MoveHoleOp::buildVoid(
+                                    m_document->getBody(pfBody), f, v, n, pocket);
+                            }
                             Handle(Geom_Surface) s = BRep_Tool::Surface(f);
                             bool round = false;
                             if (!s.IsNull()) {
@@ -5666,8 +7091,8 @@ void Application::run() {
                                 s_frozenRound = true; // assume frozen until an op claims it
                                 for (const auto& op : m_history->operations())
                                     if (op && op->isEnabled() && op->ownsFace(pf) &&
-                                        (op->typeId() == "fillet" ||
-                                         op->typeId() == "chamfer")) {
+                                        (op->kind() == Operation::Kind::Fillet ||
+                                         op->kind() == Operation::Kind::Chamfer)) {
                                         s_frozenRound = false;
                                         break;
                                     }
@@ -5679,14 +7104,42 @@ void Application::run() {
                     // edits the host body); a standalone sketch offers Extrude
                     // instead (a new body). A detached sketch counts as
                     // standalone — it was deliberately unlinked (issue #21).
+                    // Do the selected edges form one hole's rim? Only then
+                    // does Move mean anything for an edge selection. In the
+                    // memo because classifyRimEdges walks the body and probes
+                    // buildVoid — per-frame it burned time and (pre-verbose-
+                    // gate) flooded the journal with refusals.
+                    s_selEdgeIsHoleRim = false;
+                    {
+                        std::vector<TopoDS_Edge> picked;
+                        int edgeBody = -1;
+                        for (const auto& e : m_selection->getSelection()) {
+                            if (e.type != SelectionType::Edge || e.shape.IsNull()) continue;
+                            if (edgeBody >= 0 && e.bodyId != edgeBody) { picked.clear(); break; }
+                            edgeBody = e.bodyId;
+                            picked.push_back(TopoDS::Edge(e.shape));
+                        }
+                        if (!picked.empty() && edgeBody >= 0) {
+                            try {
+                                s_selEdgeIsHoleRim = MoveHoleOp::classifyRimEdges(
+                                          m_document->getBody(edgeBody), picked).ok;
+                            } catch (...) {}
+                        }
+                    }
                     s_selSketchAttached = false;
                     for (const auto& e : m_selection->getSelection()) {
                         if ((e.type == SelectionType::Sketch ||
                              e.type == SelectionType::SketchRegion) &&
                             e.sketchId >= 0) {
                             auto sk = m_document->getSketch(e.sketchId);
+                            // ...and the host must still EXIST. Attachment is
+                            // an either/or here (attached => Push/Pull, else
+                            // Extrude), so a stale id offered the one tool that
+                            // cannot work and hid the one that can — delete a
+                            // sketch's body and it still claimed to be attached.
                             if (sk && sk->getSourceBody() >= 0 &&
-                                !sk->isDetachedFromBody()) {
+                                !sk->isDetachedFromBody() &&
+                                bodyExists(sk->getSourceBody())) {
                                 s_selSketchAttached = true;
                                 break;
                             }
@@ -5695,6 +7148,8 @@ void Application::run() {
                 }
                 m_toolbar->setCanEditDiameter(s_canEditDiameter);
                 m_toolbar->setSelFacePlanar(s_selFacePlanar);
+                m_toolbar->setSelFaceIsHoleWall(s_selFaceIsHoleWall);
+                m_toolbar->setSelEdgeIsHoleRim(s_selEdgeIsHoleRim);
                 m_toolbar->setSelectedFaceFrozenRound(s_frozenRound);
                 m_toolbar->setSelectedSketchAttached(s_selSketchAttached);
             }
@@ -5745,7 +7200,8 @@ void Application::run() {
             // left edge handle (or Hide Panels). All the setters above are
             // harmless no-ops on an unsubmitted window.
             ToolAction action = ToolAction::None;
-            if (classicLayout() && !m_leftPanelHidden && m_showTools) {
+            if (classicLayout() && !landingPageUp() && !m_leftPanelHidden &&
+                m_showTools) {
                 action = m_toolbar->render();
                 m_sketchGridStep = m_toolbar->getGridStep();
                 m_snapToGrid = m_toolbar->getSnapToGrid();
@@ -5762,35 +7218,39 @@ void Application::run() {
             // needs Application's popup machinery (e.g. PatternPlugin asking for
             // the Linear / Radial pattern popup). Dispatch any pending request.
             if (m_pluginContext) {
-                std::string pending = m_pluginContext->takeRequestedInteractiveOp();
-                if (!pending.empty()) {
-                    if      (pending == "LinearPattern") beginPattern(PatternKind::Linear);
-                    else if (pending == "RadialPattern") beginPattern(PatternKind::Radial);
-                    else if (pending == "Loft")          beginLoft();
-                    else if (pending == "BoundaryFill")  beginBoundaryFill();
-                    else if (pending == "LoftPickSecond") m_loftPickHintPending = true;
-                    else if (pending == "ConstructionPlane") beginConstructionPlane();
-                    else if (pending == "ImportRefImage")    beginRefImageImport();
-                    else if (pending == "ConstructionAxis")  beginConstructionAxis();
-                    else if (pending == "Revolve")           beginRevolve();
-                    else if (pending == "Midplane")          beginConstructionPlaneMode(4);
-                    else if (pending == "PlaneNormalToAxis") beginConstructionPlaneMode(5);
-                    else if (pending == "TangentPlane")      beginConstructionPlaneMode(6);
-                    else if (pending == "PlaneThroughAxis")  beginConstructionPlaneMode(7);
-                    else if (pending == "AxisFromCylinder")  beginConstructionAxisMode(3);
-                    else if (pending == "AxisAlongEdge")     beginConstructionAxisMode(4);
-                    else if (pending == "AxisTwoPoints")     beginConstructionAxisMode(5);
-                    else if (pending == "AxisNormalToFace")  beginConstructionAxisMode(6);
-                    else if (pending == "AxisTwoPlanes")     beginConstructionAxisMode(7);
-                    else if (pending == "PrimitiveBox")      beginPrimitivePopup(0);
-                    else if (pending == "PrimitiveCylinder") beginPrimitivePopup(1);
-                    else if (pending == "PrimitiveSphere")   beginPrimitivePopup(2);
-                    else if (pending == "PrimitiveCone")     beginPrimitivePopup(3);
-                    else if (pending == "PrimitiveTorus")    beginPrimitivePopup(4);
-                    else if (pending == "StlImport")         beginStlImportDialog();
-                    // Unknown ids are silently ignored — future plugins can
-                    // ship their own without modifying Application by routing
-                    // through whatever new dispatcher is added here.
+                // Typed dispatch (was a chain of string compares — see
+                // plugin/InteractiveOp.h and discussion #72). NO default: on
+                // purpose — a new InteractiveOp that nobody handles here is a
+                // -Wswitch warning at build time, where the string version
+                // silently produced a button that did nothing.
+                const InteractiveOp pending =
+                    m_pluginContext->takeRequestedInteractiveOp();
+                switch (pending) {
+                    case InteractiveOp::None: break;
+                    case InteractiveOp::LinearPattern:  beginPattern(PatternKind::Linear); break;
+                    case InteractiveOp::RadialPattern:  beginPattern(PatternKind::Radial); break;
+                    case InteractiveOp::Loft:           beginLoft();           break;
+                    case InteractiveOp::BoundaryFill:   beginBoundaryFill();   break;
+                    case InteractiveOp::LoftPickSecond: m_loftPickHintPending = true; break;
+                    case InteractiveOp::ConstructionPlane: beginConstructionPlane(); break;
+                    case InteractiveOp::ImportRefImage: beginRefImageImport(); break;
+                    case InteractiveOp::ConstructionAxis: beginConstructionAxis(); break;
+                    case InteractiveOp::Revolve:        beginRevolve();        break;
+                    case InteractiveOp::Midplane:          beginConstructionPlaneMode(4); break;
+                    case InteractiveOp::PlaneNormalToAxis: beginConstructionPlaneMode(5); break;
+                    case InteractiveOp::TangentPlane:      beginConstructionPlaneMode(6); break;
+                    case InteractiveOp::PlaneThroughAxis:  beginConstructionPlaneMode(7); break;
+                    case InteractiveOp::AxisFromCylinder:  beginConstructionAxisMode(3); break;
+                    case InteractiveOp::AxisAlongEdge:     beginConstructionAxisMode(4); break;
+                    case InteractiveOp::AxisTwoPoints:     beginConstructionAxisMode(5); break;
+                    case InteractiveOp::AxisNormalToFace:  beginConstructionAxisMode(6); break;
+                    case InteractiveOp::AxisTwoPlanes:     beginConstructionAxisMode(7); break;
+                    case InteractiveOp::PrimitiveBox:      beginPrimitivePopup(0); break;
+                    case InteractiveOp::PrimitiveCylinder: beginPrimitivePopup(1); break;
+                    case InteractiveOp::PrimitiveSphere:   beginPrimitivePopup(2); break;
+                    case InteractiveOp::PrimitiveCone:     beginPrimitivePopup(3); break;
+                    case InteractiveOp::PrimitiveTorus:    beginPrimitivePopup(4); break;
+                    case InteractiveOp::StlImport:         beginStlImportDialog(); break;
                 }
             }
 
@@ -5808,7 +7268,8 @@ void Application::run() {
 
             // The Interactions reference is docked in the RIGHT column (above
             // Items), so it collapses with the right edge handle too.
-            if (classicLayout() && !m_rightPanelHidden && m_showInteractions)
+            if (classicLayout() && !landingPageUp() && !m_rightPanelHidden &&
+                m_showInteractions)
                 renderInteractionsPanel();
             renderSettings();
             renderMirrorPopup();
@@ -5880,6 +7341,8 @@ void Application::run() {
             // iPad "second launch locks up" bug). Welcome goes FIRST; sketch
             // recovery and the small-screen notice hold off while it is up
             // (they check m_welcomeScreen->isVisible()).
+            renderLandingPage();   // full work-area cover; modals draw above
+            renderPartsPickerDialog();
             if (m_welcomeScreen->render() == WelcomeScreen::Action::MarkSupporter) {
                 m_supporter = true;
                 saveAppSettings();
@@ -5896,7 +7359,6 @@ void Application::run() {
 #endif
             renderUpdatePopup();
             renderMultiTransformPanel();
-            renderResizeCylindricalPanel();
             {
                 auto ctx = iopContext();
                 for (auto* c : m_iops) c->renderPanel(ctx);
@@ -5958,24 +7420,28 @@ void Application::run() {
                     }
                     m_historyPanel->setHighlightStep(hl);
                 }
-                if (classicLayout() && m_showHistory && m_historyPanel->render()) {
+                if (classicLayout() && !landingPageUp() && m_showHistory &&
+                    m_historyPanel->render()) {
                     m_meshesDirty = true;
                 }
 
-                if (classicLayout() && m_showItems && m_itemsPanel->render()) {
-                    m_hoveredBodyId = -1;
-                    m_meshesDirty = true;
+                if (classicLayout() && !landingPageUp() && m_showItems) {
+                    if (m_itemsPanel->render()) {
+                        m_hoveredBodyId = -1;
+                        m_meshesDirty = true;
+                    }
                 }
                 m_propertiesPanel->setSketchContext(
                     m_inSketchMode, m_activeSketch.get(), m_activeSketchId,
                     m_sketchTool.get());
-                if (classicLayout() && m_showProperties && m_propertiesPanel->render()) {
+                if (classicLayout() && !landingPageUp() && m_showProperties &&
+                    m_propertiesPanel->render()) {
                     m_meshesDirty = true;
                 }
             }
             // Touch edge tabs to collapse/restore each side column (drawn on top
             // of the panels, and still visible when a side is collapsed).
-            if (classicLayout()) renderPanelCollapseHandles();
+            if (classicLayout() && !landingPageUp()) renderPanelCollapseHandles();
 
             // Plugin overlays — free-floating per-frame ImGui windows (e.g. the
             // Tutorial). Drawn after the panels so they float on top; non-modal,
@@ -6010,7 +7476,7 @@ void Application::run() {
             } else {
                 m_statusBar->setMessage("");
             }
-            if (classicLayout()) m_statusBar->render();
+            if (classicLayout() && !landingPageUp()) m_statusBar->render();
             renderTransientToast();
             FileDialogs::render();
             renderSavePrompt();
@@ -6045,13 +7511,56 @@ void Application::run() {
             const Uint32 spent = SDL_GetTicks() - frameLoopStartMs;
             if (spent < kMinFrameMs) SDL_Delay(kMinFrameMs - spent);
         }
+        }
+        break;   // the inner loop's own break/exit conditions reached: done
+      } catch (const std::exception& e) {
+        // Close the half-built ImGui frame before going round again. The throw
+        // almost certainly happened between NewFrame() and Render(), leaving
+        // windows on the stack; re-entering NewFrame() in that state is its own
+        // crash. EndFrame() unwinds what was open.
+        if (ImGuiContext* g = ImGui::GetCurrentContext()) {
+            if (g->WithinFrameScope) {
+                try { ImGui::EndFrame(); } catch (...) {}
+            }
+        }
+        std::fprintf(stderr,
+                     "[Recovered] exception escaped a frame: %s\n"
+                     "[Recovered]   this is a BUG — the frame was abandoned and "
+                     "the session kept alive; fix it at the throw site.\n",
+                     e.what());
+        // The stack is already unwound here, so this is the trace captured AT
+        // the throw (see core/ThrowTrace.h). Printed only on escape: the same
+        // throw is ordinary guarded control flow at ~40 call sites.
+        const std::string trace = materializr::lastThrowTrace();
+        if (!trace.empty())
+            std::fprintf(stderr, "[Recovered] thrown from:\n%s", trace.c_str());
+        // SHORT on purpose: the first version ran past what a tablet toast
+        // shows, so the part that mattered (save a copy) was the part cut off.
+        showToast("A step was skipped after an error - save a copy.", 6.0);
+        // Previews/tools may be half-applied; drop the ones that hold geometry
+        // so the next frame draws from the document rather than a dead handle.
+        m_meshesDirty = true;
+      }
     }
 
     // Persist preferences on a clean exit (in addition to saving on each change).
     saveAppSettings();
-    // Clean exit → the crash-recovery snapshot is no longer "unfinished work".
-    // A snapshot surviving to the next launch therefore means a crash/hang/kill.
-    materializr::clearProjectRecovery();
+    // Clean exit → clear the recovery snapshots, with one deliberate
+    // exception: a DIRTY INACTIVE tab keeps its file. The quit prompt only
+    // covers the active project, so an unsaved background tab was never
+    // offered a save — deleting its snapshot here would silently destroy its
+    // only copy. It is offered back on the next launch instead. (The active
+    // session always clears: if it was dirty, the user answered the prompt.)
+    for (size_t i = 0; i < m_sessions.size(); ++i) {
+        const auto& s = m_sessions[i];
+        if (i != m_activeSession) {
+            const bool dirty =
+                (s->history && s->history->currentStep() != s->savedAtHistoryStep) ||
+                s->unsavedNonHistoryChanges;
+            if (dirty) continue;
+        }
+        materializr::clearProjectRecovery(s->recoveryIndex);
+    }
 }
 
 } // namespace materializr

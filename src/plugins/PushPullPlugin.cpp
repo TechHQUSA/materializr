@@ -1,4 +1,5 @@
 #include "ui/StepperRow.h"
+#include "ui/UiTheme.h"
 #include "ui_scale.h"
 #include "../touch_mode.h"
 #include "../plugin/PluginMacro.h"
@@ -38,11 +39,19 @@ public:
                 PushPullTarget t;
                 t.sketchId = e.sketchId;
                 t.regionIndex = e.subShapeIndex;
-                // Detached sketch = independent of its former host; don't
-                // fuse into the stale source body (see beginPushPull).
-                t.sourceBodyId = sketch->isDetachedFromBody()
-                                     ? -1
-                                     : sketch->getSourceBody();
+                // Detached sketch, OR one whose host body is gone: both are
+                // free-floating. Without the second check the target kept a
+                // dead id, PushPullOp took the fuse-into-existing branch, and
+                // its doc.getBody() failure `continue`d — the op silently did
+                // NOTHING rather than falling back to making a new body.
+                int host = sketch->isDetachedFromBody()
+                               ? -1
+                               : sketch->getSourceBody();
+                if (host >= 0) {
+                    try { (void)ctx.document().getBody(host); }
+                    catch (...) { host = -1; }
+                }
+                t.sourceBodyId = host;
                 t.profile = regions[e.subShapeIndex].face;
                 if (t.profile.IsNull()) continue;
                 m_targets.push_back(t);
@@ -97,12 +106,11 @@ public:
     }
 
     void renderOverlay(materializr::PluginContext& ctx) override {
-        ImGui::SetCursorPos(ImVec2(10, 30));
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.85f, 1.0f, 1.0f));
-        ImGui::Text(materializr::touchMode()
-            ? "PUSH/PULL - Positive = extrude, Negative = cut. Drag the arrow, then Confirm / Cancel."
-            : "PUSH/PULL - Positive = extrude, Negative = cut. Enter to confirm, Escape to cancel.");
-        ImGui::PopStyleColor();
+        materializr::viewportBanner(
+            ImVec4(0.3f, 0.85f, 1.0f, 1.0f),
+            materializr::touchMode()
+                ? "PUSH/PULL - Positive = extrude, Negative = cut. Drag the arrow, then Confirm / Cancel."
+                : "PUSH/PULL - Positive = extrude, Negative = cut. Enter to confirm, Escape to cancel.");
 
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 260,
                                         ImGui::GetWindowPos().y + 50));

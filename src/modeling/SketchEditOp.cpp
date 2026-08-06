@@ -8,6 +8,7 @@
 #include <map>
 #include <sstream>
 #include <vector>
+#include "../ui/NumField.h"
 
 namespace materializr {
 
@@ -45,6 +46,8 @@ static const char* constraintName(ConstraintType t) {
         case ConstraintType::Equal:         return "Equal";
         case ConstraintType::Concentric:    return "Concentric";
         case ConstraintType::Angle:         return "Angle";
+        case ConstraintType::DistancePointLine: return "Distance to Line";
+        case ConstraintType::CircleGap: return "Circle Gap";
     }
     return "Constraint";
 }
@@ -73,6 +76,10 @@ std::string SketchEditOp::description() const {
                 } else if (c.type == ConstraintType::Angle) {
                     std::snprintf(buf, sizeof(buf), "Add Angle %.1f\xC2\xB0",
                                   c.value * 180.0 / M_PI);
+                } else if (c.type == ConstraintType::DistancePointLine) {
+                    std::snprintf(buf, sizeof(buf), "Add Distance %.2f mm", c.value);
+                } else if (c.type == ConstraintType::CircleGap) {
+                    std::snprintf(buf, sizeof(buf), "Add Gap %.2f mm", c.value);
                 } else {
                     std::snprintf(buf, sizeof(buf), "Add %s", name);
                 }
@@ -97,8 +104,13 @@ std::string SketchEditOp::description() const {
             const Constraint* bMatch = nullptr;
             for (const auto& b : cBefore) if (b.id == cAfter[i].id) { bMatch = &b; break; }
             if (!bMatch) continue;
+            // isDriving too: promoting a reference dimension to driving (or
+            // back) changes nothing numeric, so a value-only comparison would
+            // classify it as "no edit" and the toggle would get no history
+            // step to undo.
             if (std::abs(bMatch->value - cAfter[i].value) > 1e-9 ||
-                std::abs(bMatch->valueY - cAfter[i].valueY) > 1e-9) {
+                std::abs(bMatch->valueY - cAfter[i].valueY) > 1e-9 ||
+                bMatch->isDriving != cAfter[i].isDriving) {
                 char buf[100];
                 if (cAfter[i].type == ConstraintType::Angle) {
                     std::snprintf(buf, sizeof(buf), "Edit Angle %.1f\xC2\xB0 \xE2\x86\x92 %.1f\xC2\xB0",
@@ -107,7 +119,9 @@ std::string SketchEditOp::description() const {
                 } else if (cAfter[i].type == ConstraintType::Radius) {
                     std::snprintf(buf, sizeof(buf), "Edit \xC3\x98 %.2f \xE2\x86\x92 %.2f mm",
                                   bMatch->value * 2.0, cAfter[i].value * 2.0);
-                } else if (cAfter[i].type == ConstraintType::Distance) {
+                } else if (cAfter[i].type == ConstraintType::Distance ||
+                           cAfter[i].type == ConstraintType::DistancePointLine ||
+                           cAfter[i].type == ConstraintType::CircleGap) {
                     std::snprintf(buf, sizeof(buf), "Edit Distance %.2f \xE2\x86\x92 %.2f mm",
                                   bMatch->value, cAfter[i].value);
                 } else {
@@ -277,7 +291,9 @@ static void writeSketchBody(std::ostream& os, const Sketch& sk, int sketchId,
     for (const auto& c : cs) {
         os << "CONSTRAINT " << c.id << " " << static_cast<int>(c.type)
            << " " << c.entityA << " " << c.entityB
-           << " " << c.value << " " << c.valueY << "\n";
+           << " " << c.value << " " << c.valueY
+           << " " << c.labelOffX << " " << c.labelOffY
+           << " " << (c.isDriving ? 1 : 0) << "\n";
     }
 
     os << "SKETCH_END\n";
@@ -366,7 +382,8 @@ void SketchEditOp::renderProperties() {
             for (const auto& b : m_before->getConstraints())
                 if (b.id == c.id) { prev = &b; break; }
             if (prev && std::abs(prev->value - c.value) < 1e-9 &&
-                        std::abs(prev->valueY - c.valueY) < 1e-9)
+                        std::abs(prev->valueY - c.valueY) < 1e-9 &&
+                        prev->isDriving == c.isDriving)
                 continue;
         }
         ImGui::PushID(static_cast<int>(i));
@@ -374,7 +391,7 @@ void SketchEditOp::renderProperties() {
             case ConstraintType::Distance: {
                 anyDim = true;
                 double v = c.value;
-                if (ImGui::InputDouble("Distance (mm)", &v, 0.0, 0.0, "%g",
+                if (materializr::inputNumber("Distance (mm)", &v, 0.0, 0.0, "%g",
                                        ImGuiInputTextFlags_EnterReturnsTrue)) {
                     c.value = v;
                     resolveAfter();
@@ -386,7 +403,7 @@ void SketchEditOp::renderProperties() {
                 // Stored as radius; show as diameter to match the in-sketch
                 // popup ("Ø ..." in descriptions and dimensions).
                 double dia = c.value * 2.0;
-                if (ImGui::InputDouble("\xC3\x98 (mm)", &dia, 0.0, 0.0, "%g",
+                if (materializr::inputNumber("\xC3\x98 (mm)", &dia, 0.0, 0.0, "%g",
                                        ImGuiInputTextFlags_EnterReturnsTrue)) {
                     c.value = std::max(dia, 1e-6) * 0.5;
                     resolveAfter();
@@ -396,7 +413,7 @@ void SketchEditOp::renderProperties() {
             case ConstraintType::Angle: {
                 anyDim = true;
                 double deg = c.value * 180.0 / M_PI;
-                if (ImGui::InputDouble("Angle (\xC2\xB0)", &deg, 0.0, 0.0, "%.2f",
+                if (materializr::inputNumber("Angle (\xC2\xB0)", &deg, 0.0, 0.0, "%.2f",
                                        ImGuiInputTextFlags_EnterReturnsTrue)) {
                     c.value = deg * M_PI / 180.0;
                     resolveAfter();
@@ -440,7 +457,7 @@ void SketchEditOp::renderProperties() {
                 if (c.id == cid) { r = c.radius; break; }
             double dia = r * 2.0;
             ImGui::PushID(cid + 1000000);   // keep clear of the constraint-row ids
-            if (ImGui::InputDouble("Diameter (mm)", &dia, 0.0, 0.0, "%g",
+            if (materializr::inputNumber("Diameter (mm)", &dia, 0.0, 0.0, "%g",
                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 // Writes the after-snapshot AND records the edit so Apply can
                 // carry the new radius into later snapshots — otherwise the next

@@ -1,14 +1,15 @@
 # Materializr
 
 **Open-source parametric 3D CAD for makers** — constraint sketches, solid
-modeling, threads, SVG & text engraving, STL/STEP/SVG export.
+modeling, threads, SVG & text engraving, STEP/STL/SVG/DXF/OBJ/3MF exchange.
 
 > **📱 Now on Android and iPad:** Materializr runs on Android (arm64-v8a) and
 > **iPad — [get it on the App Store](https://apps.apple.com/us/app/materializr/id6787741207)** —
 > reusing the entire geometry codebase via an SDL2 + OpenGL ES 3.0 backend and
 > cross-compiled OpenCASCADE, with a runtime *touch mode* that adapts gestures
 > and hit targets. **Designed for tablets** — a phone screen will be cramped.
-> On Android, grab the APK from the [latest release](https://github.com/materializr-cad/materializr/releases/latest),
+> On Android, get it on **[Google Play](https://play.google.com/store/apps/details?id=org.ravenhold.materializr)**,
+> grab the APK from the [latest release](https://github.com/materializr-cad/materializr/releases/latest),
 > or see [`android/README.md`](android/README.md) to build it yourself.
 > Also on [F-Droid](https://f-droid.org/packages/com.materializr.app/).
 
@@ -24,6 +25,7 @@ modeling, threads, SVG & text engraving, STL/STEP/SVG export.
 | Windows | `Materializr-Setup.exe` | run the installer |
 | Windows (portable) | `Materializr-windows-x64.zip` | unzip anywhere, run `materializr.exe` |
 | iPad | [on the App Store](https://apps.apple.com/us/app/materializr/id6787741207) | install from the App Store |
+| Android (Google Play) | [on Google Play](https://play.google.com/store/apps/details?id=org.ravenhold.materializr) | install + auto-update from the Play Store; tablets recommended |
 | Android (F-Droid) | [on F-Droid](https://f-droid.org/packages/com.materializr.app/) | install + auto-update from the F-Droid app; tablets recommended |
 | Android (latest APK) | `Materializr-*-arm64-v8a.apk` | sideload (enable "install unknown apps") for the freshest fixes; tablets recommended |
 | macOS (Apple Silicon) | `Materializr-*-arm64.dmg` | open the `.dmg`, drag **Materializr** to Applications — see the first-launch note below |
@@ -57,6 +59,7 @@ modeling, threads, SVG & text engraving, STL/STEP/SVG export.
 ![License](https://img.shields.io/badge/License-GPLv3-blue)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/BRjzbMGZvE)
 [![App Store](https://img.shields.io/badge/App_Store-iPad-0D96F6?logo=apple&logoColor=white)](https://apps.apple.com/us/app/materializr/id6787741207)
+[![Google Play](https://img.shields.io/badge/Google_Play-Android-414141?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=org.ravenhold.materializr)
 
 Built on the [OpenCASCADE](https://dev.opencascade.org/) geometry kernel —
 real B-rep solids, not meshes — with a Dear ImGui interface. Sketch on any
@@ -83,13 +86,16 @@ something behaves oddly, a bug report is the most useful thing you can send.
 **Sketch** — lines, circles, arcs, splines, polygons, rectangles with
 SketchUp-style inference snapping (endpoints, midpoints, perpendicular,
 tangent, 15° increments) and opt-in dimensions & constraints. **Text** as
-real outline geometry (three bundled fonts) and **SVG import** with live
+real outline geometry (ten bundled fonts) and **SVG import** with live
 placement preview — both become ordinary closed regions you can extrude.
+Drop a **reference image** into the viewport and model against it.
 
 **Model** — push/pull, extrude, **lathe** (spin a sketch profile around an
 axis into a solid), **revolve** (rotate a body around an axis — watch a fan
-spin or a hinge open), loft, booleans, fillet/chamfer, shell, mirror,
-linear & circular patterns, split. Drop in a **primitive** (box,
+spin or a hinge open), loft (N sections, plus **guided loft** steered by
+guide curves), **boundary fill**, booleans, fillet/chamfer, shell, mirror,
+linear & circular patterns, split, and **separate** (break a body's
+disconnected solids into individual bodies). Drop in a **primitive** (box,
 cylinder, sphere, cone, torus) when that's the faster start. Direct face
 editing: **taper** (draft), **scale face** (pinch a wing tip into a winglet),
 **twist a face** about its normal to spiral the walls, edit a hole or boss to
@@ -119,12 +125,13 @@ live preview and a tour that teaches the app in the layout you picked.
 Select any face, edge or vertex for instant measurement readouts (area,
 radius, length, centre — with totals across a multi-selection).
 
-**Exchange** — STEP and IGES import/export, **STL import** (with accuracy
-control — sketch directly on a scanned part's flat faces) and STL/glTF
-export (Z-up corrected for printing), **sketch → SVG export** (1:1 mm, for
-laser cutters and 2.5D CNC) that round-trips cleanly back into sketches,
-SVG import, PNG viewport export, and a compact native `.materializr`
-format that stores bodies, sketches, and the full history.
+**Exchange** — STEP, IGES and **BREP** import/export, **STL import** (with
+accuracy control — sketch directly on a scanned part's flat faces),
+STL/glTF/**OBJ**/**3MF** export (Z-up corrected for printing), **sketch →
+SVG and DXF export** (1:1 mm, for laser cutters and 2.5D CNC) that
+round-trip cleanly back into sketches, SVG and **DXF import**, and a
+compact native **`.mzr`** format (`.materializr` still opens) that stores
+bodies, sketches, and the full history.
 
 ## Known limitations
 
@@ -139,23 +146,27 @@ up front:
   chamfers and boolean-seam features following upstream *sketch* edits — the
   move case is the remaining frontier and keeps narrowing.
 
-- **Threads have to be the last thing you do to a body.** Once a part is
-  threaded, further operations on it are refused with a prompt to delete the
-  thread, make your change, and re-apply it. *Why:* threads are dense
-  geometry; re-running cuts or fillets across them is unreliable, so
-  threading is a terminal finishing step. (Re-threading is cheap now — the
-  1.4.0 swept engine builds threads near-instantly.)
+- **Threads are re-applied after every change to a threaded body.** You can
+  keep modeling on a threaded part — new operations are automatically
+  reordered to happen before the thread in the body's history, and the
+  thread is then re-cut on top (a progress prompt lets you cancel). *Why:*
+  threads are dense geometry; running cuts or fillets across them directly
+  is unreliable, so the app applies your change to the unthreaded shape and
+  threads it again last. Re-threading is near-instant for standard profiles;
+  the cost is only noticeable on long angular threads (square/ACME/buttress).
 
-- **Chamfering an edge that meets a fillet fails.** If a chamfer's edge runs
-  into a rounded (filleted) edge, the operation is refused where the chamfer and
-  the swept fillet surface intersect — there's no tolerance setting that rescues
-  it. *Why:* it's an upstream limit in OpenCASCADE's chamfer builder, not
-  something a knob fixes. *Workaround:* cut the chamfer with a sketch instead, or
-  chamfer the edge before you fillet its neighbour.
+- **Chamfering an edge that meets a fillet can still fail.** 1.5.0 added a
+  **cut-based fallback** (the blend's cross-section is swept along the edge
+  and subtracted) that rescues many cases OpenCASCADE's native chamfer
+  builder refuses — including edges crossed by holes and pockets — but it
+  covers straight, convex, planar-walled edges; where it doesn't apply the
+  operation is still refused rather than producing garbage. *Workaround
+  when refused:* cut the chamfer with a sketch, or chamfer the edge before
+  you fillet its neighbour.
 
-Topological naming landed in 1.4.0 and keeps shrinking the first case; the
-chamfer/fillet case is an upstream OpenCASCADE limit we're tracking for a
-cut-based fallback. All three are on the roadmap.
+Topological naming landed in 1.4.0 (and 1.5.0's face lineage extends it
+through boolean splits), which keeps shrinking the first case. All three are
+on the roadmap.
 
 ## Documentation
 
@@ -232,8 +243,7 @@ this would exist without them.
 
 **Bundled fonts**
 
-- [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — UI font
-  (SIL Open Font License 1.1).
-- [DejaVu Sans](https://dejavu-fonts.github.io/) and DejaVu Serif —
-  shipped as choices for the sketch Text tool (DejaVu Fonts License,
-  derived from Bitstream Vera).
+Ten typefaces ship for the sketch Text tool (JetBrains Mono, DejaVu Sans &
+Serif, Liberation Sans & Serif, Ubuntu, Comic Neue, Black Ops One, Anton,
+Pacifico), plus the Iconoir icon font for the UI. Full credits, copyrights
+and license texts: [`assets/fonts/FONT-CREDITS.md`](assets/fonts/FONT-CREDITS.md).

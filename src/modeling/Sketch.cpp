@@ -42,6 +42,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <cmath>
+#include <set>
 
 namespace materializr {
 
@@ -56,6 +57,26 @@ void Sketch::setPlane(const gp_Pln& plane) {
 
 const gp_Pln& Sketch::getPlane() const {
     return m_plane;
+}
+
+// NB: the point parameter is `nearPt`, not `near`. <windef.h> still defines
+// `near` (and `far`) as empty macros from the 16-bit memory-model days, so on
+// MSVC a parameter called `near` is erased: `return near;` becomes `return ;`
+// and `gp_Vec rel(o, near)` becomes `gp_Vec rel(o, )`. The build breaks with a
+// pile of errors that never mention the macro.
+gp_Pnt Sketch::latticeAnchor(const gp_Pln& plane, const gp_Pnt& nearPt,
+                             double step) {
+    if (step <= 0.0) return nearPt;
+    const gp_Ax3& ax = plane.Position();
+    const gp_Pnt o = ax.Location();
+    const gp_Dir xd = ax.XDirection();
+    const gp_Dir yd = ax.YDirection();
+    const gp_Vec rel(o, nearPt);
+    const double u = std::round(rel.Dot(gp_Vec(xd)) / step) * step;
+    const double v = std::round(rel.Dot(gp_Vec(yd)) / step) * step;
+    return gp_Pnt(o.X() + u * xd.X() + v * yd.X(),
+                  o.Y() + u * xd.Y() + v * yd.Y(),
+                  o.Z() + u * xd.Z() + v * yd.Z());
 }
 
 gp_Pnt Sketch::sketchToWorld(glm::vec2 pt2d) const {
@@ -514,9 +535,22 @@ int Sketch::addRectangle(glm::vec2 corner1, glm::vec2 corner2) {
 
     // Create 4 lines forming a closed rectangle
     int firstLineId = addLine(p1, p2);
-    addLine(p2, p3);
-    addLine(p3, p4);
-    addLine(p4, p1);
+    int l2 = addLine(p2, p3);
+    int l3 = addLine(p3, p4);
+    int l4 = addLine(p4, p1);
+
+    // Keep the rectangle rigid: top/bottom horizontal, sides vertical. Without
+    // these a later dimension (e.g. a 2 mm gap to another edge) lets the naive
+    // relaxation solver skew the box into a parallelogram, since nothing holds
+    // its sides square. p1→p2 and p3→p4 are horizontal; p2→p3 and p4→p1 vertical.
+    auto addC = [&](ConstraintType t, int a) {
+        Constraint c; c.id = 0; c.type = t; c.entityA = a; c.entityB = -1;
+        c.isSatisfied = true; addConstraint(c);
+    };
+    addC(ConstraintType::Horizontal, firstLineId);
+    addC(ConstraintType::Horizontal, l3);
+    addC(ConstraintType::Vertical, l2);
+    addC(ConstraintType::Vertical, l4);
 
     return firstLineId;
 }
@@ -1258,6 +1292,31 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         }
     }
 
+    // COINCIDENT STRAIGHT EDGES collapse to one. Drawing a rectangle whose side
+    // lands on an existing line — inevitable on a busy face, and what the 0.3mm
+    // point snap encourages — produces two edges between the SAME pair of nodes.
+    // The half-edge walker then sees two outgoing half-edges at an identical
+    // angle, so nextHE's "clockwise of the twin" can pick the duplicate instead
+    // of turning the corner: the walk escapes along the twin, the enclosed area
+    // never closes as its own face, and its half-edges are absorbed into the
+    // surrounding one. The visible result is a rectangle with NO selectable
+    // region, so clicking inside it picks the whole surrounding face — and a
+    // push/pull there cut an entire box wall away (Steve's antenna tracker).
+    //
+    // Curves are excluded: two arcs (or an arc and a line) between the same two
+    // points are genuinely different edges bounding real area between them.
+    {
+        std::set<std::pair<int, int>> seenStraight;
+        for (size_t i = 0; i < edges.size(); ++i) {
+            if (edgeDead[i]) continue;
+            const EdgeSpec& e = edges[i];
+            if (e.isArc || e.splineIdx >= 0) continue;
+            const int lo = std::min(e.startPtId, e.endPtId);
+            const int hi = std::max(e.startPtId, e.endPtId);
+            if (!seenStraight.insert({lo, hi}).second) edgeDead[i] = true;
+        }
+    }
+
     // 2D polyline of an edge from its `from` endpoint to its `to` endpoint,
     // curves sampled — used both for the outgoing tangent (so a spline's two
     // sub-arcs leaving a shared point are ordered right) and for the face's TRUE
@@ -1949,29 +2008,38 @@ bool Sketch::isPointInOrNearRegion(const Region& region, glm::vec2 p, float tol)
 
 bool Sketch::getSourceFaceCentroid(glm::vec2& out) const {
     if (m_sourceFace.IsNull()) return false;
-    if (m_centroidValid) { out = m_centroid; return true; }
 
     // Let OCCT compute the true area centroid (centre of mass for a uniform
     // density surface). Doing this ourselves from densified polygon vertices is
     // fragile for faces whose outer wire has any reversed edges — the resulting
     // vertex sequence is scrambled and the polygon-area formula returns garbage.
-    try {
-        GProp_GProps props;
-        BRepGProp::SurfaceProperties(m_sourceFace, props);
-        if (props.Mass() <= 0.0) return false;
-        gp_Pnt c3d = props.CentreOfMass();
-        // Project to sketch-plane 2D coordinates.
-        const gp_Ax3& ax = m_plane.Position();
-        gp_Pnt origin = ax.Location();
-        gp_Dir xd = ax.XDirection();
-        gp_Dir yd = ax.YDirection();
-        gp_Vec v(origin, c3d);
-        m_centroid = glm::vec2(static_cast<float>(v.Dot(gp_Vec(xd))),
-                               static_cast<float>(v.Dot(gp_Vec(yd))));
-        m_centroidValid = true;
-        out = m_centroid;
-        return true;
-    } catch (...) { return false; }
+    //
+    // NOTE this is the centroid of the TRIMMED face, so holes count: an
+    // off-centre pocket pulls the point away from itself. That is what a centre
+    // of mass means, and it is what the green centre marker shows.
+    if (!m_centroid3dValid) {
+        try {
+            GProp_GProps props;
+            BRepGProp::SurfaceProperties(m_sourceFace, props);
+            if (props.Mass() <= 0.0) return false;
+            m_centroid3d = props.CentreOfMass();
+            m_centroid3dValid = true;
+        } catch (...) { return false; }
+    }
+
+    // Project to sketch-plane 2D on every call rather than caching the 2D
+    // result. The centroid belongs to the face, so its world position holds
+    // until the face is replaced (setSourceFace clears the cache) — but its
+    // 2D coordinates are relative to the PLANE, and the plane moves whenever
+    // the sketch is moved. Caching the 2D value left the centre marker (and
+    // the snap that follows it) behind by exactly the distance moved, since
+    // setPlane has no way to know the cache existed. Two dot products per call
+    // is nothing next to the BRepGProp pass this still avoids.
+    const gp_Ax3& ax = m_plane.Position();
+    gp_Vec v(ax.Location(), m_centroid3d);
+    out = glm::vec2(static_cast<float>(v.Dot(gp_Vec(ax.XDirection()))),
+                    static_cast<float>(v.Dot(gp_Vec(ax.YDirection()))));
+    return true;
 }
 
 int Sketch::elementCount() const {

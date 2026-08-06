@@ -24,6 +24,7 @@
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <TopExp_Explorer.hxx>
 #include <gp_Vec.hxx>
 #include <gp_Dir.hxx>
@@ -51,6 +52,7 @@ void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
 #include <gp_Pln.hxx>
 #include <ElSLib.hxx>
 #include <TopExp_Explorer.hxx>
+#include "../ui/NumField.h"
 
 namespace {
 // Interior points of `face`, up to `maxPts`, spread over a UV grid. MANY
@@ -422,6 +424,19 @@ bool ExtrudeOp::execute(Document& doc) {
             doc.setBodyFaceIds(m_targetBodyId, std::move(next));
         };
 
+        // Validate-or-refuse (same gate as BooleanOp/FilletOp/ShellOp): OCCT
+        // booleans can report IsDone() yet hand back a null, empty, or
+        // topologically invalid shape (a subtract that consumed the whole
+        // body, a self-intersecting fuse). Committing one crashes later
+        // tessellation/boolean/save, so refuse it here instead.
+        auto commitGuard = [](const TopoDS_Shape& s) {
+            if (s.IsNull()) return false;
+            GProp_GProps gp;
+            BRepGProp::VolumeProperties(s, gp);
+            if (gp.Mass() < 1e-6) return false;
+            return BRepCheck_Analyzer(s).IsValid() == Standard_True;
+        };
+
         // Apply boolean mode
         switch (m_mode) {
             case ExtrudeMode::NewBody: {
@@ -452,6 +467,9 @@ bool ExtrudeOp::execute(Document& doc) {
                     TopoDS_Shape unified = unifier.Shape();
                     if (!unified.IsNull()) fused = unified;
                 } catch (...) { /* keep un-unified result */ }
+                if (!commitGuard(fused)) {
+                    return false;
+                }
                 doc.updateBody(m_targetBodyId, fused);
                 publishBoolLineage(fuse, extrudedShape, fused);
                 m_createdBodyId = -1;
@@ -470,6 +488,9 @@ bool ExtrudeOp::execute(Document& doc) {
                 if (!cut.IsDone()) {
                     return false;
                 }
+                if (!commitGuard(cut.Shape())) {
+                    return false;
+                }
                 doc.updateBody(m_targetBodyId, cut.Shape());
                 publishBoolLineage(cut, extrudedShape, doc.getBody(m_targetBodyId));
                 m_createdBodyId = -1;
@@ -486,6 +507,9 @@ bool ExtrudeOp::execute(Document& doc) {
                 BRepAlgoAPI_Common common(m_previousTargetShape, extrudedShape);
                 common.Build();
                 if (!common.IsDone()) {
+                    return false;
+                }
+                if (!commitGuard(common.Shape())) {
                     return false;
                 }
                 doc.updateBody(m_targetBodyId, common.Shape());
@@ -730,7 +754,7 @@ void ExtrudeOp::renderProperties() {
     ImGui::Text("Extrude");
     ImGui::Separator();
 
-    ImGui::InputDouble("Distance", &m_distance, 0.1, 1.0, "%g");
+    materializr::inputNumber("Distance", &m_distance, 0.1, 1.0, "%g");
 
     const char* modeItems[] = { "New Body", "Union", "Subtract", "Intersect" };
     int modeIndex = static_cast<int>(m_mode);
@@ -744,10 +768,10 @@ void ExtrudeOp::renderProperties() {
         m_direction = static_cast<ExtrudeDirection>(dirIndex);
     }
 
-    ImGui::InputDouble("Draft Angle", &m_draftAngle, 0.1, 1.0, "%.1f");
+    materializr::inputNumber("Draft Angle", &m_draftAngle, 0.1, 1.0, "%.1f");
 
     if (m_mode != ExtrudeMode::NewBody) {
-        ImGui::InputInt("Target Body ID", &m_targetBodyId);
+        materializr::inputNumberInt("Target Body ID", &m_targetBodyId);
     }
 }
 

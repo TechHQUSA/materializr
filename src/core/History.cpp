@@ -16,23 +16,32 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
         return false;
     }
 
-    // THREADS ARE A FINISHING PASS — by user discipline, not by automatic
-    // reflow. The reflow machinery (reflowInsertionIndex +
-    // insertStepAndReplay, kept below for the future hybrid) silently
-    // re-ran a full validated per-turn thread recompute on the main thread
-    // for EVERY op touching a threaded body — Steve: "it is too resource
-    // intensive to just artificially shuffle to the end". An op that
-    // targets a thread-modified body is now REFUSED with guidance instead:
-    // delete the Thread step, make the change, re-thread (the thread step
-    // is parametric and cheap to re-apply).
+    // THREADS ARE A FINISHING PASS — enforced by REFLOW: an op targeting a
+    // thread-modified body is reordered beneath the thread(s) via
+    // insertStepAndReplay (non-thread steps replay first, then the op
+    // against clean geometry, then the threads re-cut parametrically on the
+    // result). Between 2026-06 and 2026-07 this was a hard refusal
+    // ("threads-last discipline") because the re-cut ran a ~minute per-turn
+    // recompute synchronously on the main thread. Two things removed that
+    // cost: ThreadOp's async recut hook (the re-cut lands from a worker;
+    // the body shows unthreaded for a moment) and the swept-profile fast
+    // path (~200ms for Standard/Rounded). If the reflow can't land (baked
+    // reload snapshot on the body / a step failed to replay — state is
+    // restored inside insertStepAndReplay), fall back to the old refusal
+    // with guidance rather than running the op directly against the
+    // thread's helicoid faces (kernel garbage).
     {
         int at = reflowInsertionIndex(*op);
         if (at >= 0) {
-            std::fprintf(stderr, "[History] '%s' declined: this body has "
-                                 "Thread steps. Threads must be applied "
-                                 "LAST — delete the Thread step, make this "
-                                 "change, then re-apply the thread.\n",
-                         op->name().c_str());
+            const std::string nm = op->name();
+            std::fprintf(stderr, "[History] reflowing '%s' beneath the "
+                                 "Thread at step %d (threads re-cut last)\n",
+                         nm.c_str(), at);
+            if (insertStepAndReplay(at, std::move(op), doc)) return true;
+            std::fprintf(stderr, "[History] '%s' declined: reflow beneath "
+                                 "the Thread step failed. Delete the Thread "
+                                 "step, make this change, then re-apply the "
+                                 "thread.\n", nm.c_str());
             if (m_threadsLastDecline) m_threadsLastDecline();
             return false;
         }
@@ -580,7 +589,14 @@ bool History::isBodyThreaded(int bodyId) const {
     for (int i = 0; i <= limit && i < static_cast<int>(m_operations.size());
          ++i) {
         const Operation* s = m_operations[i].get();
-        if (!s || s->typeId() != "thread") continue;
+        // A DISABLED thread is not in the model, so the body is not threaded:
+        // this gate only exists to make callers avoid the helicoid (ghost
+        // preview in Push/Pull, no live preview in Resize Cylindrical), and
+        // there is nothing to avoid. Missing the isEnabled() check left every
+        // later op degrading its preview for a thread the user had switched
+        // off — while reflowInsertionIndex(), which DOES check, saw no thread
+        // to reorder beneath. isBodyShelled() below always had it right.
+        if (!s || !s->isEnabled() || s->kind() != Operation::Kind::Thread) continue;
         // ThreadOp doesn't override plannedBodyIds() (returns {}); the body it
         // modified is recorded in its diff. Mirror reflowInsertionIndex's
         // touchesPlanned() so the up-front refusal matches the commit-time one.
@@ -599,7 +615,7 @@ bool History::isBodyShelled(int bodyId) const {
     for (int i = 0; i <= limit && i < static_cast<int>(m_operations.size());
          ++i) {
         const Operation* s = m_operations[i].get();
-        if (!s || !s->isEnabled() || s->typeId() != "shell") continue;
+        if (!s || !s->isEnabled() || s->kind() != Operation::Kind::Shell) continue;
         OperationDiff d = s->captureDiff();
         for (const auto& [id, shp] : d.modifiedBefore)
             if (id == bodyId) return true;
@@ -610,7 +626,7 @@ bool History::isBodyShelled(int bodyId) const {
 }
 
 int History::reflowInsertionIndex(const Operation& op) const {
-    if (op.typeId() == "thread") return -1; // stacking threads is fine as-is
+    if (op.kind() == Operation::Kind::Thread) return -1; // stacking threads is fine as-is
     std::vector<int> planned = op.plannedBodyIds();
     if (planned.empty()) return -1;
 
@@ -641,13 +657,13 @@ int History::reflowInsertionIndex(const Operation& op) const {
     for (int i = limit; i >= 0; --i) {
         const Operation* s = m_operations[i].get();
         if (!s->isEnabled()) continue;
-        if (s->typeId() == "thread" && touchesPlanned(s)) insertAt = i;
+        if (s->kind() == Operation::Kind::Thread && touchesPlanned(s)) insertAt = i;
     }
     return insertAt;
 }
 
 int History::shellReflowIndex(const Operation& op) const {
-    if (op.typeId() != "moveface") return -1;
+    if (op.kind() != Operation::Kind::MoveFace) return -1;
     std::vector<int> planned = op.plannedBodyIds();
     if (planned.empty()) return -1;
 
@@ -672,7 +688,7 @@ int History::shellReflowIndex(const Operation& op) const {
     for (int i = limit; i >= 0; --i) {
         const Operation* s = m_operations[i].get();
         if (!s->isEnabled()) continue;
-        if (s->typeId() == "shell" && touchesPlanned(s)) insertAt = i;
+        if (s->kind() == Operation::Kind::Shell && touchesPlanned(s)) insertAt = i;
     }
     return insertAt;
 }
@@ -737,7 +753,7 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
     // when the new op is a face transform (the shell-reflow case) — for any
     // other insertion a shell in the window keeps its original position, so
     // e.g. a boolean that ran on the hollow body still does.
-    const bool shellIsFinishing = (op->typeId() == "moveface");
+    const bool shellIsFinishing = (op->kind() == Operation::Kind::MoveFace);
     std::vector<size_t> ntIdx, thIdx; // partition, original order kept
     for (size_t k = 0; k < extracted.size(); ++k) {
         const std::string t = extracted[k]->typeId();

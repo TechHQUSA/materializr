@@ -30,6 +30,12 @@ void ItemsPanel::setHistory(History* hist) {
     m_history = hist;
 }
 
+void ItemsPanel::applyRowClick(const SelectionEntry& entry) {
+    if (!m_selection) return;
+    if (ImGui::GetIO().KeyCtrl) m_selection->toggleSelection(entry);
+    else                        m_selection->select(entry);
+}
+
 bool ItemsPanel::render() {
     ImGui::Begin("Items", nullptr, ImGuiWindowFlags_NoCollapse);
     const bool changed = renderContent();
@@ -329,7 +335,7 @@ bool ItemsPanel::renderContent() {
                         SelectionEntry entry;
                         entry.type = SelectionType::Sketch;
                         entry.sketchId = id;
-                        m_selection->select(entry);
+                        applyRowClick(entry);
                     }
                 }
 
@@ -338,7 +344,14 @@ bool ItemsPanel::renderContent() {
                 }
 
                 if (ImGui::BeginPopupContextItem("SketchContextMenu")) {
-                    if (ImGui::MenuItem("Edit Sketch")) {
+                    // The sketch currently being drawn: Edit Sketch would
+                    // re-enter it mid-edit (clobbering the live solver/undo
+                    // floor) and Delete would remove it from under the tool
+                    // that's still writing to it, silently reverting its
+                    // m_activeSketchId to stale and re-losing the geometry
+                    // this same save path exists to protect.
+                    bool isBeingDrawn = m_sketchModeActive && id == m_activeSketchId;
+                    if (ImGui::MenuItem("Edit Sketch", nullptr, false, !isBeingDrawn)) {
                         if (m_editSketch) m_editSketch(id);
                     }
                     if (ImGui::MenuItem("Export as SVG…")) {
@@ -356,8 +369,15 @@ bool ItemsPanel::renderContent() {
                     // Fold every OTHER coplanar sketch into this one (the app
                     // filters to the ones sharing this sketch's plane). Only
                     // offered when there's more than one sketch to fold.
+                    //
+                    // Pulls in EVERY other sketch id, so if the active sketch
+                    // is registered at all it gets swept into the fold no
+                    // matter which row is clicked — gate on that, not just
+                    // whether this row IS the active sketch.
+                    bool activeSketchInvolved = m_sketchModeActive && m_activeSketchId >= 0;
                     if (sketchIds.size() > 1 &&
-                        ImGui::MenuItem("Combine coplanar into this")) {
+                        ImGui::MenuItem("Combine coplanar into this", nullptr, false,
+                                        !activeSketchInvolved)) {
                         if (m_combineSketches) {
                             std::vector<int> ids{ id };
                             for (int other : sketchIds)
@@ -365,10 +385,10 @@ bool ItemsPanel::renderContent() {
                             m_combineSketches(ids);
                         }
                     }
-                    if (ImGui::MenuItem("Rename")) {
+                    if (ImGui::MenuItem("Rename", nullptr, false, !isBeingDrawn)) {
                         beginRename();
                     }
-                    if (ImGui::MenuItem("Delete")) {
+                    if (ImGui::MenuItem("Delete", nullptr, false, !isBeingDrawn)) {
                         m_document->removeSketch(id);
                         if (m_selection) m_selection->clear();
                         m_renamingId = -1;
@@ -443,7 +463,7 @@ bool ItemsPanel::renderContent() {
                         SelectionEntry entry;
                         entry.type = SelectionType::Plane;
                         entry.planeId = id;
-                        m_selection->select(entry);
+                        applyRowClick(entry);
                     }
                 }
 
@@ -534,7 +554,7 @@ bool ItemsPanel::renderContent() {
                         SelectionEntry entry;
                         entry.type = SelectionType::Axis;
                         entry.axisId = id;
-                        m_selection->select(entry);
+                        applyRowClick(entry);
                     }
                 }
 
@@ -638,6 +658,12 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
     // The Selectable keeps a stable widget id via the enclosing PushID(id), so
     // decorating the visible label is safe.
     std::string label = name + "  \xC2\xB7 b" + std::to_string(id);
+    // Imported meshes are REFERENCE bodies — you sketch and snap against them,
+    // but every modelling op declines them (core/MeshGuard.h). Say so in the
+    // list, so the boundary is visible BEFORE a refusal, not just after: the
+    // row otherwise looks exactly like a modelled body.
+    const bool isMesh = m_document->isBodyMesh(id);
+    if (isMesh) label += "   \xE2\x97\x87 mesh";
     // Auto-scroll into view ONLY when this is the lone selected body and it's
     // newly selected (typically a viewport pick changing selection). With
     // multi-select every selected row would otherwise re-issue SetScrollHereY,
@@ -646,8 +672,17 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
         m_selection && m_selection->selectedBodyCount() == 1) {
         ImGui::SetScrollHereY(0.5f);
     }
-    if (ImGui::Selectable(label.c_str(), isSelected, 0,
-                          ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f))) {
+    if (isMesh) ImGui::PushStyleColor(ImGuiCol_Text, materializr::dimText());
+    const bool rowClicked =
+        ImGui::Selectable(label.c_str(), isSelected, 0,
+                          ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f));
+    if (isMesh) ImGui::PopStyleColor();
+    if (isMesh && ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Imported mesh \xE2\x80\x94 a reference body.\n"
+                          "Sketch on it and snap to it; modelling operations "
+                          "(booleans, fillets, push/pull) decline it.");
+    }
+    if (rowClicked) {
         if (m_selection) {
             ImGuiIO& io = ImGui::GetIO();
             auto makeEntry = [this](int bid) {
@@ -740,7 +775,13 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
         // them into individual bodies — the largest keeps this one, the rest
         // become new bodies the user can inspect or delete.
         if (!deleted && m_history &&
-            SeparateBodyOp::solidCount(m_document->getBody(id)) > 1) {
+            // Guarded: getBody throws when the row's body has just been
+            // retired (a replay, a delete elsewhere) and the panel is drawing
+            // one frame behind. Same class as the escape that silently exited
+            // the app on Android — see Application_InteractiveOps.cpp's note.
+            [&] { try { return SeparateBodyOp::solidCount(
+                                   m_document->getBody(id)) > 1; }
+                  catch (...) { return false; } }()) {
             if (ImGui::MenuItem("Separate")) {
                 auto op = std::make_unique<SeparateBodyOp>();
                 op->setBody(id);
@@ -748,12 +789,60 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
                 if (m_markDirty) m_markDirty();
             }
         }
-        // Per-body STL export: dumps only this body's mesh to a file the
-        // user picks. Default filename = the body's current name (see
-        // Application::exportBodyAsStl). Wired via callback so ItemsPanel
-        // doesn't depend on the STL I/O module.
-        if (!deleted && m_exportStl && ImGui::MenuItem("Export STL…")) {
+        // Export: every format the app can write, listed from the plugin
+        // registry (Application supplies the names), acting on the whole
+        // BODY SELECTION when the clicked body is part of one — the
+        // print-in-place case, where the parts must land in one file with
+        // their relative positions intact. Same multi-selection rule as
+        // "Move to folder" below.
+        const std::vector<std::string> exportFormats =
+            m_exportFormats ? m_exportFormats() : std::vector<std::string>{};
+        if (!deleted && m_exportBodies && !exportFormats.empty() &&
+            ImGui::BeginMenu("Export")) {
+            std::vector<int> targets;
+            bool multi = false;
+            if (m_selection) {
+                for (const auto& e : m_selection->getSelection()) {
+                    if (e.type == SelectionType::Body && e.bodyId >= 0)
+                        targets.push_back(e.bodyId);
+                }
+                multi = targets.size() > 1 &&
+                        std::find(targets.begin(), targets.end(), id) != targets.end();
+            }
+            if (!multi) { targets.clear(); targets.push_back(id); }
+            if (multi)
+                ImGui::TextDisabled("%zu selected bodies", targets.size());
+            for (const auto& fmt : exportFormats) {
+                const std::string label = fmt + "…";
+                if (ImGui::MenuItem(label.c_str())) m_exportBodies(targets, fmt);
+            }
+            ImGui::EndMenu();
+        }
+        // Kept for the callers that still wire only the STL shortcut.
+        if (!deleted && m_exportStl && exportFormats.empty() &&
+            ImGui::MenuItem("Export STL…")) {
             m_exportStl(id);
+        }
+        // Baked copy of this body into a fresh project file — the "use this
+        // part elsewhere" flow (the new file lands in Open Recent / the
+        // landing page, ready for Import Parts from another project).
+        if (!deleted && m_exportToProject &&
+            ImGui::MenuItem("Export to New Project")) {
+            // Same selection rule as Export above: the whole selection when
+            // this body is part of one. No ellipsis — it opens a tab now
+            // rather than asking for a filename.
+            std::vector<int> targets;
+            if (m_selection) {
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == SelectionType::Body && e.bodyId >= 0)
+                        targets.push_back(e.bodyId);
+            }
+            if (std::find(targets.begin(), targets.end(), id) == targets.end() ||
+                targets.size() <= 1) {
+                targets.clear();
+                targets.push_back(id);
+            }
+            m_exportToProject(targets);
         }
         // Move-to-folder submenu. If the right-clicked body is part of a
         // multi-selection, the action moves EVERY selected body at once;

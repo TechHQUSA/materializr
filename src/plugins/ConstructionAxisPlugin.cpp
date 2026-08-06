@@ -40,7 +40,7 @@ REGISTER_PLUGIN(ConstructionAxis, [](materializr::PluginContext& ctx) {
     // to Application's interactive-op popup (same routing the plane plugin
     // uses, with a different op name so the host can dispatch).
     auto action = [](materializr::PluginContext& c) {
-        c.requestInteractiveOp("ConstructionAxis");
+        c.requestInteractiveOp(materializr::InteractiveOp::ConstructionAxis);
     };
     ctx.registerToolbarButton({"Construction Axis", "Create",
         materializr::SelectionContext::Always, 51,
@@ -61,6 +61,12 @@ REGISTER_PLUGIN(ConstructionAxis, [](materializr::PluginContext& ctx) {
         });
     ctx.events().subscribe<materializr::AxisChangedEvent>(
         [](const materializr::AxisChangedEvent&) {
+            if (g_state) g_state->dirty = true;
+        });
+    // Tab switch: this draw list belongs to the outgoing document (see the
+    // same subscription in ConstructionPlanePlugin).
+    ctx.events().subscribe<materializr::ActiveDocumentChangedEvent>(
+        [](const materializr::ActiveDocumentChangedEvent&) {
             if (g_state) g_state->dirty = true;
         });
 

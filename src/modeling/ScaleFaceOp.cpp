@@ -18,6 +18,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <TopoDS.hxx>
@@ -31,6 +32,7 @@
 #include <gp_Vec.hxx>
 #include <gp_Pln.hxx>
 #include <imgui.h>
+#include "../ui/NumField.h"
 
 ScaleFaceOp::ScaleFaceOp() = default;
 
@@ -118,15 +120,35 @@ bool ScaleFaceOp::execute(Document& doc) {
             BRepBuilderAPI_GTransform xf(w, t, Standard_True);
             return TopoDS::Wire(xf.Shape());
         };
+        // UNIFORM scale must stay exact. GTransform converts every analytic
+        // curve to a bspline (a general affine map can turn a circle into an
+        // ellipse, so OCCT downgrades unconditionally) — a uniformly scaled
+        // circle came back as a wobbly approximation: the loft wall rendered
+        // lumpy and the scaled cap centroid drifted off-axis (Steve's
+        // "strange geometry on the side wall", 2026-08-04). gp_Trsf's true
+        // scaling keeps circles circles; the wire lies in the face plane
+        // through the centroid, so the 3D scale about it IS the in-plane
+        // scale. Only genuinely non-uniform scaling pays the bspline cost.
+        const bool uniformScale = std::abs(su - sv) < 1e-9;
+        gp_Trsf uScaleT;
+        if (uniformScale) uScaleT.SetScale(centroid, su);
+        auto scaledWire = [&](const TopoDS_Wire& w) -> TopoDS_Wire {
+            return uniformScale ? movedWire(w, uScaleT)
+                                : gMovedWire(w, scaleT);
+        };
 
         TopoDS_Shape result;
         if (m_mode == Mode::Extend) {
             // Tip extension: cap outline → scaled outline at +L outward.
             gp_Trsf off;
             off.SetTranslation(gp_Vec(n) * m_length);
-            TopoDS_Wire wTip = movedWire(gMovedWire(capWire, scaleT), off);
+            TopoDS_Wire wTip = movedWire(scaledWire(capWire), off);
 
-            BRepOffsetAPI_ThruSections loft(Standard_True);
+            // Ruled, not smoothed: the default approximation mode fits a
+            // bspline through the sections even when a ruled surface is
+            // exact (two circles → cone), and rounds the corners of scaled
+            // polygonal caps.
+            BRepOffsetAPI_ThruSections loft(Standard_True, Standard_True);
             loft.AddWire(capWire);
             loft.AddWire(wTip);
             loft.Build();
@@ -178,9 +200,10 @@ bool ScaleFaceOp::execute(Document& doc) {
             gp_Trsf back;
             back.SetTranslation(gp_Vec(n) * (-m_length));
             TopoDS_Wire wBase = movedWire(capWire, back);
-            TopoDS_Wire wTip = gMovedWire(capWire, scaleT);
+            TopoDS_Wire wTip = scaledWire(capWire);
 
-            BRepOffsetAPI_ThruSections loft(Standard_True);
+            // Ruled for the same reason as the tip loft above.
+            BRepOffsetAPI_ThruSections loft(Standard_True, Standard_True);
             loft.AddWire(wBase);
             loft.AddWire(wTip);
             loft.Build();
@@ -189,7 +212,24 @@ bool ScaleFaceOp::execute(Document& doc) {
                 return false;
             }
 
-            if (fullDepth) {
+            // GROWING flips the boolean. Common() can only ever remove
+            // material, so a frustum wider than the body just clipped back to
+            // the body and the op reported success having changed nothing
+            // (Steve: "scale only makes a face smaller"). The frustum already
+            // describes the wanted shape in both directions — full-size
+            // outline at the base, scaled outline at the face — so growing is
+            // the same solid UNIONED on instead of intersected, which flares
+            // the side walls outward from the base and keeps the body's other
+            // features. Union works for the partial-length case too: the
+            // frustum only spans the last L, so only that band flares.
+            const bool grow = (su > 1.0 || sv > 1.0);
+            if (grow) {
+                BRepAlgoAPI_Fuse fuse(m_previousShape, loft.Shape());
+                fuse.SetFuzzyValue(1.0e-4);
+                fuse.Build();
+                if (!fuse.IsDone()) return false;
+                result = fuse.Shape();
+            } else if (fullDepth) {
                 // The frustum spans the entire body: one Common does it.
                 BRepAlgoAPI_Common common(m_previousShape, loft.Shape());
                 common.SetFuzzyValue(1.0e-4);
@@ -230,6 +270,17 @@ bool ScaleFaceOp::execute(Document& doc) {
         }
 
         if (result.IsNull()) return false;
+
+        // The booleans (the grow-Fuse especially) leave same-surface faces
+        // split — the grown cap arrived as the ORIGINAL top disc plus a
+        // coplanar annulus stacked at the same height. Merge them, the same
+        // way Push/Pull does after its cut/fuse.
+        try {
+            ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
+            unifier.Build();
+            TopoDS_Shape unified = unifier.Shape();
+            if (!unified.IsNull()) result = unified;
+        } catch (...) {}
 
         // Sanity: the result must still have volume, and pinch must not
         // have annihilated the body.
@@ -273,9 +324,9 @@ std::string ScaleFaceOp::description() const {
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("Scale Face");
     ImGui::Separator();
-    ImGui::InputDouble("Scale U (%)", &m_scaleU, 1.0, 10.0, "%.1f");
-    ImGui::InputDouble("Scale V (%)", &m_scaleV, 1.0, 10.0, "%.1f");
-    ImGui::InputDouble("Length (mm)", &m_length, 0.5, 5.0, "%.2f");
+    materializr::inputNumber("Scale U (%)", &m_scaleU, 1.0, 10.0, "%.1f");
+    materializr::inputNumber("Scale V (%)", &m_scaleV, 1.0, 10.0, "%.1f");
+    materializr::inputNumber("Length (mm)", &m_length, 0.5, 5.0, "%.2f");
     ImGui::Text("Mode: %s", m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text("Body ID: %d", m_bodyId);
 }

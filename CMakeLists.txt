@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 1.4.3 LANGUAGES CXX)
+project(Materializr VERSION 1.6.0 LANGUAGES CXX)
 
 # Pre-release suffix appended to the reported version (e.g. "-beta.1"). Empty on
 # stable releases. Kept here next to project() so a beta build self-identifies
@@ -66,11 +66,34 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
-# ImGui (docking branch)
+# ImGui (docking), pinned to a RELEASE TAG.
+#
+# GIT_TAG was `docking` — a BRANCH HEAD, so every configure resolved to whatever
+# that branch pointed at that day. ImGui is the entire UI and input layer,
+# compiled straight into the shipped binary, so an upstream force-push or a
+# merged malicious PR would land in the next release with no review step; and
+# two builds of the same Materializr tag could ship different ImGui, which makes
+# a release impossible to reproduce.
+#
+# It must be a TAG, not a branch commit. `docking` is rebased onto master
+# regularly, and every rebase orphans the commits that were on it: the SHA this
+# was first pinned to (81cfcb8c1) was unreachable in a fresh clone within hours
+# —
+#     $ git clone https://github.com/ocornut/imgui.git
+#     $ git cat-file -t 81cfcb8c1fed1e4dac8bcdc059ce811c17b6194c
+#     fatal: git cat-file: could not get object info
+#
+# — which made the whole project unbuildable from scratch. (GitHub's API still
+# serves orphaned commits, so a SHA that looks alive there can already be dead
+# to `git clone`. Check with a clone, not the API.) The same rebase is why the
+# ImGui our own build machine had cached, d460434, no longer exists either.
+#
+# Tags are immutable, so this is stable ground. Bump it deliberately; keep it in
+# step with android/app/jni/src/CMakeLists.txt.
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        docking
+    GIT_TAG        v1.92.8-docking # b61e56346a92cfcaf1f43a545ca37b0b32239654
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -175,6 +198,11 @@ add_executable(materializr
     src/app/ui_layout_bridge.cpp
     src/app/InteractiveOpController.cpp
     src/app/FaceOpControllers.cpp
+    src/app/ExtrudeController.cpp
+    src/app/PushPullController.cpp
+    src/app/LiveOpPreview.cpp
+    src/app/HistoryEditPreview.cpp
+    src/app/EdgeOpController.cpp
     src/app/Application_Dialogs.cpp
     src/app/Application_InteractiveOps.cpp
     src/app/layout/LayoutCommon.cpp
@@ -184,6 +212,8 @@ add_executable(materializr
     src/app/Application_Viewport.cpp
     src/app/Window.cpp
     src/plugin/PluginContext.cpp
+    src/plugin/InteractiveOp.cpp
+    src/app/CylindricalPick.cpp
     src/plugin/PluginRegistry.cpp
     src/plugins/ForceLink.cpp
     src/plugins/CoreCommandsPlugin.cpp
@@ -222,9 +252,11 @@ add_executable(materializr
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp
+    src/core/MeshGuard.cpp
     src/core/VariableManager.cpp
     src/core/Material.cpp
     src/core/Verbose.cpp
+    src/core/ThrowTrace.cpp
     src/core/VersionManager.cpp
     src/modeling/ExtrudeOp.cpp
     src/modeling/PushPullOp.cpp
@@ -247,6 +279,7 @@ add_executable(materializr
     src/modeling/ResizeCylindricalOp.cpp
     src/modeling/BooleanOp.cpp
     src/modeling/TransformOp.cpp
+    src/modeling/BatchTransformOp.cpp
     src/modeling/ShellOp.cpp
     src/modeling/TaperOp.cpp
     src/modeling/ScaleFaceOp.cpp
@@ -307,15 +340,17 @@ add_executable(materializr
     src/ui/DrawingView.cpp
     src/ui/VersionPanel.cpp
     src/ui/SectionPanel.cpp
-    src/ui/SettingsPanel.cpp
     src/ui/ToastNotification.cpp
     src/ui/ShortcutsPanel.cpp
     src/ui/AboutDialog.cpp
     src/ui/WelcomeScreen.cpp
+    src/ui/LandingPage.cpp
+    src/app/ProjectSession.cpp
     src/ui/UpdateChecker.cpp
     src/ui/HelpPanel.cpp
     src/io/ProjectIO.cpp
     src/io/ImageDecode.cpp
+    src/io/ImageEncode.cpp
     src/io/SketchRecovery.cpp
     src/io/ProjectRecovery.cpp
     src/io/Settings.cpp
@@ -330,7 +365,6 @@ add_executable(materializr
     src/io/DxfExport.cpp
     src/io/DxfImport.cpp
     src/io/ThreeMfExport.cpp
-    src/io/ImageExport.cpp
     src/io/GltfExport.cpp
     src/io/FileDialogs.cpp
 )
@@ -410,12 +444,36 @@ if(WIN32)
     target_link_libraries(materializr PRIVATE GLEW::GLEW)
 endif()
 
+# -Wswitch ONLY (not -Wall): a switch over an enum class that misses an
+# enumerator is a build warning. The interactive-op dispatch (see
+# plugin/InteractiveOp.h) relies on exactly this — it deliberately has no
+# `default:`, so adding an op and forgetting to handle it is caught here
+# instead of shipping a button that silently does nothing. Nothing else is
+# turned on: -Wall over 28k lines of existing code would bury the one warning
+# that's meant to be load-bearing. MSVC's nearest equivalent (C4062) is left
+# off; the Linux/macOS CI legs cover the check for everyone.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(materializr PRIVATE -Wswitch)
+endif()
+
 if(MSVC)
     # _USE_MATH_DEFINES: M_PI etc.  NOMINMAX: keep std::min/max usable.
     # /bigobj: OpenCASCADE-heavy translation units exceed the default obj limit.
     target_compile_definitions(materializr PRIVATE
         _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN)
     target_compile_options(materializr PRIVATE /bigobj)
+    # /EHa (asynchronous exceptions): the OCC_CONVERT_SIGNALS comment below
+    # assumed this was already on ("throws from the signal handler natively")
+    # but nothing ever actually passed it, so MSVC's default /EHsc only catches
+    # synchronous C++ throws — a hardware fault deep in OCCT (e.g. reading a
+    # truncated BREP file) surfaces as a raw SEH exception that skips every
+    # OCC_CATCH_SIGNALS/try-catch in this codebase entirely (only gtest's own
+    # SEH-aware runner caught it, reporting a failed test instead of OCCT's
+    # handler converting it to a catchable Standard_Failure). Global, via
+    # add_compile_options (not target_compile_options), so it also reaches
+    # every test executable in tests/ added below — those hit the same OCCT
+    # code paths and need the same fault-to-exception conversion.
+    add_compile_options(/EHa)
 endif()
 
 if(APPLE)

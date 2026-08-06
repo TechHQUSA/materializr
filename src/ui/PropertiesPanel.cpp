@@ -37,6 +37,7 @@
 #include <GeomAbs_CurveType.hxx>
 #include <TopoDS.hxx>
 #include <TopAbs_ShapeEnum.hxx>
+#include "NumField.h"
 
 // Measurement-style readouts for selected FACES / EDGES / VERTICES — area,
 // length, surface/curve kind and dimensions, with totals across a
@@ -592,7 +593,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         ImGui::Text("Circle");
         double dia = c->radius * 2.0;
         ImGui::SetNextItemWidth(140);
-        if (ImGui::InputDouble("Diameter (mm)", &dia, 0.0, 0.0, "%.3f",
+        if (materializr::inputNumber("Diameter (mm)", &dia, 0.0, 0.0, "%.3f",
                                ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(dia, 1e-6) * 0.5;
             apply([sk, circleId, r]() { sk->setCircleRadius(circleId, r); });
@@ -606,7 +607,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         // Radius: centre fixed, endpoints slide radially (sweep preserved).
         double rad = a->radius;
         ImGui::SetNextItemWidth(140);
-        if (ImGui::InputDouble("Radius (mm)", &rad, 0.0, 0.0, "%.3f",
+        if (materializr::inputNumber("Radius (mm)", &rad, 0.0, 0.0, "%.3f",
                                ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(rad, 1e-6);
             apply([sk, arcId, r]() { sk->resizeArc(arcId, r); });
@@ -621,7 +622,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             double chord = std::sqrt((e->pos.x - s->pos.x) * (e->pos.x - s->pos.x) +
                                      (e->pos.y - s->pos.y) * (e->pos.y - s->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (ImGui::InputDouble("Chord (mm)", &chord, 0.0, 0.0, "%.3f",
+            if (materializr::inputNumber("Chord (mm)", &chord, 0.0, 0.0, "%.3f",
                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double ch = std::max(chord, 1e-6);
                 apply([sk, arcId, ch]() { sk->setArcChord(arcId, ch); });
@@ -634,7 +635,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             while (sweep > 2.0 * M_PI) sweep -= 2.0 * M_PI;
             double deg = sweep * 180.0 / M_PI;
             ImGui::SetNextItemWidth(140);
-            if (ImGui::InputDouble("Sweep (\xC2\xB0)", &deg, 0.0, 0.0, "%.2f",
+            if (materializr::inputNumber("Sweep (\xC2\xB0)", &deg, 0.0, 0.0, "%.2f",
                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double rad2 = deg * M_PI / 180.0;
                 apply([sk, arcId, rad2]() { sk->setArcSweep(arcId, rad2); });
@@ -655,10 +656,10 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             ImGui::Text("Rectangle");
             double w = rect.width, h = rect.height;
             ImGui::SetNextItemWidth(140);
-            bool w_ed = ImGui::InputDouble("Width (mm)", &w, 0.0, 0.0, "%.3f",
+            bool w_ed = materializr::inputNumber("Width (mm)", &w, 0.0, 0.0, "%.3f",
                                            ImGuiInputTextFlags_EnterReturnsTrue);
             ImGui::SetNextItemWidth(140);
-            bool h_ed = ImGui::InputDouble("Height (mm)", &h, 0.0, 0.0, "%.3f",
+            bool h_ed = materializr::inputNumber("Height (mm)", &h, 0.0, 0.0, "%.3f",
                                            ImGuiInputTextFlags_EnterReturnsTrue);
             if (w_ed || h_ed) {
                 double nw = std::max(w, 1e-6), nh = std::max(h, 1e-6);
@@ -674,7 +675,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
                 len = std::sqrt((p2->pos.x - p1->pos.x) * (p2->pos.x - p1->pos.x) +
                                 (p2->pos.y - p1->pos.y) * (p2->pos.y - p1->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (ImGui::InputDouble("Length (mm)", &len, 0.0, 0.0, "%.3f",
+            if (materializr::inputNumber("Length (mm)", &len, 0.0, 0.0, "%.3f",
                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double nl = std::max(len, 1e-6);
                 apply([sk, lid, nl]() { sk->setLineLength(lid, nl); });
@@ -708,18 +709,20 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         for (const auto& c : sk->getConstraints()) {
             const char* tn = "?";
             switch (c.type) {
-                case ConstraintType::Coincident:    tn = "Coincident";    break;
-                case ConstraintType::Horizontal:    tn = "Horizontal";    break;
-                case ConstraintType::Vertical:      tn = "Vertical";      break;
-                case ConstraintType::Distance:      tn = "Distance";      break;
-                case ConstraintType::Radius:        tn = "Radius";        break;
-                case ConstraintType::Parallel:      tn = "Parallel";      break;
-                case ConstraintType::Perpendicular: tn = "Perpendicular"; break;
-                case ConstraintType::Fixed:         tn = "Fixed";         break;
-                case ConstraintType::Tangent:       tn = "Tangent";       break;
-                case ConstraintType::Equal:         tn = "Equal";         break;
-                case ConstraintType::Concentric:    tn = "Concentric";    break;
-                case ConstraintType::Angle:         tn = "Angle";         break;
+                case ConstraintType::Coincident:        tn = "Coincident";       break;
+                case ConstraintType::Horizontal:        tn = "Horizontal";       break;
+                case ConstraintType::Vertical:          tn = "Vertical";         break;
+                case ConstraintType::Distance:          tn = "Distance";         break;
+                case ConstraintType::Radius:            tn = "Radius";           break;
+                case ConstraintType::Parallel:          tn = "Parallel";         break;
+                case ConstraintType::Perpendicular:     tn = "Perpendicular";    break;
+                case ConstraintType::Fixed:             tn = "Fixed";            break;
+                case ConstraintType::Tangent:           tn = "Tangent";          break;
+                case ConstraintType::Equal:             tn = "Equal";            break;
+                case ConstraintType::Concentric:        tn = "Concentric";       break;
+                case ConstraintType::Angle:             tn = "Angle";            break;
+                case ConstraintType::DistancePointLine: tn = "Dist\xE2\x8A\xA5"; break;
+                case ConstraintType::CircleGap:         tn = "Gap";              break;
             }
             std::fprintf(stderr, " %s=%.2f", tn, c.value);
         }
@@ -758,6 +761,8 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             case ConstraintType::Tangent:       return "Tangent";
             case ConstraintType::Equal:         return "Equal length";
             case ConstraintType::Concentric:    return "Concentric";
+            case ConstraintType::DistancePointLine: return "Dist\xE2\x8A\xA5";
+            case ConstraintType::CircleGap:     return "Gap";
             default:                            return "Constraint";
         }
     };
@@ -794,12 +799,15 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         Constraint& c = cs[i];
         ImGui::PushID(static_cast<int>(c.id));
 
-        // Render dimensional ones (Distance, Radius/Diameter, Angle) inline.
-        // Non-dimensional ones get a single muted bullet — there's nothing to
-        // tune, but listing them confirms what's actually applied.
+        // Render dimensional ones (Distance, Radius/Diameter, Angle,
+        // point-to-line Distance) inline. Non-dimensional ones get a single
+        // muted bullet — there's nothing to tune, but listing them confirms
+        // what's actually applied.
         bool isDim = (c.type == ConstraintType::Distance ||
                       c.type == ConstraintType::Radius   ||
-                      c.type == ConstraintType::Angle);
+                      c.type == ConstraintType::Angle    ||
+                      c.type == ConstraintType::DistancePointLine ||
+                      c.type == ConstraintType::CircleGap);
         if (isDim) {
             ++anyDim;
             auto& edit = m_constraintEdits[c.id];
@@ -818,6 +826,8 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             const char* label =
                 c.type == ConstraintType::Distance ? "Distance"
               : c.type == ConstraintType::Radius   ? "\xC3\x98 (diameter)"
+              : c.type == ConstraintType::DistancePointLine ? "Dist \xE2\x8A\xA5"
+              : c.type == ConstraintType::CircleGap ? "Gap"
                                                    : "Angle";
             if (!edit.focused) {
                 std::snprintf(edit.buf, sizeof(edit.buf), "%.3f", shown);
@@ -826,12 +836,21 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             ImGui::TextUnformatted(label);
             ImGui::SameLine(120);
             ImGui::SetNextItemWidth(110);
-            ImGui::InputText("##val", edit.buf, sizeof(edit.buf),
-                             ImGuiInputTextFlags_CharsDecimal |
-                             ImGuiInputTextFlags_AutoSelectAll |
-                             ImGuiInputTextFlags_EnterReturnsTrue);
-            bool justActivated   = ImGui::IsItemActivated();
-            bool justDeactivated = ImGui::IsItemDeactivatedAfterEdit();
+            // A NUMBER wearing a text coat: this was an InputText carrying
+            // CharsDecimal, which is why the number-pad sweep (which looked for
+            // InputDouble) missed it and left the sketch's most-edited field
+            // raising the OS keyboard on a tablet. inputNumber gives it the pad
+            // in touch mode and the identical InputDouble otherwise.
+            double padVal = shown;
+            (void)materializr::parseFinite(edit.buf, padVal);
+            bool justActivated   = false;
+            bool justDeactivated =
+                materializr::inputNumber("##val", &padVal, 0.0, 0.0, "%.3f",
+                                         ImGuiInputTextFlags_EnterReturnsTrue,
+                                         &justActivated);
+            // Keep the buffer authoritative — the commit path below parses it.
+            if (justDeactivated)
+                std::snprintf(edit.buf, sizeof(edit.buf), "%.6g", padVal);
             ImGui::SameLine(); ImGui::Text("%s", unit);
 
             // Snapshot the pre-edit sketch the moment the user starts typing
