@@ -64,6 +64,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/TaperOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ScaleFaceOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DefeatureOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/MergeFacesOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ResizeCylindricalOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/CombineSketchesOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/PrimitiveOp.cpp

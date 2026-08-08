@@ -397,6 +397,11 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         if (m_selection->selectedBodyCount() == 1)
             add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
                 "Flatten the body into a 2D cut pattern (SVG / tiled PDF).");
+        add(MZ_ICON_REPAIR, "Merge Faces", ToolAction::MergeFaces, false,
+            "Merge coplanar faces back into single faces. Imported STEP parts "
+            "often arrive with flat surfaces split into pieces \xE2\x80\x94 the seam "
+            "lines you see on an otherwise flat face \xE2\x80\x94 which also confuses "
+            "Unfold and sketch-on-face. Does nothing if there is nothing to merge.");
         add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
             "Measure distance, length, or angle between picked features.");
         // Same gating as the classic body section: MultipleBodies plugins

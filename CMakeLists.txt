@@ -284,6 +284,7 @@ add_executable(materializr
     src/modeling/TaperOp.cpp
     src/modeling/ScaleFaceOp.cpp
     src/modeling/DefeatureOp.cpp
+    src/modeling/MergeFacesOp.cpp
     src/modeling/ProjectSketchOp.cpp
     src/modeling/SplitBodyOp.cpp
     src/modeling/SeparateBodyOp.cpp

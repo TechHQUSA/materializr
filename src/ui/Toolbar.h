@@ -26,7 +26,7 @@ enum class ToolAction {
     // ExtrudePlugin's toolbar button; the inline interactive extrude is reached
     // from sketch-extrude and the viewport context menu, not via a ToolAction.)
     Fillet, Chamfer, EditFilletChamfer, EditDiameter, Shell, Thread, Taper, ScaleFace,
-    ProjectSketch, RemoveFace,
+    ProjectSketch, RemoveFace, MergeFaces,
     // Gizmo modes + Mirror
     Move, Rotate, Scale, Mirror, Revolve,
     // Sketch constraints (operate on the current SketchTool element selection).

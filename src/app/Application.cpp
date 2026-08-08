@@ -79,6 +79,8 @@ inline void resetFpuForOcct() {
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
+#include "modeling/MergeFacesOp.h"
+#include "core/MeshGuard.h"
 #include "modeling/ReplayOp.h"
 #include "modeling/OperationFactory.h"
 #include "modeling/PushPullOp.h"
@@ -2565,6 +2567,29 @@ void Application::handleToolAction(int action) {
 
         case ToolAction::RemoveFace: {
             beginIop(m_defeatureCtl);
+            break;
+        }
+
+        case ToolAction::MergeFaces: {
+            // Whole-body coplanar merge — the repair half of #81, for geometry
+            // that was ALREADY split when it arrived (imported STEP) or was
+            // edited before the ops started preventing new seams. One step per
+            // selected body; the op refuses when there is nothing to merge, so
+            // pushOperation adds nothing and we say so rather than leaving an
+            // empty entry in the history.
+            const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
+            if (bodies.empty()) break;
+            if (refuseMeshSelection("Merge Faces")) break;
+            int merged = 0;
+            for (int id : bodies) {
+                auto op = std::make_unique<MergeFacesOp>();
+                op->setBody(id);
+                if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+            }
+            if (merged == 0)
+                showToast("Nothing to merge \xE2\x80\x94 these faces are already "
+                          "as merged as the kernel can make them.");
+            m_meshesDirty = true;
             break;
         }
 
