@@ -1126,36 +1126,16 @@ void SketchRenderer::drawConstraints(const Sketch* sketch, const SketchSolver* s
         }
     }
 
-    // Draw overall sketch state indicator as a colored point at the origin
-    SketchState state = solver->getState();
-    glm::vec3 stateColor;
-    switch (state) {
-        case SketchState::FullyConstrained:
-            stateColor = glm::vec3(0.0f, 0.85f, 0.3f);  // green
-            break;
-        case SketchState::UnderConstrained:
-            stateColor = glm::vec3(0.10f, 0.35f, 0.95f); // deep cobalt — matches sketch line colour
-            break;
-        case SketchState::OverConstrained:
-            stateColor = glm::vec3(0.95f, 0.15f, 0.15f); // red
-            break;
-    }
-
-    // Draw a state indicator dot at the top-left of the sketch area
-    std::vector<float> stateVerts;
-    float indicatorSize = markerSize * 0.8f;
-    // Small filled-looking square via lines at a fixed position
-    float ix = -5.0f, iy = 5.0f;
-    push2d(stateVerts, ix - indicatorSize, iy - indicatorSize);
-    push2d(stateVerts, ix + indicatorSize, iy - indicatorSize);
-    push2d(stateVerts, ix + indicatorSize, iy - indicatorSize);
-    push2d(stateVerts, ix + indicatorSize, iy + indicatorSize);
-    push2d(stateVerts, ix + indicatorSize, iy + indicatorSize);
-    push2d(stateVerts, ix - indicatorSize, iy + indicatorSize);
-    push2d(stateVerts, ix - indicatorSize, iy + indicatorSize);
-    push2d(stateVerts, ix - indicatorSize, iy - indicatorSize);
-
-    uploadAndDraw(stateVerts, GL_LINES, stateColor, vp, 3.0f);
+    // (Removed: a solver-state indicator used to be drawn here as a small
+    // square at the fixed sketch coordinate (-5, +5), coloured green / cobalt /
+    // red for Fully / Under / Over-constrained. Cobalt is also the sketch LINE
+    // colour, so on an under-constrained sketch — i.e. most of the time while
+    // drawing — it read as a stray blue dot sitting in the model near the
+    // origin, with nothing to explain it. Steve hit it as "a random little blue
+    // dot" and it had been mis-filed in my notes as orphan vertices for two
+    // months. The same three states are already reported in words by the sketch
+    // toolbar's status badge (Toolbar::setSketchSolverState), so this was a
+    // second, less legible channel for information the user already had.)
 }
 
 void SketchRenderer::renderRegionBoundary(const Sketch* sketch, int regionIndex,
