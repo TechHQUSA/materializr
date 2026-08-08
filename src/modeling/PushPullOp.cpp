@@ -26,6 +26,21 @@
 #include <Geom_ToroidalSurface.hxx>
 #include <Geom_SurfaceOfRevolution.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+
+// Angular tolerance for the coplanar-face merge below.
+//
+// OCCT's default is Precision::Angular() = 1e-12, which is tighter than the
+// numerical reality of its own boolean output: the coplanar faces a cut leaves
+// behind have normals agreeing to ~1e-9, not 1e-12, so UnifySameDomain silently
+// declines to merge them and the split shows to the user as a seam line across
+// an otherwise flat face (issue #81 — Steve's imported-and-edited nacelle).
+//
+// Measured on that part: 189 faces / 10 coplanar-adjacent pairs, unchanged by
+// unify at the default. At 1e-9 the merge takes it to 183 faces / 0 pairs — it
+// removes every seam while merging only the six faces that were genuinely one.
+// Looser values keep working but merge more aggressively (1e-3 -> 160 faces),
+// so this stays as tight as it can be while still clearing the seams.
+constexpr double kUnifyAngularTol = 1.0e-9;
 #include <BRepTools_History.hxx>
 #include <TopoDS.hxx>
 #include <TopExp.hxx>
@@ -361,6 +376,7 @@ bool PushPullOp::execute(Document& doc) {
                 Handle(BRepTools_History) unifyHist;
                 try {
                     ShapeUpgrade_UnifySameDomain u(result, true, true, true);
+                    u.SetAngularTolerance(kUnifyAngularTol);
                     u.Build();
                     if (!u.Shape().IsNull()) { result = u.Shape(); unifyHist = u.History(); }
                 } catch (...) {}
@@ -540,6 +556,7 @@ bool PushPullOp::execute(Document& doc) {
                 Handle(BRepTools_History) unifyHist;
                 try {
                     ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
+                    unifier.SetAngularTolerance(kUnifyAngularTol);
                     unifier.Build();
                     TopoDS_Shape unified = unifier.Shape();
                     if (!unified.IsNull()) { result = unified; unifyHist = unifier.History(); }
