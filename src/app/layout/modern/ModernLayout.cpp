@@ -473,26 +473,34 @@ void Application::renderModernLayout() {
                 const auto rail = m_toolbar->railTools();
                 // Fewer rail buttons = less scrolling (the point of this on a
                 // 1080 desktop / a tablet). Two collapses, MODERN ONLY (classic
-                // and im-touch keep their own layouts):
-                //   Transform = Copy + Mirror (+ Duplicate)   -> copy icon
-                //   Pattern   = Linear + Circular             -> circular icon
+                // keeps its palette; im-touch mirrors these two):
+                //   Transform = Move + Rotate + Scale                 -> move icon
+                //   Multiply  = Duplicate + Mirror + patterns + splits -> copy icon
                 // And two entries move OUT of the rail entirely: Measure (now
                 // the View menu) and the inference level (now the top bar).
+                //
+                // "Transform" used to label the Copy/Mirror/Duplicate group,
+                // which is why Move/Rotate/Scale — the actual transforms — had
+                // to sit loose. The name belongs here (classic's palette has
+                // always headed that trio "Transform"); everything that changes
+                // how MANY bodies you end up with is Multiply.
                 auto groupOf = [](const Toolbar::RailTool& t) -> int {
                     if (t.pluginIndex >= 0) {
-                        if (t.label && std::strcmp(t.label, "Linear") == 0)   return 2;
-                        if (t.label && std::strcmp(t.label, "Circular") == 0) return 2;
+                        if (t.label && std::strcmp(t.label, "Linear") == 0)    return 1;
+                        if (t.label && std::strcmp(t.label, "Circular") == 0)  return 1;
                         if (t.label && std::strcmp(t.label, "Duplicate") == 0) return 1;
-                        // Split X/Y/Z -> one "Split" flyout.
-                        if (t.label && std::strncmp(t.label, "Split", 5) == 0) return 3;
                         return 0;
                     }
                     switch (t.action) {
                         case ToolAction::SketchCopy:
                         case ToolAction::SketchMirror:
-                        case ToolAction::Mirror:               return 1;
+                        case ToolAction::Mirror:
+                        case ToolAction::Split:
                         case ToolAction::SketchLinearPattern:
-                        case ToolAction::SketchRadialPattern:  return 2;
+                        case ToolAction::SketchRadialPattern:  return 1;
+                        case ToolAction::Move:
+                        case ToolAction::Rotate:
+                        case ToolAction::Scale:                return 2;
                         default: return 0;
                     }
                 };
@@ -511,7 +519,7 @@ void Application::renderModernLayout() {
                     else handleToolAction(static_cast<int>(t.action));
                 };
 
-                bool done[4] = { false, false, false, false };
+                bool done[3] = { false, false, false };
                 int railIdx = 0;
                 for (const auto& tool : rail) {
                     if (skip(tool)) continue;
@@ -521,21 +529,15 @@ void Application::renderModernLayout() {
                     if (g != 0 && count(g) >= 2) {
                         if (done[g]) continue;
                         done[g] = true;
-                        const char* gIcon  = g == 1 ? MZ_ICON_COPY
-                                           : g == 2 ? MZ_ICON_PATTERN_CIRCULAR
-                                                    : MZ_ICON_SPLIT;
-                        const char* gLabel = g == 1 ? "Transform"
-                                           : g == 2 ? "Pattern"
-                                                    : "Split";
-                        const char* gPopup = g == 1 ? "##railTransform"
-                                           : g == 2 ? "##railPattern"
-                                                    : "##railSplit";
+                        const char* gIcon  = g == 1 ? MZ_ICON_COPY  : MZ_ICON_MOVE;
+                        const char* gLabel = g == 1 ? "Multiply"    : "Transform";
+                        const char* gPopup = g == 1 ? "##railMultiply"
+                                                    : "##railTransform";
                         ImGui::PushID(2000 + g);
                         if (touchui::railButton(gLabel, gIcon, gLabel, false, cell()))
                             ImGui::OpenPopup(gPopup);
-                        tip(g == 1 ? "Copy or mirror the selection"
-                            : g == 2 ? "Linear or circular pattern of the selection"
-                                     : "Split the selected body along an axis");
+                        tip(g == 1 ? "Copy, mirror, pattern or split the selection"
+                                   : "Move, rotate or scale the selection");
                         pushPopupPad();
                         if (ImGui::BeginPopup(gPopup)) {
                             for (const auto& m : rail) {

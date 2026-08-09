@@ -774,30 +774,37 @@ void Application::renderImTouchLayout() {
             };
 
             if (!m_inSketchMode) {
-                // Body/feature context: most tools stay flat, but the three
-                // Split axes fold into one "Split" flyout and Linear+Circular
-                // into a "Pattern" flyout (matching modern's rail). Everything
-                // else — including unrecognised future plugins — renders in
-                // catalogue order so nothing silently vanishes.
-                std::vector<const Toolbar::RailTool*> split, pattern;
+                // Body/feature context: most tools stay flat, but two flyouts
+                // (matching modern's rail):
+                //   Transform = Move + Rotate + Scale
+                //   Multiply  = Duplicate + Mirror + patterns + splits
+                // Everything else — including unrecognised future plugins —
+                // renders in catalogue order so nothing silently vanishes.
+                std::vector<const Toolbar::RailTool*> multiply, transform;
                 int railIdx = 0;
                 for (const auto& t : tools) {
                     if (t.pluginIndex >= 0 && t.label) {
-                        if (std::strncmp(t.label, "Split", 5) == 0) {
-                            split.push_back(&t); continue;
-                        }
                         if (std::strcmp(t.label, "Linear") == 0 ||
-                            std::strcmp(t.label, "Circular") == 0) {
-                            pattern.push_back(&t); continue;
+                            std::strcmp(t.label, "Circular") == 0 ||
+                            std::strcmp(t.label, "Duplicate") == 0) {
+                            multiply.push_back(&t); continue;
                         }
+                    } else if (t.action == ToolAction::Mirror ||
+                               t.action == ToolAction::Split) {
+                        multiply.push_back(&t); continue;
+                    } else if (t.action == ToolAction::Move ||
+                               t.action == ToolAction::Rotate ||
+                               t.action == ToolAction::Scale) {
+                        transform.push_back(&t); continue;
                     }
                     flatButton(t, railIdx++);
                 }
-                group("splitGroup", "##bodySplit", MZ_ICON_SPLIT, "Split",
-                      "Split the selected body along an axis", split);
-                group("patternGroup", "##bodyPattern",
-                      MZ_ICON_PATTERN_CIRCULAR, "Pattern",
-                      "Linear or circular pattern of the selection", pattern);
+                group("transformGroup", "##bodyTransform", MZ_ICON_MOVE,
+                      "Transform", "Move, rotate or scale the selection",
+                      transform);
+                group("multiplyGroup", "##bodyMultiply", MZ_ICON_COPY,
+                      "Multiply", "Copy, mirror, pattern or split the selection",
+                      multiply);
             } else {
                 // Sketch mode: the flat catalogue is ~19 buttons — a screen
                 // and a half of scrolling. The DRAWING tools stay flat (they're

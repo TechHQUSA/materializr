@@ -28,6 +28,7 @@
 #include <GC_MakeArcOfCircle.hxx>
 #include <ShapeFix_Wireframe.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 #include <GProp_GProps.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <TopExp.hxx>
@@ -1155,6 +1156,7 @@ bool applyFill(const TopoDS_Shape& body, const std::vector<Tool>& tools,
         try {
             ShapeUpgrade_UnifySameDomain u(res, Standard_True, Standard_True,
                                            Standard_False);
+            u.SetAngularTolerance(materializr::kUnifyAngularTol);
             u.Build();
             consider(u.Shape());
         } catch (...) {}
@@ -1169,6 +1171,7 @@ bool applyFill(const TopoDS_Shape& body, const std::vector<Tool>& tools,
             if (!wf.Shape().IsNull()) {
                 ShapeUpgrade_UnifySameDomain u(wf.Shape(), Standard_True,
                                                Standard_True, Standard_False);
+                u.SetAngularTolerance(materializr::kUnifyAngularTol);
                 u.Build();
                 consider(u.Shape());
             }

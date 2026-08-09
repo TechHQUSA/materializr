@@ -24,6 +24,7 @@
 #include <GProp_GProps.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
@@ -526,6 +527,7 @@ bool MoveHoleOp::execute(Document& doc) {
             ShapeUpgrade_UnifySameDomain unify(result, Standard_True /*edges*/,
                                                Standard_True /*faces*/,
                                                Standard_False /*concat bsplines*/);
+            unify.SetAngularTolerance(materializr::kUnifyAngularTol);
             unify.Build();
             if (!unify.Shape().IsNull()) result = unify.Shape();
         } catch (...) { /* keep the un-unified result rather than fail the move */ }

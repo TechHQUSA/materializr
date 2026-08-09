@@ -28,6 +28,7 @@
 #include "app/ExtrudeController.h"
 #include "app/PushPullController.h"
 #include "app/EdgeOpController.h"
+#include "app/SplitController.h"
 #include "app/LiveOpPreview.h"
 #include "app/CylindricalPick.h"
 #include <array>
@@ -1378,14 +1379,15 @@ private:
     ResizeCylindricalController m_resizeCylCtl;
     ExtrudeController m_extrudeCtl;
     PushPullController m_ppCtl;
+    SplitController m_splitCtl;
     // m_moveFaceCtl is declared up with its delegates; it joined this array
     // once its lifecycle overrides landed, so every generic loop — Esc/Enter
     // chains, single-flight, suppression, input/overlay/gizmo dispatch —
     // covers Move Face without a special case.
-    std::array<InteractiveOpController*, 10> m_iops{
+    std::array<InteractiveOpController*, 11> m_iops{
         &m_shellCtl, &m_taperCtl, &m_scaleFaceCtl, &m_projectSketchCtl,
         &m_defeatureCtl, &m_resizeCylCtl, &m_moveFaceCtl, &m_extrudeCtl,
-        &m_ppCtl, &m_edgeCtl};
+        &m_ppCtl, &m_edgeCtl, &m_splitCtl};
     IopContext iopContext();
     bool anyIopActive() const {
         for (auto* c : m_iops) if (c->active()) return true;

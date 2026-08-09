@@ -64,6 +64,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/TaperOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ScaleFaceOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DefeatureOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/MergeFacesOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ResizeCylindricalOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/CombineSketchesOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/PrimitiveOp.cpp
@@ -262,6 +263,16 @@ add_test(NAME test_exchange_io COMMAND test_exchange_io)
 add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
+
+# Split Body: off-centre planes, undo, and param round-trip (Split dialog)
+add_executable(test_split_offset test_split_offset.cpp)
+target_link_libraries(test_split_offset PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_split_offset COMMAND test_split_offset)
+
+# Merge Faces: whole-body vs face-scoped repair of split coplanar faces (#81)
+add_executable(test_merge_faces test_merge_faces.cpp)
+target_link_libraries(test_merge_faces PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_merge_faces COMMAND test_merge_faces)
 
 # Extrude region identity: draw/extrude/draw-more replays correctly (#53)
 add_executable(test_extrude_regions test_extrude_regions.cpp)

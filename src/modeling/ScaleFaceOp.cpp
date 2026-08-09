@@ -19,6 +19,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <TopoDS.hxx>
@@ -277,6 +278,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         // way Push/Pull does after its cut/fuse.
         try {
             ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
+            unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
             unifier.Build();
             TopoDS_Shape unified = unifier.Shape();
             if (!unified.IsNull()) result = unified;

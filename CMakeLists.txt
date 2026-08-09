@@ -203,6 +203,7 @@ add_executable(materializr
     src/app/LiveOpPreview.cpp
     src/app/HistoryEditPreview.cpp
     src/app/EdgeOpController.cpp
+    src/app/SplitController.cpp
     src/app/Application_Dialogs.cpp
     src/app/Application_InteractiveOps.cpp
     src/app/layout/LayoutCommon.cpp
@@ -233,7 +234,6 @@ add_executable(materializr
     src/plugins/CopyPlugin.cpp
     src/plugins/PatternPlugin.cpp
     src/plugins/ShellPlugin.cpp
-    src/plugins/SplitBodyPlugin.cpp
     src/plugins/ConstructionPlanePlugin.cpp
     src/plugins/RefImagePlugin.cpp
     src/plugins/BoundaryFillPlugin.cpp
@@ -284,6 +284,7 @@ add_executable(materializr
     src/modeling/TaperOp.cpp
     src/modeling/ScaleFaceOp.cpp
     src/modeling/DefeatureOp.cpp
+    src/modeling/MergeFacesOp.cpp
     src/modeling/ProjectSketchOp.cpp
     src/modeling/SplitBodyOp.cpp
     src/modeling/SeparateBodyOp.cpp

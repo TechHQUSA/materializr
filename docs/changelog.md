@@ -18,9 +18,42 @@ All notable changes to Materializr are documented here. Format loosely follows
   Attachment now picks the ORDER of the two, not which one exists.
 - **Lathe on a selected sketch in the classic layout.** It had always been
   there in the modern and im-touch rails.
+- **Merge Faces**, for the seam lines that run across an otherwise flat face on
+  an imported STEP part — which also confuse Unfold and sketch-on-face, because
+  what looks like one panel is several faces. Two ways in, and they try
+  different amounts. Select a **body** and it merges only what is exactly
+  coplanar, which is safe to point at a whole part but leaves the near-miss
+  seams alone. Select **two or more faces** and it merges just those, and
+  because you have said which faces are one it can accept planes that are a
+  fraction of a degree apart. Either way the result is checked for validity and
+  for volume before it is kept, so a merge that would reshape the part is
+  refused rather than applied. New parts should not need it: the modelling ops
+  no longer leave these seams behind in the first place.
 
 ### Changed
 
+- **One face-scale tool, not two.** With a face selected, Scale and Scale Face
+  were the same operation — measurably so: a 20mm box top scaled to 50% came
+  back as the identical frustum either way, because Scale was Scale Face with
+  the blend length pinned to the full depth, which is already its default. Scale
+  is gone from the face tools; if you press it (or R) with a face selected you
+  get Scale Face. Shortening the blend length, so the taper stays near the face
+  instead of running from the base, is the thing that was only ever reachable
+  through one of the two buttons.
+- **Split is one tool with a ghost plane, not three blind buttons.** Split X,
+  Split Y and Split Z each cut through the body's bounding-box centre and gave
+  no way to see where the cut would land or to move it. There is now a single
+  **Split**: pick the axis, slide the cut off centre, and a translucent plane in
+  the viewport shows exactly where it goes before you commit. The offset is
+  clamped inside the body, since a plane that misses produces a history step
+  that did nothing. The underlying op always accepted an arbitrary plane — only
+  the buttons ever assumed the middle.
+- **Two rail groups: Transform and Multiply.** Move, Rotate and Scale are now
+  one **Transform** flyout, and Duplicate, Mirror, the patterns and the splits
+  are one **Multiply** flyout — everything that changes how many bodies you end
+  up with. "Transform" previously labelled the copy-and-mirror group, which is
+  why the actual transforms had nowhere to live. Modern and im-touch rails only;
+  the classic palette already headed that trio "Transform" and is unchanged.
 - **Taper is now called Draft.** It reads as a weaker Rotate under the old
   name, and for one flat face that is nearly true. It is the moulding-draft
   operation: several faces at one angle about a fixed neutral plane, and it

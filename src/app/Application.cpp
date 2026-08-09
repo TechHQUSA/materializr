@@ -79,6 +79,8 @@ inline void resetFpuForOcct() {
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
+#include "modeling/MergeFacesOp.h"
+#include "core/MeshGuard.h"
 #include "modeling/ReplayOp.h"
 #include "modeling/OperationFactory.h"
 #include "modeling/PushPullOp.h"
@@ -2484,16 +2486,24 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
-            // A selected face scales the FACE (MoveFaceOp with a scale) — the
-            // third of the Move / Rotate / Scale trio that arrived with Move
-            // Face, and what this button has always done. Scale Face is a
-            // different op with its own button in Face Operations (Steve,
-            // 2026-08-04: "let's make it its own for clarity's sake").
+            // A selected face routes to Scale Face — the ONE face-scale tool.
+            // This used to run MoveFaceOp::Scale as a separate thing, on the
+            // theory that scaling the face and re-sloping the walls toward a
+            // scaled copy were different operations. Measured, they are not:
+            // a 20mm box top scaled to 50% gives the identical 4666.667
+            // frustum either way, because MoveFaceOp::Scale IS ScaleFaceOp
+            // with the blend length at the full depth — which is already what
+            // ScaleFaceController defaults to. The face rails no longer offer
+            // a Scale button at all; classic's shared Transform row still
+            // shows one, and this is what keeps it honest.
+            //
+            // MoveFaceOp::Kind::Scale stays in the op layer: saved projects
+            // recorded it and must replay and edit exactly as before.
             {
                 bool faceSel = false;
                 for (const auto& e : m_selection->getSelection())
                     if (e.type == SelectionType::Face && !e.shape.IsNull()) { faceSel = true; break; }
-                if (faceSel) { beginMoveFace(FaceXform::Scale); break; }
+                if (faceSel) { beginIop(m_scaleFaceCtl); break; }
             }
             // Scale-on-sketch is a no-op (the plane is 2D-infinite), so we
             // keep this body-only.
@@ -2502,6 +2512,11 @@ void Application::handleToolAction(int action) {
             m_selection->setNavigationOnly(false);
             break;
         }
+        case ToolAction::Split: {
+            beginIop(m_splitCtl);
+            break;
+        }
+
         case ToolAction::Mirror: {
             const auto& sel = m_selection->getSelection();
             if (!sel.empty() && sel[0].bodyId >= 0) {
@@ -2565,6 +2580,62 @@ void Application::handleToolAction(int action) {
 
         case ToolAction::RemoveFace: {
             beginIop(m_defeatureCtl);
+            break;
+        }
+
+        case ToolAction::MergeFaces: {
+            // The repair half of #81, for geometry that was ALREADY split when
+            // it arrived (imported STEP) or was edited before the ops started
+            // preventing new seams.
+            //
+            // Picked faces beat picked bodies. A face selection is the user
+            // saying "these two are one face", which bounds the merge to those
+            // faces and lets the op try a much looser tolerance than is ever
+            // safe body-wide — the seams left on a real imported part are
+            // near-coplanar, not exactly coplanar. With no faces picked it is
+            // the conservative whole-body pass.
+            if (refuseMeshSelection("Merge Faces")) break;
+            int merged = 0, attempted = 0;
+            if (m_selection->selectedFaceCount() >= 2) {
+                std::map<int, std::vector<TopoDS_Shape>> byBody;
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == SelectionType::Face && !e.shape.IsNull() &&
+                        e.bodyId >= 0)
+                        byBody[e.bodyId].push_back(e.shape);
+                for (auto& [id, faces] : byBody) {
+                    if (faces.size() < 2) continue;   // one face alone can't merge
+                    ++attempted;
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    op->setFaces(faces);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                if (merged == 0)
+                    showToast(attempted == 0
+                        ? "Pick two or more faces on the SAME body to merge them."
+                        : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                          "to one surface, or the merge wouldn't hold together.");
+            } else {
+                const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
+                if (bodies.empty()) break;
+                for (int id : bodies) {
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                // The whole-body pass only takes exactly-coplanar faces. Point
+                // the user at the face-picking route rather than implying the
+                // part is as merged as it can get.
+                if (merged == 0)
+                    showToast("Nothing exactly coplanar left to merge \xE2\x80\x94 pick "
+                              "the faces either side of a seam and try again.");
+            }
+            // The picked faces are gone — they were replaced by the face they
+            // merged into. Holding on to them would leave the highlight drawing
+            // shapes the body no longer has, and hand the next op dead
+            // references.
+            if (merged > 0) m_selection->clear();
+            m_meshesDirty = true;
             break;
         }
 

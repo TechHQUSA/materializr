@@ -24,6 +24,7 @@
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 #include <BRepCheck_Analyzer.hxx>
 #include <TopExp_Explorer.hxx>
 #include <gp_Vec.hxx>
@@ -134,6 +135,7 @@ std::vector<TopoDS_Face> footprintFacesOnPlane(const TopoDS_Shape& shape,
 TopoDS_Shape unifyProfile(const TopoDS_Shape& comp) {
     try {
         ShapeUpgrade_UnifySameDomain u(comp, true, true, true);
+        u.SetAngularTolerance(materializr::kUnifyAngularTol);
         u.Build();
         TopoDS_Shape s = u.Shape();
         if (!s.IsNull()) return s;
@@ -349,6 +351,7 @@ bool ExtrudeOp::execute(Document& doc) {
             extrudedShape = fuse.Shape();
             try {
                 ShapeUpgrade_UnifySameDomain unifier(extrudedShape, true, true, true);
+                unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
                 unifier.Build();
                 TopoDS_Shape unified = unifier.Shape();
                 if (!unified.IsNull()) extrudedShape = unified;
@@ -463,6 +466,7 @@ bool ExtrudeOp::execute(Document& doc) {
                 TopoDS_Shape fused = fuse.Shape();
                 try {
                     ShapeUpgrade_UnifySameDomain unifier(fused, true, true, true);
+                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
                     unifier.Build();
                     TopoDS_Shape unified = unifier.Shape();
                     if (!unified.IsNull()) fused = unified;
