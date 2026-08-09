@@ -29,6 +29,9 @@ enum class ToolAction {
     ProjectSketch, RemoveFace, MergeFaces,
     // Gizmo modes + Mirror
     Move, Rotate, Scale, Mirror, Revolve,
+    // Split a body with a plane you place (axis + offset, ghost-plane preview).
+    // Was three plugin buttons that each cut through the bbox centre.
+    Split,
     // Sketch constraints (operate on the current SketchTool element selection).
     // All opt-in — none of them runs unless the user clicks the button.
     SketchConstrainCoincident, SketchConstrainHorizontal, SketchConstrainVertical,

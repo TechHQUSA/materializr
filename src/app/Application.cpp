@@ -2512,6 +2512,11 @@ void Application::handleToolAction(int action) {
                 m_showMirrorPopup = true;
             }
             break;
+        case ToolAction::Split: {
+            beginIop(m_splitCtl);
+            break;
+        }
+
         }
 
         case ToolAction::Revolve:

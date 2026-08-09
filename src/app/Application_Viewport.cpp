@@ -1525,8 +1525,15 @@ void Application::renderViewport() {
                     ImVec2 mp = ImGui::GetMousePos();
                     ov.mouse = glm::vec2(mp.x, mp.y);
                 }
+                // Every ACTIVE controller gets the overlay, whether or not it
+                // takes pointer input. These used to be one gate, which was
+                // only ever true by coincidence — the four controllers that
+                // drew handles also dragged them. Split draws a ghost plane and
+                // has nothing to drag, and under the old gate it silently drew
+                // nothing. drawOverlay's default is a no-op, so a controller
+                // that doesn't draw still costs nothing here.
                 for (const auto* c : m_iops)
-                    if (c->active() && c->wantsViewportInput())
+                    if (c->active())
                         c->drawOverlay(ov);
             }
 

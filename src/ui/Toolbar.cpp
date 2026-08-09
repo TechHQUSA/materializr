@@ -402,6 +402,9 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "Mirror the body across a plane you'll place next.");
         add(MZ_ICON_LATHE,  "Revolve", ToolAction::Revolve, false,
             "Rotate the body around an axis (watch a fan spin or a hinge open).");
+        add(MZ_ICON_SPLIT, "Split", ToolAction::Split, false,
+            "Cut the body in two. Pick the axis and slide the cut off centre — "
+            "a ghost plane shows where it lands before you commit.");
         if (m_selection->selectedBodyCount() == 1)
             add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
                 "Flatten the body into a 2D cut pattern (SVG / tiled PDF).");

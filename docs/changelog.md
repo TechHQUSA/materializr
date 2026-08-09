@@ -32,6 +32,14 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Changed
 
+- **Split is one tool with a ghost plane, not three blind buttons.** Split X,
+  Split Y and Split Z each cut through the body's bounding-box centre and gave
+  no way to see where the cut would land or to move it. There is now a single
+  **Split**: pick the axis, slide the cut off centre, and a translucent plane in
+  the viewport shows exactly where it goes before you commit. The offset is
+  clamped inside the body, since a plane that misses produces a history step
+  that did nothing. The underlying op always accepted an arbitrary plane — only
+  the buttons ever assumed the middle.
 - **Taper is now called Draft.** It reads as a weaker Rotate under the old
   name, and for one flat face that is nearly true. It is the moulding-draft
   operation: several faces at one angle about a fixed neutral plane, and it
