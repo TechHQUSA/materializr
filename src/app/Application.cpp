@@ -2486,16 +2486,24 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
-            // A selected face scales the FACE (MoveFaceOp with a scale) — the
-            // third of the Move / Rotate / Scale trio that arrived with Move
-            // Face, and what this button has always done. Scale Face is a
-            // different op with its own button in Face Operations (Steve,
-            // 2026-08-04: "let's make it its own for clarity's sake").
+            // A selected face routes to Scale Face — the ONE face-scale tool.
+            // This used to run MoveFaceOp::Scale as a separate thing, on the
+            // theory that scaling the face and re-sloping the walls toward a
+            // scaled copy were different operations. Measured, they are not:
+            // a 20mm box top scaled to 50% gives the identical 4666.667
+            // frustum either way, because MoveFaceOp::Scale IS ScaleFaceOp
+            // with the blend length at the full depth — which is already what
+            // ScaleFaceController defaults to. The face rails no longer offer
+            // a Scale button at all; classic's shared Transform row still
+            // shows one, and this is what keeps it honest.
+            //
+            // MoveFaceOp::Kind::Scale stays in the op layer: saved projects
+            // recorded it and must replay and edit exactly as before.
             {
                 bool faceSel = false;
                 for (const auto& e : m_selection->getSelection())
                     if (e.type == SelectionType::Face && !e.shape.IsNull()) { faceSel = true; break; }
-                if (faceSel) { beginMoveFace(FaceXform::Scale); break; }
+                if (faceSel) { beginIop(m_scaleFaceCtl); break; }
             }
             // Scale-on-sketch is a no-op (the plane is 2D-infinite), so we
             // keep this body-only.
@@ -2504,6 +2512,11 @@ void Application::handleToolAction(int action) {
             m_selection->setNavigationOnly(false);
             break;
         }
+        case ToolAction::Split: {
+            beginIop(m_splitCtl);
+            break;
+        }
+
         case ToolAction::Mirror: {
             const auto& sel = m_selection->getSelection();
             if (!sel.empty() && sel[0].bodyId >= 0) {
@@ -2512,11 +2525,6 @@ void Application::handleToolAction(int action) {
                 m_showMirrorPopup = true;
             }
             break;
-        case ToolAction::Split: {
-            beginIop(m_splitCtl);
-            break;
-        }
-
         }
 
         case ToolAction::Revolve:

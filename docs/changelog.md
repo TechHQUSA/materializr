@@ -32,6 +32,14 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Changed
 
+- **One face-scale tool, not two.** With a face selected, Scale and Scale Face
+  were the same operation — measurably so: a 20mm box top scaled to 50% came
+  back as the identical frustum either way, because Scale was Scale Face with
+  the blend length pinned to the full depth, which is already its default. Scale
+  is gone from the face tools; if you press it (or R) with a face selected you
+  get Scale Face. Shortening the blend length, so the taper stays near the face
+  instead of running from the base, is the thing that was only ever reachable
+  through one of the two buttons.
 - **Split is one tool with a ghost plane, not three blind buttons.** Split X,
   Split Y and Split Z each cut through the body's bounding-box centre and gave
   no way to see where the cut would land or to move it. There is now a single
@@ -40,6 +48,12 @@ All notable changes to Materializr are documented here. Format loosely follows
   clamped inside the body, since a plane that misses produces a history step
   that did nothing. The underlying op always accepted an arbitrary plane — only
   the buttons ever assumed the middle.
+- **Two rail groups: Transform and Multiply.** Move, Rotate and Scale are now
+  one **Transform** flyout, and Duplicate, Mirror, the patterns and the splits
+  are one **Multiply** flyout — everything that changes how many bodies you end
+  up with. "Transform" previously labelled the copy-and-mirror group, which is
+  why the actual transforms had nowhere to live. Modern and im-touch rails only;
+  the classic palette already headed that trio "Transform" and is unchanged.
 - **Taper is now called Draft.** It reads as a weaker Rotate under the old
   name, and for one flat face that is nearly true. It is the moulding-draft
   operation: several faces at one angle about a fixed neutral plane, and it

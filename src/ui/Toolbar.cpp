@@ -305,14 +305,17 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Extrude the face into new material.");
             add(MZ_ICON_SHELL,    "Shell",   ToolAction::Shell, false,
                 "Hollow the body, leaving this face open.");
-            // Scale Face is its OWN entry, not the Transform Scale button —
-            // that one scales the face itself (MoveFaceOp), this re-slopes the
-            // side walls toward a scaled copy of it. Both are wanted; sharing
-            // one button meant only one of them was reachable, and for a while
-            // this one wasn't reachable at all.
+            // THE face-scale tool. There used to be a second one — the
+            // Transform "Scale" button, which ran MoveFaceOp::Scale — and the
+            // two were not merely similar: measured on a 20mm box scaled to
+            // 50%, both return the identical 4666.667 frustum, because Scale
+            // is exactly this op with the blend length pinned to the full
+            // depth (which is already the default here). One button now; see
+            // probe_scale_vs_scaleface.
             add(MZ_ICON_SCALE, "Scale Face", ToolAction::ScaleFace, false,
-                "Re-slope the side walls toward a scaled copy of this face — "
-                "under 100% tapers it in, over 100% flares it out.");
+                "Scale this face; the side walls re-slope to follow. Under 100% "
+                "tapers it in, over 100% flares it out. Shorten the length to "
+                "blend near the face instead of from the base.");
         }
         // Taper takes cylindrical and conical faces too (it drafts along their
         // own axis), so it is NOT gated on the face being flat.
@@ -370,8 +373,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Move the face (its feature follows).");
             add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
                 "Tilt the face — or twist it with the ring about its normal.");
-            add(MZ_ICON_SCALE,  "Scale",  ToolAction::Scale, false,
-                "Scale the face about its centre (uniform or per-axis).");
+            // No "Scale" here: it did the same thing as Scale Face above.
         } else if (m_selFaceIsHoleWall) {
             // The one curved face #28 shouldn't hide Move on: a hole's bore.
             // Clicking the inside wall means the whole hole (both rims travel
@@ -380,8 +382,6 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Slide the whole hole across the face it pierces \xE2\x80\x94 "
                 "select a rim edge instead to tilt or reshape one end.");
         }
-        add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
-            "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
         // Two or more picked faces is the user asserting "these are one face",
         // which is what lets this merge try harder than the whole-body one.
         if (m_selection->selectedFaceCount() >= 2)
@@ -390,6 +390,8 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "across a flat face that an imported STEP part arrives with \xE2\x80\x94 "
                 "they also confuse Unfold and sketch-on-face. Refuses if the "
                 "faces aren't really one surface.");
+        add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
+            "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
         addPlugins(1 << static_cast<int>(SelectionContext::HasFaces));
     } else if (m_selection->hasSelectedBodies()) {
         add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
@@ -400,11 +402,11 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "Scale the body: uniform, or per-axis in properties.");
         add(MZ_ICON_MIRROR, "Mirror", ToolAction::Mirror, false,
             "Mirror the body across a plane you'll place next.");
-        add(MZ_ICON_LATHE,  "Revolve", ToolAction::Revolve, false,
-            "Rotate the body around an axis (watch a fan spin or a hinge open).");
         add(MZ_ICON_SPLIT, "Split", ToolAction::Split, false,
             "Cut the body in two. Pick the axis and slide the cut off centre — "
             "a ghost plane shows where it lands before you commit.");
+        add(MZ_ICON_LATHE,  "Revolve", ToolAction::Revolve, false,
+            "Rotate the body around an axis (watch a fan spin or a hinge open).");
         if (m_selection->selectedBodyCount() == 1)
             add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
                 "Flatten the body into a 2D cut pattern (SVG / tiled PDF).");
@@ -858,15 +860,26 @@ ToolAction Toolbar::renderBodyTools(bool primaryContext) {
     ImGui::Separator();
 
     // Gizmo modes side by side, then Mirror.
-    float third = (ImGui::GetContentRegionAvail().x - 2 * ImGui::GetStyle().ItemSpacing.x) / 3.0f;
-    if (ImGui::Button("Move", ImVec2(third, bh(30))))   action = ToolAction::Move;
+    //
+    // Under a FACE selection these three become the face verbs (Move Face,
+    // tilt, scale) — the selection picks body-vs-face, not the button. Scale is
+    // dropped there because Face Operations already offers Scale Face, and they
+    // are the same operation: measured, a 20mm box top at 50% comes back as the
+    // identical frustum either way. Two buttons, one behaviour, is the thing
+    // being fixed.
+    const int cols = primaryContext ? 3 : 2;
+    float cw = (ImGui::GetContentRegionAvail().x -
+                (cols - 1) * ImGui::GetStyle().ItemSpacing.x) / static_cast<float>(cols);
+    if (ImGui::Button("Move", ImVec2(cw, bh(30))))   action = ToolAction::Move;
     tip("Show the translate gizmo. Drag axes / planes to move. (W)");
     ImGui::SameLine();
-    if (ImGui::Button("Rotate", ImVec2(third, bh(30)))) action = ToolAction::Rotate;
+    if (ImGui::Button("Rotate", ImVec2(cw, bh(30)))) action = ToolAction::Rotate;
     tip("Show the rotate gizmo. Drag rings to rotate around each axis. (E)");
-    ImGui::SameLine();
-    if (ImGui::Button("Scale", ImVec2(third, bh(30))))  action = ToolAction::Scale;
-    tip("Show the scale gizmo. Drag handles to resize. (R)");
+    if (primaryContext) {
+        ImGui::SameLine();
+        if (ImGui::Button("Scale", ImVec2(cw, bh(30))))  action = ToolAction::Scale;
+        tip("Show the scale gizmo. Drag handles to resize. (R)");
+    }
     // Mirror + Revolve share the row so they read as the "uses an
     // already-created primitive" pair (mirror plane / construction axis).
     float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
@@ -1006,8 +1019,9 @@ ToolAction Toolbar::renderFaceTools() {
             ToolAction::Shell, ToolAction::ScaleFace, ToolAction::Taper,
             ToolAction::RemoveFace, ToolAction::ProjectSketch, ToolAction::EditDiameter,
             ToolAction::Thread, ToolAction::Unfold, ToolAction::EditFilletChamfer,
-            // Move/Rotate/Scale come from the shared Transform row that
-            // render() falls through to (renderBodyTools).
+            // Move/Rotate come from the shared Transform row that render()
+            // falls through to (renderBodyTools). Scale is listed too so the
+            // net stays quiet if it ever returns to the face catalogue.
             ToolAction::Move, ToolAction::Rotate, ToolAction::Scale});
 
     // Frozen-round hint: a fillet-shaped face with no editable op behind it
