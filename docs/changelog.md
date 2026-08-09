@@ -18,6 +18,17 @@ All notable changes to Materializr are documented here. Format loosely follows
   Attachment now picks the ORDER of the two, not which one exists.
 - **Lathe on a selected sketch in the classic layout.** It had always been
   there in the modern and im-touch rails.
+- **Merge Faces**, for the seam lines that run across an otherwise flat face on
+  an imported STEP part — which also confuse Unfold and sketch-on-face, because
+  what looks like one panel is several faces. Two ways in, and they try
+  different amounts. Select a **body** and it merges only what is exactly
+  coplanar, which is safe to point at a whole part but leaves the near-miss
+  seams alone. Select **two or more faces** and it merges just those, and
+  because you have said which faces are one it can accept planes that are a
+  fraction of a degree apart. Either way the result is checked for validity and
+  for volume before it is kept, so a merge that would reshape the part is
+  refused rather than applied. New parts should not need it: the modelling ops
+  no longer leave these seams behind in the first place.
 
 ### Changed
 

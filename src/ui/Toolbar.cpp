@@ -382,6 +382,14 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         }
         add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
             "Flatten the selected faces into a 2D cut pattern (SVG / tiled PDF).");
+        // Two or more picked faces is the user asserting "these are one face",
+        // which is what lets this merge try harder than the whole-body one.
+        if (m_selection->selectedFaceCount() >= 2)
+            add(MZ_ICON_REPAIR, "Merge Faces", ToolAction::MergeFaces, false,
+                "Merge the selected faces into one. Use this on the seam lines "
+                "across a flat face that an imported STEP part arrives with \xE2\x80\x94 "
+                "they also confuse Unfold and sketch-on-face. Refuses if the "
+                "faces aren't really one surface.");
         addPlugins(1 << static_cast<int>(SelectionContext::HasFaces));
     } else if (m_selection->hasSelectedBodies()) {
         add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
@@ -398,10 +406,11 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
                 "Flatten the body into a 2D cut pattern (SVG / tiled PDF).");
         add(MZ_ICON_REPAIR, "Merge Faces", ToolAction::MergeFaces, false,
-            "Merge coplanar faces back into single faces. Imported STEP parts "
-            "often arrive with flat surfaces split into pieces \xE2\x80\x94 the seam "
-            "lines you see on an otherwise flat face \xE2\x80\x94 which also confuses "
-            "Unfold and sketch-on-face. Does nothing if there is nothing to merge.");
+            "Sweep the body for faces that are exactly coplanar and merge them. "
+            "Imported STEP parts arrive with flat surfaces split into pieces "
+            "\xE2\x80\x94 the seam lines across an otherwise flat face, which also "
+            "confuse Unfold and sketch-on-face. For a seam this leaves behind, "
+            "select the two faces either side of it and merge those instead.");
         add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
             "Measure distance, length, or angle between picked features.");
         // Same gating as the classic body section: MultipleBodies plugins

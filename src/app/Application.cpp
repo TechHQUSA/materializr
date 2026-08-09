@@ -2571,24 +2571,57 @@ void Application::handleToolAction(int action) {
         }
 
         case ToolAction::MergeFaces: {
-            // Whole-body coplanar merge — the repair half of #81, for geometry
-            // that was ALREADY split when it arrived (imported STEP) or was
-            // edited before the ops started preventing new seams. One step per
-            // selected body; the op refuses when there is nothing to merge, so
-            // pushOperation adds nothing and we say so rather than leaving an
-            // empty entry in the history.
-            const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
-            if (bodies.empty()) break;
+            // The repair half of #81, for geometry that was ALREADY split when
+            // it arrived (imported STEP) or was edited before the ops started
+            // preventing new seams.
+            //
+            // Picked faces beat picked bodies. A face selection is the user
+            // saying "these two are one face", which bounds the merge to those
+            // faces and lets the op try a much looser tolerance than is ever
+            // safe body-wide — the seams left on a real imported part are
+            // near-coplanar, not exactly coplanar. With no faces picked it is
+            // the conservative whole-body pass.
             if (refuseMeshSelection("Merge Faces")) break;
-            int merged = 0;
-            for (int id : bodies) {
-                auto op = std::make_unique<MergeFacesOp>();
-                op->setBody(id);
-                if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+            int merged = 0, attempted = 0;
+            if (m_selection->selectedFaceCount() >= 2) {
+                std::map<int, std::vector<TopoDS_Shape>> byBody;
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == SelectionType::Face && !e.shape.IsNull() &&
+                        e.bodyId >= 0)
+                        byBody[e.bodyId].push_back(e.shape);
+                for (auto& [id, faces] : byBody) {
+                    if (faces.size() < 2) continue;   // one face alone can't merge
+                    ++attempted;
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    op->setFaces(faces);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                if (merged == 0)
+                    showToast(attempted == 0
+                        ? "Pick two or more faces on the SAME body to merge them."
+                        : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                          "to one surface, or the merge wouldn't hold together.");
+            } else {
+                const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
+                if (bodies.empty()) break;
+                for (int id : bodies) {
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                // The whole-body pass only takes exactly-coplanar faces. Point
+                // the user at the face-picking route rather than implying the
+                // part is as merged as it can get.
+                if (merged == 0)
+                    showToast("Nothing exactly coplanar left to merge \xE2\x80\x94 pick "
+                              "the faces either side of a seam and try again.");
             }
-            if (merged == 0)
-                showToast("Nothing to merge \xE2\x80\x94 these faces are already "
-                          "as merged as the kernel can make them.");
+            // The picked faces are gone — they were replaced by the face they
+            // merged into. Holding on to them would leave the highlight drawing
+            // shapes the body no longer has, and hand the next op dead
+            // references.
+            if (merged > 0) m_selection->clear();
             m_meshesDirty = true;
             break;
         }

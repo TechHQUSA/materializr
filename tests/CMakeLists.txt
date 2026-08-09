@@ -264,6 +264,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Merge Faces: whole-body vs face-scoped repair of split coplanar faces (#81)
+add_executable(test_merge_faces test_merge_faces.cpp)
+target_link_libraries(test_merge_faces PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_merge_faces COMMAND test_merge_faces)
+
 # Extrude region identity: draw/extrude/draw-more replays correctly (#53)
 add_executable(test_extrude_regions test_extrude_regions.cpp)
 target_link_libraries(test_extrude_regions PRIVATE materializr_core gtest gtest_main)
