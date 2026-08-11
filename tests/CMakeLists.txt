@@ -264,6 +264,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Face-sketch grid direction: world-aligned edge beats the longest diagonal
+add_executable(test_sketch_plane_axis test_sketch_plane_axis.cpp)
+target_link_libraries(test_sketch_plane_axis PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_plane_axis COMMAND test_sketch_plane_axis)
+
 # Typed sketch values beat the snap grid (circle radius, rect from centre)
 add_executable(test_typed_sketch_values test_typed_sketch_values.cpp)
 target_link_libraries(test_typed_sketch_values PRIVATE materializr_core gtest gtest_main)

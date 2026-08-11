@@ -84,6 +84,14 @@ All notable changes to Materializr are documented here. Format loosely follows
   the width and then *clicking* the height spanned the full typed value either
   side of the centre. Typing both values was always correct, which is why it
   took a specific sequence to see.
+- **The sketch grid on a face follows the world, not the longest edge.** A
+  symmetric tapered face put the grid on one of its diagonals, because the rule
+  was "align to the longest straight edge" and a trapezoid's longest edges are
+  its diagonals. It now prefers the edge that agrees best with the world axes,
+  and falls back to the longest edge only when nothing agrees — so a part
+  deliberately rotated off-axis still follows its own geometry.
+
+
 - **A body could change id on every frame of a drag.** Extrude's preview
   created a new body per keystroke; anything referring to it downstream saw a
   different body each time.

@@ -80,6 +80,7 @@ inline void resetFpuForOcct() {
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
 #include "modeling/MergeFacesOp.h"
+#include "modeling/SketchPlaneAxis.h"
 #include "core/MeshGuard.h"
 #include "modeling/ReplayOp.h"
 #include "modeling/OperationFactory.h"
@@ -4884,47 +4885,20 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         }
     }
 
-    // Align the sketch plane's X axis to the face's LONGEST straight edge so the
-    // grid runs parallel to the face. The plane recovered from the surface uses
-    // the surface's intrinsic parametric X, which for a lofted face (e.g. a
-    // scaled-down box top) can sit ~45° off the visible edges. For an ordinary
-    // box face this is a no-op or a 90° turn that looks identical on a square
-    // grid; a face with no straight edge (a circular cap) keeps the surface X.
+    // Align the sketch plane's X axis to the face's own geometry. The plane
+    // recovered from the surface uses the surface's intrinsic parametric X,
+    // which a boolean or a loft can leave rotated any which way.
+    //
+    // The rule lives in modeling/SketchPlaneAxis.h so it can be tested — ctest
+    // cannot see src/app, and this heuristic has now misfired twice: once on a
+    // lofted cap (fixed by following the longest edge) and once on a symmetric
+    // taper, whose two LONGEST edges are its diagonals, so the grid rotated to
+    // a diagonal on a part built symmetric about a world axis.
     {
-        const gp_Dir n = pln.Position().Direction();
-        gp_Dir bestX;
-        double bestLen = -1.0;
-        bool found = false;
-        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-            BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
-            if (c.GetType() != GeomAbs_Line) continue;
-            gp_Pnt p0, p1;
-            c.D0(c.FirstParameter(), p0);
-            c.D0(c.LastParameter(), p1);
-            gp_Vec ev(p0, p1);
-            // Project the edge into the plane; skip edges ~parallel to the normal.
-            gp_Vec proj = ev - gp_Vec(n) * (ev * gp_Vec(n));
-            double L = proj.Magnitude();
-            if (L > bestLen + 1e-9) { bestLen = L; bestX = gp_Dir(proj); found = (L > 1e-6); }
-        }
-        if (found) {
-            gp_Ax3 ax(pln.Position().Location(), n, bestX);
-            pln = gp_Pln(ax);
-        } else {
-            // No straight edge (a circular cap, a threaded rod's top): the
-            // surface's intrinsic X is arbitrary — a boolean-generated plane
-            // can be rotated any which way, so the sketch grid sat visibly
-            // askew from the ground grid. Align to the projection of a world
-            // axis instead (world X unless it's nearly parallel to the
-            // normal, then world Y).
-            gp_Vec wx(1.0, 0.0, 0.0);
-            if (std::abs(gp_Vec(n).Dot(wx)) > 0.9) wx = gp_Vec(0.0, 1.0, 0.0);
-            gp_Vec proj = wx - gp_Vec(n) * (wx * gp_Vec(n));
-            if (proj.Magnitude() > 1e-9) {
-                gp_Ax3 ax(pln.Position().Location(), n, gp_Dir(proj));
-                pln = gp_Pln(ax);
-            }
-        }
+        const gp_Ax3& cur = pln.Position();
+        const gp_Dir x = materializr::sketchPlaneXDirection(
+            face, cur.Direction(), cur.XDirection());
+        pln = gp_Pln(gp_Ax3(cur.Location(), cur.Direction(), x));
     }
 
     // Whether the plane origin below ends up on the face's true centre —
