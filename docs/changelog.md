@@ -75,6 +75,15 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **A value you type in a sketch beats the snap grid.** Typing a 7.3mm circle
+  diameter on a 1mm grid built an 8mm circle — and recorded a Radius constraint
+  of 3.65 against it, so the circle disagreed with its own constraint from the
+  moment it existed. Typed values are no longer re-rounded. Anything you did
+  not type still snaps.
+- **A rectangle drawn from its centre no longer doubles a typed width.** Typing
+  the width and then *clicking* the height spanned the full typed value either
+  side of the centre. Typing both values was always correct, which is why it
+  took a specific sequence to see.
 - **A body could change id on every frame of a drag.** Extrude's preview
   created a new body per keystroke; anything referring to it downstream saw a
   different body each time.

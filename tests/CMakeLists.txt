@@ -264,6 +264,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Typed sketch values beat the snap grid (circle radius, rect from centre)
+add_executable(test_typed_sketch_values test_typed_sketch_values.cpp)
+target_link_libraries(test_typed_sketch_values PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_typed_sketch_values COMMAND test_typed_sketch_values)
+
 # Shrinking a hole that exits through a near-coplanar seam (#81 follow-on)
 add_executable(test_shrink_over_seam test_shrink_over_seam.cpp)
 target_link_libraries(test_shrink_over_seam PRIVATE materializr_core gtest gtest_main)
