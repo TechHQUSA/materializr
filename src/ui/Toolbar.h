@@ -26,9 +26,12 @@ enum class ToolAction {
     // ExtrudePlugin's toolbar button; the inline interactive extrude is reached
     // from sketch-extrude and the viewport context menu, not via a ToolAction.)
     Fillet, Chamfer, EditFilletChamfer, EditDiameter, Shell, Thread, Taper, ScaleFace,
-    ProjectSketch, RemoveFace,
+    ProjectSketch, RemoveFace, MergeFaces,
     // Gizmo modes + Mirror
     Move, Rotate, Scale, Mirror, Revolve,
+    // Split a body with a plane you place (axis + offset, ghost-plane preview).
+    // Was three plugin buttons that each cut through the bbox centre.
+    Split,
     // Sketch constraints (operate on the current SketchTool element selection).
     // All opt-in — none of them runs unless the user clicks the button.
     SketchConstrainCoincident, SketchConstrainHorizontal, SketchConstrainVertical,

@@ -27,6 +27,7 @@
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 
 #include <imgui.h>
 #include <cstdio>
@@ -557,6 +558,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                                                /*unifyEdges=*/Standard_True,
                                                /*unifyFaces=*/Standard_True,
                                                /*concatBSplines=*/Standard_False);
+            unify.SetAngularTolerance(materializr::kUnifyAngularTol);
             unify.Build();
             TopoDS_Shape clean = unify.Shape();
             if (!clean.IsNull()) result = clean;

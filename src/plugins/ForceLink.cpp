@@ -20,7 +20,6 @@ void forceLink_Mirror();
 void forceLink_Copy();
 void forceLink_Pattern();
 void forceLink_Shell();
-void forceLink_SplitBody();
 void forceLink_ConstructionPlane();
 void forceLink_ConstructionAxis();
 void forceLink_Revolve();
@@ -61,7 +60,6 @@ void linkAll() {
     forceLink_Copy();
     forceLink_Pattern();
     forceLink_Shell();
-    forceLink_SplitBody();
     forceLink_ConstructionPlane();
     forceLink_ConstructionAxis();
     forceLink_Revolve();

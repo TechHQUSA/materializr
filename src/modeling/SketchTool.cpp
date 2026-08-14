@@ -76,8 +76,15 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
     // Rectangle stage-1 (width typed-in, cursor still drives height): the
     // click that commits the second corner should use the LOCKED width on the
     // X axis, not whatever the cursor happens to be at horizontally.
+    //
+    // The HALF matters in Center mode: m_firstClick is the centre and
+    // handleRectangleTool mirrors the corner through it, so the corner sits
+    // half the typed width away. applyDimension has always halved here; these
+    // re-application sites did not, which doubled any typed width the moment
+    // the user clicked (rather than typed) the second side.
     if (m_mode == SketchToolMode::Rectangle && m_rectDimStage == 1 && m_isPlacing) {
-        snapped.x = m_firstClick.x + m_rectDimH;
+        const float half = (m_rectMode == RectMode::Center) ? 0.5f : 1.0f;
+        snapped.x = m_firstClick.x + m_rectDimH * half;
     }
 
     if (m_mode == SketchToolMode::None) return;
@@ -156,7 +163,8 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
     // live preview keeps the typed width visible while the user adjusts /
     // types / clicks for the height.
     if (m_mode == SketchToolMode::Rectangle && m_rectDimStage == 1) {
-        m_currentPos.x = m_firstClick.x + m_rectDimH;
+        const float half = (m_rectMode == RectMode::Center) ? 0.5f : 1.0f;
+        m_currentPos.x = m_firstClick.x + m_rectDimH * half;
     }
 
     // Arc 3rd-click sweep snap to 15° increments. Snap is only meaningful
@@ -419,7 +427,7 @@ bool SketchTool::applyDimension(float value) {
                                    ? m_firstClick + dir * value
                                    : m_firstClick + dir * radius;
             size_t cBefore = m_sketch->getCircles().size();
-            handleCircleTool(second);
+            handleCircleTool(second, /*exact=*/true);
             // Typed diameter → Radius constraint on the new circle.
             if (m_sketch->getCircles().size() > cBefore) {
                 const auto& circ = m_sketch->getCircles().back();
@@ -1964,7 +1972,7 @@ void SketchTool::handleLineTool(glm::vec2 pos) {
     }
 }
 
-void SketchTool::handleCircleTool(glm::vec2 pos) {
+void SketchTool::handleCircleTool(glm::vec2 pos, bool exact) {
     if (!m_isPlacing) {
         // First click: set center
         m_firstClick = pos;
@@ -1977,7 +1985,14 @@ void SketchTool::handleCircleTool(glm::vec2 pos) {
         // the first click.
         // Snap the radius/diameter onto the grid (same helper as the preview),
         // so a grid-enabled sketch commits clean whole-unit circles.
-        if (m_snapToGridEnabled) pos = snapRadialToGrid(m_firstClick, pos);
+        //
+        // NOT when the position came from a typed value. A number the user
+        // typed is a stronger statement of intent than the grid, and rounding
+        // it here produced a circle that disagreed with its own Radius
+        // constraint: typing 7.3 on a 1mm grid built r=4.0 and then recorded
+        // a Radius of 3.65 against it.
+        if (m_snapToGridEnabled && !exact)
+            pos = snapRadialToGrid(m_firstClick, pos);
         glm::vec2 center = (m_circleMode == CircleMode::TwoPoint)
                                ? 0.5f * (m_firstClick + pos) : m_firstClick;
         float radius = (m_circleMode == CircleMode::TwoPoint)

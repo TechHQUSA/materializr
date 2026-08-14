@@ -3,6 +3,120 @@
 All notable changes to Materializr are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow SemVer.
 
+## [Unreleased]
+
+### Added
+
+- **Move a hole.** Select a hole's rim edge and drag: one rim tilts the bore,
+  one straight side reshapes it, both rims slide the whole hole across the face
+  it pierces. Clicking the bore wall itself also offers Move, for the
+  slide-the-whole-hole case. The selection picks the verb, and the drag
+  previews the verb it will commit.
+- **Push / Pull and Extrude are both offered for a sketch**, whichever it is
+  attached to. A sketch drawn on a face used to offer only Push — exactly when
+  "make this a separate body instead of fusing it" is what you want.
+  Attachment now picks the ORDER of the two, not which one exists.
+- **Lathe on a selected sketch in the classic layout.** It had always been
+  there in the modern and im-touch rails.
+- **Merge Faces**, for the seam lines that run across an otherwise flat face on
+  an imported STEP part — which also confuse Unfold and sketch-on-face, because
+  what looks like one panel is several faces. Two ways in, and they try
+  different amounts. Select a **body** and it merges only what is exactly
+  coplanar, which is safe to point at a whole part but leaves the near-miss
+  seams alone. Select **two or more faces** and it merges just those, and
+  because you have said which faces are one it can accept planes that are a
+  fraction of a degree apart. Either way the result is checked for validity and
+  for volume before it is kept, so a merge that would reshape the part is
+  refused rather than applied. New parts should not need it: the modelling ops
+  no longer leave these seams behind in the first place.
+
+### Changed
+
+- **One face-scale tool, not two.** With a face selected, Scale and Scale Face
+  were the same operation — measurably so: a 20mm box top scaled to 50% came
+  back as the identical frustum either way, because Scale was Scale Face with
+  the blend length pinned to the full depth, which is already its default. Scale
+  is gone from the face tools; if you press it (or R) with a face selected you
+  get Scale Face. Shortening the blend length, so the taper stays near the face
+  instead of running from the base, is the thing that was only ever reachable
+  through one of the two buttons.
+- **Split is one tool with a ghost plane, not three blind buttons.** Split X,
+  Split Y and Split Z each cut through the body's bounding-box centre and gave
+  no way to see where the cut would land or to move it. There is now a single
+  **Split**: pick the axis, slide the cut off centre, and a translucent plane in
+  the viewport shows exactly where it goes before you commit. The offset is
+  clamped inside the body, since a plane that misses produces a history step
+  that did nothing. The underlying op always accepted an arbitrary plane — only
+  the buttons ever assumed the middle.
+- **Two rail groups: Transform and Multiply.** Move, Rotate and Scale are now
+  one **Transform** flyout, and Duplicate, Mirror, the patterns and the splits
+  are one **Multiply** flyout — everything that changes how many bodies you end
+  up with. "Transform" previously labelled the copy-and-mirror group, which is
+  why the actual transforms had nowhere to live. Modern and im-touch rails only;
+  the classic palette already headed that trio "Transform" and is unchanged.
+- **Taper is now called Draft.** It reads as a weaker Rotate under the old
+  name, and for one flat face that is nearly true. It is the moulding-draft
+  operation: several faces at one angle about a fixed neutral plane, and it
+  works on curved walls, where Rotate isn't offered at all — a cylinder drafts
+  into a cone. The tooltips now say so. Saved projects are unaffected.
+- **Previews no longer appear in the History panel.** Pattern, Loft, Boundary
+  Fill and the two construction popups used to add a real, undoable step the
+  moment their panel opened, and take it away again on each change — so Ctrl+Z
+  reached into the middle of a gesture and the panel listed a step you hadn't
+  committed to. History now stays put until Apply.
+- **Scale Face is one control that grows and shrinks**, instead of asking you
+  to pick a mode first, and it no longer offers a range the chosen mode can't
+  deliver.
+- **Imported meshes are reference bodies.** Sketch on them and snap to them,
+  but modelling ops decline them with an explanation rather than producing
+  broken geometry.
+- Saving no longer pays for compression that bought almost nothing — large
+  projects write faster.
+
+### Fixed
+
+- **A value you type in a sketch beats the snap grid.** Typing a 7.3mm circle
+  diameter on a 1mm grid built an 8mm circle — and recorded a Radius constraint
+  of 3.65 against it, so the circle disagreed with its own constraint from the
+  moment it existed. Typed values are no longer re-rounded. Anything you did
+  not type still snaps.
+- **A rectangle drawn from its centre no longer doubles a typed width.** Typing
+  the width and then *clicking* the height spanned the full typed value either
+  side of the centre. Typing both values was always correct, which is why it
+  took a specific sequence to see.
+- **The sketch grid on a face follows the world, not the longest edge.** A
+  symmetric tapered face put the grid on one of its diagonals, because the rule
+  was "align to the longest straight edge" and a trapezoid's longest edges are
+  its diagonals. It now prefers the edge that agrees best with the world axes,
+  and falls back to the longest edge only when nothing agrees — so a part
+  deliberately rotated off-axis still follows its own geometry.
+
+
+- **A body could change id on every frame of a drag.** Extrude's preview
+  created a new body per keystroke; anything referring to it downstream saw a
+  different body each time.
+- **Scaling a circular face by the same amount in both directions kept it a
+  circle.** It was being rebuilt as a spline, which left the side walls subtly
+  wrong and could leave a sliver behind when pushed back down.
+- **Move Face refused to move a flat cap**, mistaking it for a pocket.
+- **The Move Face arrows pointed the wrong way** in several cases — flipping
+  with an incidental normal direction, and coloured by the world axes rather
+  than the ones shown in the UI.
+- **A disabled Thread step still counted as threaded**, so operations kept
+  reflowing beneath a thread that wasn't there.
+- **Windows builds have been broken since the hole work landed** — `near` is a
+  `windows.h` macro.
+- Scale Face and Taper had become **unreachable** in a shipped build; both are
+  their own entries again.
+
+### Internal
+
+Most of the work in this cycle doesn't show up above: the interactive
+operations (Move Face, Extrude, Push/Pull, fillet/chamfer, the face ops) moved
+out of the `Application` god-class into self-contained controllers, and every
+live preview was moved off the history stack. See `docs/architecture.md` for
+the three preview models and why the distinction matters.
+
 ## [1.6.0] — 2026-08-02
 
 ### Added

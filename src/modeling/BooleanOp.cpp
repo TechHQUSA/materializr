@@ -3,6 +3,7 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+#include "UnifyTolerance.h"
 #include <GProp_GProps.hxx>
 #include <BRepGProp.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -58,6 +59,7 @@ bool BooleanOp::execute(Document& doc) {
                         // Merge coplanar/tangent neighbours so the union has no seam.
                         try {
                             ShapeUpgrade_UnifySameDomain u(s, true, true, true);
+                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
                             u.Build();
                             TopoDS_Shape uu = u.Shape();
                             if (!uu.IsNull()) s = uu;
@@ -74,6 +76,16 @@ bool BooleanOp::execute(Document& doc) {
                         // name seam faces/edges by their generating faces.
                         m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
                         m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
+                        // Merge coplanar neighbours the cut left behind. This
+                        // used to happen for Union only, so a Subtract/Intersect
+                        // split a flat face and the seam stayed visible (#81).
+                        try {
+                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
+                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
+                            u.Build();
+                            TopoDS_Shape uu = u.Shape();
+                            if (!uu.IsNull()) s = uu;
+                        } catch (...) {}
                         break;
                     }
                     case BooleanMode::Intersect: {
@@ -86,6 +98,16 @@ bool BooleanOp::execute(Document& doc) {
                         // name seam faces/edges by their generating faces.
                         m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
                         m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
+                        // Merge coplanar neighbours the cut left behind. This
+                        // used to happen for Union only, so a Subtract/Intersect
+                        // split a flat face and the seam stayed visible (#81).
+                        try {
+                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
+                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
+                            u.Build();
+                            TopoDS_Shape uu = u.Shape();
+                            if (!uu.IsNull()) s = uu;
+                        } catch (...) {}
                         break;
                     }
                 }

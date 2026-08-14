@@ -79,6 +79,9 @@ inline void resetFpuForOcct() {
 #include "modeling/SketchSolver.h"
 #include "modeling/SketchTool.h"
 #include "modeling/ExtrudeOp.h"
+#include "modeling/MergeFacesOp.h"
+#include "modeling/SketchPlaneAxis.h"
+#include "core/MeshGuard.h"
 #include "modeling/ReplayOp.h"
 #include "modeling/OperationFactory.h"
 #include "modeling/PushPullOp.h"
@@ -502,6 +505,35 @@ bool Application::activeSessionIsScratch() const {
     if (!m_document->getAllBodyIds().empty()) return false;
     if (!m_document->getAllSketchIds().empty()) return false;
     return !m_history || m_history->stepCount() == 0;
+}
+
+size_t Application::sessionForProjectRef(const std::string& ref) const {
+    if (ref.empty()) return m_sessions.size();
+    for (size_t i = 0; i < m_sessions.size(); ++i) {
+        const std::string& p = (i == m_activeSession) ? m_currentProjectPath
+                                                      : m_sessions[i]->projectPath;
+        if (!p.empty() && p == ref) return i;
+    }
+    return m_sessions.size();
+}
+
+bool Application::focusExistingProject(const std::string& ref) {
+    const size_t idx = sessionForProjectRef(ref);
+    if (idx >= m_sessions.size()) return false;
+    if (idx == m_activeSession) {          // already looking at it
+        if (m_landingPage) m_landingPage->setVisible(false);
+        return true;
+    }
+    // The caller may have made a blank tab to load into before it knew the
+    // project was already open; take it back out rather than leaving a stray
+    // "Untitled". Checked BEFORE the switch, while it is still active.
+    const bool dropScratch = activeSessionIsScratch();
+    const size_t scratchIdx = m_activeSession;
+    if (!switchToSession(idx)) return false;   // refused (mid-sketch) — it toasted
+    if (dropScratch && m_sessions.size() > 1) closeSession(scratchIdx);
+    if (m_landingPage) m_landingPage->setVisible(false);
+    showToast("That project is already open \xE2\x80\x94 switched to its tab.");
+    return true;
 }
 
 size_t Application::createSession() {
@@ -1624,8 +1656,17 @@ void Application::loadAppSettings() {
     if (!m_safeMode) {
         std::vector<std::string> restore;
         if (m_autoOpenLastProject) {
-            for (const auto& p : s.sessionPaths)
-                if (!p.empty()) restore.push_back(p);
+            for (const auto& p : s.sessionPaths) {
+                if (p.empty()) continue;
+                // Skip a project already queued: one project, one tab. Settings
+                // written before focusExistingProject existed can hold the same
+                // path twice (re-opening an open project used to make a second
+                // tab), and restoring both faithfully reproduced the duplicate
+                // on every launch thereafter.
+                if (std::find(restore.begin(), restore.end(), p) != restore.end())
+                    continue;
+                restore.push_back(p);
+            }
             // Settings written by a build that predates tabs have no
             // sessionPaths — fall back to the single last project.
             if (restore.empty() && !s.lastProjectPath.empty())
@@ -2446,16 +2487,24 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
-            // A selected face scales the FACE (MoveFaceOp with a scale) — the
-            // third of the Move / Rotate / Scale trio that arrived with Move
-            // Face, and what this button has always done. Scale Face is a
-            // different op with its own button in Face Operations (Steve,
-            // 2026-08-04: "let's make it its own for clarity's sake").
+            // A selected face routes to Scale Face — the ONE face-scale tool.
+            // This used to run MoveFaceOp::Scale as a separate thing, on the
+            // theory that scaling the face and re-sloping the walls toward a
+            // scaled copy were different operations. Measured, they are not:
+            // a 20mm box top scaled to 50% gives the identical 4666.667
+            // frustum either way, because MoveFaceOp::Scale IS ScaleFaceOp
+            // with the blend length at the full depth — which is already what
+            // ScaleFaceController defaults to. The face rails no longer offer
+            // a Scale button at all; classic's shared Transform row still
+            // shows one, and this is what keeps it honest.
+            //
+            // MoveFaceOp::Kind::Scale stays in the op layer: saved projects
+            // recorded it and must replay and edit exactly as before.
             {
                 bool faceSel = false;
                 for (const auto& e : m_selection->getSelection())
                     if (e.type == SelectionType::Face && !e.shape.IsNull()) { faceSel = true; break; }
-                if (faceSel) { beginMoveFace(FaceXform::Scale); break; }
+                if (faceSel) { beginIop(m_scaleFaceCtl); break; }
             }
             // Scale-on-sketch is a no-op (the plane is 2D-infinite), so we
             // keep this body-only.
@@ -2464,6 +2513,11 @@ void Application::handleToolAction(int action) {
             m_selection->setNavigationOnly(false);
             break;
         }
+        case ToolAction::Split: {
+            beginIop(m_splitCtl);
+            break;
+        }
+
         case ToolAction::Mirror: {
             const auto& sel = m_selection->getSelection();
             if (!sel.empty() && sel[0].bodyId >= 0) {
@@ -2527,6 +2581,62 @@ void Application::handleToolAction(int action) {
 
         case ToolAction::RemoveFace: {
             beginIop(m_defeatureCtl);
+            break;
+        }
+
+        case ToolAction::MergeFaces: {
+            // The repair half of #81, for geometry that was ALREADY split when
+            // it arrived (imported STEP) or was edited before the ops started
+            // preventing new seams.
+            //
+            // Picked faces beat picked bodies. A face selection is the user
+            // saying "these two are one face", which bounds the merge to those
+            // faces and lets the op try a much looser tolerance than is ever
+            // safe body-wide — the seams left on a real imported part are
+            // near-coplanar, not exactly coplanar. With no faces picked it is
+            // the conservative whole-body pass.
+            if (refuseMeshSelection("Merge Faces")) break;
+            int merged = 0, attempted = 0;
+            if (m_selection->selectedFaceCount() >= 2) {
+                std::map<int, std::vector<TopoDS_Shape>> byBody;
+                for (const auto& e : m_selection->getSelection())
+                    if (e.type == SelectionType::Face && !e.shape.IsNull() &&
+                        e.bodyId >= 0)
+                        byBody[e.bodyId].push_back(e.shape);
+                for (auto& [id, faces] : byBody) {
+                    if (faces.size() < 2) continue;   // one face alone can't merge
+                    ++attempted;
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    op->setFaces(faces);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                if (merged == 0)
+                    showToast(attempted == 0
+                        ? "Pick two or more faces on the SAME body to merge them."
+                        : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                          "to one surface, or the merge wouldn't hold together.");
+            } else {
+                const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
+                if (bodies.empty()) break;
+                for (int id : bodies) {
+                    auto op = std::make_unique<MergeFacesOp>();
+                    op->setBody(id);
+                    if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                }
+                // The whole-body pass only takes exactly-coplanar faces. Point
+                // the user at the face-picking route rather than implying the
+                // part is as merged as it can get.
+                if (merged == 0)
+                    showToast("Nothing exactly coplanar left to merge \xE2\x80\x94 pick "
+                              "the faces either side of a seam and try again.");
+            }
+            // The picked faces are gone — they were replaced by the face they
+            // merged into. Holding on to them would leave the highlight drawing
+            // shapes the body no longer has, and hand the next op dead
+            // references.
+            if (merged > 0) m_selection->clear();
+            m_meshesDirty = true;
             break;
         }
 
@@ -4078,6 +4188,10 @@ void Application::openRecentProject(const AppSettings::RecentProject& r) {
     // which may be the vector backing the reference `r`.
     const std::string ref  = r.ref;
     const std::string name = r.name;
+    // One project, one tab. Every recent-open route lands here — the home
+    // screen's tiles, the "+" dropdown, the File menu — so the guard sits here
+    // rather than at each of them.
+    if (focusExistingProject(ref)) return;
     guardedOpen([this, ref, name]() {
 #if defined(MZ_MOBILE)
         // ref is a persisted SAF content:// URI — resolve to a temp file, no picker.
@@ -4135,6 +4249,24 @@ void Application::loadProject() {
         {{"Materializr Project", "*.mzr *.materializr"}, {"All Files", "*"}},
         [this](const std::string& path) {
             if (path.empty()) return;
+            // Picking a file that is already open in another tab focuses it
+            // instead of making a second one. Checked here, after the picker,
+            // because that is the first moment the file is known.
+            //
+            // Compare on the same IDENTITY a tab stores. On mobile that is the
+            // SAF content:// URI, not `path` — the picker hands back a cache
+            // temp it copied the document into, and a fresh temp per open would
+            // never match anything. The URI is already readable here: the
+            // poll that produced `path` only fires once the Java side has
+            // opened the document and recorded it.
+            std::string ident = path;
+#if defined(MZ_MOBILE)
+            {
+                const std::string uri = materializr::mobileLastDocUri();
+                if (!uri.empty()) ident = uri;
+            }
+#endif
+            if (focusExistingProject(ident)) return;
             // Guard unsaved changes (the picked path is captured for after the
             // save prompt resolves), then load + record in Open Recent.
             guardedOpen([this, path]() {
@@ -4753,47 +4885,20 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         }
     }
 
-    // Align the sketch plane's X axis to the face's LONGEST straight edge so the
-    // grid runs parallel to the face. The plane recovered from the surface uses
-    // the surface's intrinsic parametric X, which for a lofted face (e.g. a
-    // scaled-down box top) can sit ~45° off the visible edges. For an ordinary
-    // box face this is a no-op or a 90° turn that looks identical on a square
-    // grid; a face with no straight edge (a circular cap) keeps the surface X.
+    // Align the sketch plane's X axis to the face's own geometry. The plane
+    // recovered from the surface uses the surface's intrinsic parametric X,
+    // which a boolean or a loft can leave rotated any which way.
+    //
+    // The rule lives in modeling/SketchPlaneAxis.h so it can be tested — ctest
+    // cannot see src/app, and this heuristic has now misfired twice: once on a
+    // lofted cap (fixed by following the longest edge) and once on a symmetric
+    // taper, whose two LONGEST edges are its diagonals, so the grid rotated to
+    // a diagonal on a part built symmetric about a world axis.
     {
-        const gp_Dir n = pln.Position().Direction();
-        gp_Dir bestX;
-        double bestLen = -1.0;
-        bool found = false;
-        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-            BRepAdaptor_Curve c(TopoDS::Edge(ex.Current()));
-            if (c.GetType() != GeomAbs_Line) continue;
-            gp_Pnt p0, p1;
-            c.D0(c.FirstParameter(), p0);
-            c.D0(c.LastParameter(), p1);
-            gp_Vec ev(p0, p1);
-            // Project the edge into the plane; skip edges ~parallel to the normal.
-            gp_Vec proj = ev - gp_Vec(n) * (ev * gp_Vec(n));
-            double L = proj.Magnitude();
-            if (L > bestLen + 1e-9) { bestLen = L; bestX = gp_Dir(proj); found = (L > 1e-6); }
-        }
-        if (found) {
-            gp_Ax3 ax(pln.Position().Location(), n, bestX);
-            pln = gp_Pln(ax);
-        } else {
-            // No straight edge (a circular cap, a threaded rod's top): the
-            // surface's intrinsic X is arbitrary — a boolean-generated plane
-            // can be rotated any which way, so the sketch grid sat visibly
-            // askew from the ground grid. Align to the projection of a world
-            // axis instead (world X unless it's nearly parallel to the
-            // normal, then world Y).
-            gp_Vec wx(1.0, 0.0, 0.0);
-            if (std::abs(gp_Vec(n).Dot(wx)) > 0.9) wx = gp_Vec(0.0, 1.0, 0.0);
-            gp_Vec proj = wx - gp_Vec(n) * (wx * gp_Vec(n));
-            if (proj.Magnitude() > 1e-9) {
-                gp_Ax3 ax(pln.Position().Location(), n, gp_Dir(proj));
-                pln = gp_Pln(ax);
-            }
-        }
+        const gp_Ax3& cur = pln.Position();
+        const gp_Dir x = materializr::sketchPlaneXDirection(
+            face, cur.Direction(), cur.XDirection());
+        pln = gp_Pln(gp_Ax3(cur.Location(), cur.Direction(), x));
     }
 
     // Whether the plane origin below ends up on the face's true centre —

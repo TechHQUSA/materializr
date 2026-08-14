@@ -407,7 +407,8 @@ private:
     int findCoincidentPoint(glm::vec2 pos, int excludeId = -1) const;
 
     void handleLineTool(glm::vec2 pos);
-    void handleCircleTool(glm::vec2 pos);
+    // exact = the position came from a typed value; skip the grid rounding.
+    void handleCircleTool(glm::vec2 pos, bool exact = false);
     void handleRectangleTool(glm::vec2 pos);
     void handleArcTool(glm::vec2 pos);
     // Snap the arc's swept apex to a 15°-multiple sweep when within ±5° of one

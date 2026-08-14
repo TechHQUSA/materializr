@@ -26,6 +26,8 @@
 #include <Geom_ToroidalSurface.hxx>
 #include <Geom_SurfaceOfRevolution.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
+
+#include "UnifyTolerance.h"
 #include <BRepTools_History.hxx>
 #include <TopoDS.hxx>
 #include <TopExp.hxx>
@@ -361,6 +363,7 @@ bool PushPullOp::execute(Document& doc) {
                 Handle(BRepTools_History) unifyHist;
                 try {
                     ShapeUpgrade_UnifySameDomain u(result, true, true, true);
+                    u.SetAngularTolerance(materializr::kUnifyAngularTol);
                     u.Build();
                     if (!u.Shape().IsNull()) { result = u.Shape(); unifyHist = u.History(); }
                 } catch (...) {}
@@ -540,6 +543,7 @@ bool PushPullOp::execute(Document& doc) {
                 Handle(BRepTools_History) unifyHist;
                 try {
                     ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
+                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
                     unifier.Build();
                     TopoDS_Shape unified = unifier.Shape();
                     if (!unified.IsNull()) { result = unified; unifyHist = unifier.History(); }

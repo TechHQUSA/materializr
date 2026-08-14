@@ -28,6 +28,7 @@
 #include "app/ExtrudeController.h"
 #include "app/PushPullController.h"
 #include "app/EdgeOpController.h"
+#include "app/SplitController.h"
 #include "app/LiveOpPreview.h"
 #include "app/CylindricalPick.h"
 #include <array>
@@ -334,6 +335,19 @@ private:
     // no geometry, no history) — i.e. safe to load into without displacing
     // anything the user still wants.
     bool activeSessionIsScratch() const;
+    // The open tab already holding this project, or m_sessions.size() for
+    // none. Compares the ACTIVE tab against m_currentProjectPath — an inactive
+    // session's own `projectPath` is only refreshed when it's stashed on the
+    // way out — the same rule saveAppSettings uses to write the tab list.
+    size_t sessionForProjectRef(const std::string& ref) const;
+    // One project, one tab. If `ref` is already open, focus that tab and
+    // return true; the caller must then NOT load it again. Nothing checked
+    // this before, so re-opening a project you already had open (a home-screen
+    // tile, an Open Recent entry) silently made a SECOND tab of the same file
+    // — and the duplicate went on to be written into the session list and
+    // faithfully restored on the next launch, which looked like a restore bug.
+    // Discards the empty tab a caller may have just created for the load.
+    bool focusExistingProject(const std::string& ref);
     // Reopen a previous session's projects, one per tab, and focus the tab
     // that was in front. Runs from the deferred startup slot when "open last
     // project on launch" is on. Missing projects are skipped, not fatal.
@@ -1365,14 +1379,15 @@ private:
     ResizeCylindricalController m_resizeCylCtl;
     ExtrudeController m_extrudeCtl;
     PushPullController m_ppCtl;
+    SplitController m_splitCtl;
     // m_moveFaceCtl is declared up with its delegates; it joined this array
     // once its lifecycle overrides landed, so every generic loop — Esc/Enter
     // chains, single-flight, suppression, input/overlay/gizmo dispatch —
     // covers Move Face without a special case.
-    std::array<InteractiveOpController*, 10> m_iops{
+    std::array<InteractiveOpController*, 11> m_iops{
         &m_shellCtl, &m_taperCtl, &m_scaleFaceCtl, &m_projectSketchCtl,
         &m_defeatureCtl, &m_resizeCylCtl, &m_moveFaceCtl, &m_extrudeCtl,
-        &m_ppCtl, &m_edgeCtl};
+        &m_ppCtl, &m_edgeCtl, &m_splitCtl};
     IopContext iopContext();
     bool anyIopActive() const {
         for (auto* c : m_iops) if (c->active()) return true;
