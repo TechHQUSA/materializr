@@ -118,6 +118,49 @@ All notable changes to Materializr are documented here. Format loosely follows
   the attachment simply lets go. Sticky, not locked — there is nothing to
   delete, and no dialog. It survives save and reload, and shows the same "On
   Circle" marker that On Line has always shown.
+- **The constraint badge no longer reads Over-constrained on a legitimately
+  dimensioned circle.** The sketch's degree-of-freedom tally counted only point
+  coordinates, but a circle's radius lives on the entity itself and the solver
+  drives it directly. Every circle therefore came out one degree short: a circle
+  with a locked centre and a driven radius — three equations against three
+  freedoms, exactly determined — showed Over-constrained, and a sketch carrying
+  a circle could show "fully constrained" while it was still free to move.
+  Nothing in the app gates on solver state, so this was a misleading readout
+  rather than blocked editing. The counter predates the Dimension tool; the new
+  circle dimensions are simply the first thing to lean on it. It remains a plain
+  equation count with no redundancy detection, so a zero still does not prove a
+  sketch is fully constrained.
+- **A rim-to-rim gap smaller than the circles can reach no longer thrashes the
+  sketch.** The gap bottoms out at minus the sum of the two radii — concentric.
+  A value below that implies a negative centre distance, which nothing can
+  satisfy, and the solver drove the centres through each other and back for its
+  whole iteration budget, leaving the pair wherever the last pass dropped them.
+  It now settles at the closest arrangement it can actually reach and leaves the
+  constraint marked unsatisfied, instead of shaking the geometry.
+- **An arc is counted as the five freedoms it has.** It stores seven values —
+  centre, both endpoints and a radius — for a shape with only five: centre,
+  radius and the two endpoint bearings. The other two are pinned by the arc's
+  own geometry, so they are now counted as the equations they are. A fully
+  dimensioned arc had been reading under-constrained, which invites adding
+  constraints until something genuinely breaks.
+- **An arc's radius follows its endpoints.** Every correction that moves an arc
+  endpoint goes through the generic point mover, which leaves the stored radius
+  describing where the endpoints used to be — and the arc's mid point is placed
+  from that stored value, so the curve matched neither the endpoints nor the
+  dimension. The radius is now re-read from the settled geometry, and a radius
+  dimension measures the endpoints rather than the cached number, so a
+  neighbouring constraint can no longer quietly undo it while the solve still
+  reports success.
+- **A radius of zero or less leaves the geometry alone.** The value clamps to a
+  hair above zero, and for an arc that clamp drags both endpoints onto the
+  centre, collapsing the profile around it. Such a value now simply does not
+  apply, and the constraint stays marked unsatisfied.
+- **Adjusting an arc's radius from a dimension moves the arc.** The solver's
+  radius setter wrote the stored value and left the endpoints where they were,
+  so the dimension and the arc built from centre, endpoints and radius
+  disagreed. It now goes through the same resize the Properties panel has always
+  used, sliding both endpoints onto the new radius along their existing bearings
+  and leaving the swept angle untouched.
 - **A value you type in a sketch beats the snap grid.** Typing a 7.3mm circle
   diameter on a 1mm grid built an 8mm circle — and recorded a Radius constraint
   of 3.65 against it, so the circle disagreed with its own constraint from the

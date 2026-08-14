@@ -223,10 +223,38 @@ void Sketch::setCircleRadius(int circleId, double r) {
     }
 }
 
-void Sketch::setArcRadius(int arcId, double r) {
+void Sketch::refreshArcRadiusFromGeometry(int arcId) {
     for (auto& a : m_arcs) {
-        if (a.id == arcId) { a.radius = std::max(r, 1e-6); return; }
+        if (a.id != arcId) continue;
+        const SketchPoint* c = getPoint(a.centerPointId);
+        const SketchPoint* s = getPoint(a.startPointId);
+        const SketchPoint* e = getPoint(a.endPointId);
+        if (!c || !s || !e) return;
+        glm::vec2 C = c->pos;
+        double ds = glm::length(s->pos - C);
+        double de = glm::length(e->pos - C);
+        // The two agree whenever the arc is coherent; the mean is the best
+        // single radius when a constraint has pulled them apart, and keeps the
+        // stored value between them rather than favouring one endpoint.
+        double mean = 0.5 * (ds + de);
+        if (mean > 1e-6) a.radius = mean;
+        return;
     }
+}
+
+void Sketch::setArcRadius(int arcId, double r) {
+    // An arc is built from its centre, both endpoints AND its stored radius:
+    // buildWires places the arc's mid point at centre + (cos,sin)(midAngle) *
+    // radius and hands that to GC_MakeArcOfCircle, so writing the radius alone
+    // left the curve fitted through three mutually inconsistent points. The
+    // endpoints have to move with it.
+    //
+    // resizeArc already does exactly that — slide both endpoints onto the new
+    // radius along their existing bearings, which preserves the swept angle —
+    // and it is what the Properties panel has always called. Delegating keeps
+    // the dimension path and the panel path on one behaviour instead of two
+    // that disagree in the degenerate case.
+    resizeArc(arcId, r);
 }
 
 namespace {

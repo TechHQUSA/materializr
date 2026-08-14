@@ -80,7 +80,31 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
         }
     }
 
-    m_dof = 2 * numPoints - numEquations;
+    // Not every freedom in a sketch is a point coordinate, and not every
+    // stored value is a freedom.
+    //
+    // A CIRCLE stores a centre point and a radius: three values for the three
+    // freedoms a circle actually has. Nothing else determines its radius, and
+    // applyCorrection drives it directly through setCircleRadius, so it earns
+    // a +1. Counting only points while still subtracting the Radius/CircleGap
+    // equation that pins it put every circle one degree low — a circle with a
+    // locked centre and a driven radius (3 equations against 3 freedoms) read
+    // Over-constrained.
+    //
+    // An ARC is different: it stores a centre, a start point, an end point AND
+    // a radius — seven values for a shape that has only five freedoms (centre
+    // x/y, radius, and the two endpoint bearings). The extra two are pinned by
+    // the arc's own geometry, |start - centre| == |end - centre| == radius, so
+    // they are counted here as intrinsic equations. Counting the radius as a
+    // free seventh value without them reported a fully dimensioned arc as
+    // under-constrained and invited the user to keep adding constraints until
+    // they tripped a real Over-constrained.
+    int numCircles = static_cast<int>(sketch.getCircles().size());
+    int numArcs    = static_cast<int>(sketch.getArcs().size());
+
+    // +1 radius per circle; per arc, +1 radius less the two intrinsic
+    // relations, i.e. a net -1 against its three points.
+    m_dof = 2 * numPoints + numCircles - numArcs - numEquations;
 
     if (m_dof < 0) {
         m_state = SketchState::OverConstrained;
@@ -103,6 +127,26 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
         for (auto& c : constraints) {
             if (c.isDriving) continue;
             c.value += computeError(c, sketch);
+        }
+    };
+
+    // Every correction branch that moves an arc endpoint does it through plain
+    // movePoint, which knows nothing about arcs, so the stored radius is left
+    // describing where the endpoints USED to be. buildWires places the arc's
+    // mid point from that stale value, so the emitted curve matches neither the
+    // endpoints nor the dimension. Re-read it from the settled geometry.
+    //
+    // Arcs carrying a driving Radius are skipped: that constraint is the
+    // authority on their radius, and computeError already measures the
+    // endpoints for it, so the solver has kept them honest.
+    auto refreshArcRadii = [&] {
+        for (const auto& arc : sketch.getArcs()) {
+            bool driven = false;
+            for (const auto& c : constraints) {
+                if (c.isDriving && c.type == ConstraintType::Radius &&
+                    c.entityA == arc.id) { driven = true; break; }
+            }
+            if (!driven) sketch.refreshArcRadiusFromGeometry(arc.id);
         }
     };
 
@@ -135,11 +179,13 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
             for (auto& c : constraints) {
                 c.isSatisfied = true;
             }
+            refreshArcRadii();
             refreshReferenceValues();
             return true;
         }
     }
 
+    refreshArcRadii();
     refreshReferenceValues();
     return false;
 }
@@ -221,9 +267,28 @@ double SketchSolver::computeError(const Constraint& c, const Sketch& sketch) con
                 }
             }
             for (const auto& arc : sketch.getArcs()) {
-                if (arc.id == c.entityA) {
-                    return arc.radius - c.value;
+                if (arc.id != c.entityA) continue;
+                // An arc's radius is not just the stored number: the arc is
+                // only that radius if both endpoints actually sit on it, and
+                // buildWires reads all of centre, endpoints and radius. Every
+                // OTHER correction branch moves endpoints through plain
+                // movePoint without touching the stored radius, so measuring
+                // the field alone reported "satisfied" the instant the number
+                // matched while a neighbour had already dragged the geometry
+                // off it — the setter ran once and was then silently undone.
+                // Measure the worst of the three so the solver keeps pulling
+                // until the arc really holds its dimension.
+                double worst = arc.radius - c.value;
+                const SketchPoint* ctr = sketch.getPoint(arc.centerPointId);
+                if (ctr) {
+                    for (int ptId : {arc.startPointId, arc.endPointId}) {
+                        const SketchPoint* p = sketch.getPoint(ptId);
+                        if (!p) continue;
+                        double d = glm::length(p->pos - ctr->pos) - c.value;
+                        if (std::abs(d) > std::abs(worst)) worst = d;
+                    }
                 }
+                return worst;
             }
             return 0.0;
         }
@@ -519,6 +584,14 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             // the circle / arc struct itself, so we write it back through
             // the dedicated setter rather than the generic point-mover.
             // We try circles first (the common case) and fall back to arcs.
+            //
+            // A non-positive radius is not reachable geometry. Both setters
+            // clamp it to 1e-6, and for an arc that clamp now drags both
+            // endpoints in with it, so a value of 0 or less would grind the
+            // arc down onto its own centre and take the profile around it with
+            // it — worse than the value simply not applying. Leave the geometry
+            // alone; computeError still reports the constraint unsatisfied.
+            if (c.value <= 0.0) return;
             for (const auto& circle : sketch.getCircles()) {
                 if (circle.id == c.entityA) {
                     sketch.setCircleRadius(c.entityA, c.value);
@@ -819,11 +892,30 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             const SketchPoint* pa = sketch.getPoint(caPt);
             const SketchPoint* pb = sketch.getPoint(cbPt);
             if (!pa || !pb) return;
+            // The rim gap bottoms out at -(rA + rB): that is concentric, the
+            // deepest two circles can overlap. A value below it implies a
+            // NEGATIVE centre distance, which no arrangement of two points can
+            // satisfy — the correction then drove the centres past each other,
+            // dir flipped, and the next pass drove them back, so the solver
+            // oscillated for the full iteration budget and left the geometry
+            // wherever the last pass dropped it. Clamp to the closest
+            // achievable arrangement instead; the constraint still reports
+            // unsatisfied (computeError is unchanged), so the UI can flag the
+            // value as impossible rather than the sketch quietly thrashing.
+            float targetCentre = std::max(0.0f, static_cast<float>(c.value + rA + rB));
+
             glm::vec2 diff = pb->pos - pa->pos;
             float centreDist = glm::length(diff);
-            if (centreDist < 1e-10f) { diff = glm::vec2(1.0f, 0.0f); centreDist = 1.0f; }
+            if (centreDist < 1e-10f) {
+                // Coincident centres carry no direction. Only invent one when
+                // the target actually wants them apart — inventing it while
+                // the target is concentric shoved them back off each other
+                // every pass, which is the same thrash by another route.
+                if (targetCentre < 1e-10f) return;
+                diff = glm::vec2(1.0f, 0.0f);
+                centreDist = 1.0f;
+            }
             glm::vec2 dir = diff / centreDist;
-            float targetCentre = static_cast<float>(c.value + rA + rB);
             float corr = (targetCentre - centreDist) * 0.5f;
             sketch.movePoint(caPt, pa->pos - dir * corr);
             sketch.movePoint(cbPt, pb->pos + dir * corr);
