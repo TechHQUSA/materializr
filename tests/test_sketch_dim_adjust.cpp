@@ -110,11 +110,7 @@ TEST(DimAdjust, DeeplyNegativeCircleGapDoesNotFlipCentres) {
 // stored radius disagreed with the radius the endpoints describe — and since
 // buildWires places the arc's mid point from the stored radius, the emitted
 // curve matched neither.
-//
-// KNOWN GAP: this covers a standalone arc only. computeError for Radius reads
-// the cached field, so once it matches the branch stops firing and any
-// neighbouring constraint that moves an endpoint desynchronises the arc again
-// with solve() still reporting success. See docs/CLEANUP-BACKLOG.md.
+// This covers a standalone arc; the held-endpoint case is the test below.
 TEST(DimAdjust, ArcRadiusAdjustKeepsEndpointsOnTheArc) {
     Sketch sk;
     int c = sk.addPoint({0.0f, 0.0f});
@@ -256,4 +252,98 @@ TEST(DimAdjust, PointLineThroughZeroKeepsSide) {
 
     EXPECT_GT(sideOf(sk, p, ln), 0.0)
         << "passing through zero lost the side the dimension was placed on";
+}
+
+// A VERTICAL pair driven through zero. The degenerate guard used to invent a
+// +x separation direction, so the pair came back horizontal - the dimension
+// was satisfied and the sketch had silently rotated 90 degrees.
+TEST(DimAdjust, PointPointDistanceThroughZeroKeepsAxis) {
+    Sketch sk;
+    int a = sk.addPoint({0.0f, 0.0f});
+    int b = sk.addPoint({0.0f, 10.0f});
+
+    Constraint d{};
+    d.type = ConstraintType::Distance;
+    d.entityA = a;
+    d.entityB = b;
+    d.value = 10.0;
+    int id = sk.addConstraint(d);
+
+    SketchSolver solver;
+    ASSERT_TRUE(solver.solve(sk, 500, 1e-4));
+
+    for (double v : {0.0, 10.0}) {
+        for (auto& c : sk.getMutableConstraints())
+            if (c.id == id) c.value = v;
+        solver.solve(sk, 500, 1e-4);
+    }
+
+    glm::vec2 axis = sk.getPoint(b)->pos - sk.getPoint(a)->pos;
+    EXPECT_GT(std::abs(axis.y), std::abs(axis.x))
+        << "pair rotated off its vertical axis: (" << axis.x << "," << axis.y << ")";
+    EXPECT_NEAR(glm::length(axis), 10.0f, 1e-3f);
+}
+
+// The mirror of PointLineThroughZeroKeepsSide. The original passed only
+// because the point sat on the side the arbitrary normal happened to favour;
+// placed on the other side it used to cross over.
+TEST(DimAdjust, PointLineThroughZeroKeepsNegativeSide) {
+    Sketch sk;
+    int a = sk.addPoint({0.0f, 0.0f});
+    int b = sk.addPoint({10.0f, 0.0f});
+    int ln = sk.addLine(a, b);
+    int p = sk.addPoint({5.0f, -4.0f});
+
+    Constraint d{};
+    d.type = ConstraintType::DistancePointLine;
+    d.entityA = p;
+    d.entityB = ln;
+    d.value = 4.0;
+    int id = sk.addConstraint(d);
+
+    SketchSolver solver;
+    ASSERT_TRUE(solver.solve(sk, 500, 1e-4));
+    ASSERT_LT(sideOf(sk, p, ln), 0.0);
+
+    for (double v : {0.0, 6.0}) {
+        for (auto& c : sk.getMutableConstraints())
+            if (c.id == id) c.value = v;
+        solver.solve(sk, 500, 1e-4);
+    }
+
+    EXPECT_LT(sideOf(sk, p, ln), 0.0) << "point crossed to the far side";
+    EXPECT_NEAR(std::abs(sk.getPoint(p)->pos.y), 6.0f, 1e-3f);
+}
+
+// A radius of zero or less is unreachable. Both setters clamp it to a hair
+// above zero, and for an arc that clamp drags the endpoints in with it, so
+// applying such a value would grind the arc onto its own centre and collapse
+// whatever profile it belonged to. It must not apply at all.
+TEST(DimAdjust, NonPositiveArcRadiusLeavesGeometryAlone) {
+    Sketch sk;
+    int c = sk.addPoint({0.0f, 0.0f});
+    int s = sk.addPoint({5.0f, 0.0f});
+    int e = sk.addPoint({0.0f, 5.0f});
+    int arc = sk.addArc(c, s, e, 5.0);
+
+    Constraint r{};
+    r.type = ConstraintType::Radius;
+    r.entityA = arc;
+    r.value = 5.0;
+    int id = sk.addConstraint(r);
+
+    SketchSolver solver;
+    ASSERT_TRUE(solver.solve(sk, 500, 1e-4));
+
+    for (double v : {0.0, -3.0}) {
+        for (auto& cc : sk.getMutableConstraints())
+            if (cc.id == id) cc.value = v;
+        solver.solve(sk, 500, 1e-4);
+
+        const auto* cp = sk.getPoint(c);
+        EXPECT_NEAR(glm::distance(sk.getPoint(s)->pos, cp->pos), 5.0f, 1e-3f)
+            << "value=" << v << ": start endpoint collapsed onto the centre";
+        EXPECT_NEAR(glm::distance(sk.getPoint(e)->pos, cp->pos), 5.0f, 1e-3f)
+            << "value=" << v << ": end endpoint collapsed onto the centre";
+    }
 }

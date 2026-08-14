@@ -921,3 +921,69 @@ TEST(DimensionResolve, TwoCirclesStillGiveRimGapNotCentreDistance) {
     EXPECT_EQ(r.type, ConstraintType::CircleGap);
     EXPECT_NEAR(r.measured, 12.0, 1e-6);
 }
+
+TEST(DimensionPersistence, LegacyKLinesCarryNoOrientation) {
+    // The orientation pair (which side an unsigned dimension was placed on) is
+    // the 10th/11th field. No file written before it existed has it, and a
+    // 9-field line leaves the stream failed for the two extractions, so the
+    // "not recorded" default must stand rather than picking up garbage.
+    std::string body =
+        "PLANE 0 0 0 0 0 1 1 0 0 0 1 0\n"
+        "POINT_COUNT 2\n"
+        "P 1 0 0 0 0\n"
+        "P 2 4 0 0 0\n"
+        "LINE_COUNT 1\n"
+        "L 3 1 2 0 0\n"
+        "CIRCLE_COUNT 0\n"
+        "ARC_COUNT 0\n"
+        "SPLINE_COUNT 0\n"
+        "POLYGON_COUNT 0\n"
+        "CONSTRAINT_COUNT 3\n"
+        "K 4 3 1 2 4 0\n"                    // 6 fields
+        "K 5 3 1 2 4 0 1.5 2.5\n"            // 8 fields
+        "K 6 3 1 2 4 0 1.5 2.5 1\n"          // 9 fields (pre-orientation)
+        "SKETCH_END\n";
+    std::istringstream is(body);
+    Sketch sk;
+    materializr::ProjectIO::parseSketchBody(is, sk, "SKETCH_END");
+    ASSERT_EQ(sk.getConstraints().size(), 3u);
+    for (const auto& c : sk.getConstraints()) {
+        EXPECT_DOUBLE_EQ(c.orientX, 0.0) << "constraint id " << c.id;
+        EXPECT_DOUBLE_EQ(c.orientY, 0.0) << "constraint id " << c.id;
+        EXPECT_TRUE(c.isDriving) << "constraint id " << c.id;
+    }
+}
+
+TEST(DimensionPersistence, OrientationRoundTrips) {
+    // A point-line distance placed on the NEGATIVE side must come back on the
+    // negative side after a save/load, or reopening a project would let the
+    // next edit mirror the geometry.
+    Sketch sk;
+    int a = sk.addPoint({0.0f, 0.0f});
+    int b = sk.addPoint({10.0f, 0.0f});
+    int ln = sk.addLine(a, b);
+    int p = sk.addPoint({5.0f, -4.0f});
+
+    Constraint d{};
+    d.type = ConstraintType::DistancePointLine;
+    d.entityA = p;
+    d.entityB = ln;
+    d.value = 4.0;
+    sk.addConstraint(d);
+
+    SketchSolver solver;
+    ASSERT_TRUE(solver.solve(sk, 500, 1e-4));
+    ASSERT_LT(sk.getConstraints()[0].orientX, 0.0) << "should record the -1 side";
+
+    std::ostringstream os;
+    materializr::ProjectIO::writeSketchBody(os, sk);
+    std::istringstream is(os.str());
+    Sketch loaded;
+    materializr::ProjectIO::parseSketchBody(is, loaded, "SKETCH_END");
+
+    ASSERT_EQ(loaded.getConstraints().size(), 1u);
+    EXPECT_DOUBLE_EQ(loaded.getConstraints()[0].orientX,
+                     sk.getConstraints()[0].orientX);
+    EXPECT_DOUBLE_EQ(loaded.getConstraints()[0].orientY,
+                     sk.getConstraints()[0].orientY);
+}

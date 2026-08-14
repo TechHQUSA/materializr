@@ -137,6 +137,17 @@ All notable changes to Materializr are documented here. Format loosely follows
   whole iteration budget, leaving the pair wherever the last pass dropped them.
   It now settles at the closest arrangement it can actually reach and leaves the
   constraint marked unsatisfied, instead of shaking the geometry.
+- **A dimension driven through zero no longer mirrors the sketch.** A distance
+  reads the same on either side, so nothing recorded which side you put it on:
+  drive a point-to-line distance down to zero and back out and the point came
+  back on the far side of the line, and a vertical pair of points driven to zero
+  and back out separated along the horizontal instead — the number was right and
+  the shape had quietly turned ninety degrees. Each of these dimensions now
+  remembers the arrangement it was placed in, as a side relative to the line's
+  own direction (so it survives the line rotating) or as the direction the two
+  points were separated along, and a correction restores that instead of taking
+  whichever side the geometry happens to be on. Projects saved before this gain
+  the information the first time they are solved.
 - **An arc is counted as the five freedoms it has.** It stores seven values —
   centre, both endpoints and a radius — for a shape with only five: centre,
   radius and the two endpoint bearings. The other two are pinned by the arc's
