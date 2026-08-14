@@ -144,28 +144,24 @@ All notable changes to Materializr are documented here. Format loosely follows
   and back out separated along the horizontal instead — the number was right and
   the shape had quietly turned ninety degrees. Each of these dimensions now
   remembers the arrangement it was placed in, as a side relative to the line's
-  own direction (so it survives the line rotating) or as the direction the two
-  points were separated along, and a correction restores that instead of taking
-  whichever side the geometry happens to be on. Projects saved before this gain
-  the information the first time they are solved.
-- **An arc is counted as the five freedoms it has.** It stores seven values —
-  centre, both endpoints and a radius — for a shape with only five: centre,
-  radius and the two endpoint bearings. The other two are pinned by the arc's
-  own geometry, so they are now counted as the equations they are. A fully
-  dimensioned arc had been reading under-constrained, which invites adding
-  constraints until something genuinely breaks.
-- **An arc's radius follows its endpoints.** Every correction that moves an arc
-  endpoint goes through the generic point mover, which leaves the stored radius
-  describing where the endpoints used to be — and the arc's mid point is placed
-  from that stored value, so the curve matched neither the endpoints nor the
-  dimension. The radius is now re-read from the settled geometry, and a radius
-  dimension measures the endpoints rather than the cached number, so a
-  neighbouring constraint can no longer quietly undo it while the solve still
-  reports success.
+  own direction, so it survives the line rotating. A point-to-line distance is
+  now measured signed against that side, so drifting across the line is an
+  error the solver corrects rather than a position it accepts. A point-to-point
+  distance keeps the direction the pair last genuinely had, and consults it only
+  at the moment the two points coincide and the geometry offers nothing.
+  Projects saved before this pick the information up as they are solved.
+- **An arc is counted as the freedoms it actually has.** It stores seven values
+  — centre, both endpoints and a radius — for a shape with five: centre, radius
+  and the two endpoint bearings. The other two are the relations tying the
+  endpoints to the radius, and they are only subtracted where something holds
+  them: a driving radius dimension does, because its correction slides both
+  endpoints. With no radius dimension nothing does, and the arc really can
+  reach all seven, incoherent ones included.
 - **A radius of zero or less leaves the geometry alone.** The value clamps to a
-  hair above zero, and for an arc that clamp drags both endpoints onto the
-  centre, collapsing the profile around it. Such a value now simply does not
-  apply, and the constraint stays marked unsatisfied.
+  hair above zero; now that a radius dimension slides an arc's endpoints with
+  it, applying such a value would drag them onto the centre and collapse the
+  profile around it. It simply does not apply, and the constraint stays marked
+  unsatisfied.
 - **Adjusting an arc's radius from a dimension moves the arc.** The solver's
   radius setter wrote the stored value and left the endpoints where they were,
   so the dimension and the arc built from centre, endpoints and radius

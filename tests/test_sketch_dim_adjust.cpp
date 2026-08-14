@@ -183,16 +183,18 @@ TEST(DimAdjust, ArcRadiusWithAHeldEndpointDoesNotFakeSuccess) {
     double storedR = 0.0;
     for (const auto& a : sk.getArcs()) if (a.id == arc) storedR = a.radius;
 
-    // Whatever it settles on, it must not CLAIM success while the geometry
-    // disagrees with the dimension.
-    if (converged) {
-        EXPECT_NEAR(ds, storedR, 1e-3)
-            << "reported success with the endpoint off the stored radius";
-        EXPECT_NEAR(storedR, 12.0, 1e-3);
-    } else {
-        SUCCEED() << "honestly reported non-convergence for a contradictory "
-                     "radius/fixed-endpoint pair";
-    }
+    // Fixed pulls the endpoint back to distance 5 every pass while Radius
+    // measures the endpoints against 12: the system is contradictory, so the
+    // contract is that the solver SAYS so rather than reporting success over
+    // geometry that disagrees with its own dimension.
+    EXPECT_FALSE(converged) << "claimed success on a contradictory system";
+    bool radiusSatisfied = true;
+    for (const auto& cc : sk.getConstraints())
+        if (cc.id == rId) radiusSatisfied = cc.isSatisfied;
+    EXPECT_FALSE(radiusSatisfied);
+    EXPECT_TRUE(std::isfinite(ds) && std::isfinite(storedR));
+    EXPECT_NEAR(sk.getPoint(s)->pos.x, 5.0f, 1e-3f) << "Fixed endpoint moved";
+    EXPECT_NEAR(sk.getPoint(s)->pos.y, 0.0f, 1e-3f) << "Fixed endpoint moved";
 }
 
 // A point dimensioned to a line, then re-dimensioned to a much larger value.
@@ -346,4 +348,38 @@ TEST(DimAdjust, NonPositiveArcRadiusLeavesGeometryAlone) {
         EXPECT_NEAR(glm::distance(sk.getPoint(e)->pos, cp->pos), 5.0f, 1e-3f)
             << "value=" << v << ": end endpoint collapsed onto the centre";
     }
+}
+
+// The recorded side is only worth anything if the ERROR function enforces it.
+// While the error was the unsigned |distance| - value, a point sitting on the
+// wrong side at the right distance scored zero: no correction ran, the
+// constraint reported satisfied, and the sketch sat mirrored until some
+// unrelated edit disturbed the value and teleported it back across.
+TEST(DimAdjust, PointOnWrongSideAtRightDistanceIsPulledBack) {
+    Sketch sk;
+    int a = sk.addPoint({0.0f, 0.0f});
+    int b = sk.addPoint({10.0f, 0.0f});
+    int ln = sk.addLine(a, b);
+    int p = sk.addPoint({5.0f, 4.0f});
+
+    Constraint d{};
+    d.type = ConstraintType::DistancePointLine;
+    d.entityA = p;
+    d.entityB = ln;
+    d.value = 4.0;
+    int id = sk.addConstraint(d);
+
+    SketchSolver solver;
+    ASSERT_TRUE(solver.solve(sk, 500, 1e-4));
+    ASSERT_GT(sideOf(sk, p, ln), 0.0);
+
+    // Move it across to the mirror position: same perpendicular distance,
+    // opposite side.
+    sk.movePoint(p, {5.0f, -4.0f});
+    solver.solve(sk, 500, 1e-4);
+
+    EXPECT_GT(sideOf(sk, p, ln), 0.0)
+        << "wrong side at the right distance was accepted as satisfied";
+    EXPECT_NEAR(sk.getPoint(p)->pos.y, 4.0f, 1e-3f);
+    (void)id;
 }
