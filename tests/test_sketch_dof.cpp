@@ -1,16 +1,15 @@
 // Degree-of-freedom accounting for geometry whose freedoms are NOT points.
 //
-// The DOF counter is `2 * pointCount - numEquations`, which assumes every
-// freedom in the sketch is a point coordinate. A circle's radius and an arc's
-// radius are stored on the entity itself (SketchCircle::radius,
-// SketchArc::radius) and the solver drives them directly through
-// setCircleRadius / setArcRadius — so each one is a freedom the count never
-// granted, while the Radius / CircleGap constraints that pin them each still
-// subtract an equation.
+// The DOF counter was `2 * pointCount - numEquations`, which assumes every
+// freedom in the sketch is a point coordinate. A circle's radius is stored on
+// the entity itself and the solver drives it directly through
+// setCircleRadius, so it is a freedom the count never granted while the
+// Radius / CircleGap constraint pinning it still subtracted an equation.
 //
-// Net effect: every circle and arc pushes the reported DOF one too low. A
-// correctly dimensioned circle reads OverConstrained, and a sketch the user
-// sees as "fully constrained" is really still free to move.
+// Net effect: every circle pushed the reported DOF one too low, so a correctly
+// dimensioned circle read OverConstrained. Nothing in the app gates on solver
+// state - it drives a toolbar badge - so this was a misleading readout rather
+// than blocked editing.
 
 #include "modeling/Sketch.h"
 #include "modeling/SketchSolver.h"
@@ -72,15 +71,16 @@ TEST(SketchDof, FixedCentrePlusRadiusIsFullyConstrained) {
     EXPECT_EQ(solver.degreesOfFreedom(), 0);
     EXPECT_EQ(solver.getState(), SketchState::FullyConstrained)
         << "a circle with a locked centre and a driven radius is exactly "
-           "determined; reporting OverConstrained blocks the user from "
-           "adjusting a dimension that is perfectly legal";
+           "determined; reporting OverConstrained puts a misleading warning "
+           "on a badge for a dimension that is perfectly legal";
 }
 
-// An arc stores seven values — centre, start, end (6 coords) plus its own
-// radius — for a shape with only FIVE freedoms: centre x/y, radius, and the
-// two endpoint bearings. The other two are pinned by the arc's own geometry,
-// |start - centre| == |end - centre| == radius.
-TEST(SketchDof, BareArcHasFiveFreedoms) {
+// An arc stores seven values for a shape that geometrically has five
+// freedoms. The other two are the relations |start - centre| == |end - centre|
+// == radius — but they may only be SUBTRACTED where something holds them. A
+// driving Radius does (its correction reprojects both endpoints); with no
+// driving Radius nothing does, so the arc really can reach all seven.
+TEST(SketchDof, BareArcKeepsAllSevenStoredFreedoms) {
     Sketch sk;
     int c = sk.addPoint({0.0f, 0.0f});
     int s = sk.addPoint({5.0f, 0.0f});
@@ -89,8 +89,9 @@ TEST(SketchDof, BareArcHasFiveFreedoms) {
 
     SketchSolver solver;
     solver.solve(sk);
-    EXPECT_EQ(solver.degreesOfFreedom(), 5)
-        << "7 stored values less the 2 intrinsic radius relations";
+    EXPECT_EQ(solver.degreesOfFreedom(), 7)
+        << "with no driving Radius nothing holds |s-c| == |e-c| == radius, so "
+           "all seven stored values are independently reachable";
 }
 
 // Pinning the centre and driving the radius leaves only the two bearings.
@@ -105,6 +106,8 @@ TEST(SketchDof, FixedCentrePlusRadiusOnArcLeavesTwoBearings) {
 
     SketchSolver solver;
     solver.solve(sk);
+    // 7 stored - 2 intrinsic (held by the driving Radius) - 2 Fixed - 1
+    // Radius = 2: the two endpoint bearings.
     EXPECT_EQ(solver.degreesOfFreedom(), 2);
     EXPECT_NE(solver.getState(), SketchState::OverConstrained);
 }

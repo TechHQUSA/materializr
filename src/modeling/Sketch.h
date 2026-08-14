@@ -292,15 +292,6 @@ public:
     // the endpoints stay exactly on the circle, so shared lines follow cleanly.
     void resizeArc(int arcId, double newRadius);
 
-    // Bookkeeping counterpart to resizeArc: re-read an arc's radius FROM its
-    // current geometry (the mean of its two endpoint distances) and store it,
-    // WITHOUT moving anything. Any correction that moves an arc endpoint goes
-    // through plain movePoint and leaves the stored radius behind, which then
-    // misplaces the mid point buildWires feeds to GC_MakeArcOfCircle. Call
-    // this after such a move to keep the stored value honest. It deliberately
-    // does not reproject the endpoints: by the time the solver has settled,
-    // those positions are what the constraints asked for.
-    void refreshArcRadiusFromGeometry(int arcId);
 
     // Set an arc's swept angle (radians, CCW from start) keeping centre, radius
     // and start point fixed; the end point moves to the new angle.
