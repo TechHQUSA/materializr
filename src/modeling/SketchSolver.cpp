@@ -150,6 +150,38 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
         }
     };
 
+    // Record which way round each unsigned dimension was placed, once, from
+    // the geometry as it stands the first time it is solved — which is the
+    // arrangement the user drew. Everything after this reads the stored value,
+    // so a dimension driven through zero is restored to the side it came from
+    // rather than whichever side the last correction happened to leave it on.
+    for (auto& c : constraints) {
+        if (!c.isDriving) continue;
+        if (c.orientX != 0.0 || c.orientY != 0.0) continue; // already recorded
+        if (c.type == ConstraintType::DistancePointLine) {
+            const SketchPoint* p = sketch.getPoint(c.entityA);
+            if (!p) continue;
+            for (const auto& line : sketch.getLines()) {
+                if (line.id != c.entityB) continue;
+                const SketchPoint* a = sketch.getPoint(line.startPointId);
+                const SketchPoint* b = sketch.getPoint(line.endPointId);
+                if (!a || !b) break;
+                glm::vec2 dir = b->pos - a->pos, rel = p->pos - a->pos;
+                double cross = static_cast<double>(dir.x) * rel.y -
+                               static_cast<double>(dir.y) * rel.x;
+                if (cross != 0.0) c.orientX = (cross > 0.0) ? 1.0 : -1.0;
+                break;
+            }
+        } else if (c.type == ConstraintType::Distance) {
+            const SketchPoint* pa = sketch.getPoint(c.entityA);
+            const SketchPoint* pb = sketch.getPoint(c.entityB);
+            if (!pa || !pb) continue;
+            glm::vec2 d = pb->pos - pa->pos;
+            float len = glm::length(d);
+            if (len > 1e-10f) { c.orientX = d.x / len; c.orientY = d.y / len; }
+        }
+    }
+
     // Iterative relaxation
     for (int iter = 0; iter < maxIterations; ++iter) {
         double maxError = 0.0;
@@ -567,8 +599,15 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             glm::vec2 diff = pb->pos - pa->pos;
             float currentDist = glm::length(diff);
             if (currentDist < 1e-10f) {
-                // Points are coincident, push apart along x
-                diff = glm::vec2(1.0f, 0.0f);
+                // Coincident points carry no direction of their own. Pushing
+                // apart along a hardcoded +x rotated the pair onto that axis:
+                // a vertical pair driven 10 -> 0 -> 10 came back horizontal.
+                // Separate along the direction the dimension was placed on
+                // when there is one, and only fall back to +x when there is
+                // not.
+                glm::vec2 hint(static_cast<float>(c.orientX),
+                               static_cast<float>(c.orientY));
+                diff = (glm::length(hint) > 1e-6f) ? hint : glm::vec2(1.0f, 0.0f);
                 currentDist = 1.0f;
             }
             glm::vec2 dir = diff / currentDist;
@@ -860,7 +899,17 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
                 dir /= len;
                 glm::vec2 n(-dir.y, dir.x); // unit normal
                 float s = glm::dot(p->pos - a->pos, n); // signed distance
-                if (s < 0.0f) { n = -n; s = -s; }       // n points line → point
+                // Which side the dimension was placed on. Re-deriving it from
+                // the live sign (flip n whenever s < 0) meant that once
+                // another correction — or a pass through zero — carried the
+                // point across the line, the constraint cheerfully pinned it
+                // on the WRONG side and called it satisfied. Drive towards the
+                // recorded side instead, so crossing over is corrected rather
+                // than adopted. Falls back to the old behaviour when no side
+                // was recorded.
+                float side = (c.orientX != 0.0)
+                                 ? static_cast<float>(c.orientX > 0.0 ? 1.0 : -1.0)
+                                 : (s < 0.0f ? -1.0f : 1.0f);
                 // Move ONLY the measured point, not the reference line. The
                 // line is what we're dimensioning AGAINST (e.g. an already-
                 // placed box's edge); dragging its endpoints too would deform
@@ -868,7 +917,10 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
                 // point's own geometry (if part of a constrained rectangle)
                 // gets re-squared by that rectangle's H/V constraints in the
                 // following relaxation passes.
-                float corr = (static_cast<float>(c.value) - s);
+                //
+                // n is the +1 side's normal by construction, so the target
+                // signed distance is side * value.
+                float corr = side * static_cast<float>(c.value) - s;
                 sketch.movePoint(c.entityA, p->pos + n * corr);
                 return;
             }
