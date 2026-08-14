@@ -23,6 +23,13 @@ struct SketchPoint {
     // a five-letter word carries hundreds of vertices, and drawing anywhere
     // near it became impossible when every one was a snap target.
     bool fromText = false;
+    // STICKY, not locked: the circle/arc this point was placed on, or -1.
+    // Dragging the point (or a line that owns it) slides it ALONG that rim
+    // while the drag stays near the rim, and simply lets go once the drag
+    // pulls it clear — see SketchTool's drag handling. Deliberately not a
+    // solver Constraint: constraints in this sketcher are opt-in and binding,
+    // and this is a hint the user can walk away from without ceremony.
+    int onCurveId = -1;
 };
 
 struct SketchLine {
@@ -77,6 +84,8 @@ public:
     // Point management
     int addPoint(glm::vec2 pos, bool fromText = false);
     void movePoint(int id, glm::vec2 pos);
+    // Mark (or clear, with -1) the circle/arc a point is stuck to.
+    void setPointOnCurve(int pointId, int curveId);
     const SketchPoint* getPoint(int id) const;
     const std::vector<SketchPoint>& getPoints() const;
 

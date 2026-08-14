@@ -103,6 +103,10 @@ int Sketch::addPoint(glm::vec2 pos, bool fromText) {
     return pt.id;
 }
 
+void Sketch::setPointOnCurve(int pointId, int curveId) {
+    if (SketchPoint* pt = findPoint(pointId)) pt->onCurveId = curveId;
+}
+
 void Sketch::movePoint(int id, glm::vec2 pos) {
     SketchPoint* pt = findPoint(id);
     if (pt) {

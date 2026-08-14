@@ -138,6 +138,15 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
         default:
             break;
     }
+
+    // If that click landed on a circle/arc rim, mark whatever point ended up
+    // there as stuck to it. Done HERE, once, rather than in each tool's
+    // handler: every draw tool routes through this dispatch, so a new tool
+    // cannot forget to do it.
+    if (m_snapRimId >= 0 && m_sketch) {
+        const int pid = findCoincidentPoint(snapped, -1);
+        if (pid >= 0) m_sketch->setPointOnCurve(pid, m_snapRimId);
+    }
 }
 
 void SketchTool::onMouseMove(glm::vec2 pos) {
@@ -232,6 +241,10 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
                 glm::vec2 target = p->pos + delta;
                 glm::vec2 inferred = snap(target);
                 m_snapExcludePoints.clear();
+                // A point already stuck to a rim rides it; snap()'s answer only
+                // applies once the attachment has been let go.
+                inferred = slideOrRelease(m_dragPointId, inferred,
+                                          /*wholeSelection=*/false);
                 m_sketch->movePoint(m_dragPointId, inferred);
             }
         } else {
@@ -240,16 +253,26 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
             // rounded to the nearest grid increment so a group drag still
             // adheres to the chosen step (otherwise the offset accumulates
             // sub-grid float drift across many drags).
-            bool gridSnap = m_snapToGridEnabled && m_gridStep > 0.0f;
-            for (int pid : pts) {
-                const SketchPoint* p = m_sketch->getPoint(pid);
-                if (!p) continue;
-                glm::vec2 target = p->pos + delta;
-                if (gridSnap) {
-                    target.x = std::round(target.x / m_gridStep) * m_gridStep;
-                    target.y = std::round(target.y / m_gridStep) * m_gridStep;
+            // Quantise the DELTA, not each point. Rounding every point to the
+            // lattice teleported anything that was deliberately off it — a line
+            // with its ends on two circles lost both, 0.6mm off the rim, and
+            // came out rotated 30 -> 33.7 degrees and shorter. It also fired on
+            // a drag of nearly zero length, so merely pressing and twitching on
+            // a line moved it. A whole-step delta keeps the shape rigid and
+            // still prevents sub-grid drift accumulating across many drags.
+            glm::vec2 step = delta;
+            if (m_snapToGridEnabled && m_gridStep > 0.0f) {
+                step.x = std::round(step.x / m_gridStep) * m_gridStep;
+                step.y = std::round(step.y / m_gridStep) * m_gridStep;
+            }
+            if (step != glm::vec2(0.0f)) {
+                for (int pid : pts) {
+                    const SketchPoint* p = m_sketch->getPoint(pid);
+                    if (!p) continue;
+                    m_sketch->movePoint(
+                        pid, slideOrRelease(pid, p->pos + step,
+                                            /*wholeSelection=*/true));
                 }
-                m_sketch->movePoint(pid, target);
             }
             // Multi-point drag doesn't fire inferences; clear any stale ones
             // so the overlay doesn't draw guides from the previous frame.
@@ -714,7 +737,15 @@ static bool snapCurveToGrid(glm::vec2 center, float radius, glm::vec2 pos,
     return true;
 }
 
+// Rim snapping predates the guide overlay and drew nothing, so landing on a
+// circle looked identical to landing nowhere. Publish a guide so it reads like
+// every other inference — same diamond marker as On Line, its own label.
+void SketchTool::noteRimGuide(glm::vec2 at, int curveId) const {
+    m_activeInferences.push_back({InferenceGuide::OnCircle, at, at, curveId});
+}
+
 glm::vec2 SketchTool::snap(glm::vec2 pos) const {
+    m_snapRimId = -1;
     // Fresh inference set every snap — the renderer treats this as "what's
     // active right now".
     m_activeInferences.clear();
@@ -835,12 +866,14 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                 glm::vec2 gc;
                 if (snapCurveToGrid(center->pos, r, pos, m_gridStep,
                                     std::max(curveSnapThreshold, m_gridStep * 0.6f), gc))
-                    return gc;
+                    { m_snapRimId = c.id; noteRimGuide(gc, c.id); return gc; }
             }
             // Reduced (and Full/Max fallback): grid wins ties — only land on the
             // bare perimeter when it's genuinely closer than the nearest grid pt.
             if (gridActive && std::abs(dist - r) >= gridDist) continue;
-            return center->pos + (v / dist) * r;
+            m_snapRimId = c.id;
+            { const glm::vec2 rp = center->pos + (v / dist) * r;
+              noteRimGuide(rp, c.id); return rp; }
         }
     }
     const auto& arcs = m_sketch->getArcs();
@@ -881,15 +914,19 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                                            gc.x - center->pos.x) - startA;
                     while (gcA < 0.0f)    gcA += TWO_PI;
                     while (gcA >= TWO_PI) gcA -= TWO_PI;
-                    if (gcA <= sweep) return gc;
+                    if (gcA <= sweep) { m_snapRimId = a.id; noteRimGuide(gc, a.id); return gc; }
                 }
                 // No grid crossing on the arc — fall through to the plain
                 // perimeter point so arcs behave like circles (any on-arc point
                 // is reachable even when no grid line crosses the arc span).
-                return center->pos + (v / dist) * r;
+                m_snapRimId = a.id;
+                { const glm::vec2 rp = center->pos + (v / dist) * r;
+                  noteRimGuide(rp, a.id); return rp; }
             }
             if (gridActive && std::abs(dist - r) >= gridDist) continue;
-            return center->pos + (v / dist) * r;
+            m_snapRimId = a.id;
+            { const glm::vec2 rp = center->pos + (v / dist) * r;
+              noteRimGuide(rp, a.id); return rp; }
         }
     }
     // Face-reference circular / arc edges — continuous perimeter snapping for
@@ -2031,6 +2068,82 @@ void SketchTool::handleRectangleTool(glm::vec2 pos) {
         m_isPlacing = false;
         m_clickCount = 0;
     }
+}
+
+float SketchTool::rimBreakBand(bool wholeSelection) const {
+    // Two bands, because the two gestures mean different things (Steve): moving
+    // the LINE about the circle should keep its end on the circle, while taking
+    // the POINT off the circle is how you say you no longer want it there.
+    //
+    // So dragging a whole selection gets a generous band — the end rides round
+    // the rim through any normal repositioning and only lets go if the line is
+    // hauled somewhere else entirely. Dragging the point alone gets a tight one,
+    // so a deliberate pull detaches immediately.
+    const float tight = std::max(m_gridStep * 0.75f, 0.5f) * snapScale();
+    return wholeSelection ? std::max(tight * 8.0f, 4.0f * m_gridStep) : tight;
+}
+
+// Sticky, not locked. While the drag stays near the rim the point rides it —
+// that is "move the line about the circle and the ends stay on it". Once the
+// drag pulls clear, the attachment is dropped silently and the point goes
+// where it was put. No dialog, no constraint to delete: the user walking away
+// from the rim IS the instruction.
+glm::vec2 SketchTool::slideOrRelease(int pointId, glm::vec2 target,
+                                    bool wholeSelection) {
+    if (!m_sketch) return target;
+    const SketchPoint* p = m_sketch->getPoint(pointId);
+    if (!p || p->onCurveId < 0) return target;
+
+    glm::vec2 centre(0.0f);
+    float radius = 0.0f;
+    bool arcLimited = false;
+    float aStart = 0.0f, aSweep = 0.0f;
+    bool found = false;
+    for (const auto& c : m_sketch->getCircles())
+        if (c.id == p->onCurveId) {
+            const SketchPoint* ctr = m_sketch->getPoint(c.centerPointId);
+            if (ctr) { centre = ctr->pos; radius = float(c.radius); found = true; }
+            break;
+        }
+    if (!found)
+        for (const auto& a : m_sketch->getArcs())
+            if (a.id == p->onCurveId) {
+                const SketchPoint* ctr = m_sketch->getPoint(a.centerPointId);
+                const SketchPoint* sp  = m_sketch->getPoint(a.startPointId);
+                const SketchPoint* ep  = m_sketch->getPoint(a.endPointId);
+                if (ctr && sp && ep) {
+                    centre = ctr->pos; radius = float(a.radius);
+                    aStart = std::atan2(sp->pos.y - ctr->pos.y, sp->pos.x - ctr->pos.x);
+                    float e = std::atan2(ep->pos.y - ctr->pos.y, ep->pos.x - ctr->pos.x);
+                    const float TWO_PI = 2.0f * float(M_PI);
+                    aSweep = e - aStart;
+                    while (aSweep < 0.0f) aSweep += TWO_PI;
+                    arcLimited = true; found = true;
+                }
+                break;
+            }
+    // The rim was deleted out from under it: nothing to hold on to.
+    if (!found || radius < 1e-6f) { m_sketch->setPointOnCurve(pointId, -1); return target; }
+
+    const glm::vec2 v = target - centre;
+    const float dc = glm::length(v);
+    if (dc < 1e-6f) return target;                 // dead centre: no rim point
+    if (std::abs(dc - radius) > rimBreakBand(wholeSelection)) {  // pulled clear
+        m_sketch->setPointOnCurve(pointId, -1);
+        return target;
+    }
+    glm::vec2 onRim = centre + (v / dc) * radius;
+    if (arcLimited) {
+        float a = std::atan2(onRim.y - centre.y, onRim.x - centre.x) - aStart;
+        const float TWO_PI = 2.0f * float(M_PI);
+        while (a < 0.0f) a += TWO_PI;
+        while (a >= TWO_PI) a -= TWO_PI;
+        if (a > aSweep) {           // slid off the end of the sweep
+            m_sketch->setPointOnCurve(pointId, -1);
+            return target;
+        }
+    }
+    return onRim;
 }
 
 glm::vec2 SketchTool::snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const {

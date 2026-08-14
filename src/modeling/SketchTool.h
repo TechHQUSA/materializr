@@ -48,6 +48,7 @@ struct InferenceGuide {
         Endpoint,       // cursor snapped onto an existing sketch point
         Midpoint,       // cursor snapped onto the midpoint of a line / arc
         OnLine,         // cursor projected onto an existing line (not at an endpoint/midpoint)
+        OnCircle,       // cursor landed on a circle's or arc's rim → same diamond marker as OnLine
         AxisHFromPoint, // cursor's Y aligns with an existing point's Y → red horizontal guide
         AxisVFromPoint, // cursor's X aligns with an existing point's X → green vertical guide
         PerpToPrev,        // cursor is on the perpendicular ray from the chain's previous segment → orange guide
@@ -428,6 +429,17 @@ private:
     // or diameter (2-point mode) to whole grid units, so a 1 mm grid can't
     // produce a 10.05 mm circle. No-op when grid snap is off.
     glm::vec2 snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const;
+    // How far a drag may pull a sticky point off its rim before the
+    // attachment simply lets go. Sized to the snap band so attaching and
+    // detaching feel like the same gesture at the same scale.
+    float rimBreakBand(bool wholeSelection) const;
+    // Slide `p` along the rim it is stuck to, or release it. Returns the
+    // position to use. Clears onCurveId when the drag has left the rim.
+    glm::vec2 slideOrRelease(int pointId, glm::vec2 target, bool wholeSelection);
+    // The circle/arc the last snap() landed on, or -1. mutable: snap() is
+    // const and every caller wants the position, not a second return value.
+    mutable int m_snapRimId = -1;
+    void noteRimGuide(glm::vec2 at, int curveId) const;
     void handleSelectTool(glm::vec2 pos);
     void handleSplineTool(glm::vec2 pos);
     void handlePolygonTool(glm::vec2 pos);

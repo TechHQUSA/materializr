@@ -2108,6 +2108,7 @@ void Application::renderViewport() {
                         case InferenceGuide::Endpoint:
                         case InferenceGuide::Midpoint:
                         case InferenceGuide::OnLine:
+                        case InferenceGuide::OnCircle:
                             // Markers: shape carries the meaning.
                             break;
                         case InferenceGuide::AxisHFromPoint:
@@ -2150,8 +2151,11 @@ void Application::renderViewport() {
                         ImVec2 t2(sa.x + r,     sa.y + r * 0.6f);
                         dl->AddTriangle(t0, t1, t2, halo, 4.0f);
                         dl->AddTriangle(t0, t1, t2, col, 2.5f);
-                    } else if (g.kind == InferenceGuide::OnLine) {
-                        // Diamond marker with halo.
+                    } else if (g.kind == InferenceGuide::OnLine ||
+                               g.kind == InferenceGuide::OnCircle) {
+                        // Diamond marker with halo. A rim landing gets the same
+                        // shape as an on-edge landing because it means the same
+                        // thing to the user — the point is ON that geometry.
                         const float r = 5.0f;
                         ImVec2 d0(sa.x,     sa.y - r);
                         ImVec2 d1(sa.x + r, sa.y);
@@ -2448,6 +2452,7 @@ void Application::renderViewport() {
                             case InferenceGuide::Endpoint:       return "Endpoint";
                             case InferenceGuide::Midpoint:       return "Midpoint";
                             case InferenceGuide::OnLine:         return "On Line";
+                            case InferenceGuide::OnCircle:       return "On Circle";
                             case InferenceGuide::AxisHFromPoint: return "On Horizontal Axis";
                             case InferenceGuide::AxisVFromPoint: return "On Vertical Axis";
                             case InferenceGuide::PerpToPrev:     return "Perpendicular";

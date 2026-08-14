@@ -264,6 +264,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Sticky rim attachment: a point placed on a circle/arc rides it, then lets go
+add_executable(test_sticky_rim test_sticky_rim.cpp)
+target_link_libraries(test_sticky_rim PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sticky_rim COMMAND test_sticky_rim)
+
 # Face-sketch grid direction: world-aligned edge beats the longest diagonal
 add_executable(test_sketch_plane_axis test_sketch_plane_axis.cpp)
 target_link_libraries(test_sketch_plane_axis PRIVATE materializr_core gtest gtest_main)

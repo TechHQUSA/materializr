@@ -75,6 +75,15 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **A point placed on a circle or arc stays there.** Landing on a rim already
+  worked, but nothing remembered it, so the first drag threw the relationship
+  away — and with snap-to-grid on, dragging a line rounded BOTH its ends to the
+  nearest grid point, which pulled them off their circles, rotated the line and
+  shortened it, on a drag of essentially no distance. Now the point remembers
+  its rim: move the line and the end slides around the circle; pull it clear and
+  the attachment simply lets go. Sticky, not locked — there is nothing to
+  delete, and no dialog. It survives save and reload, and shows the same "On
+  Circle" marker that On Line has always shown.
 - **A value you type in a sketch beats the snap grid.** Typing a 7.3mm circle
   diameter on a 1mm grid built an 8mm circle — and recorded a Radius constraint
   of 3.65 against it, so the circle disagreed with its own constraint from the
