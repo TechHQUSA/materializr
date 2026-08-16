@@ -6133,19 +6133,16 @@ void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
         return;
     }
 
+    // A Subtract PREFERS the sketch's host body, but no longer requires one: a
+    // free-floating sketch (construction plane, origin plane) or a detached one
+    // cuts whichever body the swept profile actually runs into, resolved from
+    // the tool volume at commit. This used to bail here with a stderr line, so
+    // the Subtract button was a silent no-op on every unattached sketch.
+    // Detached sketches deliberately pass -1: the former host is no longer the
+    // preferred answer, only a candidate like any other.
     int targetBody = -1;
-    if (mode == ExtrudeMode::Subtract) {
-        // A detached sketch no longer belongs to its former host — cutting
-        // that body from a sketch moved elsewhere is never what's meant.
-        targetBody = sketch->isDetachedFromBody() ? -1
-                                                  : sketch->getSourceBody();
-        if (targetBody < 0) {
-            std::fprintf(stderr, "Subtract needs a sketch attached to a body "
-                                 "face; this sketch is free-floating or was "
-                                 "unlinked from its body\n");
-            return;
-        }
-    }
+    if (mode == ExtrudeMode::Subtract && !sketch->isDetachedFromBody())
+        targetBody = sketch->getSourceBody();
     beginInteractiveExtrude(profile, mode, targetBody, sketchId);
 }
 
@@ -6153,15 +6150,11 @@ void Application::subtractSketchRegion(int sketchId, int regionIndex) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
 
-    // Detached sketch: see subtract path above — never cut the former host.
-    int targetBody = sketch->isDetachedFromBody() ? -1
-                                                  : sketch->getSourceBody();
-    if (targetBody < 0) {
-        std::fprintf(stderr, "Subtract needs a sketch attached to a body "
-                             "face; this sketch is free-floating or was "
-                             "unlinked from its body\n");
-        return;
-    }
+    // Preferred host only — see extrudeSketchById: with no attachment the cut
+    // target comes from the swept volume at commit, not from the sketch's
+    // provenance, and a detached sketch's former host gets no special claim.
+    const int targetBody = sketch->isDetachedFromBody() ? -1
+                                                       : sketch->getSourceBody();
 
     auto regions = sketch->buildRegions();
     if (regionIndex < 0 || regionIndex >= static_cast<int>(regions.size())) return;

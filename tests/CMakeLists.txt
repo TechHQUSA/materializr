@@ -645,6 +645,13 @@ add_executable(test_plane_axes test_plane_axes.cpp)
 target_link_libraries(test_plane_axes PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_plane_axes COMMAND test_plane_axes)
 
+# test_cut_target_pick — Subtract-from-sketch picks the body it actually cuts
+# (geometry, not the sketch's source-body link), so a free-floating sketch stops
+# being a silent no-op and a sweep that misses can't land an empty History step.
+add_executable(test_cut_target_pick test_cut_target_pick.cpp)
+target_link_libraries(test_cut_target_pick PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_cut_target_pick COMMAND test_cut_target_pick)
+
 # ─── Loader path for a source-built OCCT ─────────────────────────────────────
 # With MZR_OCCT_PREFIX the kernel lives outside the loader's default search
 # path, and the test binaries then die at startup with "libTKBRep.so.7.9:

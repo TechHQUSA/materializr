@@ -1,5 +1,6 @@
 #include "ExtrudeController.h"
 #include "../core/Document.h"
+#include "../modeling/CutTargetPick.h"
 #include "../core/NumParse.h"
 #include "../ui/UiTheme.h"       // viewportBanner
 #include "../ui/NumField.h"      // btnConfirm / btnCancel
@@ -9,20 +10,82 @@
 #include "../touch_mode.h"
 #include <imgui.h>
 #include <BRep_Tool.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
+#include <Bnd_Box.hxx>
 #include <Geom_Plane.hxx>
 #include <Geom_Surface.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <cmath>
 #include <cstdio>
+#include <utility>
+#include <vector>
 
 namespace materializr {
 
 double ExtrudeController::opDistance() const {
-    return (m_mode == ExtrudeMode::Subtract)
-        ? -static_cast<double>(m_distance)
-        : static_cast<double>(m_distance);
+    return m_sweepSign * static_cast<double>(m_distance);
+}
+
+// Every visible, non-mesh body except the preview's own tool volume. Imported
+// meshes decline modelling ops elsewhere and must not become a cut target here
+// either.
+static std::vector<std::pair<int, TopoDS_Shape>> cutCandidates(
+        const IopContext& ctx, int excludeBody) {
+    std::vector<std::pair<int, TopoDS_Shape>> out;
+    for (int id : ctx.doc.getAllBodyIds()) {
+        if (id == excludeBody) continue;
+        if (!ctx.doc.isBodyVisible(id) || ctx.doc.isBodyMesh(id)) continue;
+        try {
+            const TopoDS_Shape& s = ctx.doc.getBody(id);
+            if (!s.IsNull()) out.push_back({id, s});
+        } catch (...) {}
+    }
+    return out;
+}
+
+int ExtrudeController::resolveCutTarget(const IopContext& ctx) const {
+    // The live preview IS the tool volume — the exact solid the user is
+    // watching — so ask which bodies it overlaps rather than re-deriving it.
+    const int previewId = previewBodyId();
+    if (previewId < 0) {
+        std::fprintf(stderr, "[Subtract] no tool volume to cut with "
+                             "(preview not applied)\n");
+        return -1;
+    }
+    TopoDS_Shape tool;
+    try { tool = ctx.doc.getBody(previewId); } catch (...) { return -1; }
+    if (tool.IsNull()) return -1;
+    const auto cands = cutCandidates(ctx, previewId);
+    const int hit = cutpick::pickCutTarget(cands, tool, m_targetBody);
+    if (hit < 0) {
+        // Say what was actually measured — "nothing to cut" is a claim about
+        // geometry, and a wrong one is invisible without the numbers (this
+        // dump is what turned "but it CLEARLY overlaps" into "the tool spans
+        // x -18..-6 and every body starts at 0"). Re-running the booleans to
+        // report them is fine: only the refusal path gets here, and the user
+        // is already stopped.
+        std::fprintf(stderr, "[Subtract] tool body %d (dist %.3f) reaches no "
+                     "body; preferred=%d, checked %zu:\n",
+                     previewId, opDistance(), m_targetBody, cands.size());
+        auto bbox = [](const TopoDS_Shape& s, double* v) {
+            Bnd_Box b; BRepBndLib::Add(s, b);
+            if (b.IsVoid()) { for (int i = 0; i < 6; ++i) v[i] = 0; return; }
+            b.Get(v[0], v[1], v[2], v[3], v[4], v[5]);
+        };
+        double t[6]; bbox(tool, t);
+        std::fprintf(stderr, "  tool bbox [%.2f %.2f %.2f]..[%.2f %.2f %.2f]\n",
+                     t[0], t[1], t[2], t[3], t[4], t[5]);
+        for (const auto& [id, shape] : cands) {
+            double b[6]; bbox(shape, b);
+            std::fprintf(stderr, "  body %d overlap %.6g  bbox [%.2f %.2f %.2f]"
+                         "..[%.2f %.2f %.2f]\n", id,
+                         cutpick::removedVolume(shape, tool),
+                         b[0], b[1], b[2], b[3], b[4], b[5]);
+        }
+    }
+    return hit;
 }
 
 bool ExtrudeController::beginExtrude(const IopContext& ctx,
@@ -53,7 +116,6 @@ bool ExtrudeController::beginExtrude(const IopContext& ctx,
 }
 
 int ExtrudeController::onBegin(const IopContext& ctx) {
-    (void)ctx;
     m_distance = 5.0f;
     std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
     m_inputFocus = true;
@@ -77,9 +139,25 @@ int ExtrudeController::onBegin(const IopContext& ctx) {
             m_normal = glm::normalize(glm::vec3(norm.X(), norm.Y(), norm.Z()));
         m_origin = glm::vec3(center.X(), center.Y(), center.Z());
     }
-    // Point the on-screen arrow INTO the body for a Subtract, so dragging
-    // toward the material deepens the cut.
-    if (m_mode == ExtrudeMode::Subtract) m_normal = -m_normal;
+    // Point the on-screen arrow INTO the material for a Subtract, so dragging
+    // toward it deepens the cut. A face sketch gets that for free — its normal
+    // points OUT of the host body, so the cut runs the other way. A sketch on a
+    // construction or origin plane has no host and no such convention: its
+    // normal points wherever the plane faces, which half the time is away from
+    // every body, so aim at the nearest one instead.
+    m_sweepSign = 1.0;
+    if (m_mode == ExtrudeMode::Subtract) {
+        m_sweepSign = -1.0;
+        if (m_targetBody < 0) {
+            std::vector<TopoDS_Shape> bodies;
+            for (const auto& [id, shape] : cutCandidates(ctx, -1))
+                bodies.push_back(shape);
+            m_sweepSign = cutpick::cutSweepSign(
+                gp_Pnt(m_origin.x, m_origin.y, m_origin.z),
+                gp_Dir(m_normal.x, m_normal.y, m_normal.z), bodies);
+        }
+        m_normal *= static_cast<float>(m_sweepSign);
+    }
 
     // Threaded target bodies are fine: the preview is always a NewBody tool
     // volume (never a per-frame boolean against the target), and the real
@@ -103,6 +181,26 @@ std::unique_ptr<Operation> ExtrudeController::buildOp(const IopContext& ctx) {
 bool ExtrudeController::syncLiveOp(Operation& op) {
     static_cast<ExtrudeOp&>(op).setDistance(opDistance());
     return true;
+}
+
+// Resolve the cut target from the swept volume before the base records
+// anything. Without this the two ways a Subtract can quietly do nothing both
+// end in a History step: no target at all (the base would record the preview,
+// leaving the tool volume behind as a stray body), or a target the sweep never
+// reaches (BRepAlgoAPI_Cut hands the body straight back, valid and unchanged).
+// Refusing leaves the op OPEN so the distance can be pushed further or reversed.
+void ExtrudeController::commit(const IopContext& ctx) {
+    if (active() && m_mode == ExtrudeMode::Subtract) {
+        const int target = resolveCutTarget(ctx);
+        if (target < 0) {
+            if (ctx.toast)
+                ctx.toast("Subtract: this profile doesn't reach any body \xE2\x80\x94 "
+                          "nothing to cut. Extrude it further, or drag the other way.");
+            return;
+        }
+        m_targetBody = target;
+    }
+    InteractiveOpController::commit(ctx);
 }
 
 std::unique_ptr<Operation> ExtrudeController::buildCommitOp(const IopContext& ctx) {
@@ -281,6 +379,7 @@ void ExtrudeController::onCleanup() {
     m_profile.Nullify();
     m_mode = ExtrudeMode::NewBody;
     m_targetBody = -1;
+    m_sweepSign = 1.0;
     m_sketchId = -1;
 }
 

@@ -248,7 +248,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "Push/pull the region into or out of the body beneath it.");
         }
         add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
-            "Cut the region's shape out of the body beneath it.");
+            "Extrude the region and cut it out of the body it runs into.");
         add(MZ_ICON_EDIT,     "Edit",     ToolAction::EditSketch, false,
             "Reopen the sketch this region belongs to.");
         add(MZ_ICON_MOVE,     "Move",     ToolAction::Move, false,
@@ -284,7 +284,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
                 "beneath them.");
         }
         add(MZ_ICON_SUBTRACT, "Subtract", ToolAction::SubtractSketch, false,
-            "Cut the sketch's shape out of the body beneath it.");
+            "Extrude the sketch's regions and cut them out of the body they run into.");
         add(MZ_ICON_LATHE,    "Lathe",    ToolAction::Revolve, false,
             "Spin the sketch profile around an axis into a solid.");
         add(MZ_ICON_MOVE,     "Move",     ToolAction::Move, false,
@@ -1081,10 +1081,12 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     if (catalogOffers(ToolAction::SubtractSketch)) {
         if (ImGui::Button("Subtract Sketch", ImVec2(-1, bh(30))))
             action = ToolAction::SubtractSketch;
-        tip("Cut the extruded regions out of the body the sketch was drawn on.");
+        tip("Extrude the sketch's regions and cut the result out of the body they\n"
+            "run into \xE2\x80\x94 the host body when the sketch sits on one, otherwise\n"
+            "whichever body the sweep reaches.");
     }
-    ImGui::TextWrapped("Subtract cuts the extruded profile into the body the "
-                       "sketch was drawn on (preview shown in red).");
+    ImGui::TextWrapped("Subtract sweeps the profile like Extrude, then cuts that "
+                       "volume out of the body it reaches.");
 
     // Move / Rotate gizmo modes — appear here so a selected sketch behaves
     // like a movable construction plane. Bodies have these in renderBodyTools;

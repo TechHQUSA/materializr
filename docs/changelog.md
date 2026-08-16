@@ -75,6 +75,19 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Subtract from a sketch is no longer a button that does nothing.** It cuts
+  what the profile actually runs into, instead of insisting the sketch still be
+  linked to the body it was drawn on. A sketch on a construction plane, on an
+  origin plane, or one that had been moved off its face used to print a line to
+  the terminal and stop — the button was there, and pressing it did nothing at
+  all. It now works like Extrude followed by a Subtract: sweep the profile, then
+  cut it out of the body it reaches. A sketch that still sits on a face keeps
+  cutting that face's body. The other silent failure is gone too: a cut whose
+  sweep stops short of the body used to land on the History panel as a step that
+  changed nothing, and it now says the profile doesn't reach anything and leaves
+  the distance open so you can push it further or reverse it. And for a sketch
+  with no host body the arrow starts out aimed at the nearest body rather than
+  at whichever way the plane happens to face.
 - **A point placed on a circle or arc stays there.** Landing on a rim already
   worked, but nothing remembered it, so the first drag threw the relationship
   away — and with snap-to-grid on, dragging a line rounded BOTH its ends to the

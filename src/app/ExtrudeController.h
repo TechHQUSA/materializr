@@ -28,6 +28,9 @@ public:
     // Entry point (this op is handed its profile rather than reading the
     // selection, so it doesn't fit onBegin's capture-from-selection shape).
     // Returns false when it refused — a curved face has no single normal.
+    //
+    // A Subtract may pass targetBody = -1: the body to cut is then resolved
+    // from the swept volume at commit (see resolveCutTarget).
     bool beginExtrude(const IopContext& ctx, const TopoDS_Shape& profile,
                       ExtrudeMode mode, int targetBody, int sourceSketchId);
 
@@ -51,6 +54,14 @@ public:
     // typed value exact (the grid step would round it under the user).
     void updateExtrude(const IopContext& ctx, bool applySnap = true);
 
+    // Subtract resolves its target from the swept volume first, and REFUSES —
+    // staying open, so the distance can be adjusted — when that volume reaches
+    // no body at all. Committing anyway would either record a step that changed
+    // nothing (a cut that misses leaves the body intact and passes every
+    // validity check) or, with no target, leave the tool volume behind as a
+    // stray new body.
+    void commit(const IopContext& ctx) override;
+
 protected:
     const char* title() const override { return "Extrude"; }
     PreviewModel previewModel() const override { return PreviewModel::LiveOp; }
@@ -67,13 +78,19 @@ protected:
     void onCleanup() override;
 
 private:
-    // Signed distance for the op: the profile normal points OUT of the body,
-    // so a Subtract's tool has to travel the other way.
+    // Signed distance for the op: a Subtract's tool travels against the profile
+    // normal (which points OUT of the host body) — except for a sketch with no
+    // host, where the direction is aimed at the nearest body instead.
     double opDistance() const;
+    // The visible body the current tool volume removes the most material from,
+    // preferring m_targetBody. -1 when the sweep reaches nothing.
+    int resolveCutTarget(const IopContext& ctx) const;
 
     TopoDS_Shape m_profile;
     ExtrudeMode m_mode = ExtrudeMode::NewBody;
     int m_targetBody = -1;
+    // +1 sweeps along the profile normal, -1 against it. See opDistance.
+    double m_sweepSign = 1.0;
     int m_sketchId = -1;
     glm::vec3 m_normal{0, 0, 1};
     glm::vec3 m_origin{0};
