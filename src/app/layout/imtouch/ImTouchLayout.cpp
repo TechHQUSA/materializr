@@ -18,6 +18,7 @@
 #include "modeling/DeleteOp.h"          // Items tree: body delete via History
 #include "modeling/SketchEditOp.h"      // timeline: Apply cascade targets
 #include "modeling/SketchTransformOp.h"
+#include "ui/UiTheme.h"                 // viewportTopChromeBottom
 #include "modeling/SketchTool.h"   // SketchToolMode for the select-mode gate
 #include "plugin/PluginContext.h"
 #include "ui/HistoryPanel.h"
@@ -91,6 +92,12 @@ void Application::renderImTouchLayout() {
     const ImVec2 wp = vp->WorkPos;
     const ImVec2 ws = vp->WorkSize;
     const float m = 12.0f * s; // float margin from the work-rect edges
+
+    // Reserve the strip the top-left chips and top-right cluster occupy, so the
+    // overlays drawn INSIDE the viewport window (the op banner, the toast) start
+    // below them instead of underneath. Both clusters are one 44*s box tall and
+    // sit at wp.y + m. See viewportTopChromeBottom.
+    materializr::viewportTopChromeBottom() = wp.y + m + 44.0f * s;
 
     // Viewport underneath everything.
     m_touchVpX = wp.x;
@@ -213,6 +220,30 @@ void Application::renderImTouchLayout() {
                 m_multiSelectToggle = !m_multiSelectToggle;
             tip("Multi-select: add taps to the current selection\n"
                 "(the touch equivalent of holding Ctrl)");
+            ImGui::SameLine(0.0f, 8.0f * s);
+        }
+        // Inference level, in sketch mode — the same live cycle the modern
+        // layout puts in its top bar and the classic toolbar puts in its rail.
+        // It IS in this layout's tool catalogue, but only inside the "More"
+        // flyout at the BOTTOM of a dock that scrolls once the sketch tools
+        // outgrow the screen, so on a tablet it sits below the fold and reads
+        // as missing (Steve: "i cannot seem to find it"). Beside the snap pill
+        // is where it belongs — the two are the same kind of drawing aid, and
+        // this cluster never scrolls. Honours the same "show the toggle"
+        // setting the other layouts gate on.
+        if (m_inSketchMode && m_showInferenceToolbarToggle && m_sketchTool) {
+            const char* infLbl = "Full";
+            switch (m_sketchTool->getInferenceLevel()) {
+                case SketchTool::InferenceLevel::Full:    infLbl = "Full";    break;
+                case SketchTool::InferenceLevel::Reduced: infLbl = "Reduced"; break;
+                case SketchTool::InferenceLevel::Off:     infLbl = "Off";     break;
+                case SketchTool::InferenceLevel::Max:     infLbl = "Max";     break;
+            }
+            if (touchui::twoRowButton("inflvl", "Inference", infLbl))
+                handleToolAction(static_cast<int>(ToolAction::SketchCycleInference));
+            tip("Sketch inference level (snapping / guides)\n"
+                "Tap to cycle: Full \xE2\x86\x92 Reduced \xE2\x86\x92 Off \xE2\x86\x92 Max\n"
+                "Max widens the catch ranges for fingertips.");
             ImGui::SameLine(0.0f, 8.0f * s);
         }
         // Snap-to-grid — the corner square's im-touch home (renderSnapWidget

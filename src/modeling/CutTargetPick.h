@@ -28,6 +28,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <vector>
@@ -83,6 +84,26 @@ inline int pickCutTarget(const std::vector<std::pair<int, TopoDS_Shape>>& bodies
         if (v > bestVol) { bestVol = v; best = id; }
     }
     return best;
+}
+
+// EVERY body the tool volume removes material from, in id order.
+//
+// The one-target rule is right for the common case — a sketch drawn on a face
+// belongs to that face's body — but wrong whenever a profile is meant to pass
+// through a stack: only the host got cut, and the rest of the sweep vanished
+// into bodies it visibly passed through. This is the opt-in answer to that.
+// Deterministic order matters: the caller pushes one operation per body, and
+// History replays them in the order they were recorded.
+inline std::vector<int> pickAllCutTargets(
+        const std::vector<std::pair<int, TopoDS_Shape>>& bodies,
+        const TopoDS_Shape& tool) {
+    std::vector<int> hits;
+    if (tool.IsNull()) return hits;
+    for (const auto& [id, shape] : bodies)
+        if (removedVolume(shape, tool) > kMinRemovedVolume)
+            hits.push_back(id);
+    std::sort(hits.begin(), hits.end());
+    return hits;
 }
 
 // Which way should a cut sweep from a sketch with no host body? +1 runs along the

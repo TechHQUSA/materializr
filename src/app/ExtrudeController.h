@@ -3,6 +3,7 @@
 #include "../modeling/ExtrudeOp.h"
 #include <TopoDS_Shape.hxx>
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace materializr {
 
@@ -85,12 +86,24 @@ private:
     // The visible body the current tool volume removes the most material from,
     // preferring m_targetBody. -1 when the sweep reaches nothing.
     int resolveCutTarget(const IopContext& ctx) const;
+    // Every visible body the tool volume reaches, for the all-bodies option.
+    std::vector<int> resolveAllCutTargets(const IopContext& ctx) const;
+    // Push one Subtract per body. History has no op grouping — the existing
+    // multi-body Boolean does the same — so each body's cut is its own step,
+    // which also keeps each one's face lineage and undo exactly as they are for
+    // the single-target case.
+    void commitCutAll(const IopContext& ctx, const std::vector<int>& targets);
 
     TopoDS_Shape m_profile;
     ExtrudeMode m_mode = ExtrudeMode::NewBody;
     int m_targetBody = -1;
     // +1 sweeps along the profile normal, -1 against it. See opDistance.
     double m_sweepSign = 1.0;
+    // Subtract only: cut EVERY body the sweep passes through, not just the one
+    // it belongs to. Off by default — a sketch on a face means that face's
+    // body, and silently carving a neighbour it happens to overlap would be a
+    // surprise. Per-gesture, not persisted.
+    bool m_cutAllBodies = false;
     int m_sketchId = -1;
     glm::vec3 m_normal{0, 0, 1};
     glm::vec3 m_origin{0};

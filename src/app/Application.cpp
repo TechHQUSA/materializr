@@ -1060,9 +1060,13 @@ void Application::renderTransientToast() {
     if (m_toastText.empty()) return;
     if (ImGui::GetTime() > m_toastExpiry) { m_toastText.clear(); return; }
     ImGuiViewport* vp = ImGui::GetMainViewport();
+    // 80px clears classic's menu bar and modern's tab strip. im-touch floats
+    // taller chrome over the viewport and scales it by uiScale, so on a tablet
+    // the fixed offset is not guaranteed to clear it — take whichever is lower.
+    const float y = std::max(vp->WorkPos.y + 80.0f,
+                             materializr::viewportTopChromeBottom() + 12.0f);
     ImGui::SetNextWindowPos(
-        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
-               vp->WorkPos.y + 80.0f),
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, y),
         ImGuiCond_Always, ImVec2(0.5f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.92f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.35f, 0.18f, 0.10f, 1.0f));
@@ -7084,6 +7088,11 @@ void Application::run() {
         // im-touch shells stand down completely (their floating chrome would
         // draw over the page); classic keeps its menu bar — the one piece of
         // chrome that is useful above the page — and drops the rest below.
+        // No floating chrome until a layout says otherwise. Reset HERE, in the
+        // one place every layout passes through, rather than in each layout's
+        // else-branch — a third layout that forgot would inherit im-touch's
+        // inset from the frame before the user switched.
+        materializr::viewportTopChromeBottom() = 0.0f;
         switch (m_uiLayout) {
             case UiLayout::Classic: renderMenuBar();        break;
             case UiLayout::Modern:

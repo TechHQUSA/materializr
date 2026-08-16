@@ -1,11 +1,15 @@
 #include "ExtrudeController.h"
 #include "../core/Document.h"
+#include "../core/History.h"
+#include "../core/Operation.h"
+#include "../core/SelectionManager.h"
 #include "../modeling/CutTargetPick.h"
 #include "../core/NumParse.h"
 #include "../ui/UiTheme.h"       // viewportBanner
 #include "../ui/NumField.h"      // btnConfirm / btnCancel
 #include "../ui/StepperRow.h"
 #include "../ui/TouchWidgets.h"  // im-touch number-pad amount field
+#include "../ui/TouchIcons.h"    // MZ_ICON_BODY — the all-bodies pill
 #include "../ui/OpDialogGrip.h"
 #include "../touch_mode.h"
 #include <imgui.h>
@@ -191,6 +195,17 @@ bool ExtrudeController::syncLiveOp(Operation& op) {
 // Refusing leaves the op OPEN so the distance can be pushed further or reversed.
 void ExtrudeController::commit(const IopContext& ctx) {
     if (active() && m_mode == ExtrudeMode::Subtract) {
+        if (m_cutAllBodies) {
+            const std::vector<int> targets = resolveAllCutTargets(ctx);
+            if (targets.empty()) {
+                if (ctx.toast)
+                    ctx.toast("Subtract: this profile doesn't reach any body \xE2\x80\x94 "
+                              "nothing to cut. Extrude it further, or drag the other way.");
+                return;
+            }
+            commitCutAll(ctx, targets);
+            return;
+        }
         const int target = resolveCutTarget(ctx);
         if (target < 0) {
             if (ctx.toast)
@@ -201,6 +216,55 @@ void ExtrudeController::commit(const IopContext& ctx) {
         m_targetBody = target;
     }
     InteractiveOpController::commit(ctx);
+}
+
+std::vector<int> ExtrudeController::resolveAllCutTargets(
+        const IopContext& ctx) const {
+    const int previewId = previewBodyId();
+    if (previewId < 0) return {};
+    TopoDS_Shape tool;
+    try { tool = ctx.doc.getBody(previewId); } catch (...) { return {}; }
+    if (tool.IsNull()) return {};
+    return cutpick::pickAllCutTargets(cutCandidates(ctx, previewId), tool);
+}
+
+// One body, one step. The base's commit() records at most a single alternative
+// op, so this takes over the whole tail of the gesture: drop the preview volume
+// (it is a NewBody tool that must not survive), then push a real Subtract per
+// target. Each carries the same profile and distance, so each cuts its own body
+// exactly as a single-target Subtract would — including its face lineage, which
+// is per-body and would have to be reinvented to pack them into one op.
+void ExtrudeController::commitCutAll(const IopContext& ctx,
+                                     const std::vector<int>& targets) {
+    if (livePreviewApplied() && liveOp()) {
+        try { liveOp()->undo(ctx.doc); } catch (...) {}
+    }
+    int done = 0;
+    for (int id : targets) {
+        auto op = std::make_unique<ExtrudeOp>();
+        op->setProfile(m_profile);
+        op->setDistance(opDistance());
+        op->setMode(ExtrudeMode::Subtract);
+        op->setTargetBody(id);
+        op->setSketchSource(m_sketchId);
+        if (ctx.history.pushOperation(std::move(op), ctx.doc)) ++done;
+    }
+    std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",
+                 std::abs(m_distance), done, targets.size());
+    // A body whose cut FAILED is not a silent loss — pushOperation refuses an
+    // op that can't produce a valid solid, so that body is simply unchanged,
+    // and the ones that worked still landed.
+    if (done < static_cast<int>(targets.size()) && ctx.toast) {
+        char msg[160];
+        std::snprintf(msg, sizeof(msg),
+                      "Cut %d of %zu bodies \xE2\x80\x94 the rest couldn't make a "
+                      "valid solid and were left alone.",
+                      done, targets.size());
+        ctx.toast(msg);
+    }
+    ctx.selection.clear();
+    ctx.markMeshesDirty();
+    teardown();
 }
 
 std::unique_ptr<Operation> ExtrudeController::buildCommitOp(const IopContext& ctx) {
@@ -348,6 +412,33 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         updateExtrude(ctx, /*applySnap=*/false);  // steppers override the grid
     }
 
+    // Subtract only: cut everything the sweep passes through, not just the one
+    // body. Off by default — a sketch on a face means that face's body, and
+    // carving a neighbour it merely overlaps would be a surprise. The checkbox
+    // is here (not a setting) because it is a property of THIS cut: a profile
+    // meant to pass through a stack and one meant to pocket a single plate are
+    // the same gesture until you say which.
+    if (m_mode == ExtrudeMode::Subtract) {
+        ImGui::Spacing();
+        // Nothing to re-preview either way: the preview IS the tool volume, and
+        // which bodies it cuts is decided at commit. The panel is pinned to
+        // 240*s, so the label has to stay short or it clips — the tooltip
+        // carries the detail. im-touch gets a pill instead of a checkbox: a
+        // checkbox tickbox is a fingertip-hostile tap target.
+        if (imTouch) {
+            if (touchui::pillButton("cutall", MZ_ICON_BODY, "All bodies",
+                                    m_cutAllBodies))
+                m_cutAllBodies = !m_cutAllBodies;
+        } else {
+            ImGui::Checkbox("Cut every body it reaches", &m_cutAllBodies);
+        }
+        ImGui::SetItemTooltip(
+            "Off: cut ONE body \xE2\x80\x94 the one the sketch sits on when it has a "
+            "host, otherwise whichever the sweep reaches most of.\n"
+            "On: cut every body the swept profile reaches, each as its own "
+            "undoable step.");
+    }
+
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead
         ImGui::Spacing();
         if (ImGui::Button(materializr::btnConfirm(), ImVec2(110, 0)))
@@ -380,6 +471,7 @@ void ExtrudeController::onCleanup() {
     m_mode = ExtrudeMode::NewBody;
     m_targetBody = -1;
     m_sweepSign = 1.0;
+    m_cutAllBodies = false;
     m_sketchId = -1;
 }
 

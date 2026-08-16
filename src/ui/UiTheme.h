@@ -1,8 +1,24 @@
 #pragma once
 #include <imgui.h>
+#include <algorithm>
 #include <cstdarg>
 
 namespace materializr {
+
+// Screen-space Y of the BOTTOM of any floating top chrome, or 0 when the layout
+// has none. Classic and modern dock their chrome above the viewport, so the
+// viewport's own top edge is already clear; im-touch floats its logo / menu /
+// project chips ON TOP of a full-screen viewport, and anything placed at a fixed
+// offset inside that window lands underneath them — which is exactly what
+// happened to the op banner ("EXTRUDE — drag in viewport…" read as "EXT… m,
+// Escape to cancel", the half naming the gesture being the half that vanished).
+//
+// Reset to 0 each frame before the layout dispatch; raised by the layout that
+// floats chrome. Read by viewportBanner and the transient toast.
+inline float& viewportTopChromeBottom() {
+    static float v = 0.0f;
+    return v;
+}
 
 // A blue accent for headings / section titles that stays READABLE on the active
 // theme: the long-standing light blue on a dark background, but a deep blue on a
@@ -38,7 +54,17 @@ inline ImVec4 dimText() {
 // look: a wide viewport still lays every one of these out on a single line, so
 // this only ever changes what a too-narrow window does.
 inline void viewportBanner(const ImVec4& col, const char* fmt, ...) {
-    ImGui::SetCursorPos(ImVec2(10.0f, 30.0f));
+    // Below the layout's floating chrome when there is any — see
+    // viewportTopChromeBottom. Screen coords for that case, because the chrome's
+    // position is screen-space and this window's own origin is not.
+    const float chromeBottom = viewportTopChromeBottom();
+    if (chromeBottom > 0.0f) {
+        const ImVec2 wp = ImGui::GetWindowPos();
+        ImGui::SetCursorScreenPos(
+            ImVec2(wp.x + 10.0f, std::max(wp.y + 30.0f, chromeBottom + 10.0f)));
+    } else {
+        ImGui::SetCursorPos(ImVec2(10.0f, 30.0f));
+    }
     ImGui::PushTextWrapPos(0.0f);   // 0 = wrap at the window's content edge
     ImGui::PushStyleColor(ImGuiCol_Text, col);
     va_list args;

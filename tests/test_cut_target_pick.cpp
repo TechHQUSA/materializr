@@ -28,6 +28,7 @@
 
 using materializr::Sketch;
 using materializr::cutpick::cutSweepSign;
+using materializr::cutpick::pickAllCutTargets;
 using materializr::cutpick::pickCutTarget;
 using materializr::cutpick::removedVolume;
 
@@ -222,4 +223,40 @@ TEST(CutTargetPick, ASweepThatStopsShortReachesNothing) {
     EXPECT_EQ(pickCutTarget(bodies, doc.getBody(tool.createdBodyId()),
                             /*preferred=*/part), -1)
         << "a preferred target the sweep never reaches is still no target";
+}
+
+// ─── The all-bodies option ───────────────────────────────────────────────────
+TEST(CutTargetPick, CuttingEverythingReturnsEveryBodyTheSweepReaches) {
+    // A profile driven through a stack: the one-target rule cuts the first
+    // plate and the rest of the sweep vanishes into bodies it visibly passes
+    // through. With the option on, every one of them is a target.
+    std::vector<std::pair<int, TopoDS_Shape>> bodies{
+        {3, box(0, 0, 0,  10, 10, 4)},     // z 0..4
+        {1, box(0, 0, 6,  10, 10, 4)},     // z 6..10
+        {2, box(0, 0, 12, 10, 10, 4)},     // z 12..16
+        {5, box(40, 0, 0, 10, 10, 4)},     // off to the side — untouched
+    };
+    TopoDS_Shape tool = box(3, 3, -1, 3, 3, 20);
+    const std::vector<int> hits = pickAllCutTargets(bodies, tool);
+    // Sorted by id, NOT by the order the bodies happened to arrive in: the
+    // caller pushes one History step each, and replay order must be stable.
+    EXPECT_EQ(hits, (std::vector<int>{1, 2, 3}));
+}
+
+TEST(CutTargetPick, CuttingEverythingStillSkipsWhatItOnlyTouches) {
+    // Same sliver-of-common-volume trap as the single-target pick: a body the
+    // tool merely shares a face with is not one the sweep passes through.
+    std::vector<std::pair<int, TopoDS_Shape>> bodies{
+        {1, box(0, 0, 0, 10, 10, 10)},
+        {2, box(10, 0, 0, 10, 10, 10)},   // shares the x=10 face with body 1
+    };
+    TopoDS_Shape tool = box(2, 2, 2, 8, 4, 4);   // inside 1, up to the seam
+    EXPECT_EQ(pickAllCutTargets(bodies, tool), (std::vector<int>{1}));
+}
+
+TEST(CutTargetPick, CuttingEverythingReachingNothingIsEmpty) {
+    std::vector<std::pair<int, TopoDS_Shape>> bodies{
+        {1, box(0, 0, 0, 10, 10, 10)},
+    };
+    EXPECT_TRUE(pickAllCutTargets(bodies, box(50, 50, 50, 2, 2, 2)).empty());
 }

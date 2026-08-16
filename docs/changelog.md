@@ -73,8 +73,27 @@ All notable changes to Materializr are documented here. Format loosely follows
 - Saving no longer pays for compression that bought almost nothing — large
   projects write faster.
 
+- **Subtract can cut every body it passes through.** A checkbox on the Subtract
+  panel ("All bodies" on touch). Off, it cuts one body — the one the sketch sits
+  on when it has a host. On, a profile driven through a stack cuts each body it
+  reaches, one undoable step per body. Off by default: a sketch drawn on a face
+  means that face's body, and carving a neighbour it merely overlaps would be a
+  surprise.
+
 ### Fixed
 
+- **The sketch inference level is reachable on touch.** It was in the tool
+  catalogue all along, but only inside the "More" flyout at the bottom of a dock
+  that scrolls once the sketch tools outgrow the screen — so on a tablet it sat
+  below the fold and read as missing. It now has a permanent Inference button in
+  the top bar during a sketch, beside snap, the way the other two layouts have
+  always had one. Tap to cycle Full → Reduced → Off → Max.
+- **Tool banners are no longer hidden behind the touch layout's chrome.** The
+  "EXTRUDE — drag in viewport…" line sat at a fixed offset inside the viewport,
+  which in the touch layout is underneath the floating logo, menu and project
+  chips: the visible half read "EXT… Escape to cancel", and the half that
+  vanished was the one naming the gesture. Banners and transient messages now
+  start below whatever chrome the layout floats over the viewport.
 - **Subtract from a sketch is no longer a button that does nothing.** It cuts
   what the profile actually runs into, instead of insisting the sketch still be
   linked to the body it was drawn on. A sketch on a construction plane, on an
