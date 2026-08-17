@@ -5,6 +5,8 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-08-16
+
 ### Added
 
 - **Move a hole.** Select a hole's rim edge and drag: one rim tilts the bore,
