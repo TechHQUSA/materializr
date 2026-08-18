@@ -669,7 +669,7 @@ void FileDialogs::render() {
         ImGui::SameLine();
     }
 
-    if (ImGui::Button(s_state.isSave ? "Save" : "Open", ImVec2(70, 0))) {
+    if (ImGui::Button(s_state.isSave ? "Save" : "Open", materializr::uiSz(70, 0))) {
         std::string result;
         if (s_state.isSave && std::strlen(s_state.nameBuf) > 0) {
             result = s_state.currentDir + "/" + s_state.nameBuf;
@@ -681,7 +681,7 @@ void FileDialogs::render() {
         if (s_state.callback) s_state.callback(result);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(70, 0))) {
+    if (ImGui::Button("Cancel", materializr::uiSz(70, 0))) {
         s_state.open = false;
         if (s_state.callback) s_state.callback("");
     }

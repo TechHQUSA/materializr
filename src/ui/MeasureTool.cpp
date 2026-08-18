@@ -166,7 +166,7 @@ void MeasureTool::renderPanel() {
         bool isCurrent = (m_mode == m);
         if (isCurrent)
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
-        if (ImGui::Button(label, ImVec2(95, 28))) setMode(m);
+        if (ImGui::Button(label, materializr::uiSz(95, 28))) setMode(m);
         if (isCurrent) ImGui::PopStyleColor();
         ImGui::SameLine();
     };

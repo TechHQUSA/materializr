@@ -5778,9 +5778,9 @@ void Application::renderViewport() {
                             }
                         }
                         ImGui::Separator();
-                        bool apply  = ImGui::Button("Apply", ImVec2(70, 0)) || typedEnter;
+                        bool apply  = ImGui::Button("Apply", materializr::uiSz(70, 0)) || typedEnter;
                         ImGui::SameLine();
-                        bool cancel = ImGui::Button("Cancel", ImVec2(70, 0));
+                        bool cancel = ImGui::Button("Cancel", materializr::uiSz(70, 0));
 
                         if (apply) {
                             float deg = m_sketchGizmoRotateDegrees;

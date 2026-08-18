@@ -1432,7 +1432,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
         ImGui::ProgressBar(fraction, ImVec2(-1, 0), pct);
     }
     ImGui::Spacing();
-    if (ImGui::Button("Cancel", ImVec2(110, 0)) ||
+    if (ImGui::Button("Cancel", materializr::uiSz(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         m_progressCancelled = true;
     }
@@ -4382,13 +4382,13 @@ void Application::renderSavePrompt() {
         }
         ImGui::Text("%s", prompt);
         ImGui::Separator();
-        if (ImGui::Button("Save", ImVec2(100, 0))) {
+        if (ImGui::Button("Save", materializr::uiSz(100, 0))) {
             m_closeAfterSave = true;
             saveProjectQuick();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Don't Save", ImVec2(100, 0))) {
+        if (ImGui::Button("Don't Save", materializr::uiSz(100, 0))) {
             if (m_postSaveAction == PostSaveAction::CloseProject) {
                 doCloseProject();
                 m_postSaveAction = PostSaveAction::None;
@@ -4403,7 +4403,7 @@ void Application::renderSavePrompt() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+        if (ImGui::Button("Cancel", materializr::uiSz(100, 0))) {
             m_closeAfterSave = false;
             m_pendingOpenAction = nullptr;
             m_postSaveAction = PostSaveAction::None;
@@ -6489,13 +6489,13 @@ void Application::renderSketchRecoveryPrompt() {
         ImGui::TextDisabled(
             "It wasn't committed before the app closed (a crash, or a restart).");
         ImGui::Spacing();
-        if (ImGui::Button("Restore it", ImVec2(140, 0))) {
+        if (ImGui::Button("Restore it", materializr::uiSz(140, 0))) {
             restoreSketchDraftNow();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+        if (ImGui::Button("Discard", materializr::uiSz(140, 0))) {
             materializr::clearSketchDraft();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
@@ -6647,13 +6647,13 @@ void Application::renderProjectRecoveryPrompt() {
                                 "own tab.", nOrphans);
         ImGui::Spacing();
         if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
-                          ImVec2(140, 0))) {
+                          materializr::uiSz(140, 0))) {
             restoreProjectRecoveryNow();
             m_pendingProjectRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+        if (ImGui::Button("Discard", materializr::uiSz(140, 0))) {
             // These are the dead session's orphaned snapshots — our own live
             // slot is separate and untouched. Discard means ALL of them, to
             // match the restore: leaving the rest to resurface on the next

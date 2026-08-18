@@ -581,14 +581,14 @@ void Application::renderSettings() {
         ImGui::EndChild();
 
         ImGui::Separator();
-        if (ImGui::Button("Apply", ImVec2(90, 0))) {
+        if (ImGui::Button("Apply", materializr::uiSz(90, 0))) {
             m_orbitButton = m_settingsOrbitButton;
             m_panButton = m_settingsPanButton;
             changed = true;
             m_showSettings = false; // Apply commits + dismisses; matches expectation
         }
         ImGui::SameLine();
-        if (ImGui::Button("Close", ImVec2(90, 0))) {
+        if (ImGui::Button("Close", materializr::uiSz(90, 0))) {
             m_showSettings = false;
         }
 
@@ -597,12 +597,12 @@ void Application::renderSettings() {
         // applies live and persists, so dismiss the dialog to avoid showing
         // stale staged values over freshly-imported ones.
         ImGui::SameLine();
-        if (ImGui::Button("Import...", ImVec2(90, 0))) {
+        if (ImGui::Button("Import...", materializr::uiSz(90, 0))) {
             importSettings();
             m_showSettings = false;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Export...", ImVec2(90, 0))) {
+        if (ImGui::Button("Export...", materializr::uiSz(90, 0))) {
             exportSettings();
         }
 
@@ -642,11 +642,11 @@ void Application::renderMirrorPopup() {
             } catch (...) {}
         };
 
-        if (ImGui::Button("X axis", ImVec2(150, 0))) { mirrorAxis(0); ImGui::CloseCurrentPopup(); }
-        if (ImGui::Button("Y axis", ImVec2(150, 0))) { mirrorAxis(1); ImGui::CloseCurrentPopup(); }
-        if (ImGui::Button("Z axis", ImVec2(150, 0))) { mirrorAxis(2); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("X axis", materializr::uiSz(150, 0))) { mirrorAxis(0); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Y axis", materializr::uiSz(150, 0))) { mirrorAxis(1); ImGui::CloseCurrentPopup(); }
+        if (ImGui::Button("Z axis", materializr::uiSz(150, 0))) { mirrorAxis(2); ImGui::CloseCurrentPopup(); }
         ImGui::Separator();
-        if (ImGui::Button("Across a face…", ImVec2(150, 0))) {
+        if (ImGui::Button("Across a face…", materializr::uiSz(150, 0))) {
             m_mirrorPickFace = true; // next planar face click defines the mirror plane
             ImGui::CloseCurrentPopup();
         }
@@ -705,7 +705,7 @@ void Application::renderUpdatePopup() {
             ImGui::TextWrapped("Download the new build from the release page; the "
                                "installer or portable zip will replace this one.");
             ImGui::Spacing();
-            if (ImGui::Button("Open Release Page", ImVec2(180, 0))) {
+            if (ImGui::Button("Open Release Page", materializr::uiSz(180, 0))) {
                 // m_updateReleaseUrl is the GitHub API's html_url — server
                 // controlled — so open it via the shell-free helper, pinned to
                 // github.com (a tampered response can neither inject a shell
@@ -719,12 +719,12 @@ void Application::renderUpdatePopup() {
 
         ImGui::Spacing();
         ImGui::Separator();
-        if (ImGui::Button("Close", ImVec2(100, 0))) {
+        if (ImGui::Button("Close", materializr::uiSz(100, 0))) {
             m_showUpdatePopup = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Re-check", ImVec2(100, 0))) {
+        if (ImGui::Button("Re-check", materializr::uiSz(100, 0))) {
             m_updateChecked = false;
         }
         ImGui::EndPopup();
@@ -791,16 +791,16 @@ void Application::renderMultiTransformPanel() {
                       std::abs(m_multiRotate[2]) > 1e-3f;
 
     ImGui::BeginDisabled(!anyNonZero);
-    if (ImGui::Button("Apply", ImVec2(100, 0))) {
+    if (ImGui::Button("Apply", materializr::uiSz(100, 0))) {
         applyMultiBodyRotation();
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Reset", ImVec2(100, 0))) {
+    if (ImGui::Button("Reset", materializr::uiSz(100, 0))) {
         m_multiRotate[0] = m_multiRotate[1] = m_multiRotate[2] = 0.0f;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close", ImVec2(100, 0))) {
+    if (ImGui::Button("Close", materializr::uiSz(100, 0))) {
         m_multiTransformPanelOpen = false;
     }
 
@@ -1005,7 +1005,7 @@ void Application::renderScalePanel() {
     }
 
     ImGui::Spacing();
-    if (ImGui::Button("Apply", ImVec2(95, 0))) {
+    if (ImGui::Button("Apply", materializr::uiSz(95, 0))) {
         if (m_selection->hasSelectedBodies()) {
             int bodyId = m_selection->getSelection()[0].bodyId;
             float sx = 1.0f, sy = 1.0f, sz = 1.0f;       // per-WORLD-axis ratios
@@ -1086,7 +1086,7 @@ void Application::renderScalePanel() {
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Reset", ImVec2(95, 0))) {
+    if (ImGui::Button("Reset", materializr::uiSz(95, 0))) {
         m_scalePct[0] = m_scalePct[1] = m_scalePct[2] = 100.0f;
         for (int i = 0; i < 3; ++i) m_scaleMmEdit[i].focused = false;
     }
@@ -1272,11 +1272,11 @@ void Application::renderSketchPatternPopup() {
         if (m_sketchPatternPickingOrigin) {
             ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
                                "Click a point in the sketch… (Esc to cancel)");
-            if (ImGui::Button("Cancel picking", ImVec2(-1, 0))) {
+            if (ImGui::Button("Cancel picking", ImVec2(-1, materializr::uiW(0)))) {
                 m_sketchPatternPickingOrigin = false;
             }
         } else {
-            if (ImGui::Button("Pick origin in sketch", ImVec2(-1, 0))) {
+            if (ImGui::Button("Pick origin in sketch", ImVec2(-1, materializr::uiW(0)))) {
                 m_sketchPatternPickingOrigin = true;
             }
             ImGui::TextDisabled("Click in the sketch — snaps to the grid.");
@@ -1284,9 +1284,9 @@ void Application::renderSketchPatternPopup() {
     }
 
     ImGui::Separator();
-    bool apply  = ImGui::Button("Apply",  ImVec2(120, 0));
+    bool apply  = ImGui::Button("Apply",  materializr::uiSz(120, 0));
     ImGui::SameLine();
-    bool cancel = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool cancel = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     bool esc    = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (changed) updateSketchPattern();
@@ -1448,11 +1448,11 @@ void Application::renderPatternPanel() {
             if (m_patternPickingOrigin) {
                 ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
                                    "Pick a point in the viewport… (Esc to cancel)");
-                if (ImGui::Button("Cancel picking", ImVec2(-1, 0))) {
+                if (ImGui::Button("Cancel picking", ImVec2(-1, materializr::uiW(0)))) {
                     m_patternPickingOrigin = false;
                 }
             } else {
-                if (ImGui::Button("Pick axis origin in viewport", ImVec2(-1, 0))) {
+                if (ImGui::Button("Pick axis origin in viewport", ImVec2(-1, materializr::uiW(0)))) {
                     m_patternPickingOrigin = true;
                 }
                 ImGui::TextDisabled("Click a point in the viewport — snaps to the grid.");
@@ -1464,9 +1464,9 @@ void Application::renderPatternPanel() {
     bool applyClicked = false, cancelClicked = false;
     if (!imTouchActionCorner()) {
         ImGui::Separator();
-        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
         ImGui::SameLine();
-        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+        cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
@@ -1529,7 +1529,7 @@ void Application::renderThreadPanel() {
                 // and mid-boolean via user-break), abandon the future, and
                 // return to the parameter popup so the values can be tweaked
                 // and re-applied.
-                if (ImGui::Button("Cancel", ImVec2(120, 0)) ||
+                if (ImGui::Button("Cancel", materializr::uiSz(120, 0)) ||
                     ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
                     if (m_threadApplyCancel) m_threadApplyCancel->store(true);
                     m_threadZombies.push_back(std::move(m_threadFuture));
@@ -1562,7 +1562,7 @@ void Application::renderThreadPanel() {
             ImGui::TextDisabled("Sharp profiles can take a while on long "
                                 "threads.");
             ImGui::Spacing();
-            if (ImGui::Button("Cancel", ImVec2(120, 0)) ||
+            if (ImGui::Button("Cancel", materializr::uiSz(120, 0)) ||
                 ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
                 cancelThreadRecuts();
                 ImGui::CloseCurrentPopup();
@@ -1755,9 +1755,9 @@ void Application::renderThreadPanel() {
     bool applyClicked = false, cancelClicked = false;
     if (!imTouchActionCorner()) {
         ImGui::Separator();
-        applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
         ImGui::SameLine();
-        cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+        cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     }
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
@@ -1819,9 +1819,9 @@ void Application::renderLoftPanel() {
             changed = true;
 
         ImGui::Separator();
-        bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+        bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
         ImGui::SameLine();
-        bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+        bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
         bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
         if (changed) updateLoft();
         if (applyClicked) commitLoft();
@@ -1906,9 +1906,9 @@ void Application::renderLoftPanel() {
                           "profiles, less predictable between dissimilar ones.");
 
     ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (changed) updateLoft();
@@ -2250,7 +2250,7 @@ void Application::renderRefImagePanel() {
     float distMM = static_cast<float>(std::atof(m_refImgDistBuf));
     bool canApply = m_refImgPickCount == 2 && distMM > 0.0f;
     ImGui::BeginDisabled(!canApply);
-    if (ImGui::Button("Apply", ImVec2(120, 0))) {
+    if (ImGui::Button("Apply", materializr::uiSz(120, 0))) {
         float ddx = m_refImgPickPx[1][0] - m_refImgPickPx[0][0];
         float ddy = m_refImgPickPx[1][1] - m_refImgPickPx[0][1];
         float pxDist = std::sqrt(ddx * ddx + ddy * ddy);
@@ -2265,7 +2265,7 @@ void Application::renderRefImagePanel() {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(120, 0))) m_refImgCalibPlane = -1;
+    if (ImGui::Button("Cancel", materializr::uiSz(120, 0))) m_refImgCalibPlane = -1;
 
     ImGui::End();
     if (!calibOpen) m_refImgCalibPlane = -1;
@@ -2301,9 +2301,9 @@ void Application::renderBoundaryFillPanel() {
                         "matches ALL of them (order doesn't matter).");
 
     ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (applyClicked) commitBoundaryFill();
@@ -2395,16 +2395,16 @@ void Application::renderSketchMovePanel() {
                       std::abs(m_sketchMove[1]) > 1e-4f ||
                       std::abs(m_sketchMove[2]) > 1e-4f;
     ImGui::BeginDisabled(!anyNonZero);
-    if (ImGui::Button("Apply", ImVec2(100, 0))) applySketchMove();
+    if (ImGui::Button("Apply", materializr::uiSz(100, 0))) applySketchMove();
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Reset", ImVec2(100, 0))) {
+    if (ImGui::Button("Reset", materializr::uiSz(100, 0))) {
         m_sketchMove[0] = m_sketchMove[1] = m_sketchMove[2] = 0.0f;
         for (int i = 0; i < 3; ++i)
             std::snprintf(m_sketchMoveBuf[i], sizeof(m_sketchMoveBuf[i]), "0");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close", ImVec2(100, 0))) m_sketchMovePanelOpen = false;
+    if (ImGui::Button("Close", materializr::uiSz(100, 0))) m_sketchMovePanelOpen = false;
 
     ImGui::End();
 }
@@ -2552,7 +2552,7 @@ void Application::renderSnapSettingsPopup() {
             if (i > 0) ImGui::SameLine();
             bool active = std::abs(m_sketchGridStep - steps[i]) < 1e-4f;
             if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
-            if (ImGui::Button(labels[i], ImVec2(46, 26))) {
+            if (ImGui::Button(labels[i], materializr::uiSz(46, 26))) {
                 m_sketchGridStep = steps[i];
                 if (m_toolbar) m_toolbar->setGridStep(m_sketchGridStep);
                 saveAppSettings();
@@ -2738,9 +2738,9 @@ void Application::renderConstructionPlanePanel() {
     }
 
     ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     bool escPressed = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (kindChanged || offsetChanged) updateConstructionPlane();
@@ -2955,10 +2955,10 @@ void Application::renderRevolvePopup() {
 
     ImGui::Separator();
     ImGui::BeginDisabled(!canApply);
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(130, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(130, 0));
     ImGui::EndDisabled();
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(130, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(130, 0));
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
 
     if (applyClicked && canApply) {
@@ -3037,9 +3037,9 @@ void Application::renderRotatePlaneAboutAxisPopup() {
     if (angleChanged) applyRotatePlanePreview();
 
     ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(150, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(150, 0));
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(150, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(150, 0));
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
 
     if (applyClicked) {
@@ -3377,9 +3377,9 @@ void Application::renderConstructionAxisPanel() {
                         "later (after Apply) to fine-tune.");
 
     ImGui::Separator();
-    bool applyClicked  = ImGui::Button("Apply", ImVec2(120, 0));
+    bool applyClicked  = ImGui::Button("Apply", materializr::uiSz(120, 0));
     ImGui::SameLine();
-    bool cancelClicked = ImGui::Button("Cancel", ImVec2(120, 0));
+    bool cancelClicked = ImGui::Button("Cancel", materializr::uiSz(120, 0));
     bool escPressed    = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
     if (kindChanged || originChanged) updateConstructionAxis();
@@ -3508,7 +3508,7 @@ void Application::renderSectionPanel() {
 
         ImGui::TextDisabled("View-only: bodies are not modified.");
         ImGui::Separator();
-        if (ImGui::Button("Exit Section View", ImVec2(200, 0)) ||
+        if (ImGui::Button("Exit Section View", materializr::uiSz(200, 0)) ||
             ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             open = false;
         }
@@ -3914,13 +3914,13 @@ void Application::renderPrimitivePopup() {
 
     ImGui::Spacing();
     if (!ok) ImGui::BeginDisabled();
-    if (ImGui::Button(materializr::btnCreate(), ImVec2(110, 0)) ||
+    if (ImGui::Button(materializr::btnCreate(), materializr::uiSz(110, 0)) ||
         (ok && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
         commitPrimitivePopup();
     }
     if (!ok) ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button(materializr::btnCancel(), ImVec2(110, 0)) ||
+    if (ImGui::Button(materializr::btnCancel(), materializr::uiSz(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         cancelPrimitivePopup();
     }
@@ -3993,7 +3993,7 @@ void Application::renderStlImportDialog() {
                  ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::TextColored(materializr::accentText(), "File");
-    if (ImGui::Button("Browse\xE2\x80\xA6", ImVec2(90, 0))) {
+    if (ImGui::Button("Browse\xE2\x80\xA6", materializr::uiSz(90, 0))) {
         // Deferred/non-blocking: the callback fires on a later frame and just
         // stores the path; the dialog stays open meanwhile.
         materializr::FileDialogs::openFile(
@@ -4044,13 +4044,13 @@ void Application::renderStlImportDialog() {
     ImGui::Spacing();
     const bool ok = !m_stlDialogPath.empty();
     if (!ok) ImGui::BeginDisabled();
-    if (ImGui::Button("Import", ImVec2(120, 0)) ||
+    if (ImGui::Button("Import", materializr::uiSz(120, 0)) ||
         (ok && ImGui::IsKeyPressed(ImGuiKey_Enter, false))) {
         commitStlImport();
     }
     if (!ok) ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button(materializr::btnCancel(), ImVec2(120, 0)) ||
+    if (ImGui::Button(materializr::btnCancel(), materializr::uiSz(120, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         cancelStlImport();
     }
@@ -4615,10 +4615,10 @@ void Application::renderUnfoldDialog() {
     ImGui::SetNextItemWidth(150);
     ImGui::SliderFloat("Rotate", &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");
     ImGui::SameLine();
-    if (ImGui::Button("-", ImVec2(24, 0))) { m_unfoldRotationDeg -= 1.0f; if (m_unfoldRotationDeg < -180.0f) m_unfoldRotationDeg += 360.0f; }
+    if (ImGui::Button("-", materializr::uiSz(24, 0))) { m_unfoldRotationDeg -= 1.0f; if (m_unfoldRotationDeg < -180.0f) m_unfoldRotationDeg += 360.0f; }
     ImGui::SetItemTooltip("Rotate -1°");
     ImGui::SameLine();
-    if (ImGui::Button("+", ImVec2(24, 0))) { m_unfoldRotationDeg += 1.0f; if (m_unfoldRotationDeg > 180.0f) m_unfoldRotationDeg -= 360.0f; }
+    if (ImGui::Button("+", materializr::uiSz(24, 0))) { m_unfoldRotationDeg += 1.0f; if (m_unfoldRotationDeg > 180.0f) m_unfoldRotationDeg -= 360.0f; }
     ImGui::SetItemTooltip("Rotate +1°");
     ImGui::SameLine();
     if (ImGui::Button("+90°")) {
@@ -4769,7 +4769,7 @@ void Application::renderUnfoldDialog() {
         ImGui::Combo("Marks", &m_unfoldRegDensity, "None\0Sparse\0Normal\0Dense\0");
         ImGui::SetItemTooltip("Alignment crosses in the page overlaps for precise assembly.");
     }
-    if (ImGui::Button("Export…", ImVec2(110, 0))) {
+    if (ImGui::Button("Export…", materializr::uiSz(110, 0))) {
         const double th = m_unfoldThicknessMm;
         const materializr::FlatPattern pat = rfp;  // rotated copy; dialog may recompute later
         if (m_unfoldExportFmt == 0) {
@@ -4795,7 +4795,7 @@ void Application::renderUnfoldDialog() {
         : "Tiled, full-size (1:1) PDF with crop marks, a 50 mm scale bar, and "
           "registration crosses in the overlaps for precise assembly.");
     ImGui::SameLine();
-    if (ImGui::Button("Close", ImVec2(90, 0))) m_unfoldDialogActive = false;
+    if (ImGui::Button("Close", materializr::uiSz(90, 0))) m_unfoldDialogActive = false;
 
     ImGui::End();
 }
