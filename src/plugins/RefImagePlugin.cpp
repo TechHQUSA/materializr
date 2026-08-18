@@ -70,8 +70,19 @@ REGISTER_PLUGIN(RefImage, [](materializr::PluginContext& ctx) {
 
     materializr::RenderPassContribution pass;
     pass.name = "ReferenceImages";
-    pass.priority = 490; // just under construction planes (500): photo first,
-                         // so a plain plane's translucent fill can overlay it
+    // 500 = Application::kBodyPassPriority, the threshold that decides whether
+    // a pass runs BEFORE the bodies or after. At 490 the photo ran before them
+    // and every body painted straight over it — the renderer uses
+    // glDepthMask(GL_FALSE), correct for a translucent overlay but it leaves no
+    // depth behind, so a body drawn afterwards passes the depth test and wins.
+    // Construction planes had exactly this bug and were moved across the line;
+    // the photo is the same kind of thing (a tracing aid you look AT the model
+    // through) and belongs on the same side. Depth TEST is still on, so a photo
+    // genuinely behind a body stays correctly hidden.
+    //
+    // Planes (501) and axes (502) moved up one to keep the old relative order:
+    // photo first, so a plane's translucent fill can still overlay it.
+    pass.priority = 500;
     pass.initialize = []() -> bool {
         if (!g_state) g_state = std::make_unique<RefImageState>();
         return g_state->renderer.initialize();

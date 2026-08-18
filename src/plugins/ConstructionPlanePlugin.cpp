@@ -80,7 +80,8 @@ REGISTER_PLUGIN(ConstructionPlane, [](materializr::PluginContext& ctx) {
     // initialize() runs once on the GL thread before the first render.
     materializr::RenderPassContribution pass;
     pass.name = "ConstructionPlanes";
-    pass.priority = 500; // mid-range: above body, below gizmo overlay
+    pass.priority = 501; // above body (>= kBodyPassPriority), below gizmo
+                         // overlay; one above the reference photo (500)
     pass.initialize = []() -> bool {
         if (!g_state) g_state = std::make_unique<PlaneRenderState>();
         return g_state->renderer.initialize();

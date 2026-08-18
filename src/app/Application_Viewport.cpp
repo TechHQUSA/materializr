@@ -611,8 +611,14 @@ void Application::renderViewport() {
         // plane quads) draw between the grid/background and the body/edge
         // pass. PluginContext receives the same view+proj, and each pass'
         // initialize() ran in initRenderers so GL state is ready.
-        // Passes that draw BEHIND geometry. The reference photo (priority 490)
-        // belongs here: it is meant to be traced over.
+        // Passes that draw BEHIND geometry. Nothing registers here today: the
+        // reference photo used to (priority 490, "it is meant to be traced
+        // over"), but drawing early does NOT put a translucent overlay behind
+        // the model — with glDepthMask(GL_FALSE) it leaves no depth, so it
+        // loses to every body regardless of where it actually sits in 3D. A
+        // photo the camera is nearer to than the part vanished anyway. Depth
+        // TEST does the "behind" part correctly on its own, so the photo moved
+        // up with the planes (see the in-front block below).
         if (m_pluginContext) {
             for (auto& pass :
                  materializr::PluginRegistry::instance().renderPasses()) {
@@ -718,7 +724,8 @@ void Application::renderViewport() {
         }
         m_shapeRenderer->render(view, proj, cam.getPosition());
         m_edgeRenderer->render(view, proj);
-        // Passes that draw IN FRONT — construction planes (500) and axes (501),
+        // Passes that draw IN FRONT — the reference photo (500), construction
+        // planes (501) and axes (502),
         // which is what both already claim ("above body") but never got: the
         // whole block ran before the bodies, and PlaneRenderer draws with
         // glDepthMask(GL_FALSE). Correct for a transparent overlay, but it
