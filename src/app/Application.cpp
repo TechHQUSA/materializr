@@ -196,7 +196,9 @@ void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
 
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
-    m_window = std::make_unique<Window>(1600, 900, "Materializr");
+    // The CLI scale has to reach the constructor: the INITIAL window size is
+    // scaled by it, and setUiScaleOverride() below runs too late for that.
+    m_window = std::make_unique<Window>(1600, 900, "Materializr", m_cliUiScale);
     m_viewport = std::make_unique<Viewport>();
     m_grid = std::make_unique<Grid>();
     m_shapeRenderer = std::make_unique<ShapeRenderer>();
@@ -293,14 +295,19 @@ Application::Application(bool safeMode, float uiScaleOverride)
     {
         AppSettings early = SettingsIO::load(SettingsIO::defaultPath());
         materializr::setTouchMode(early.touchMode);
-        // Desktop UI scale (Linux HiDPI, Settings → Appearance) must be known
-        // before the font atlas is baked in initImGui() below — it's applied at
-        // the window level so uiScale() (which fonts + style read) returns it.
-        // A --ui-scale / --hidpi command-line value wins over the saved setting
-        // (the escape hatch for "UI too small to read to change it in Settings").
+        // Desktop UI scale must be known before the font atlas is baked in
+        // initImGui() below — it's applied at the window level so uiScale()
+        // (which fonts + style read) returns it.
+        //
+        // Linux HiDPI is DETECTED now, not asked (Window::linuxAutoUiScale);
+        // the old Low/High setting and its first-run picker are gone. Only
+        // --ui-scale / --hidpi still overrides, as the escape hatch for a
+        // display whose DPI is reported wrongly.
         if (m_window) {
-            float scale = m_cliUiScale > 0.0f ? m_cliUiScale : early.desktopUiScale;
-            m_window->setUiScaleOverride(scale);
+            if (m_cliUiScale > 0.0f) m_window->setUiScaleOverride(m_cliUiScale);
+            // Cursor size rides the same answer, and must be set before
+            // initImGui() creates ImGui's system cursors.
+            m_window->applyCursorScale();
         }
     }
     // Scale the Tools-panel button heights to match the HiDPI font (touch mode),
@@ -1625,12 +1632,6 @@ void Application::loadAppSettings() {
             m_uiLayout = static_cast<UiLayout>(idx);
             saveAppSettings();
         });
-    // Same bridge for the desktop UI scale, so the first-run picker can set it
-    // (restart-to-apply — it only bakes into the fonts at startup).
-    materializr::bindUiScaleBridge(
-        [this]() { return m_desktopUiScale; },
-        [this](float s) { m_desktopUiScale = s; saveAppSettings(); });
-
     // Welcome screen: every launch until the user becomes a Supporter.
     // Suppressed by --safe-mode — no asking for coffee while the user is
     // recovering from a crash — and on the VERY FIRST launch, where the
@@ -1790,7 +1791,6 @@ void Application::meshQualityParams(float& deflection, float& angularDeflection)
 AppSettings Application::currentSettings() const {
     AppSettings s;
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
-    s.desktopUiScale = m_desktopUiScale;
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
     s.imTouchTree = m_imTouchTree;
@@ -1870,7 +1870,6 @@ void Application::applyAppSettings(const AppSettings& s) {
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
-    m_desktopUiScale = s.desktopUiScale;  // staged; applied at next startup
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;

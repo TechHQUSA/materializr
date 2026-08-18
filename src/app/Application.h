@@ -920,7 +920,6 @@ private:
     // Desktop UI scale preference (Linux HiDPI; Settings → Appearance). Staged
     // value for the Settings dialog + persistence; applied at startup via
     // Window::setUiScaleOverride (a change takes effect on restart). 1.0 = Low.
-    float m_desktopUiScale = 1.0f;
     // --ui-scale / --hidpi command-line override (0 = none). Wins over the
     // saved setting for this launch — an escape hatch when the UI is too small
     // to read to change it in Settings.

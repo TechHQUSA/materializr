@@ -280,24 +280,6 @@ void renderLayoutPicker(bool& close) {
         ImGui::Spacing();
     }
 
-#if defined(__linux__) && !defined(__ANDROID__)
-    // Desktop UI scale, offered here too so a HiDPI user whose text is too tiny
-    // to read Settings can enlarge it from the very first screen. Restart-to-
-    // apply (fonts bake at startup). See issue #26.
-    ImGui::Spacing();
-    ImGui::SeparatorText("Display size");
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextUnformatted(
-        "On a high-resolution screen the interface can look tiny. Pick "
-        "High DPI to enlarge it — this takes effect after you restart.");
-    ImGui::PopTextWrapPos();
-    {
-        int dpiIdx = (currentUiScalePref() >= 1.5f) ? 1 : 0;
-        if (ImGui::RadioButton("Normal", dpiIdx == 0)) requestUiScalePref(1.0f);
-        ImGui::SameLine(0.0f, uiW(16.0f));
-        if (ImGui::RadioButton("High DPI (2x)", dpiIdx == 1)) requestUiScalePref(2.0f);
-    }
-#endif
 
     ImGui::Spacing();
     ImGui::Separator();

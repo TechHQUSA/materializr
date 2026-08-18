@@ -14,7 +14,11 @@ namespace materializr {
 // interaction model works on a phone unchanged.
 class Window {
 public:
-    Window(int width, int height, const std::string& title);
+    // uiScaleHint: the --ui-scale CLI value, or 0 to detect. Passed in because
+    // the initial window SIZE must be scaled at creation time, and
+    // setUiScaleOverride() lands after the constructor has already run.
+    Window(int width, int height, const std::string& title,
+           float uiScaleHint = 0.0f);
     ~Window();
 
     // Non-copyable, non-movable
@@ -51,6 +55,10 @@ public:
     // > 0 overrides the platform default on Linux desktop; 0 = follow default.
     // Set before the font atlas is built (a change takes effect on restart).
     void setUiScaleOverride(float s) { m_uiScaleOverride = (s > 0.0f ? s : 0.0f); }
+    // Linux/X11: size the X theme cursors to match uiScale(). Must be called
+    // once the scale is final and BEFORE ImGui creates its system cursors —
+    // Xcursor reads XCURSOR_SIZE as it loads each one, and never again.
+    void applyCursorScale();
 
     // Raise/lower the soft keyboard to match ImGui's WantTextInput. The
     // SDL2 backend no longer calls SDL_StartTextInput itself, which is what shows

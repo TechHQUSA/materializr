@@ -262,34 +262,6 @@ void Application::renderSettings() {
                         changed = true;
                     }
 
-#if defined(__linux__) && !defined(__ANDROID__)
-                    ImGui::Spacing();
-                    ImGui::SeparatorText("Interface scale");
-                    // Linux HiDPI (issue #26): an X11/Xwayland client gets no
-                    // compositor-side scaling, so on a high-DPI panel the UI
-                    // renders tiny. Auto-detect is unreliable across
-                    // X11/Xwayland/GNOME/KDE, so the user picks. Restart-to-apply
-                    // (the font atlas bakes at 15×scale on startup).
-                    {
-                        int dpiIdx = (m_desktopUiScale >= 1.5f) ? 1 : 0;
-                        const char* dpiNames[] = { "Low DPI (100%)",
-                                                   "High DPI (200%)" };
-                        if (ImGui::Combo("Interface scale", &dpiIdx, dpiNames, 2)) {
-                            m_desktopUiScale = (dpiIdx == 1) ? 2.0f : 1.0f;
-                            changed = true;
-                        }
-                        ImGui::TextWrapped(
-                            "High DPI enlarges all text and controls for "
-                            "high-resolution displays where the interface "
-                            "otherwise renders tiny. Takes effect on restart.");
-                        float live = m_window ? m_window->uiScale() : 1.0f;
-                        if (m_desktopUiScale > live + 0.01f ||
-                            m_desktopUiScale < live - 0.01f) {
-                            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                                "Restart Materializr to apply the new scale.");
-                        }
-                    }
-#endif
 
                     ImGui::Spacing();
                     ImGui::SeparatorText("Toolbar tooltips");
