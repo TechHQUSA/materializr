@@ -196,7 +196,9 @@ void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
 
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
-    m_window = std::make_unique<Window>(1600, 900, "Materializr");
+    // The CLI scale has to reach the constructor: the INITIAL window size is
+    // scaled by it, and setUiScaleOverride() below runs too late for that.
+    m_window = std::make_unique<Window>(1600, 900, "Materializr", m_cliUiScale);
     m_viewport = std::make_unique<Viewport>();
     m_grid = std::make_unique<Grid>();
     m_shapeRenderer = std::make_unique<ShapeRenderer>();
@@ -293,14 +295,19 @@ Application::Application(bool safeMode, float uiScaleOverride)
     {
         AppSettings early = SettingsIO::load(SettingsIO::defaultPath());
         materializr::setTouchMode(early.touchMode);
-        // Desktop UI scale (Linux HiDPI, Settings → Appearance) must be known
-        // before the font atlas is baked in initImGui() below — it's applied at
-        // the window level so uiScale() (which fonts + style read) returns it.
-        // A --ui-scale / --hidpi command-line value wins over the saved setting
-        // (the escape hatch for "UI too small to read to change it in Settings").
+        // Desktop UI scale must be known before the font atlas is baked in
+        // initImGui() below — it's applied at the window level so uiScale()
+        // (which fonts + style read) returns it.
+        //
+        // Linux HiDPI is DETECTED now, not asked (Window::linuxAutoUiScale);
+        // the old Low/High setting and its first-run picker are gone. Only
+        // --ui-scale / --hidpi still overrides, as the escape hatch for a
+        // display whose DPI is reported wrongly.
         if (m_window) {
-            float scale = m_cliUiScale > 0.0f ? m_cliUiScale : early.desktopUiScale;
-            m_window->setUiScaleOverride(scale);
+            if (m_cliUiScale > 0.0f) m_window->setUiScaleOverride(m_cliUiScale);
+            // Cursor size rides the same answer, and must be set before
+            // initImGui() creates ImGui's system cursors.
+            m_window->applyCursorScale();
         }
     }
     // Scale the Tools-panel button heights to match the HiDPI font (touch mode),
