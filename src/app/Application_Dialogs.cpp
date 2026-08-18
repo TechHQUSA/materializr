@@ -2458,25 +2458,34 @@ void Application::renderSnapWidget() {
     // keep the ORIGINAL fixed tuck (the position Steve is used to) unchanged.
     ImVec2 wp = ImGui::GetWindowPos();
     ImVec2 ws = ImGui::GetWindowSize();
+    // ALWAYS anchor to the cube's cached bottom. The desktop path used to
+    // re-derive the position from its own copy of the cube's layout constants
+    // (pad 10, widgetR 38, +26, +96) on the assumption that "on desktop the
+    // cube is at its default size and spot" — true until the cube started
+    // scaling with the interface, after which the cube grew and this square
+    // stayed put. Reading the anchors means it can't drift again the next time
+    // the cube's geometry changes.
+    //
+    // The nudges differ only to preserve each mode's existing position: touch
+    // keeps the (0, 10) it already had, and at scale 1 the desktop pair
+    // (20, 12) reproduces the old fixed tuck exactly — in CLASSIC. In modern it
+    // lands ~8px up and left of where it used to, because the cube there takes
+    // a setExtraOffset(8, -8) nudge that the old hand-rolled position ignored;
+    // the square now follows the cube instead of sitting beside it. Measured on
+    // the rig: 1222,293 -> 1212,283.
     const bool anchorToCube =
         materializr::touchMode() || imTouchLayout();
-    float  size;
-    ImVec2 widgetPos;
-    if (anchorToCube) {
-        // Same rule as the ViewCube it tucks under (see ViewCube::render):
-        // follow the interface size on desktop, keep touch's own factor.
-        const float tScale = materializr::touchMode() ? 1.5f
-                                                     : materializr::uiScale();
-        size = 28.0f * tScale;
-        widgetPos = ImVec2(m_viewCube->widgetCenterX() - size * 0.5f,
-                           m_viewCube->widgetBottomY() + 10.0f * tScale);
-    } else {
-        const float pad = 10.0f, widgetR = 38.0f, xNudge = 20.0f;
-        size = 28.0f;
-        widgetPos = ImVec2(
-            wp.x + ws.x - pad - widgetR - 26.0f - size * 0.5f + xNudge,
-            wp.y + pad + widgetR * 2.0f + 96.0f);
-    }
+    // Same rule as the ViewCube it tucks under (see ViewCube::render): follow
+    // the interface size on desktop, keep touch's own factor.
+    const float tScale = materializr::touchMode() ? 1.5f
+                                                 : materializr::uiScale();
+    const float size     = 28.0f * tScale;
+    const float xNudge   = anchorToCube ?  0.0f : 20.0f;
+    const float yGap     = anchorToCube ? 10.0f : 12.0f;
+    const ImVec2 widgetPos(
+        m_viewCube->widgetCenterX() - size * 0.5f + xNudge * tScale,
+        m_viewCube->widgetBottomY() + yGap * tScale);
+    (void)wp; (void)ws;
     ImVec2 widgetEnd(widgetPos.x + size, widgetPos.y + size);
 
     // Manual hit-test — same pattern the ViewCube uses to anchor in a corner
