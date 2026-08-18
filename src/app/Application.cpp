@@ -1632,12 +1632,6 @@ void Application::loadAppSettings() {
             m_uiLayout = static_cast<UiLayout>(idx);
             saveAppSettings();
         });
-    // Same bridge for the desktop UI scale, so the first-run picker can set it
-    // (restart-to-apply — it only bakes into the fonts at startup).
-    materializr::bindUiScaleBridge(
-        [this]() { return m_desktopUiScale; },
-        [this](float s) { m_desktopUiScale = s; saveAppSettings(); });
-
     // Welcome screen: every launch until the user becomes a Supporter.
     // Suppressed by --safe-mode — no asking for coffee while the user is
     // recovering from a crash — and on the VERY FIRST launch, where the
@@ -1797,7 +1791,6 @@ void Application::meshQualityParams(float& deflection, float& angularDeflection)
 AppSettings Application::currentSettings() const {
     AppSettings s;
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
-    s.desktopUiScale = m_desktopUiScale;
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
     s.imTouchTree = m_imTouchTree;
@@ -1877,7 +1870,6 @@ void Application::applyAppSettings(const AppSettings& s) {
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
-    m_desktopUiScale = s.desktopUiScale;  // staged; applied at next startup
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;

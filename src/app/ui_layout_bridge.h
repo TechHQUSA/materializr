@@ -18,13 +18,4 @@ void requestUiLayout(int index);   // switches immediately and persists
 void bindUiLayoutBridge(std::function<int()> get,
                         std::function<void(int)> set);
 
-// Desktop UI scale preference (Linux HiDPI): 1.0 = Normal, 2.0 = High DPI.
-// Exposed so the first-run picker can set it too (in case Settings is unreadably
-// tiny). Persists; takes effect on the next launch (fonts bake at startup).
-float currentUiScalePref();
-void  requestUiScalePref(float scale);
-
-void  bindUiScaleBridge(std::function<float()> get,
-                        std::function<void(float)> set);
-
 } // namespace materializr
