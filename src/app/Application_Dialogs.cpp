@@ -2463,7 +2463,10 @@ void Application::renderSnapWidget() {
     float  size;
     ImVec2 widgetPos;
     if (anchorToCube) {
-        const float tScale = materializr::touchMode() ? 1.5f : 1.0f;
+        // Same rule as the ViewCube it tucks under (see ViewCube::render):
+        // follow the interface size on desktop, keep touch's own factor.
+        const float tScale = materializr::touchMode() ? 1.5f
+                                                     : materializr::uiScale();
         size = 28.0f * tScale;
         widgetPos = ImVec2(m_viewCube->widgetCenterX() - size * 0.5f,
                            m_viewCube->widgetBottomY() + 10.0f * tScale);
