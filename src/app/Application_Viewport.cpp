@@ -3397,6 +3397,22 @@ void Application::renderViewport() {
             // (touch has no hover), so don't orbit. Two-finger pan/zoom still
             // works — it's gated on gizmoOwnsDrag, not this local.
             bool suppressCamDrag = gizmoOwnsDrag;
+            // Shift+Left is the trackpad-mode pan gesture (orbit and pan are
+            // both bound to Left, so Shift is the only thing telling them
+            // apart). It has to lock the tools out from the PRESS frame, not
+            // just once the drag is recognised: camDragging below only turns
+            // true after ImGui's drag threshold, and a drawing tool places its
+            // point on the press — so Shift+drag panned AND left a stray line
+            // or circle behind, unless the user first switched to Select
+            // (Steve: "i cannot do that without first changing to select/move,
+            // otherwise i am drawing sketch elements even if i shift+click").
+            // Shift means nothing to the sketch tools or the viewport picker
+            // (multi-select is Ctrl), so swallowing it costs nothing. Touch
+            // pans with two fingers and has no Shift to hold.
+            const bool shiftPanGesture =
+                !materializr::touchMode() && io.KeyShift &&
+                (m_orbitButton == ImGuiMouseButton_Left ||
+                 m_panButton   == ImGuiMouseButton_Left);
             // A primary drag should drive the ACTIVE TOOL, not the camera, while a
             // tool owns it. In sketch mode that's the rubber-band; during an
             // interactive op it's the op's arrow/handle (push/pull, extrude, edge
@@ -3427,7 +3443,7 @@ void Application::renderViewport() {
                 // while sketching. Shift held → don't suppress → the Shift-pan
                 // below fires and camDragging turns the sketch input off, so it
                 // pans without also drawing.
-                if (toolWantsDrag && leftIsCamera && !io.KeyShift) suppressCamDrag = true;
+                if (toolWantsDrag && leftIsCamera && !shiftPanGesture) suppressCamDrag = true;
                 // Alt+Left-drag is reserved for box-select when left IS the camera
                 // (trackpad / left-orbit mode) — Alt is otherwise unused, and Shift
                 // is already pan. Don't let it orbit; the box-select code below
@@ -4680,7 +4696,8 @@ void Application::renderViewport() {
                         !m_ppCtl.active() && !m_extrudeCtl.active() &&
                         !m_patternActive && !anyIopActive() &&
                         !m_threadActive &&
-                        !m_moveModeToggle;   // Move (nav lock): taps don't select
+                        !m_moveModeToggle &&  // Move (nav lock): taps don't select
+                        !shiftPanGesture;     // Shift+Left is a pan, not a pick
                     // Touch: commit selection on a GENUINE tap-LIFT (Window::
                     // consumeSingleTap), not the press frame — else the first
                     // finger-down of a following nav gesture (one-finger orbit /
@@ -5308,10 +5325,14 @@ void Application::renderViewport() {
 
             // Sketch mode mouse input — ray-plane intersection. Skipped while
             // the camera is being dragged so the in-progress preview (e.g. the
-            // line endpoint following the cursor) doesn't jolt as the view moves.
+            // line endpoint following the cursor) doesn't jolt as the view moves,
+            // and while Shift is held in trackpad mode — that press belongs to
+            // the pan gesture, and a drawing tool would otherwise place its point
+            // on it before the drag was ever recognised (see shiftPanGesture).
             // Suppress while the ViewCube widget is being hovered/dragged so its
             // click doesn't pass through and start a line draw underneath.
             if (m_inSketchMode && m_activeSketch && !camDragging &&
+                !shiftPanGesture &&
                 !m_viewCube->wasHovered() && !m_snapWidgetHovered &&
                 !m_revolveArcWasHovered) {
                 ImVec2 mousePos = ImGui::GetMousePos();
