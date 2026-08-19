@@ -83,6 +83,16 @@ Window::Window(int width, int height, const std::string& title,
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 #endif
 
+    // Let the screen blank/lock and the machine idle-suspend normally. SDL
+    // assumes it is running a game and inhibits the screensaver at video init
+    // (on Linux that's a GNOME/freedesktop idle inhibitor literally reasoned
+    // "Playing a game"), which held the idle timer off for as long as the app
+    // was open — laptops left with a model on screen ran their battery flat
+    // instead of suspending. A CAD app is a document editor: it should idle out
+    // like every other one. Must precede SDL_Init — the video subsystem reads
+    // this once as it comes up.
+    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
     // NOTE: the port uses SDL2 on every platform, so upstream's GLFW-only X11/
     // Wayland drag-and-drop workaround doesn't apply here (kept the SDL init).
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
