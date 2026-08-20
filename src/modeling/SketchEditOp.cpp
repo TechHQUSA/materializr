@@ -293,7 +293,8 @@ static void writeSketchBody(std::ostream& os, const Sketch& sk, int sketchId,
            << " " << c.entityA << " " << c.entityB
            << " " << c.value << " " << c.valueY
            << " " << c.labelOffX << " " << c.labelOffY
-           << " " << (c.isDriving ? 1 : 0) << "\n";
+           << " " << (c.isDriving ? 1 : 0)
+           << " " << c.orientX << " " << c.orientY << "\n";
     }
 
     os << "SKETCH_END\n";

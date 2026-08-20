@@ -274,6 +274,16 @@ add_executable(test_typed_sketch_values test_typed_sketch_values.cpp)
 target_link_libraries(test_typed_sketch_values PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_typed_sketch_values COMMAND test_typed_sketch_values)
 
+# DOF accounting for non-point freedoms (circle/arc radius)
+add_executable(test_sketch_dof test_sketch_dof.cpp)
+target_link_libraries(test_sketch_dof PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_dof COMMAND test_sketch_dof)
+
+# Adjusting a dimension after the sketch has solved must not mirror geometry
+add_executable(test_sketch_dim_adjust test_sketch_dim_adjust.cpp)
+target_link_libraries(test_sketch_dim_adjust PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_dim_adjust COMMAND test_sketch_dim_adjust)
+
 # Shrinking a hole that exits through a near-coplanar seam (#81 follow-on)
 add_executable(test_shrink_over_seam test_shrink_over_seam.cpp)
 target_link_libraries(test_shrink_over_seam PRIVATE materializr_core gtest gtest_main)

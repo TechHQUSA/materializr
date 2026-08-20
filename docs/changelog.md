@@ -75,6 +75,56 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **The constraint badge no longer reads Over-constrained on a legitimately
+  dimensioned circle.** The sketch's degree-of-freedom tally counted only point
+  coordinates, but a circle's radius lives on the entity itself and the solver
+  drives it directly. Every circle therefore came out one degree short: a circle
+  with a locked centre and a driven radius — three equations against three
+  freedoms, exactly determined — showed Over-constrained, and a sketch carrying
+  a circle could show "fully constrained" while it was still free to move.
+  Nothing in the app gates on solver state, so this was a misleading readout
+  rather than blocked editing. The counter predates the Dimension tool; the new
+  circle dimensions are simply the first thing to lean on it. It remains a plain
+  equation count with no redundancy detection, so a zero still does not prove a
+  sketch is fully constrained.
+- **A rim-to-rim gap smaller than the circles can reach no longer thrashes the
+  sketch.** The gap bottoms out at minus the sum of the two radii — concentric.
+  A value below that implies a negative centre distance, which nothing can
+  satisfy, and the solver drove the centres through each other and back for its
+  whole iteration budget, leaving the pair wherever the last pass dropped them.
+  It now settles at the closest arrangement it can actually reach and leaves the
+  constraint marked unsatisfied, instead of shaking the geometry.
+- **A dimension driven through zero no longer mirrors the sketch.** A distance
+  reads the same on either side, so nothing recorded which side you put it on:
+  drive a point-to-line distance down to zero and back out and the point came
+  back on the far side of the line, and a vertical pair of points driven to zero
+  and back out separated along the horizontal instead — the number was right and
+  the shape had quietly turned ninety degrees. Each of these dimensions now
+  remembers the arrangement it was placed in, as a side relative to the line's
+  own direction, so it survives the line rotating. A point-to-line distance is
+  now measured signed against that side, so drifting across the line is an
+  error the solver corrects rather than a position it accepts. A point-to-point
+  distance keeps the direction the pair last genuinely had, and consults it only
+  at the moment the two points coincide and the geometry offers nothing.
+  Projects saved before this pick the information up as they are solved.
+- **An arc is counted as the freedoms it actually has.** It stores seven values
+  — centre, both endpoints and a radius — for a shape with five: centre, radius
+  and the two endpoint bearings. The other two are the relations tying the
+  endpoints to the radius, and they are only subtracted where something holds
+  them: a driving radius dimension does, because its correction slides both
+  endpoints. With no radius dimension nothing does, and the arc really can
+  reach all seven, incoherent ones included.
+- **A radius of zero or less leaves the geometry alone.** The value clamps to a
+  hair above zero; now that a radius dimension slides an arc's endpoints with
+  it, applying such a value would drag them onto the centre and collapse the
+  profile around it. It simply does not apply, and the constraint stays marked
+  unsatisfied.
+- **Adjusting an arc's radius from a dimension moves the arc.** The solver's
+  radius setter wrote the stored value and left the endpoints where they were,
+  so the dimension and the arc built from centre, endpoints and radius
+  disagreed. It now goes through the same resize the Properties panel has always
+  used, sliding both endpoints onto the new radius along their existing bearings
+  and leaving the swept angle untouched.
 - **A value you type in a sketch beats the snap grid.** Typing a 7.3mm circle
   diameter on a 1mm grid built an 8mm circle — and recorded a Radius constraint
   of 3.65 against it, so the circle disagreed with its own constraint from the

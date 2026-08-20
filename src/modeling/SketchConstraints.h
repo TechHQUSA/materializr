@@ -46,6 +46,27 @@ struct Constraint {
     // dimension measures without moving anything until the user promotes it
     // in the label's edit popup. See Application::applyPendingDimension.
     bool isDriving = true;
+
+    // Which way round the constraint was placed. Both error terms below are
+    // unsigned — a perpendicular distance and a point-to-point length are the
+    // same number on either side — so a dimension driven through zero came out
+    // the far side and the sketch settled mirrored. These record the
+    // arrangement the user placed, so a correction can restore it instead of
+    // re-deriving it from geometry that has already crossed over.
+    //
+    //   DistancePointLine: orientX is the side, +1 or -1, as the sign of
+    //     cross(lineDir, point - lineStart). Relative to the line's own
+    //     direction, so it survives the line rotating.
+    //   Distance: (orientX, orientY) is the unit A->B direction, used only to
+    //     break the tie when the two points are coincident and the geometry
+    //     itself offers no direction.
+    //
+    // (0, 0) means "not recorded" — projects written before this existed, and
+    // constraints whose geometry was degenerate when they were seeded. Those
+    // keep the previous behaviour. Seeded on first solve, not at creation, so
+    // the dimension-placement paths did not have to change.
+    double orientX = 0.0;
+    double orientY = 0.0;
 };
 
 // Reference/driven mode is only meaningful for the dimension-bearing types —

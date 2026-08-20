@@ -292,6 +292,7 @@ public:
     // the endpoints stay exactly on the circle, so shared lines follow cleanly.
     void resizeArc(int arcId, double newRadius);
 
+
     // Set an arc's swept angle (radians, CCW from start) keeping centre, radius
     // and start point fixed; the end point moves to the new angle.
     void setArcSweep(int arcId, double sweepRad);
