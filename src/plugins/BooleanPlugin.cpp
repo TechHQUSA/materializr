@@ -66,7 +66,18 @@ void runChainedBoolean(materializr::PluginContext& ctx,
         allOk = ctx.history().pushOperation(std::move(op), ctx.document());
     }
     if (allOk) { ctx.markMeshesDirty(); ctx.selection().clear(); }
-    else std::fprintf(stderr, "Boolean failed (%zu bodies)\n", bodies.size());
+    else {
+        std::fprintf(stderr, "Boolean failed (%zu bodies)\n", bodies.size());
+        // Say it on screen too. This was stderr-only, so a Union that failed
+        // was indistinguishable from a dead button: no toast, no history step,
+        // no selection change, nothing at all. Subtract has always reported its
+        // failures here; Union and Intersect run the same path and said nothing.
+        ctx.events().publish(materializr::ToastEvent{
+            std::string(mode == BooleanMode::Union ? "Union" : "Intersect") +
+            " couldn't make a valid solid from these bodies \xE2\x80\x94 they "
+            "may not overlap, share a coincident face, or the geometry is too "
+            "degenerate.", 5.0});
+    }
 }
 
 // Subtract is order-dependent, so unlike Union/Intersect we put up a modal: the

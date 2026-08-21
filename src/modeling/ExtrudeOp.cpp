@@ -133,14 +133,7 @@ std::vector<TopoDS_Face> footprintFacesOnPlane(const TopoDS_Shape& shape,
 // the body (face-count divergence downstream, and chamfer walks fail at the
 // fragment boundaries).
 TopoDS_Shape unifyProfile(const TopoDS_Shape& comp) {
-    try {
-        ShapeUpgrade_UnifySameDomain u(comp, true, true, true);
-        u.SetAngularTolerance(materializr::kUnifyAngularTol);
-        u.Build();
-        TopoDS_Shape s = u.Shape();
-        if (!s.IsNull()) return s;
-    } catch (...) {}
-    return comp;
+    return materializr::unifySameDomain(comp, "Extrude profile");
 }
 
 std::vector<std::pair<double,double>> footprintPoints(
@@ -349,13 +342,7 @@ bool ExtrudeOp::execute(Document& doc) {
             fuse.Build();
             if (!fuse.IsDone()) return false;
             extrudedShape = fuse.Shape();
-            try {
-                ShapeUpgrade_UnifySameDomain unifier(extrudedShape, true, true, true);
-                unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                unifier.Build();
-                TopoDS_Shape unified = unifier.Shape();
-                if (!unified.IsNull()) extrudedShape = unified;
-            } catch (...) { /* keep un-unified result */ }
+            extrudedShape = materializr::unifySameDomain(extrudedShape, "Extrude");
         } else {
             gp_Vec direction = faceNormal * m_distance;
             BRepPrimAPI_MakePrism prism(ownProfile, direction);
@@ -464,13 +451,7 @@ bool ExtrudeOp::execute(Document& doc) {
                     return false;
                 }
                 TopoDS_Shape fused = fuse.Shape();
-                try {
-                    ShapeUpgrade_UnifySameDomain unifier(fused, true, true, true);
-                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    unifier.Build();
-                    TopoDS_Shape unified = unifier.Shape();
-                    if (!unified.IsNull()) fused = unified;
-                } catch (...) { /* keep un-unified result */ }
+                fused = materializr::unifySameDomain(fused, "Extrude fuse");
                 if (!commitGuard(fused)) {
                     return false;
                 }

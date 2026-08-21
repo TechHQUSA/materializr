@@ -9,6 +9,7 @@
 #include <GProp_GProps.hxx>
 #include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -227,6 +228,16 @@ bool MergeFacesOp::execute(Document& doc) {
         if (m_previousShape.IsNull()) return false;
         m_facesBefore = faceCount(m_previousShape);
 
+        // UnifySameDomain edits its input in place when the merge goes wrong
+        // (see UnifyTolerance.h), and runUnify below is handed the LIVE body —
+        // up to five times on the face-scoped ladder. Without a spare, a merge
+        // this op then refuses would leave the body silently reshaped: the user
+        // is told nothing merged, and the part is already wrong. A merge that
+        // succeeds does not touch its input, so this only ever pays off on the
+        // path that was about to corrupt something.
+        TopoDS_Shape spare;
+        try { spare = BRepBuilderAPI_Copy(m_previousShape).Shape(); } catch (...) {}
+
         const bool faceScoped = isFaceScoped();
         if (faceScoped) {
             if (!rebindFaces(m_previousShape)) return false;
@@ -248,7 +259,13 @@ bool MergeFacesOp::execute(Document& doc) {
         // Nothing merged. Refusing means History::pushOperation declines and no
         // step is added — a merge that did nothing should not litter the
         // timeline, and the caller says so instead.
-        if (best.shape.IsNull()) return false;
+        if (best.shape.IsNull()) {
+            if (!spare.IsNull()) {
+                doc.updateBody(m_bodyId, spare);
+                m_previousShape = spare;
+            }
+            return false;
+        }
 
         m_facesAfter = faceCount(best.shape);
 

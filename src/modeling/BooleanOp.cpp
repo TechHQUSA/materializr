@@ -57,13 +57,7 @@ bool BooleanOp::execute(Document& doc) {
                         m_ledger.capture(op, m_previousTargetShape, TopAbs_FACE);
                         m_ledger.captureAdd(op, m_previousToolShape, TopAbs_FACE);
                         // Merge coplanar/tangent neighbours so the union has no seam.
-                        try {
-                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
-                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
-                            u.Build();
-                            TopoDS_Shape uu = u.Shape();
-                            if (!uu.IsNull()) s = uu;
-                        } catch (...) {}
+                        s = materializr::unifySameDomain(s, "Boolean");
                         break;
                     }
                     case BooleanMode::Subtract: {
@@ -79,13 +73,7 @@ bool BooleanOp::execute(Document& doc) {
                         // Merge coplanar neighbours the cut left behind. This
                         // used to happen for Union only, so a Subtract/Intersect
                         // split a flat face and the seam stayed visible (#81).
-                        try {
-                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
-                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
-                            u.Build();
-                            TopoDS_Shape uu = u.Shape();
-                            if (!uu.IsNull()) s = uu;
-                        } catch (...) {}
+                        s = materializr::unifySameDomain(s, "Boolean");
                         break;
                     }
                     case BooleanMode::Intersect: {
@@ -101,13 +89,7 @@ bool BooleanOp::execute(Document& doc) {
                         // Merge coplanar neighbours the cut left behind. This
                         // used to happen for Union only, so a Subtract/Intersect
                         // split a flat face and the seam stayed visible (#81).
-                        try {
-                            ShapeUpgrade_UnifySameDomain u(s, true, true, true);
-                            u.SetAngularTolerance(materializr::kUnifyAngularTol);
-                            u.Build();
-                            TopoDS_Shape uu = u.Shape();
-                            if (!uu.IsNull()) s = uu;
-                        } catch (...) {}
+                        s = materializr::unifySameDomain(s, "Boolean");
                         break;
                     }
                 }

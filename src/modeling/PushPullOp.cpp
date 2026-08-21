@@ -361,12 +361,9 @@ bool PushPullOp::execute(Document& doc) {
                 captureLedger(bid, body, cut);
                 TopoDS_Shape rawResult = result;
                 Handle(BRepTools_History) unifyHist;
-                try {
-                    ShapeUpgrade_UnifySameDomain u(result, true, true, true);
-                    u.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    u.Build();
-                    if (!u.Shape().IsNull()) { result = u.Shape(); unifyHist = u.History(); }
-                } catch (...) {}
+                result = materializr::unifySameDomain(result, "Push/Pull cut",
+                                                      /*concatBSplines=*/true,
+                                                      &unifyHist);
                 if (!savedBodies.count(bid)) {
                     m_previousBodies.emplace_back(bid, body);
                     savedBodies.insert(bid);
@@ -541,13 +538,9 @@ bool PushPullOp::execute(Document& doc) {
                 }
                 TopoDS_Shape rawResult = result;
                 Handle(BRepTools_History) unifyHist;
-                try {
-                    ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
-                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    unifier.Build();
-                    TopoDS_Shape unified = unifier.Shape();
-                    if (!unified.IsNull()) { result = unified; unifyHist = unifier.History(); }
-                } catch (...) {}
+                result = materializr::unifySameDomain(result, "Push/Pull",
+                                                      /*concatBSplines=*/true,
+                                                      &unifyHist);
                 snapshotLineage(doc, tgt.sourceBodyId);
                 doc.updateBody(tgt.sourceBodyId, result);
                 publishLineage(doc, tgt.sourceBodyId, current, rawResult,

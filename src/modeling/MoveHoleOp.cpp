@@ -523,14 +523,8 @@ bool MoveHoleOp::execute(Document& doc) {
         // the original face, with a ghost circular edge between them. Merge same-
         // surface faces and drop the redundant seam so the old location looks
         // untouched (also tidies the new hole's edges).
-        try {
-            ShapeUpgrade_UnifySameDomain unify(result, Standard_True /*edges*/,
-                                               Standard_True /*faces*/,
-                                               Standard_False /*concat bsplines*/);
-            unify.SetAngularTolerance(materializr::kUnifyAngularTol);
-            unify.Build();
-            if (!unify.Shape().IsNull()) result = unify.Shape();
-        } catch (...) { /* keep the un-unified result rather than fail the move */ }
+        result = materializr::unifySameDomain(result, "MoveHole",
+                                              /*concatBSplines=*/false);
 
         if (!BRepCheck_Analyzer(result).IsValid()) {
             std::fprintf(stderr, "[MoveHole] result invalid\n");

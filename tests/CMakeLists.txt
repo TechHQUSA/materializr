@@ -294,6 +294,10 @@ add_executable(test_merge_faces test_merge_faces.cpp)
 target_link_libraries(test_merge_faces PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_merge_faces COMMAND test_merge_faces)
 
+add_executable(test_unify_guard test_unify_guard.cpp)
+target_link_libraries(test_unify_guard PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_unify_guard COMMAND test_unify_guard)
+
 # Extrude region identity: draw/extrude/draw-more replays correctly (#53)
 add_executable(test_extrude_regions test_extrude_regions.cpp)
 target_link_libraries(test_extrude_regions PRIVATE materializr_core gtest gtest_main)

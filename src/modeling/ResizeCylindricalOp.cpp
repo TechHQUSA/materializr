@@ -553,19 +553,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         // (a visible hairline seam across the cap face). UnifySameDomain
         // walks the topology and merges any pair of adjacent same-surface
         // faces.
-        try {
-            ShapeUpgrade_UnifySameDomain unify(result,
-                                               /*unifyEdges=*/Standard_True,
-                                               /*unifyFaces=*/Standard_True,
-                                               /*concatBSplines=*/Standard_False);
-            unify.SetAngularTolerance(materializr::kUnifyAngularTol);
-            unify.Build();
-            TopoDS_Shape clean = unify.Shape();
-            if (!clean.IsNull()) result = clean;
-        } catch (...) {
-            // Non-fatal — fall back to the un-unified result.
-            MZLOG("[Resize] unify pass threw, using raw result\n");
-        }
+        result = materializr::unifySameDomain(result, "Resize",
+                                             /*concatBSplines=*/false);
 
         // Validate before committing: a hole grown past the outer wall
         // (or any degenerate resize) removes all material — the cut

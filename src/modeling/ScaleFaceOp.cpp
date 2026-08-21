@@ -276,13 +276,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         // split — the grown cap arrived as the ORIGINAL top disc plus a
         // coplanar annulus stacked at the same height. Merge them, the same
         // way Push/Pull does after its cut/fuse.
-        try {
-            ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
-            unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-            unifier.Build();
-            TopoDS_Shape unified = unifier.Shape();
-            if (!unified.IsNull()) result = unified;
-        } catch (...) {}
+        result = materializr::unifySameDomain(result, "ScaleFace");
 
         // Sanity: the result must still have volume, and pinch must not
         // have annihilated the body.
