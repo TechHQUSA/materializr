@@ -395,11 +395,14 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         // to ConstraintType in SketchConstraints.h — which is the policy).
         // K line format:
         //   K id type eA eB value valueY labelOffX labelOffY isDriving
+        //     orientX orientY
         // Label offsets were added for the dimension tool; isDriving for
-        // reference (annotation-only) dimensions. Readers of older builds
-        // ignore trailing tokens, so a file written here still loads there
-        // — losing the offsets and treating every dimension as driving,
-        // which is that build's only behaviour anyway.
+        // reference (annotation-only) dimensions; the orientation pair for
+        // which side an unsigned dimension was placed on. Readers of older
+        // builds ignore trailing tokens, so a file written here still loads
+        // there — losing the offsets and treating every dimension as driving,
+        // which is that build's only behaviour anyway. An older FILE loaded
+        // here simply arrives with no orientation and gets one on first solve.
         const auto& cns = sk->getConstraints();
         ofs << "CONSTRAINT_COUNT " << static_cast<int>(cns.size()) << "\n";
         for (const auto& c : cns) {
@@ -407,7 +410,8 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
                 << c.entityA << " " << c.entityB << " "
                 << c.value << " " << c.valueY << " "
                 << c.labelOffX << " " << c.labelOffY << " "
-                << (c.isDriving ? 1 : 0) << "\n";
+                << (c.isDriving ? 1 : 0) << " "
+                << c.orientX << " " << c.orientY << "\n";
         }
 
         ofs << "SKETCH_END\n";
@@ -762,6 +766,16 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 // this extraction fails too and the default stands.
                 int drv = 1;
                 c.isDriving = (s >> drv) ? (drv != 0) : true;
+                // Orientation is the 10th/11th field: which side an unsigned
+                // dimension was placed on. Absent from every file written
+                // before it existed, and the stream is already failed for the
+                // shorter legacy layouts, so the (0,0) "not recorded" default
+                // stands and the constraint picks its side up from the
+                // geometry on the first solve after loading.
+                if (!(s >> c.orientX >> c.orientY)) {
+                    c.orientX = 0.0;
+                    c.orientY = 0.0;
+                }
                 c.isSatisfied = false;
                 maxConstraintId = std::max(maxConstraintId, c.id);
                 sk.addRawConstraint(c);
@@ -1593,7 +1607,8 @@ void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
            << c.entityA << " " << c.entityB << " "
            << c.value << " " << c.valueY << " "
            << c.labelOffX << " " << c.labelOffY << " "
-           << (c.isDriving ? 1 : 0) << "\n";
+           << (c.isDriving ? 1 : 0) << " "
+           << c.orientX << " " << c.orientY << "\n";
 
     os << "SKETCH_END\n";
 }

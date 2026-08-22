@@ -80,7 +80,47 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
         }
     }
 
-    m_dof = 2 * numPoints - numEquations;
+    // Not every freedom in a sketch is a point coordinate, and not every
+    // stored value is a freedom.
+    //
+    // A CIRCLE stores a centre point and a radius: three values for the three
+    // freedoms a circle actually has. Nothing else determines its radius, and
+    // applyCorrection drives it directly through setCircleRadius, so it earns
+    // a +1. Counting only points while still subtracting the Radius/CircleGap
+    // equation that pins it put every circle one degree low — a circle with a
+    // locked centre and a driven radius (3 equations against 3 freedoms) read
+    // Over-constrained.
+    //
+    // An ARC stores a centre, a start point, an end point AND a radius: seven
+    // values for a shape that geometrically has only five freedoms (centre
+    // x/y, radius, two endpoint bearings). The other two are the intrinsic
+    // relations |start - centre| == |end - centre| == radius.
+    //
+    // Whether those two may be SUBTRACTED depends on whether anything actually
+    // holds them. A driving Radius does: its correction goes through
+    // setArcRadius -> resizeArc, which slides both endpoints onto the radius.
+    // With no driving Radius nothing enforces either relation — every other
+    // correction moves arc endpoints through the generic point mover — so all
+    // seven stored values are independently reachable and the arc really does
+    // have seven freedoms, incoherent ones included. Subtracting the relations
+    // there would claim a coherence the solver does not maintain, and report a
+    // still-movable sketch as fully constrained.
+    int numCircles = static_cast<int>(sketch.getCircles().size());
+    int arcsWithDrivenRadius = 0, arcsWithout = 0;
+    for (const auto& arc : sketch.getArcs()) {
+        bool driven = false;
+        for (const auto& c : constraints) {
+            if (c.isDriving && c.type == ConstraintType::Radius &&
+                c.entityA == arc.id) { driven = true; break; }
+        }
+        (driven ? arcsWithDrivenRadius : arcsWithout) += 1;
+    }
+
+    // +1 radius per circle. Per arc: +1 for the radius, and -2 for the
+    // intrinsic relations only where a driving Radius keeps them true.
+    m_dof = 2 * numPoints + numCircles
+            + arcsWithout - arcsWithDrivenRadius
+            - numEquations;
 
     if (m_dof < 0) {
         m_state = SketchState::OverConstrained;
@@ -105,6 +145,51 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
             c.value += computeError(c, sketch);
         }
     };
+
+    // Record which way round each unsigned dimension was placed, once, from
+    // the geometry as it stands the first time it is solved — which is the
+    // arrangement the user drew. Everything after this reads the stored value,
+    // so a dimension driven through zero is restored to the side it came from
+    // rather than whichever side the last correction happened to leave it on.
+    for (auto& c : constraints) {
+        if (!c.isDriving) continue;
+        if (c.orientX != 0.0 || c.orientY != 0.0) continue; // already recorded
+        if (c.type == ConstraintType::DistancePointLine) {
+            const SketchPoint* p = sketch.getPoint(c.entityA);
+            if (!p) continue;
+            for (const auto& line : sketch.getLines()) {
+                if (line.id != c.entityB) continue;
+                const SketchPoint* a = sketch.getPoint(line.startPointId);
+                const SketchPoint* b = sketch.getPoint(line.endPointId);
+                if (!a || !b) break;
+                glm::vec2 dir = b->pos - a->pos, rel = p->pos - a->pos;
+                double cross = static_cast<double>(dir.x) * rel.y -
+                               static_cast<double>(dir.y) * rel.x;
+                if (cross != 0.0) c.orientX = (cross > 0.0) ? 1.0 : -1.0;
+                break;
+            }
+        }
+    }
+    // The Distance hint is NOT sticky, and must not be: it is only ever a
+    // tiebreaker for the moment the two points coincide and the geometry
+    // offers no direction of its own. Frozen at first solve it goes stale the
+    // same way the old hardcoded +x did — drag a horizontal pair upright, run
+    // the value through zero, and it separates horizontally again. Re-record
+    // it every solve while it is still knowable, so the fallback always
+    // describes where the pair last actually was.
+    //
+    // The DPL side above is the opposite case and is deliberately written
+    // once: re-deriving it from live geometry is exactly what let a crossing
+    // be adopted instead of corrected.
+    for (auto& c : constraints) {
+        if (!c.isDriving || c.type != ConstraintType::Distance) continue;
+        const SketchPoint* pa = sketch.getPoint(c.entityA);
+        const SketchPoint* pb = sketch.getPoint(c.entityB);
+        if (!pa || !pb) continue;
+        glm::vec2 d = pb->pos - pa->pos;
+        float len = glm::length(d);
+        if (len > 1e-10f) { c.orientX = d.x / len; c.orientY = d.y / len; }
+    }
 
     // Iterative relaxation
     for (int iter = 0; iter < maxIterations; ++iter) {
@@ -221,9 +306,35 @@ double SketchSolver::computeError(const Constraint& c, const Sketch& sketch) con
                 }
             }
             for (const auto& arc : sketch.getArcs()) {
-                if (arc.id == c.entityA) {
-                    return arc.radius - c.value;
+                if (arc.id != c.entityA) continue;
+                // An arc's radius is not just the stored number: the arc is
+                // only that radius if both endpoints actually sit on it, and
+                // buildWires reads all of centre, endpoints and radius. Every
+                // OTHER correction branch moves endpoints through plain
+                // movePoint without touching the stored radius, so measuring
+                // the field alone reported "satisfied" the instant the number
+                // matched while a neighbour had already dragged the geometry
+                // off it — the setter ran once and was then silently undone.
+                // Measure the worst of the three so the solver keeps pulling
+                // until the arc really holds its dimension.
+                //
+                // DRIVING only. refreshReferenceValues re-reads an annotation
+                // as value += computeError, so handing it the worst of three
+                // disagreeing residuals made a reference label bounce between
+                // the two endpoint distances forever instead of settling on a
+                // reading.
+                if (!c.isDriving) return arc.radius - c.value;
+                double worst = arc.radius - c.value;
+                const SketchPoint* ctr = sketch.getPoint(arc.centerPointId);
+                if (ctr) {
+                    for (int ptId : {arc.startPointId, arc.endPointId}) {
+                        const SketchPoint* p = sketch.getPoint(ptId);
+                        if (!p) continue;
+                        double d = glm::length(p->pos - ctr->pos) - c.value;
+                        if (std::abs(d) > std::abs(worst)) worst = d;
+                    }
                 }
+                return worst;
             }
             return 0.0;
         }
@@ -420,9 +531,18 @@ double SketchSolver::computeError(const Constraint& c, const Sketch& sketch) con
                 float len = glm::length(dir);
                 if (len < 1e-10f) return 0.0; // degenerate line: inert, no NaN
                 glm::vec2 rel = p->pos - a->pos;
-                double dist = std::abs(static_cast<double>(dir.x) * rel.y -
-                                       static_cast<double>(dir.y) * rel.x) / len;
-                return dist - c.value;
+                // SIGNED, against the side the dimension was placed on. An
+                // unsigned |distance| - value reads zero for a point sitting
+                // on the WRONG side at the right distance, so no correction
+                // ever ran: the sketch sat mirrored and reported satisfied,
+                // then jumped back across the line the next time an unrelated
+                // edit happened to disturb the value. Recording the side is
+                // only worth anything if the error function enforces it.
+                double sgn = (static_cast<double>(dir.x) * rel.y -
+                              static_cast<double>(dir.y) * rel.x) / len;
+                double side = (c.orientX != 0.0) ? ((c.orientX > 0.0) ? 1.0 : -1.0)
+                                                 : ((sgn < 0.0) ? -1.0 : 1.0);
+                return side * sgn - c.value;
             }
             return 0.0;
         }
@@ -502,8 +622,18 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             glm::vec2 diff = pb->pos - pa->pos;
             float currentDist = glm::length(diff);
             if (currentDist < 1e-10f) {
-                // Points are coincident, push apart along x
-                diff = glm::vec2(1.0f, 0.0f);
+                // Coincident points carry no direction of their own. Pushing
+                // apart along a hardcoded +x rotated the pair onto that axis:
+                // a vertical pair driven 10 -> 0 -> 10 came back horizontal.
+                // Separate along the direction the dimension was placed on
+                // when there is one, and only fall back to +x when there is
+                // not.
+                glm::vec2 hint(static_cast<float>(c.orientX),
+                               static_cast<float>(c.orientY));
+                // Normalise rather than assume: the pair round-trips through
+                // the project file at the stream's default precision.
+                diff = (glm::length(hint) > 1e-6f) ? glm::normalize(hint)
+                                                   : glm::vec2(1.0f, 0.0f);
                 currentDist = 1.0f;
             }
             glm::vec2 dir = diff / currentDist;
@@ -519,6 +649,14 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             // the circle / arc struct itself, so we write it back through
             // the dedicated setter rather than the generic point-mover.
             // We try circles first (the common case) and fall back to arcs.
+            //
+            // A non-positive radius is not reachable geometry. Both setters
+            // clamp it to 1e-6, and for an arc that clamp now drags both
+            // endpoints in with it, so a value of 0 or less would grind the
+            // arc down onto its own centre and take the profile around it with
+            // it — worse than the value simply not applying. Leave the geometry
+            // alone; computeError still reports the constraint unsatisfied.
+            if (c.value <= 0.0) return;
             for (const auto& circle : sketch.getCircles()) {
                 if (circle.id == c.entityA) {
                     sketch.setCircleRadius(c.entityA, c.value);
@@ -787,7 +925,17 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
                 dir /= len;
                 glm::vec2 n(-dir.y, dir.x); // unit normal
                 float s = glm::dot(p->pos - a->pos, n); // signed distance
-                if (s < 0.0f) { n = -n; s = -s; }       // n points line → point
+                // Which side the dimension was placed on. Re-deriving it from
+                // the live sign (flip n whenever s < 0) meant that once
+                // another correction — or a pass through zero — carried the
+                // point across the line, the constraint cheerfully pinned it
+                // on the WRONG side and called it satisfied. Drive towards the
+                // recorded side instead, so crossing over is corrected rather
+                // than adopted. Falls back to the old behaviour when no side
+                // was recorded.
+                float side = (c.orientX != 0.0)
+                                 ? static_cast<float>(c.orientX > 0.0 ? 1.0 : -1.0)
+                                 : (s < 0.0f ? -1.0f : 1.0f);
                 // Move ONLY the measured point, not the reference line. The
                 // line is what we're dimensioning AGAINST (e.g. an already-
                 // placed box's edge); dragging its endpoints too would deform
@@ -795,7 +943,10 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
                 // point's own geometry (if part of a constrained rectangle)
                 // gets re-squared by that rectangle's H/V constraints in the
                 // following relaxation passes.
-                float corr = (static_cast<float>(c.value) - s);
+                //
+                // n is the +1 side's normal by construction, so the target
+                // signed distance is side * value.
+                float corr = side * static_cast<float>(c.value) - s;
                 sketch.movePoint(c.entityA, p->pos + n * corr);
                 return;
             }
@@ -819,11 +970,30 @@ void SketchSolver::applyCorrection(const Constraint& c, Sketch& sketch, double e
             const SketchPoint* pa = sketch.getPoint(caPt);
             const SketchPoint* pb = sketch.getPoint(cbPt);
             if (!pa || !pb) return;
+            // The rim gap bottoms out at -(rA + rB): that is concentric, the
+            // deepest two circles can overlap. A value below it implies a
+            // NEGATIVE centre distance, which no arrangement of two points can
+            // satisfy — the correction then drove the centres past each other,
+            // dir flipped, and the next pass drove them back, so the solver
+            // oscillated for the full iteration budget and left the geometry
+            // wherever the last pass dropped it. Clamp to the closest
+            // achievable arrangement instead; the constraint still reports
+            // unsatisfied (computeError is unchanged), so the UI can flag the
+            // value as impossible rather than the sketch quietly thrashing.
+            float targetCentre = std::max(0.0f, static_cast<float>(c.value + rA + rB));
+
             glm::vec2 diff = pb->pos - pa->pos;
             float centreDist = glm::length(diff);
-            if (centreDist < 1e-10f) { diff = glm::vec2(1.0f, 0.0f); centreDist = 1.0f; }
+            if (centreDist < 1e-10f) {
+                // Coincident centres carry no direction. Only invent one when
+                // the target actually wants them apart — inventing it while
+                // the target is concentric shoved them back off each other
+                // every pass, which is the same thrash by another route.
+                if (targetCentre < 1e-10f) return;
+                diff = glm::vec2(1.0f, 0.0f);
+                centreDist = 1.0f;
+            }
             glm::vec2 dir = diff / centreDist;
-            float targetCentre = static_cast<float>(c.value + rA + rB);
             float corr = (targetCentre - centreDist) * 0.5f;
             sketch.movePoint(caPt, pa->pos - dir * corr);
             sketch.movePoint(cbPt, pb->pos + dir * corr);

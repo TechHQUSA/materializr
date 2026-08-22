@@ -5760,6 +5760,14 @@ void Application::applyPendingDimension() {
                 if (distSwapped || angleSwapped || gapSwapped || mirroredDPL) {
                     c.entityA = pd.entityA;
                     c.entityB = pd.entityB;
+                    // The recorded orientation describes the OLD ordering: a
+                    // Distance hint runs entityA->entityB, and a mirrored
+                    // DistancePointLine's side is measured against the old
+                    // line's direction. Both are backwards once the entities
+                    // swap, so clear them and let the solver re-record from
+                    // the geometry as it now stands.
+                    c.orientX = 0.0;
+                    c.orientY = 0.0;
                 }
                 // Value: left untouched everywhere the stored number stays
                 // geometrically correct under the (possibly new) entity
