@@ -826,6 +826,16 @@ float Window::uiScale() const {
     if (s < 1.0f) s = 1.0f;     // never shrink below 100%
     if (s > 3.0f) s = 3.0f;     // 300% cap (Windows tops out ~250% on laptops)
     return s;
+#elif defined(__ANDROID__)
+    // Android only reaches here with touch mode turned OFF — a tablet driven by
+    // a mouse and keyboard, which is a supported setup. It must NOT fall into
+    // the Linux desktop branch below: Android defines __linux__ too, but
+    // linuxAutoUiScale() is guarded desktop-only at its definition, so building
+    // it here is what broke the F-Droid/APK build (the desktop CI never
+    // compiles for Android, so nothing caught it until the release preflight).
+    // 1.0 is what the manual desktop scale defaulted to before it was replaced,
+    // so this is the behaviour that path always had.
+    return 1.0f;
 #elif defined(__linux__)
     // Linux desktop: the app is an X11/Xwayland client and no compositor-side
     // scaling reaches it, so on a HiDPI panel the native-pixel framebuffer
