@@ -3,6 +3,7 @@
 
 #include <OSD.hxx>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -44,6 +45,16 @@ void installCrashBacktrace() {
     sigaction(SIGSEGV, &sa, &g_prevSegv);
 }
 #endif
+
+// Buffer size for the setvbuf calls in main(). It must be a REAL size, not 0:
+// glibc treats 0 as "allocate your own buffer", but MSVC's UCRT rejects it for
+// _IOLBF/_IOFBF as an invalid parameter and calls __fastfail(FAST_FAIL_INVALID_ARG),
+// which killed Materializr on the FIRST LINE of main() with no message at all.
+// Windows 1.6.1 and 1.6.2 could not start at all because of it (#82) — the
+// console window opened and closed, and there was nothing to see because the
+// process died before a single write. Verified on Windows: size 0 exits
+// 0xC0000409 in ucrtbase.dll, size 4096 returns 0.
+constexpr std::size_t kStdioBufSize = 4096;
 
 struct CliOptions {
     bool safeMode = false;
@@ -121,7 +132,9 @@ int main(int argc, char* argv[]) {
     // buffering held MINUTES of prints and flushed them in one burst, giving
     // every journal line the same timestamp — which made an input-storm
     // non-bug out of an ordinary session while hiding the real event order.
-    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    // (MSVC treats _IOLBF as full buffering, so that intent is Linux-only —
+    // but the call must still pass a valid size there. See kStdioBufSize.)
+    std::setvbuf(stdout, nullptr, _IOLBF, kStdioBufSize);
     CliOptions opts = parseArgs(argc, argv);
     if (opts.wantHelp) {
         printHelp();
@@ -137,7 +150,7 @@ int main(int argc, char* argv[]) {
         // crash mid-op still flushes recent traces.
         std::FILE* log = std::freopen(opts.logPath, "w", stderr);
         if (log) {
-            std::setvbuf(log, nullptr, _IOLBF, 0);
+            std::setvbuf(log, nullptr, _IOLBF, kStdioBufSize);
             std::cout << "[verbose] stderr -> " << opts.logPath << std::endl;
             std::fprintf(stderr, "[verbose] materializr log opened\n");
         } else {
