@@ -5,6 +5,51 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [1.6.2] — 2026-08-22
+
+### Changed
+
+- **The Linux interface scale is detected, not configured.** The manual
+  Low/High setting and its first-run prompt are gone: the scale is measured
+  from the display, so the app comes up the right size on a HiDPI laptop with
+  nothing to set. The mouse cursor and the initial window size follow the same
+  scale, so the pointer is no longer a speck and the toolbars are no longer
+  jammed against the viewport. `--ui-scale` still overrides it.
+- **Interface elements scale with it.** Buttons across the dialogs sized
+  themselves in fixed pixels while their text grew with the scale, so labels
+  ran past their own edges at 2x. The ViewCube, its rotation arrows, the Home
+  button, the axis triad and the snap widget had the opposite problem — they
+  stayed at 1x while everything around them grew. All of them now follow the
+  interface scale. Touch mode is deliberately unchanged.
+- **Materializr lets the screen sleep.** It was holding the display awake for
+  as long as it was open, which on a laptop meant a flat battery rather than a
+  suspended machine. It now idles out like any other application.
+
+### Fixed
+
+- **Union and Intersect could silently do nothing.** On some geometry the
+  cosmetic pass that merges seam faces after a boolean would corrupt the
+  result — changing the part's volume and leaving it invalid — and the
+  operation then discarded a perfectly good result and reported nothing at
+  all, so the button looked dead. That merge is now rejected whenever it
+  changes the part, and a boolean that genuinely fails says so instead of
+  failing in silence. The same protection covers Push/Pull, Extrude, Scale
+  Face, Move Hole, Resize and Merge Faces, where the same pass could reshape a
+  body while telling you nothing had happened.
+- **Sketch dimensions hold the side they were placed on.** A point-to-line
+  dimension records which side of the line it was on and now enforces it, so
+  the sketch no longer mirrors itself and snap back across the line on a later
+  unrelated edit. Arcs no longer lose their radius or oscillate between
+  solves, and an arc's degrees of freedom are counted correctly, so a
+  fully-pinned arc no longer reads as over-constrained.
+- **Shift+drag pans in sketch mode** with trackpad navigation enabled, instead
+  of panning and drawing a sketch element at the same time.
+- **Reference images draw in front of the model** rather than underneath every
+  body, so a photo being traced stays visible.
+- **The Android build compiles again.** A display-scaling change did not build
+  for Android, which would have left the release with no F-Droid build and no
+  APKs.
+
 ## [1.6.1] — 2026-08-16
 
 ### Added
