@@ -32,3 +32,18 @@
 #define MZ_GLES 1
 #define MZ_MOBILE 1
 #endif
+
+//   MZ_TOUCH_INPUT - the SDL finger-gesture pipeline is COMPILED IN. Defined
+//               everywhere: SDL2 reports SDL_FINGER* on desktop X11/Wayland
+//               just as it does on Android, and a Surface/2-in-1 running the
+//               desktop build has a real touchscreen. This is deliberately
+//               separate from MZ_MOBILE, which stays "is a touch-FIRST
+//               platform" and still gates the on-screen keyboard and the
+//               mobile defaults.
+//
+// Compiling the pipeline in is not the same as running it: on desktop it stays
+// dormant until opted into at runtime (materializr::desktopTouchEnabled() in
+// touch_mode.h). Before this split the gestures were inside MZ_MOBILE, so on
+// desktop handleFingerEvent() was an empty stub and touch mode delivered its
+// larger UI with none of its input model.
+#define MZ_TOUCH_INPUT 1

@@ -62,12 +62,18 @@ Window::Window(int width, int height, const std::string& title,
                float uiScaleHint)
     : m_width(width), m_height(height) {
 
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
     // Stop SDL from synthesizing mouse events from touch. On Android that
     // synthesis leaves ImGui's mouse button stuck "down" after a tap (so every
     // gesture reads as click-and-hold). We feed ImGui clean finger events
     // ourselves in pollEvents() instead.
-    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    //
+    // Only when we are actually going to handle finger events. On desktop
+    // without the opt-in we leave SDL's synthesis ALONE: it is the only thing
+    // making a touchscreen work there, and killing it while handleFingerEvent()
+    // stays dormant would take a partly-working touchscreen to a dead one.
+    if (materializr::touchInputActive())
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 
 #if defined(_WIN32)
@@ -319,11 +325,16 @@ int Window::pollEvents(int waitMs) {
                     break;
             }
         }
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
         // Touch gestures, handled directly (SDL's own touch->mouse synthesis is
         // off). One finger drives the left mouse (tap = select, drag = orbit in
         // trackpad mode); two fingers pan/pinch-zoom the camera.
-        if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION || e.type == SDL_FINGERUP) {
+        //
+        // touchInputActive() is checked FIRST so that on an opted-out desktop
+        // the finger events fall through to ImGui_ImplSDL2_ProcessEvent below
+        // and SDL's synthesis keeps working exactly as it did before.
+        if (materializr::touchInputActive() &&
+            (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION || e.type == SDL_FINGERUP)) {
             handleFingerEvent(e.type, (std::int64_t)e.tfinger.fingerId, e.tfinger.x, e.tfinger.y);
             continue;   // don't also route finger events through the backend
         }
@@ -344,15 +355,17 @@ int Window::pollEvents(int waitMs) {
                 break;
         }
     }
-#if defined(MZ_MOBILE)
-    updateHoldSelect();          // arm the long-press (box-select on drag / menu on lift)
-    pumpSyntheticRightClick();   // play back a queued long-press context-menu click
+#if defined(MZ_TOUCH_INPUT)
+    if (materializr::touchInputActive()) {
+        updateHoldSelect();      // arm the long-press (box-select on drag / menu on lift)
+        pumpSyntheticRightClick();   // play back a queued long-press context-menu click
+    }
 #endif
     SDL_GetWindowSize(m_window, &m_width, &m_height);
     return result;
 }
 
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
 void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float ny) {
     ImGuiIO& io = ImGui::GetIO();
     const float x = nx * io.DisplaySize.x;   // normalised [0,1] -> pixels
