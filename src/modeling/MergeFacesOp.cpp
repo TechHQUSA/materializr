@@ -8,6 +8,7 @@
 #include <BRepTools_History.hxx>
 #include <GProp_GProps.hxx>
 #include <ShapeBuild_ReShape.hxx>
+#include <ShapeFix_FixSmallFace.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
@@ -188,6 +189,66 @@ bool outwardNormal(const TopoDS_Shape& s, gp_Dir& n) {
     return faceNormalPoint(f, n, p);
 }
 
+// Is a degenerate sliver face wedged between two of the picked faces?
+//
+// Sketch point coordinates are stored as glm::vec2, i.e. 32-bit floats, while
+// the kernel works in double. 85.7 has no float32 representation: it becomes
+// 85.699996948, which is 3.05e-6 mm out. A sketch snapped to an edge at that
+// coordinate therefore lands 3 NANOMETRES short, and the push/pull built from
+// it leaves a strip face that thin between the two surfaces.
+//
+// Measured on robot dog cover.mzr, body "Extrude": three such faces, 97.00 mm
+// and 15.38 mm long, each exactly 3.0546e-6 mm wide -- the same figure as the
+// float32 error on 85.7. The two faces either side visibly touch and are
+// coplanar, but share no edge, because those strips are between them. Merge
+// then refuses and no tolerance can help: the slivers are real faces.
+bool sliverBetween(const TopoDS_Shape& body,
+                   const std::vector<TopoDS_Shape>& faces, double maxArea) {
+    TopTools_MapOfShape picked;
+    for (const auto& f : faces) picked.Add(f);
+    TopTools_IndexedDataMapOfShapeListOfShape e2f;
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, e2f);
+    // faces adjacent to at least two DIFFERENT picked faces
+    TopTools_IndexedMapOfShape all;
+    TopExp::MapShapes(body, TopAbs_FACE, all);
+    for (int i = 1; i <= all.Extent(); ++i) {
+        const TopoDS_Shape& cand = all(i);
+        if (picked.Contains(cand)) continue;
+        GProp_GProps g;
+        try { BRepGProp::SurfaceProperties(cand, g); } catch (...) { continue; }
+        if (g.Mass() > maxArea) continue;
+        int touches = 0;
+        TopTools_MapOfShape seen;
+        for (TopExp_Explorer ex(cand, TopAbs_EDGE); ex.More(); ex.Next()) {
+            if (!e2f.Contains(ex.Current())) continue;
+            const TopTools_ListOfShape& fl = e2f.FindFromKey(ex.Current());
+            for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next())
+                if (picked.Contains(it.Value()) && seen.Add(it.Value())) ++touches;
+        }
+        if (touches >= 2) return true;
+    }
+    return false;
+}
+
+// Drop those slivers. Refuses anything that changes the part.
+TopoDS_Shape withoutSlivers(const TopoDS_Shape& body) {
+    try {
+        ShapeFix_FixSmallFace sff;
+        sff.Init(body);
+        sff.SetPrecision(1e-3);
+        sff.Perform();
+        const TopoDS_Shape r = sff.FixShape();
+        if (r.IsNull() || !BRepCheck_Analyzer(r).IsValid()) return TopoDS_Shape();
+        const double v0 = volumeOf(body), v1 = volumeOf(r);
+        if (std::fabs(v0 - v1) > 1e-4 * std::max(1.0, std::fabs(v0))) {
+            std::fprintf(stderr, "[MergeFaces] sliver removal moved volume "
+                                 "%.6f -> %.6f; keeping the original.\n", v0, v1);
+            return TopoDS_Shape();
+        }
+        return r;
+    } catch (...) { return TopoDS_Shape(); }
+}
+
 // Structural reasons a picked set can never merge, whatever the tolerance.
 // Checked BEFORE the ladder so the message names the real cause instead of
 // blaming proximity for something proximity has nothing to do with.
@@ -322,8 +383,32 @@ bool MergeFacesOp::execute(Document& doc) {
         // Why this pick cannot work, if it cannot. Worked out before the ladder
         // runs, because these are properties of the selection rather than of any
         // tolerance, and the ladder's failure looks identical in every case.
-        const Refusal pickIssue =
+        Refusal pickIssue =
             faceScoped ? diagnosePick(m_previousShape, m_faces) : Refusal::None;
+
+        // "They don't touch" is sometimes a 3-nanometre lie: see sliverBetween()
+        // above. If a degenerate strip is wedged between the picked faces, drop
+        // it and look again. The picked faces are re-found on the cleaned body
+        // through the same anchors a replay uses, and if that does not leave
+        // them genuinely adjacent the original body is kept untouched.
+        TopoDS_Shape workShape = m_previousShape;
+        if (faceScoped && pickIssue == Refusal::NotAdjacent &&
+            sliverBetween(m_previousShape, m_faces, 1e-3)) {
+            const TopoDS_Shape cleaned = withoutSlivers(m_previousShape);
+            if (!cleaned.IsNull()) {
+                const std::vector<TopoDS_Shape> saved = m_faces;
+                if (rebindFaces(cleaned) && m_faces.size() >= 2 &&
+                    diagnosePick(cleaned, m_faces) == Refusal::None) {
+                    std::fprintf(stderr, "[MergeFaces] removed degenerate sliver "
+                                         "face(s) between the picked faces.\n");
+                    workShape = cleaned;
+                    pickIssue = Refusal::None;
+                } else {
+                    m_faces = saved;
+                }
+            }
+        }
+        const int facesInWork = faceCount(workShape);
 
         // A merge the guard threw out is a different story from one that never
         // happened: the faces ARE one surface, but joining them would have moved
@@ -332,16 +417,21 @@ bool MergeFacesOp::execute(Document& doc) {
 
         Attempt best;
         if (faceScoped) {
-            const TopTools_MapOfShape keep = edgesToKeep(m_previousShape, m_faces);
+            const TopTools_MapOfShape keep = edgesToKeep(workShape, m_faces);
             for (double tol : kFaceScopedTols) {
-                Attempt a = runUnify(m_previousShape, &keep, tol);
-                if (acceptable(m_previousShape, a, m_facesBefore)) { best = a; break; }
-                if (!a.shape.IsNull() && faceCount(a.shape) < m_facesBefore)
+                Attempt a = runUnify(workShape, &keep, tol);
+                if (acceptable(workShape, a, facesInWork)) { best = a; break; }
+                if (!a.shape.IsNull() && faceCount(a.shape) < facesInWork)
                     guardRejected = true;
             }
+            // The sliver removal alone is a real simplification, so keep it even
+            // when nothing further merged -- the faces now touch, which is what
+            // lets a fillet run across them.
+            if (best.shape.IsNull() && facesInWork < m_facesBefore)
+                best.shape = workShape;
         } else {
-            Attempt a = runUnify(m_previousShape, nullptr, materializr::kUnifyAngularTol);
-            if (acceptable(m_previousShape, a, m_facesBefore)) best = a;
+            Attempt a = runUnify(workShape, nullptr, materializr::kUnifyAngularTol);
+            if (acceptable(workShape, a, facesInWork)) best = a;
         }
         // Nothing merged. Refusing means History::pushOperation declines and no
         // step is added — a merge that did nothing should not litter the
