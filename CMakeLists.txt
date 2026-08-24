@@ -116,6 +116,17 @@ target_link_libraries(imgui_lib PUBLIC ${MZ_SDL2_TARGET})
 
 # ─── Find system packages ────────────────────────────────────────────────────
 
+# Link the legacy libGL.so.1 entry point rather than GLVND's libOpenGL.so.0 +
+# libGLX.so.0. Both work when building and running on the same box, but the
+# AppImage deliberately does NOT bundle the GL stack (it must come from the
+# host driver - see the exclude list in the Dockerfile), and libOpenGL.so.0
+# ships in a separate package (libopengl0 on Debian/Ubuntu) that a stock
+# desktop install does not pull in. Linking GLVND therefore produced an
+# AppImage that died at startup with
+#     error while loading shared libraries: libOpenGL.so.0
+# on any clean Ubuntu. libGL.so.1 is present wherever working drivers are, and
+# is what SDL2 itself dlopens, so LEGACY is the portable choice here.
+set(OpenGL_GL_PREFERENCE LEGACY)
 find_package(OpenGL REQUIRED)
 
 # OpenCASCADE
