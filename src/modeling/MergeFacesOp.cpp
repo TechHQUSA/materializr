@@ -17,7 +17,9 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_MapOfShape.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -163,6 +165,63 @@ bool acceptable(const TopoDS_Shape& before, const Attempt& a, int facesBefore) {
 // a genuinely coplanar pair is still merged the conservative way.
 const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2};
 
+MergeFacesOp::Refusal g_lastRefusal = MergeFacesOp::Refusal::None;
+
+// A planar face's OUTWARD normal -- the plane's own normal flipped when the
+// face is REVERSED. The outward one is what says which side the material is on,
+// and that is the whole question here; the raw surface normal is the same for
+// both sides of a coincident pair and would report them as agreeing.
+bool outwardNormal(const TopoDS_Shape& s, gp_Dir& n) {
+    if (s.IsNull() || s.ShapeType() != TopAbs_FACE) return false;
+    const TopoDS_Face f = TopoDS::Face(s);
+    BRepAdaptor_Surface surf(f);
+    if (surf.GetType() != GeomAbs_Plane) return false;
+    n = surf.Plane().Axis().Direction();
+    if (f.Orientation() == TopAbs_REVERSED) n.Reverse();
+    return true;
+}
+
+// Structural reasons a picked set can never merge, whatever the tolerance.
+// Checked BEFORE the ladder so the message names the real cause instead of
+// blaming proximity for something proximity has nothing to do with.
+MergeFacesOp::Refusal diagnosePick(const TopoDS_Shape& body,
+                                   const std::vector<TopoDS_Shape>& faces) {
+    // Antiparallel: the two faces bound material on OPPOSITE sides, so there is
+    // no single face that could replace them -- the solid would have to exist on
+    // both sides of it. Measured on a real part (robot dog cover, body
+    // "Extrude"): two coplanar faces, centres 0.47 mm apart, outward normals
+    // exactly 180 deg apart. Reported as "not close enough", which is the one
+    // thing it was not: they are the same plane to 3e-6 mm.
+    for (std::size_t i = 0; i < faces.size(); ++i) {
+        gp_Dir ni;
+        if (!outwardNormal(faces[i], ni)) continue;
+        for (std::size_t j = i + 1; j < faces.size(); ++j) {
+            gp_Dir nj;
+            if (!outwardNormal(faces[j], nj)) continue;
+            if (ni.Angle(nj) > 170.0 * M_PI / 180.0)
+                return MergeFacesOp::Refusal::OppositeNormals;
+        }
+    }
+    // No shared edge: unify merges by DISSOLVING the edge between two faces, so
+    // with nothing between them there is nothing to dissolve. Two faces a hair
+    // apart with a step wall between them land here, and loosening the
+    // tolerance will never help -- the fix is to move one of them first.
+    TopTools_MapOfShape picked;
+    for (const auto& f : faces) picked.Add(f);
+    TopTools_IndexedDataMapOfShapeListOfShape e2f;
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, e2f);
+    for (int i = 1; i <= e2f.Extent(); ++i) {
+        const TopTools_ListOfShape& fl = e2f.FindFromIndex(i);
+        if (fl.Extent() != 2) continue;
+        TopTools_ListOfShape::Iterator it(fl);
+        const TopoDS_Shape f1 = it.Value(); it.Next();
+        const TopoDS_Shape f2 = it.Value();
+        if (!f1.IsSame(f2) && picked.Contains(f1) && picked.Contains(f2))
+            return MergeFacesOp::Refusal::None;      // adjacent: tolerance is genuinely in play
+    }
+    return MergeFacesOp::Refusal::NotAdjacent;
+}
+
 } // namespace
 
 MergeFacesOp::MergeFacesOp() = default;
@@ -221,7 +280,11 @@ bool MergeFacesOp::rebindFaces(const TopoDS_Shape& body) {
     return true;
 }
 
+MergeFacesOp::Refusal MergeFacesOp::lastRefusal() { return g_lastRefusal; }
+void MergeFacesOp::resetLastRefusal() { g_lastRefusal = Refusal::None; }
+
 bool MergeFacesOp::execute(Document& doc) {
+    g_lastRefusal = Refusal::Internal;
     if (m_bodyId < 0) return false;
     try {
         m_previousShape = doc.getBody(m_bodyId);
@@ -240,10 +303,25 @@ bool MergeFacesOp::execute(Document& doc) {
 
         const bool faceScoped = isFaceScoped();
         if (faceScoped) {
-            if (!rebindFaces(m_previousShape)) return false;
-            if (m_faces.size() < 2) return false;
+            if (!rebindFaces(m_previousShape)) {
+                g_lastRefusal = Refusal::FacesNotFound; return false;
+            }
+            if (m_faces.size() < 2) {
+                g_lastRefusal = Refusal::NeedTwoFaces; return false;
+            }
             captureAnchors(m_previousShape);
         }
+
+        // Why this pick cannot work, if it cannot. Worked out before the ladder
+        // runs, because these are properties of the selection rather than of any
+        // tolerance, and the ladder's failure looks identical in every case.
+        const Refusal pickIssue =
+            faceScoped ? diagnosePick(m_previousShape, m_faces) : Refusal::None;
+
+        // A merge the guard threw out is a different story from one that never
+        // happened: the faces ARE one surface, but joining them would have moved
+        // material. Worth saying so rather than implying they were too far apart.
+        bool guardRejected = false;
 
         Attempt best;
         if (faceScoped) {
@@ -251,6 +329,8 @@ bool MergeFacesOp::execute(Document& doc) {
             for (double tol : kFaceScopedTols) {
                 Attempt a = runUnify(m_previousShape, &keep, tol);
                 if (acceptable(m_previousShape, a, m_facesBefore)) { best = a; break; }
+                if (!a.shape.IsNull() && faceCount(a.shape) < m_facesBefore)
+                    guardRejected = true;
             }
         } else {
             Attempt a = runUnify(m_previousShape, nullptr, materializr::kUnifyAngularTol);
@@ -260,12 +340,15 @@ bool MergeFacesOp::execute(Document& doc) {
         // step is added — a merge that did nothing should not litter the
         // timeline, and the caller says so instead.
         if (best.shape.IsNull()) {
+            g_lastRefusal = pickIssue != Refusal::None ? pickIssue
+                          : (guardRejected ? Refusal::Unsafe : Refusal::NotSameSurface);
             if (!spare.IsNull()) {
                 doc.updateBody(m_bodyId, spare);
                 m_previousShape = spare;
             }
             return false;
         }
+        g_lastRefusal = Refusal::None;
 
         m_facesAfter = faceCount(best.shape);
 

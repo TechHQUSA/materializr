@@ -2606,19 +2606,54 @@ void Application::handleToolAction(int action) {
                     if (e.type == SelectionType::Face && !e.shape.IsNull() &&
                         e.bodyId >= 0)
                         byBody[e.bodyId].push_back(e.shape);
+                MergeFacesOp::Refusal why = MergeFacesOp::Refusal::None;
                 for (auto& [id, faces] : byBody) {
                     if (faces.size() < 2) continue;   // one face alone can't merge
                     ++attempted;
                     auto op = std::make_unique<MergeFacesOp>();
                     op->setBody(id);
                     op->setFaces(faces);
+                    MergeFacesOp::resetLastRefusal();
                     if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                    // pushOperation took the op by value and has destroyed it;
+                    // the reason is parked on the class. Read it now.
+                    else if (why == MergeFacesOp::Refusal::None)
+                        why = MergeFacesOp::lastRefusal();
                 }
-                if (merged == 0)
+                if (merged == 0) {
+                    // Say which failure it was. The old text named a tolerance
+                    // problem for every refusal, including the two that no
+                    // tolerance can fix, which sends people hunting for a
+                    // setting instead of looking at the faces they picked.
+                    const char* msg = nullptr;
+                    switch (why) {
+                        case MergeFacesOp::Refusal::OppositeNormals:
+                            msg = "Those faces point in opposite directions \xE2\x80\x94 they "
+                                  "sit back to back with material on either side, so there "
+                                  "is no single face that could replace them.";
+                            break;
+                        case MergeFacesOp::Refusal::NotAdjacent:
+                            msg = "Those faces don't touch \xE2\x80\x94 merging dissolves the "
+                                  "edge between two faces, and there isn't one. If a small "
+                                  "step separates them, level it first, then merge.";
+                            break;
+                        case MergeFacesOp::Refusal::Unsafe:
+                            msg = "That merge would have moved material, so it was refused "
+                                  "\xE2\x80\x94 the faces are one surface, but joining them "
+                                  "would reshape the part rather than tidy it.";
+                            break;
+                        case MergeFacesOp::Refusal::FacesNotFound:
+                            msg = "Couldn't find those faces on the body any more \xE2\x80\x94 "
+                                  "they may already have been merged.";
+                            break;
+                        default: break;   // NotSameSurface and friends: the tolerance text below is right
+                    }
                     showToast(attempted == 0
                         ? "Pick two or more faces on the SAME body to merge them."
-                        : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
-                          "to one surface, or the merge wouldn't hold together.");
+                        : (msg ? msg
+                               : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                                 "to one surface, or the merge wouldn't hold together."));
+                }
             } else {
                 const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
                 if (bodies.empty()) break;
