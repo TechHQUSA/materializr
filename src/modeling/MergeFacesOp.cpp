@@ -161,20 +161,7 @@ bool acceptable(const TopoDS_Shape& before, const Attempt& a, int facesBefore) {
 // pointed at — and it has to be loose: on the nacelle NONE of the 41 surviving
 // seams were within 1e-6, they sit between 1e-4 and 1e-2 rad. Tightest first, so
 // a genuinely coplanar pair is still merged the conservative way.
-//
-// The top three rungs (3e-2 / 5e-2 / 1e-1 rad = 1.7 / 2.9 / 5.7 deg) exist for
-// faces the user asserts are one face but which are visibly out of plane -- an
-// imported part whose "flat" panel was modelled as a shallow fan, say. They are
-// safe to add for a structural reason worth stating: the ladder stops at the
-// FIRST tolerance that merges, so a new rung can only ever be reached by a pick
-// that currently fails outright. No merge that succeeds today changes result.
-//
-// What still stops a loose rung is the volume guard in accept() below: a merge
-// that flattens genuinely angled faces moves material, and past ~1e-4 relative
-// it is rejected and the un-merged shape kept. So these rungs land the cases
-// that are geometrically close but not close enough for 1e-2, and refuse the
-// ones that would reshape the part.
-const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 3e-2, 5e-2, 1e-1};
+const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2};
 
 } // namespace
 
