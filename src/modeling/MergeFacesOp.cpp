@@ -103,7 +103,7 @@ struct Attempt {
 // seams that would otherwise be unmergeable (10 of 41 at 1e-2). The caller
 // still has to accept the result — this only produces a candidate.
 Attempt runUnify(const TopoDS_Shape& body, const TopTools_MapOfShape* keep,
-                 double angularTol) {
+                 double angularTol, double linearTol) {
     Attempt out;
     try {
         // concatBSplines deliberately FALSE. With it on, unify re-fits spline
@@ -114,6 +114,9 @@ Attempt runUnify(const TopoDS_Shape& body, const TopTools_MapOfShape* keep,
         ShapeUpgrade_UnifySameDomain u(body, /*edges=*/true, /*faces=*/true,
                                        /*concatBSplines=*/false);
         u.SetAngularTolerance(angularTol);
+        // Left at OCCT's default (Precision::Confusion, 1e-7 mm) unless asked.
+        // See kFaceScopedRungs for why a looser one is sometimes needed.
+        if (linearTol > 0.0) u.SetLinearTolerance(linearTol);
         if (keep) u.KeepShapes(*keep);
         u.Build();
         TopoDS_Shape r = u.Shape();
@@ -164,7 +167,33 @@ bool acceptable(const TopoDS_Shape& before, const Attempt& a, int facesBefore) {
 // pointed at — and it has to be loose: on the nacelle NONE of the 41 surviving
 // seams were within 1e-6, they sit between 1e-4 and 1e-2 rad. Tightest first, so
 // a genuinely coplanar pair is still merged the conservative way.
-const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2};
+//
+// ANGULAR IS ONLY HALF OF IT. UnifySameDomain also has a LINEAR tolerance, and
+// it was never set here, so it sat at OCCT's default Precision::Confusion() =
+// 1e-7 mm. That decides whether two PARALLEL planes count as the same plane --
+// a completely different axis from how far their normals may differ.
+//
+// Measured on robot dog cover.mzr, body "Extrude", the two faces of one flat
+// surface a user could not merge:
+//
+//     face 55 plane Y = 85.700003054738048
+//     face 56 plane Y = 85.700000000000003
+//     separation      = 3.054738e-06 mm     -- 30x the default tolerance
+//
+// Their normals agree exactly; they share a 127.76 mm continuous boundary; and
+// unify refused at EVERY angular rung, because the planes are 3 nanometres
+// apart. That gap is the float32 error on 85.7 (see sliverBetween() above): the
+// same single-precision sketch coordinate that leaves the slivers also leaves
+// the two planes a hair apart, and removing the slivers does not move them.
+//
+// So the ladder escalates on both axes, tightest first. A linear rung of 0 means
+// "leave OCCT's default"; the guard in accept() still vets every result, and a
+// merge across a 3 nm step moves ~7.6e-9 of the volume -- four orders inside it.
+struct FaceScopedRung { double angular; double linear; };
+const FaceScopedRung kFaceScopedRungs[] = {
+    {1e-9, 0.0}, {1e-6, 0.0}, {1e-4, 0.0}, {1e-3, 0.0}, {1e-2, 0.0},
+    {1e-9, 1e-5}, {1e-6, 1e-5}, {1e-4, 1e-4}, {1e-2, 1e-3},
+};
 
 MergeFacesOp::Refusal g_lastRefusal = MergeFacesOp::Refusal::None;
 
@@ -372,6 +401,17 @@ bool MergeFacesOp::execute(Document& doc) {
         const bool faceScoped = isFaceScoped();
         if (faceScoped) {
             if (!rebindFaces(m_previousShape)) {
+                // Say WHY, because "couldn't find those faces" with no detail is
+                // impossible to act on: it covers both a stale selection and a
+                // failed anchor re-bind, which have nothing to do with each other.
+                int live = 0;
+                for (const auto& f : m_faces)
+                    if (faceInShape(f, m_previousShape)) ++live;
+                std::fprintf(stderr,
+                    "[MergeFaces] re-bind FAILED: body %d has %d faces; %zu picked, "
+                    "%d of them still live; %zu anchor(s) stored.\n",
+                    m_bodyId, faceCount(m_previousShape), m_faces.size(), live,
+                    m_anchors.size());
                 g_lastRefusal = Refusal::FacesNotFound; return false;
             }
             if (m_faces.size() < 2) {
@@ -385,6 +425,14 @@ bool MergeFacesOp::execute(Document& doc) {
         // tolerance, and the ladder's failure looks identical in every case.
         Refusal pickIssue =
             faceScoped ? diagnosePick(m_previousShape, m_faces) : Refusal::None;
+        if (faceScoped) {
+            const char* what = pickIssue == Refusal::None            ? "adjacent, tolerance decides"
+                             : pickIssue == Refusal::OppositeNormals ? "outward normals oppose"
+                             : pickIssue == Refusal::NotAdjacent     ? "no shared edge"
+                                                                     : "other";
+            std::fprintf(stderr, "[MergeFaces] body %d: %zu picked face(s) of %d; pick reads as: %s\n",
+                         m_bodyId, m_faces.size(), m_facesBefore, what);
+        }
 
         // "They don't touch" is sometimes a 3-nanometre lie: see sliverBetween()
         // above. If a degenerate strip is wedged between the picked faces, drop
@@ -418,8 +466,8 @@ bool MergeFacesOp::execute(Document& doc) {
         Attempt best;
         if (faceScoped) {
             const TopTools_MapOfShape keep = edgesToKeep(workShape, m_faces);
-            for (double tol : kFaceScopedTols) {
-                Attempt a = runUnify(workShape, &keep, tol);
+            for (const FaceScopedRung& rung : kFaceScopedRungs) {
+                Attempt a = runUnify(workShape, &keep, rung.angular, rung.linear);
                 if (acceptable(workShape, a, facesInWork)) { best = a; break; }
                 if (!a.shape.IsNull() && faceCount(a.shape) < facesInWork)
                     guardRejected = true;
@@ -430,7 +478,9 @@ bool MergeFacesOp::execute(Document& doc) {
             if (best.shape.IsNull() && facesInWork < m_facesBefore)
                 best.shape = workShape;
         } else {
-            Attempt a = runUnify(workShape, nullptr, materializr::kUnifyAngularTol);
+            // Whole-body stays conservative on BOTH axes: it is not the user
+            // asserting anything about a particular pair.
+            Attempt a = runUnify(workShape, nullptr, materializr::kUnifyAngularTol, 0.0);
             if (acceptable(workShape, a, facesInWork)) best = a;
         }
         // Nothing merged. Refusing means History::pushOperation declines and no
@@ -439,6 +489,8 @@ bool MergeFacesOp::execute(Document& doc) {
         if (best.shape.IsNull()) {
             g_lastRefusal = pickIssue != Refusal::None ? pickIssue
                           : (guardRejected ? Refusal::Unsafe : Refusal::NotSameSurface);
+            std::fprintf(stderr, "[MergeFaces] nothing merged (%d faces in, guard %s).\n",
+                         facesInWork, guardRejected ? "rejected a candidate" : "never fired");
             if (!spare.IsNull()) {
                 doc.updateBody(m_bodyId, spare);
                 m_previousShape = spare;
