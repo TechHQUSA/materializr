@@ -167,18 +167,25 @@ const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2};
 
 MergeFacesOp::Refusal g_lastRefusal = MergeFacesOp::Refusal::None;
 
-// A planar face's OUTWARD normal -- the plane's own normal flipped when the
-// face is REVERSED. The outward one is what says which side the material is on,
-// and that is the whole question here; the raw surface normal is the same for
-// both sides of a coincident pair and would report them as agreeing.
+// A planar face's outward normal.
+//
+// This MUST come from the surface parameterisation, not from the plane's stored
+// Axis().Direction(): a Geom_Plane may be built with its axis ANTI-PARALLEL to
+// dU x dV, which is legal and which no orientation flag corrects. On the part
+// this was found on, 5 of 51 planar faces were like that, and reading the axis
+// reported them backwards -- so two faces of one flat surface looked 180 deg
+// apart and this very check refused to merge them, telling the user they
+// "point in opposite directions" when they plainly did not.
+//
+// faceNormalPoint() above already does it correctly. Planar faces have a
+// constant normal, so its UV-midpoint sample is exact even for a face whose
+// midpoint falls in a hole.
 bool outwardNormal(const TopoDS_Shape& s, gp_Dir& n) {
     if (s.IsNull() || s.ShapeType() != TopAbs_FACE) return false;
     const TopoDS_Face f = TopoDS::Face(s);
-    BRepAdaptor_Surface surf(f);
-    if (surf.GetType() != GeomAbs_Plane) return false;
-    n = surf.Plane().Axis().Direction();
-    if (f.Orientation() == TopAbs_REVERSED) n.Reverse();
-    return true;
+    if (BRepAdaptor_Surface(f).GetType() != GeomAbs_Plane) return false;
+    gp_Pnt p;
+    return faceNormalPoint(f, n, p);
 }
 
 // Structural reasons a picked set can never merge, whatever the tolerance.

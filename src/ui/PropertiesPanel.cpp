@@ -3,6 +3,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Face.hxx>
 #include <GProp_GProps.hxx>
 #include <BRep_Tool.hxx>
 #include <TopoDS.hxx>
@@ -75,7 +76,25 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                 ImGui::Text("Area: %.2f mm^2", g.Mass());
                 ImGui::Text("Centre: %.2f, %.2f, %.2f mm", c.X(), c.Z(), c.Y());
                 if (surf.GetType() == GeomAbs_Plane) {
+                    // From the SURFACE, not the plane's stored axis.
+                    //
+                    // A Geom_Plane may be parameterised so Axis().Direction() is
+                    // ANTI-PARALLEL to the surface's own normal (dU x dV) -- legal,
+                    // and true of 5 of the 51 planar faces on a part this was found
+                    // on. Reading the axis reported those five backwards, so two
+                    // faces of one flat surface showed as pointing opposite ways and
+                    // every question that followed ("why can't these merge?") started
+                    // from a false premise. BRepGProp_Face::Normal derives it from the
+                    // parameterisation with the face's orientation applied, which is
+                    // what OCCT itself uses.
                     gp_Dir n = surf.Plane().Axis().Direction();
+                    try {
+                        BRepGProp_Face gf(f);
+                        Standard_Real u0, u1, v0, v1; gf.Bounds(u0, u1, v0, v1);
+                        gp_Pnt np; gp_Vec nv;
+                        gf.Normal(0.5 * (u0 + u1), 0.5 * (v0 + v1), np, nv);
+                        if (nv.Magnitude() > 1e-9) n = gp_Dir(nv);
+                    } catch (...) {}
                     ImGui::Text("Normal: %.3f, %.3f, %.3f", n.X(), n.Z(), n.Y());
                 } else if (surf.GetType() == GeomAbs_Cylinder) {
                     ImGui::Text("Radius: %.3f mm  (dia %.3f)",

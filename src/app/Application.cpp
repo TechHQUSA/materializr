@@ -2629,8 +2629,10 @@ void Application::handleToolAction(int action) {
                     switch (why) {
                         case MergeFacesOp::Refusal::OppositeNormals:
                             msg = "Those faces point in opposite directions \xE2\x80\x94 they "
-                                  "sit back to back with material on either side, so there "
-                                  "is no single face that could replace them.";
+                                  "lie in the same plane, but the material is on opposite "
+                                  "sides, so they are different surfaces of the part rather "
+                                  "than two halves of one. Merging can't join them, and "
+                                  "wouldn't add material to either.";
                             break;
                         case MergeFacesOp::Refusal::NotAdjacent:
                             msg = "Those faces don't touch \xE2\x80\x94 merging dissolves the "
