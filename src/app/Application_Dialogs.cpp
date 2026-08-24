@@ -3060,6 +3060,17 @@ void Application::renderRotatePlaneAboutAxisPopup() {
         // Ctrl+Z reverts the rotation. Skip the push for a no-op (angle 0 /
         // unchanged) so we don't litter history with empty steps.
         applyRotatePlanePreview();
+        // Same ordering trap as the plane gizmo: a plane still previewed by the
+        // Construction Plane popup is in the document and therefore rotatable,
+        // but its creation op is not in history yet. Recording the rotation
+        // first yields rotate-then-create, which on reload replays the rotation
+        // and then resets the plane to its birth pose.
+        if (m_planeOpActive) {
+            std::fprintf(stderr,
+                "[Plane] rotated a plane still previewed by the popup - committing "
+                "its creation first so history stays in order.\n");
+            commitConstructionPlane();
+        }
         const auto* pe = (m_document && m_rotPlaneId >= 0)
                              ? m_document->getPlane(m_rotPlaneId) : nullptr;
         if (m_history && pe && std::abs(m_rotPlaneAngle) > 1e-4f) {

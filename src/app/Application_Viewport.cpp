@@ -4289,6 +4289,35 @@ void Application::renderViewport() {
                                 // PlaneTransformOp (before = m_planeGizmoDrag's
                                 // stored pose, after = current) so Ctrl+Z works.
                                 // One batched op covers a multi-plane drag.
+                                // A plane still being previewed by the Construction
+                                // Plane popup is ALREADY in the document, so the gizmo
+                                // will happily drag it -- but its ConstructionPlaneOp
+                                // does not reach history until the popup is committed.
+                                // Recording the move first leaves history in an order
+                                // that cannot replay: move, move, then create. On the
+                                // next load the moves apply and the creation then puts
+                                // the plane back at its birth pose, so a plane the user
+                                // positioned and saved reopens at the origin.
+                                //
+                                // Seen on robot dog cover.mzr: of 156 steps exactly one
+                                // ran backwards in time -- the construction_plane at
+                                // t=1787594362 sitting after its own moves at t=...368
+                                // and t=...377, with the saved CPLANE back at (0,0,0)
+                                // despite the moves recording (0,0,0) -> (-84,0,0) ->
+                                // (-84,65,0).
+                                //
+                                // So commit the creation before recording the move. The
+                                // user dragging the previewed plane is a clear enough
+                                // signal they want to keep it; Esc after this undoes
+                                // both steps rather than discarding the preview, which
+                                // is the ordinary history behaviour.
+                                if (m_planeOpActive) {
+                                    std::fprintf(stderr,
+                                        "[Plane] gizmo moved a plane still previewed by the "
+                                        "popup - committing its creation first so history "
+                                        "stays in order.\n");
+                                    commitConstructionPlane();
+                                }
                                 if (m_history) {
                                     std::vector<PlaneTransformOp::Entry> entries;
                                     for (auto& [pid, plnBefore] : m_planeGizmoDrag) {
