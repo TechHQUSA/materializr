@@ -144,7 +144,7 @@ TopoDS_Edge interpolatedEdge(const std::vector<gp_Pnt>& pts) {
 // Rebuild one closed loop as a 2-edge wire split at its extremes along `axis`
 // (0=X 1=Y 2=Z). Runs are resampled uniformly by arc length.
 TopoDS_Wire tipSplitWire(const TopoDS_Wire& w, int axis) {
-    const std::vector<gp_Pnt> p = densePoly(w, 2048);
+    const std::vector<gp_Pnt> p = densePoly(w, 8192);
     if (p.size() < 8) return TopoDS_Wire();
     auto coord = [axis](const gp_Pnt& q) {
         return axis == 0 ? q.X() : axis == 1 ? q.Y() : q.Z();
@@ -161,9 +161,25 @@ TopoDS_Wire tipSplitWire(const TopoDS_Wire& w, int axis) {
         for (int i = a;; i = (i + 1) % n) { r.push_back(p[i]); if (i == b) break; }
         return r;
     };
+    // Curvature-weighted resampling: uniform arc length cuts the corners of
+    // the ~0.2 mm arcs where a band loop turns around at its tips, and the
+    // interpolated curve then misses the true outline by more than any sane
+    // sewing tolerance -- the bridge sew was left with 20+ free edges at
+    // 80 pts/run uniform, and closed at 0 with this metric (each radian of
+    // turn counts as an extra millimetre of path, so tight arcs get dense
+    // samples while long straights stay sparse).
     auto resample = [](const std::vector<gp_Pnt>& r, int k) {
         std::vector<double> cum(r.size(), 0.0);
-        for (std::size_t i = 1; i < r.size(); ++i) cum[i] = cum[i-1] + r[i-1].Distance(r[i]);
+        for (std::size_t i = 1; i < r.size(); ++i) {
+            const double ds = r[i-1].Distance(r[i]);
+            double dth = 0.0;
+            if (i + 1 < r.size()) {
+                const gp_Vec a(r[i-1], r[i]), b(r[i], r[i+1]);
+                if (a.Magnitude() > 1e-12 && b.Magnitude() > 1e-12)
+                    dth = a.Angle(b);
+            }
+            cum[i] = cum[i-1] + ds + 1.0 * dth;
+        }
         const double L = cum.back();
         std::vector<gp_Pnt> out; out.reserve(k);
         std::size_t j = 0;
@@ -178,8 +194,8 @@ TopoDS_Wire tipSplitWire(const TopoDS_Wire& w, int axis) {
         }
         return out;
     };
-    const TopoDS_Edge e1 = interpolatedEdge(resample(walk(iMax, iMin), 80));
-    const TopoDS_Edge e2 = interpolatedEdge(resample(walk(iMin, iMax), 80));
+    const TopoDS_Edge e1 = interpolatedEdge(resample(walk(iMax, iMin), 240));
+    const TopoDS_Edge e2 = interpolatedEdge(resample(walk(iMin, iMax), 240));
     if (e1.IsNull() || e2.IsNull()) return TopoDS_Wire();
     try {
         BRepBuilderAPI_MakeWire mk(e1); mk.Add(e2);
