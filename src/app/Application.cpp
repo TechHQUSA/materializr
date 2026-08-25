@@ -7530,6 +7530,7 @@ void Application::run() {
             renderUnfoldDialog();
             renderRevolvePopup();
             renderRotatePlaneAboutAxisPopup();
+            renderAlignFacePopup();
             renderSketchMovePanel();
             renderSketchPatternPopup();
 

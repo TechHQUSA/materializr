@@ -16,6 +16,7 @@
 #include "io/ImageDecode.h"   // DecodedImage — thumbnail peek results
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
+#include <gp_Trsf.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
@@ -1825,6 +1826,31 @@ private:
     // intentionally outside undo — see Application_Viewport.cpp's planeOnly
     // branch). Live preview re-bases from m_rotPlaneOriginal each change;
     // Apply leaves the current pose, Cancel restores the snapshot.
+    // ── Lay Flat on Plane (viewport right-click on a planar face) ──────────
+    // Rotates the body so the picked face sits flush on a chosen plane (world
+    // or construction), with an offset along the plane's normal and an
+    // optional exact position for the face's centre. Live preview against a
+    // snapshot; Apply commits as ordinary Transform history steps (rotate +
+    // translate), so undo/reload need nothing new.
+    bool m_alignActive = false;
+    int  m_alignBodyId = -1;
+    TopoDS_Shape m_alignFace;
+    TopoDS_Shape m_alignSnapshot;
+    int   m_alignPlaneIdx = 0;            // 0..2 world, then construction planes
+    float m_alignOffset = 0.0f;
+    bool  m_alignFlip = false;
+    bool  m_alignSetPos = false;
+    float m_alignU = 0.0f, m_alignV = 0.0f;
+    char  m_alignOffsetBuf[32] = "0.00";
+    char  m_alignUBuf[32] = "0.00";
+    char  m_alignVBuf[32] = "0.00";
+    void beginAlignFaceToPlane(int bodyId, const TopoDS_Shape& face);
+    void renderAlignFacePopup();
+    bool computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
+                               gp_Pnt& centerOut, bool& needRot, bool& needMove);
+    void applyAlignPreview();
+    void cancelAlignFace();
+
     bool   m_rotPlaneActive = false;
     int    m_rotPlaneId = -1;             // target plane id
     gp_Pln m_rotPlaneOriginal;            // snapshot for preview re-base + cancel

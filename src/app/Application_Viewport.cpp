@@ -98,6 +98,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Geom_Plane.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -6626,6 +6627,20 @@ void Application::renderViewport() {
         // Shared body-level actions — they operate on the whole body the face
         // belongs to, so they appear under both the Face and Body branches.
         auto sharedBodyOps = [&]() {
+            // Lay Flat: planar faces only -- the alignment needs a face
+            // normal that means something over the whole face.
+            if (!m_contextMenuFace.IsNull() &&
+                m_contextMenuFace.ShapeType() == TopAbs_FACE) {
+                bool planar = false;
+                try {
+                    planar = BRepAdaptor_Surface(TopoDS::Face(m_contextMenuFace))
+                                 .GetType() == GeomAbs_Plane;
+                } catch (...) {}
+                if (planar && ImGui::MenuItem("Lay Flat on Plane…")) {
+                    beginAlignFaceToPlane(bid, m_contextMenuFace);
+                    m_contextMenuFace.Nullify();
+                }
+            }
             // Both actions change visibility flags, and the renderer only
             // reflects those on a rebuild — m_meshesDirty is required or the
             // menu item "doesn't seem to do anything" (markDirty() alone only

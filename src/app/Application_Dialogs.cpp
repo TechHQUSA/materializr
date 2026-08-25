@@ -62,6 +62,7 @@
 #include "modeling/PushPullOp.h"
 #include "modeling/TransformOp.h"
 #include "modeling/SketchTransformOp.h"
+#include <gp_Quaternion.hxx>
 #include "modeling/PlaneTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/RevolveOp.h"
@@ -113,6 +114,9 @@ static const char* mouseButtonName(int b) {
 #include <Geom_Plane.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <GProp_GProps.hxx>
+#include <BRepGProp.hxx>
+#include <gp_Ax1.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -2990,6 +2994,262 @@ void Application::renderRevolvePopup() {
         m_revolveActive = false;
     }
 
+    ImGui::End();
+}
+
+
+// ─── Lay Flat on Plane ──────────────────────────────────────────────────────
+// The align target list: three world planes, then every construction plane.
+// Index space matches m_alignPlaneIdx.
+static void alignTargetAxes(const Document* doc, int idx,
+                            gp_Pnt& o, gp_Dir& n, gp_Dir& u, gp_Dir& v) {
+    switch (idx) {
+        case 0: o = gp_Pnt(0,0,0); n = gp_Dir(0,1,0); u = gp_Dir(1,0,0); break; // Ground (XZ)
+        case 1: o = gp_Pnt(0,0,0); n = gp_Dir(0,0,1); u = gp_Dir(1,0,0); break; // XY
+        case 2: o = gp_Pnt(0,0,0); n = gp_Dir(1,0,0); u = gp_Dir(0,1,0); break; // YZ
+        default: {
+            o = gp_Pnt(0,0,0); n = gp_Dir(0,1,0); u = gp_Dir(1,0,0);
+            if (!doc) break;
+            const std::vector<int> ids = doc->getAllPlaneIds();
+            const int k = idx - 3;
+            if (k >= 0 && k < static_cast<int>(ids.size())) {
+                if (const auto* pe = doc->getPlane(ids[k])) {
+                    const gp_Ax3& ax = pe->plane.Position();
+                    o = ax.Location(); n = ax.Direction(); u = ax.XDirection();
+                }
+            }
+            break;
+        }
+    }
+    v = n.Crossed(u);
+}
+
+void Application::beginAlignFaceToPlane(int bodyId, const TopoDS_Shape& face) {
+    if (!m_document || bodyId < 0 || face.IsNull() ||
+        face.ShapeType() != TopAbs_FACE) return;
+    const TopoDS_Shape body = m_document->getBody(bodyId);
+    if (body.IsNull()) return;
+    m_alignBodyId = bodyId;
+    m_alignFace = face;
+    m_alignSnapshot = body;
+    m_alignPlaneIdx = 0;
+    m_alignOffset = 0.0f; m_alignFlip = false;
+    m_alignSetPos = false; m_alignU = 0.0f; m_alignV = 0.0f;
+    std::snprintf(m_alignOffsetBuf, sizeof(m_alignOffsetBuf), "0.00");
+    std::snprintf(m_alignUBuf, sizeof(m_alignUBuf), "0.00");
+    std::snprintf(m_alignVBuf, sizeof(m_alignVBuf), "0.00");
+    m_alignActive = true;
+    applyAlignPreview();
+}
+
+// The whole computation. Face normal comes from BRepGProp_Face -- the surface
+// parameterisation with orientation applied -- NEVER from the plane's stored
+// axis, which can be anti-parallel to the real normal (five faces on one
+// measured part; see the face-normal fix).
+bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
+                                        gp_Pnt& centerOut, bool& needRot,
+                                        bool& needMove) {
+    needRot = needMove = false;
+    if (m_alignFace.IsNull() || m_alignSnapshot.IsNull()) return false;
+    const TopoDS_Face f = TopoDS::Face(m_alignFace);
+    gp_Pnt c; gp_Dir nFace;
+    try {
+        GProp_GProps g;
+        BRepGProp::SurfaceProperties(f, g);
+        c = g.CentreOfMass();
+        BRepGProp_Face gf(f);
+        Standard_Real u0,u1,v0,v1; gf.Bounds(u0,u1,v0,v1);
+        gp_Pnt dummy; gp_Vec nv;
+        gf.Normal(0.5*(u0+u1), 0.5*(v0+v1), dummy, nv);
+        if (nv.Magnitude() < 1e-12) return false;
+        nFace = gp_Dir(nv);
+    } catch (...) { return false; }
+    centerOut = c;
+
+    gp_Pnt o; gp_Dir m, u, v;
+    alignTargetAxes(m_document ? &*m_document : nullptr, m_alignPlaneIdx, o, m, u, v);
+    if (m_alignFlip) m.Reverse();
+
+    // face pressed against the plane: outward normal maps to -m
+    const gp_Dir want = m.Reversed();
+    const double ang = nFace.Angle(want);
+    if (ang > 1e-9) {
+        gp_Dir axis;
+        if (ang > M_PI - 1e-6) {
+            // antiparallel: any direction perpendicular to the normal works
+            axis = (std::fabs(nFace.Dot(u)) < 0.9) ? gp_Dir(nFace.Crossed(u))
+                                                   : gp_Dir(nFace.Crossed(v));
+        } else {
+            axis = gp_Dir(nFace.Crossed(want));
+        }
+        rotOut.SetRotation(gp_Ax1(c, axis), ang);   // about the face centre
+        needRot = true;
+    }
+    // centroid is unmoved by the rotation-about-centre; place it
+    const gp_Vec w(o, c);
+    const double curU = w.Dot(gp_Vec(u)), curV = w.Dot(gp_Vec(v));
+    const double tu = m_alignSetPos ? (double)m_alignU : curU;
+    const double tv = m_alignSetPos ? (double)m_alignV : curV;
+    const gp_Pnt target(o.X() + tu*u.X() + tv*v.X() + (double)m_alignOffset*m.X(),
+                        o.Y() + tu*u.Y() + tv*v.Y() + (double)m_alignOffset*m.Y(),
+                        o.Z() + tu*u.Z() + tv*v.Z() + (double)m_alignOffset*m.Z());
+    const gp_Vec T(c, target);
+    if (T.Magnitude() > 1e-9) {
+        moveOut.SetTranslation(T);
+        needMove = true;
+    }
+    return needRot || needMove;
+}
+
+void Application::applyAlignPreview() {
+    if (!m_alignActive || !m_document || m_alignBodyId < 0) return;
+    gp_Trsf R, T; gp_Pnt c; bool nr, nm;
+    if (!computeAlignTransform(R, T, c, nr, nm)) {
+        m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+        m_meshesDirty = true;
+        return;
+    }
+    gp_Trsf full;
+    if (nr && nm) full = T * R;
+    else if (nr)  full = R;
+    else          full = T;
+    try {
+        const TopoDS_Shape moved =
+            BRepBuilderAPI_Transform(m_alignSnapshot, full, Standard_True).Shape();
+        if (!moved.IsNull()) m_document->updateBody(m_alignBodyId, moved);
+    } catch (...) {}
+    m_meshesDirty = true;
+}
+
+void Application::cancelAlignFace() {
+    if (m_document && m_alignBodyId >= 0 && !m_alignSnapshot.IsNull())
+        m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+    m_alignActive = false;
+    m_alignFace.Nullify(); m_alignSnapshot.Nullify();
+    m_meshesDirty = true;
+}
+
+void Application::renderAlignFacePopup() {
+    if (!m_alignActive) return;
+    ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - 360,
+                                    ImGui::GetWindowPos().y + 50), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(uiSz(360, 0), ImGuiCond_Appearing);
+    ImGui::Begin("Lay Flat on Plane", nullptr,
+        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_AlwaysAutoResize);
+
+    bool changed = false;
+
+    ImGui::TextColored(materializr::accentText(), "Target plane");
+    std::vector<std::string> names = {"Ground (XZ)", "XY plane", "YZ plane"};
+    if (m_document)
+        for (int pid : m_document->getAllPlaneIds())
+            names.push_back(m_document->getPlaneName(pid));
+    if (m_alignPlaneIdx >= static_cast<int>(names.size())) m_alignPlaneIdx = 0;
+    if (ImGui::BeginCombo("##alignPlane", names[m_alignPlaneIdx].c_str())) {
+        for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+            const bool sel = (m_alignPlaneIdx == i);
+            if (ImGui::Selectable(names[i].c_str(), sel)) { m_alignPlaneIdx = i; changed = true; }
+        }
+        ImGui::EndCombo();
+    }
+    if (ImGui::Checkbox("Flip side", &m_alignFlip)) changed = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(body on the other side of the plane)");
+
+    ImGui::Separator();
+    ImGui::TextColored(materializr::accentText(), "Offset from plane");
+    ImGui::SetNextItemWidth(100);
+    if (ImGui::InputText("##alignOff", m_alignOffsetBuf, sizeof(m_alignOffsetBuf),
+                         ImGuiInputTextFlags_CharsDecimal)) {
+        float a = m_alignOffset;
+        if (materializr::parseFinite(m_alignOffsetBuf, a)) m_alignOffset = a;
+        changed = true;
+    }
+    ImGui::SameLine(); ImGui::Text("mm");
+
+    ImGui::Separator();
+    if (ImGui::Checkbox("Set position on plane", &m_alignSetPos)) {
+        if (m_alignSetPos) {
+            // seed with the CURRENT projected position so ticking the box
+            // doesn't jump the body
+            gp_Pnt o; gp_Dir n, u, v;
+            alignTargetAxes(m_document ? &*m_document : nullptr, m_alignPlaneIdx, o, n, u, v);
+            gp_Trsf R, T; gp_Pnt c; bool nr, nm;
+            if (computeAlignTransform(R, T, c, nr, nm)) {
+                const gp_Vec w(o, c);
+                m_alignU = (float)w.Dot(gp_Vec(u));
+                m_alignV = (float)w.Dot(gp_Vec(v));
+                std::snprintf(m_alignUBuf, sizeof(m_alignUBuf), "%.2f", m_alignU);
+                std::snprintf(m_alignVBuf, sizeof(m_alignVBuf), "%.2f", m_alignV);
+            }
+        }
+        changed = true;
+    }
+    if (m_alignSetPos) {
+        ImGui::TextDisabled("Face centre, along the plane's own axes");
+        ImGui::SetNextItemWidth(90);
+        if (ImGui::InputText("U##alignU", m_alignUBuf, sizeof(m_alignUBuf),
+                             ImGuiInputTextFlags_CharsDecimal)) {
+            float a = m_alignU;
+            if (materializr::parseFinite(m_alignUBuf, a)) m_alignU = a;
+            changed = true;
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90);
+        if (ImGui::InputText("V##alignV", m_alignVBuf, sizeof(m_alignVBuf),
+                             ImGuiInputTextFlags_CharsDecimal)) {
+            float a = m_alignV;
+            if (materializr::parseFinite(m_alignVBuf, a)) m_alignV = a;
+            changed = true;
+        }
+    }
+    if (changed) applyAlignPreview();
+
+    ImGui::Separator();
+    const bool applyClicked  = ImGui::Button(materializr::btnConfirm(), materializr::uiSz(150, 0));
+    ImGui::SameLine();
+    bool cancelClicked = ImGui::Button(materializr::btnCancel(), materializr::uiSz(150, 0));
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
+
+    if (applyClicked) {
+        // Restore the snapshot, then commit through the ordinary op path so
+        // undo / reload capture everything (a rotate then a move, matching
+        // what the preview showed).
+        gp_Trsf R, T; gp_Pnt c; bool nr, nm;
+        const bool any = computeAlignTransform(R, T, c, nr, nm);
+        m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+        if (any && m_history) {
+            if (nr) {
+                const gp_Quaternion q = R.GetRotation();
+                gp_Vec axis; Standard_Real ang = 0.0;
+                q.GetVectorAndAngle(axis, ang);
+                if (axis.Magnitude() > 1e-12 && std::fabs(ang) > 1e-9) {
+                    auto op = std::make_unique<TransformOp>();
+                    op->setBodyId(m_alignBodyId);
+                    op->setType(TransformType::Rotate);
+                    op->setRotation(axis.X(), axis.Y(), axis.Z(),
+                                    ang * 180.0 / M_PI);
+                    op->setCenter(c.X(), c.Y(), c.Z());
+                    m_history->pushOperation(std::move(op), *m_document);
+                }
+            }
+            if (nm) {
+                const gp_XYZ t = T.TranslationPart();
+                auto op = std::make_unique<TransformOp>();
+                op->setBodyId(m_alignBodyId);
+                op->setType(TransformType::Translate);
+                op->setTranslation(t.X(), t.Y(), t.Z());
+                m_history->pushOperation(std::move(op), *m_document);
+            }
+            markDirty();
+        }
+        m_alignActive = false;
+        m_alignFace.Nullify(); m_alignSnapshot.Nullify();
+        m_meshesDirty = true;
+    } else if (cancelClicked) {
+        cancelAlignFace();
+    }
     ImGui::End();
 }
 
