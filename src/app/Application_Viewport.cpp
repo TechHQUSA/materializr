@@ -6826,6 +6826,10 @@ void Application::renderViewport() {
                 editSketch(sid);
                 m_contextMenuSketchId = -1;
             }
+            if (ImGui::MenuItem("Lay Flat on Plane…")) {
+                beginAlignSketchToPlane(sid);
+                m_contextMenuSketchId = -1;
+            }
             if (ImGui::MenuItem("Export as SVG…")) {
                 exportSketchAsSvg(sid);
                 m_contextMenuSketchId = -1;

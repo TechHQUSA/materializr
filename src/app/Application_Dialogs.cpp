@@ -3024,11 +3024,30 @@ static void alignTargetAxes(const Document* doc, int idx,
     v = n.Crossed(u);
 }
 
+void Application::beginAlignSketchToPlane(int sketchId) {
+    if (!m_document || sketchId < 0) return;
+    auto sk = m_document->getSketch(sketchId);
+    if (!sk) return;
+    m_alignBodyId = -1;
+    m_alignFace.Nullify(); m_alignSnapshot.Nullify();
+    m_alignSketchId = sketchId;
+    m_alignSketchPlaneBefore = sk->getPlane();
+    m_alignPlaneIdx = 0;
+    m_alignOffset = 0.0f; m_alignFlip = false;
+    m_alignSetPos = false; m_alignU = 0.0f; m_alignV = 0.0f;
+    std::snprintf(m_alignOffsetBuf, sizeof(m_alignOffsetBuf), "0.00");
+    std::snprintf(m_alignUBuf, sizeof(m_alignUBuf), "0.00");
+    std::snprintf(m_alignVBuf, sizeof(m_alignVBuf), "0.00");
+    m_alignActive = true;
+    applyAlignPreview();
+}
+
 void Application::beginAlignFaceToPlane(int bodyId, const TopoDS_Shape& face) {
     if (!m_document || bodyId < 0 || face.IsNull() ||
         face.ShapeType() != TopAbs_FACE) return;
     const TopoDS_Shape body = m_document->getBody(bodyId);
     if (body.IsNull()) return;
+    m_alignSketchId = -1;
     m_alignBodyId = bodyId;
     m_alignFace = face;
     m_alignSnapshot = body;
@@ -3050,9 +3069,27 @@ bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
                                         gp_Pnt& centerOut, bool& needRot,
                                         bool& needMove) {
     needRot = needMove = false;
+    gp_Pnt c; gp_Dir nFace;
+    if (m_alignSketchId >= 0) {
+        // Sketch: anchor on the drawn content's centroid (the plane origin
+        // can sit far from the geometry) and use the plane normal. Lay flat
+        // for a sketch means drawing side up: its normal maps to +m, so the
+        // sketch lies ON the target, ready to draw on / extrude from.
+        auto sk = m_document ? m_document->getSketch(m_alignSketchId) : nullptr;
+        if (!sk) return false;
+        const gp_Ax3& ax = m_alignSketchPlaneBefore.Position();
+        double cu = 0, cv = 0; int np = 0;
+        for (const auto& pt : sk->getPoints()) { cu += pt.pos.x; cv += pt.pos.y; ++np; }
+        if (np > 0) { cu /= np; cv /= np; }
+        c = gp_Pnt(ax.Location().X() + cu*ax.XDirection().X() + cv*ax.YDirection().X(),
+                   ax.Location().Y() + cu*ax.XDirection().Y() + cv*ax.YDirection().Y(),
+                   ax.Location().Z() + cu*ax.XDirection().Z() + cv*ax.YDirection().Z());
+        nFace = ax.Direction().Reversed();   // shared math then maps it to +m
+        centerOut = c;
+    } else
+    {
     if (m_alignFace.IsNull() || m_alignSnapshot.IsNull()) return false;
     const TopoDS_Face f = TopoDS::Face(m_alignFace);
-    gp_Pnt c; gp_Dir nFace;
     try {
         GProp_GProps g;
         BRepGProp::SurfaceProperties(f, g);
@@ -3065,6 +3102,7 @@ bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
         nFace = gp_Dir(nv);
     } catch (...) { return false; }
     centerOut = c;
+    }
 
     gp_Pnt o; gp_Dir m, u, v;
     alignTargetAxes(m_document ? &*m_document : nullptr, m_alignPlaneIdx, o, m, u, v);
@@ -3102,7 +3140,24 @@ bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
 }
 
 void Application::applyAlignPreview() {
-    if (!m_alignActive || !m_document || m_alignBodyId < 0) return;
+    if (!m_alignActive || !m_document) return;
+    if (m_alignSketchId >= 0) {
+        auto sk = m_document->getSketch(m_alignSketchId);
+        if (!sk) return;
+        gp_Trsf R, T; gp_Pnt c; bool nr, nm;
+        if (!computeAlignTransform(R, T, c, nr, nm)) {
+            sk->setPlane(m_alignSketchPlaneBefore);
+        } else {
+            gp_Trsf full;
+            if (nr && nm) full = T * R; else if (nr) full = R; else full = T;
+            gp_Pln next = m_alignSketchPlaneBefore;
+            next.Transform(full);
+            sk->setPlane(next);
+        }
+        m_meshesDirty = true;
+        return;
+    }
+    if (m_alignBodyId < 0) return;
     gp_Trsf R, T; gp_Pnt c; bool nr, nm;
     if (!computeAlignTransform(R, T, c, nr, nm)) {
         m_document->updateBody(m_alignBodyId, m_alignSnapshot);
@@ -3124,6 +3179,10 @@ void Application::applyAlignPreview() {
 void Application::cancelAlignFace() {
     if (m_document && m_alignBodyId >= 0 && !m_alignSnapshot.IsNull())
         m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+    if (m_document && m_alignSketchId >= 0)
+        if (auto sk = m_document->getSketch(m_alignSketchId))
+            sk->setPlane(m_alignSketchPlaneBefore);
+    m_alignSketchId = -1;
     m_alignActive = false;
     m_alignFace.Nullify(); m_alignSnapshot.Nullify();
     m_meshesDirty = true;
@@ -3212,7 +3271,24 @@ void Application::renderAlignFacePopup() {
     bool cancelClicked = ImGui::Button(materializr::btnCancel(), materializr::uiSz(150, 0));
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
 
-    if (applyClicked) {
+    if (applyClicked && m_alignSketchId >= 0) {
+        gp_Trsf R, T; gp_Pnt c; bool nr, nm;
+        const bool any = computeAlignTransform(R, T, c, nr, nm);
+        if (auto sk = m_document->getSketch(m_alignSketchId))
+            sk->setPlane(m_alignSketchPlaneBefore);   // op re-applies from clean
+        if (any && m_history) {
+            gp_Trsf full;
+            if (nr && nm) full = T * R; else if (nr) full = R; else full = T;
+            auto op = std::make_unique<SketchTransformOp>();
+            op->setSketch(m_alignSketchId);
+            op->setTransform(full);
+            m_history->pushOperation(std::move(op), *m_document);
+            markDirty();
+        }
+        m_alignSketchId = -1;
+        m_alignActive = false;
+        m_meshesDirty = true;
+    } else if (applyClicked) {
         // Restore the snapshot, then commit through the ordinary op path so
         // undo / reload capture everything (a rotate then a move, matching
         // what the preview showed).

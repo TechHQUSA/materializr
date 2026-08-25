@@ -1834,6 +1834,11 @@ private:
     // translate), so undo/reload need nothing new.
     bool m_alignActive = false;
     int  m_alignBodyId = -1;
+    // Sketch mode: exactly one of bodyId / sketchId is >= 0. A sketch aligns
+    // its PLANE onto the target (drawing side up; Flip turns it over) and
+    // commits as ONE SketchTransformOp instead of the body's rotate+move.
+    int  m_alignSketchId = -1;
+    gp_Pln m_alignSketchPlaneBefore;
     TopoDS_Shape m_alignFace;
     TopoDS_Shape m_alignSnapshot;
     int   m_alignPlaneIdx = 0;            // 0..2 world, then construction planes
@@ -1845,6 +1850,7 @@ private:
     char  m_alignUBuf[32] = "0.00";
     char  m_alignVBuf[32] = "0.00";
     void beginAlignFaceToPlane(int bodyId, const TopoDS_Shape& face);
+    void beginAlignSketchToPlane(int sketchId);
     void renderAlignFacePopup();
     bool computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
                                gp_Pnt& centerOut, bool& needRot, bool& needMove);
