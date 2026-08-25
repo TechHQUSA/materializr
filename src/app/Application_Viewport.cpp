@@ -3386,7 +3386,8 @@ void Application::renderViewport() {
             bool gizmoOwnsDrag = m_gizmoDragging ||
                                  anyIopDraggingHandle() ||
                                  m_edgeCtl.dragging() ||
-                                 m_ppCtl.sticky();
+                                 m_ppCtl.sticky() ||
+                                 m_extrudeCtl.sticky();
             if (materializr::touchMode()) {
                 // A one-finger press-and-hold drives box-select, not orbit/pan — so
                 // suppress the camera drag (and the two-finger consume below) while
@@ -3444,7 +3445,21 @@ void Application::renderViewport() {
                 // while sketching. Shift held → don't suppress → the Shift-pan
                 // below fires and camDragging turns the sketch input off, so it
                 // pans without also drawing.
-                if (toolWantsDrag && leftIsCamera && !shiftPanGesture) suppressCamDrag = true;
+                // Handle-aware, not blanket. The blanket version locked the
+                // camera for the WHOLE op, so in trackpad mode (orbit and pan
+                // both on Left) there was no way to orbit while a fillet /
+                // chamfer / push-pull was underway. The controllers hit-test
+                // on the press frame (edge arrows within 12 px, gizmo axes,
+                // push-pull sticky), so gizmoOwnsDrag already says whether
+                // THIS drag is the op's -- an empty-canvas drag orbits, a
+                // handle drag drives the value, exactly like default
+                // bindings where middle-orbit stays live during an op.
+                // Sketch mode keeps the blanket: the rubber-band preview
+                // owns the cursor with no handle to test against.
+                if (leftIsCamera && !shiftPanGesture) {
+                    if (m_inSketchMode) suppressCamDrag = true;
+                    else if (toolWantsDrag) suppressCamDrag = gizmoOwnsDrag;
+                }
                 // Alt+Left-drag is reserved for box-select when left IS the camera
                 // (trackpad / left-orbit mode) — Alt is otherwise unused, and Shift
                 // is already pan. Don't let it orbit; the box-select code below

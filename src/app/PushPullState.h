@@ -49,6 +49,7 @@ struct PushPullState {
     // gizmoOwnsDrag suppresses orbit so the cursor isn't fighting the
     // camera. (Steve: "let click then click act like click and hold".)
     bool sticky = false;
+    bool pressWasDrag = false;   // press became a drag: not a sticky toggle
 
     // Dense-body drag protection: when any target body has >250 faces (a
     // threaded rod), the per-frame preview shows a tinted GHOST of the tool

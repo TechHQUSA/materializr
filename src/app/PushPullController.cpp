@@ -458,8 +458,15 @@ void PushPullController::onViewportInput(const IopViewport& vp,
     // the cursor with no button held) — vp.trackpadInput is already false under
     // touch, where a tap would toggle it on and then feed BOTH it and the
     // direct drag above (double distance).
-    if (vp.trackpadInput && vp.clicked && !vp.uiCaptured)
-        m_st.sticky = !m_st.sticky;
+    // Toggle on a click that never became a drag -- the press frame is too
+    // early now that an empty-canvas LEFT-drag orbits in trackpad mode: the
+    // orbit's own press would flip sticky on, and after the orbit ended the
+    // cursor would keep feeding the value.
+    if (vp.trackpadInput && !vp.uiCaptured) {
+        if (vp.clicked) m_st.pressWasDrag = false;
+        if (vp.dragging) m_st.pressWasDrag = true;
+        if (vp.released && !m_st.pressWasDrag) m_st.sticky = !m_st.sticky;
+    }
     if (m_st.sticky && (vp.mouseDelta.x != 0.0f || vp.mouseDelta.y != 0.0f)) {
         applyDrag(vp);
         updatePushPull(ctx);

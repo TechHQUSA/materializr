@@ -40,6 +40,7 @@ public:
     const glm::vec3& origin() const { return m_origin; }
     const glm::vec3& normal() const { return m_normal; }
     float distance() const { return m_distance; }
+    bool sticky() const { return m_sticky; }
     ExtrudeMode mode() const { return m_mode; }
     int previewBodyId() const;
 
@@ -108,6 +109,9 @@ private:
     glm::vec3 m_normal{0, 0, 1};
     glm::vec3 m_origin{0};
     float m_distance = 5.0f;
+    // Trackpad-mode click-move-click value drive (see Push/Pull).
+    bool m_sticky = false;
+    bool m_stickyPressWasDrag = false;
     char m_inputBuf[32] = "5.0";
     bool m_inputFocus = true;
 };

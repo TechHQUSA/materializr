@@ -311,10 +311,26 @@ int ExtrudeController::previewBodyId() const {
 // dispatch loop skips this while the camera is dragging).
 void ExtrudeController::onViewportInput(const IopViewport& vp,
                                         const IopContext& ctx) {
-    if (!active() || !vp.dragging) return;
-    m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
-    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
-    updateExtrude(ctx);
+    if (!active()) return;
+    if (vp.dragging) {
+        m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
+        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        updateExtrude(ctx);
+    }
+    // Trackpad-mode click-move-click, same model as Push/Pull: with Left
+    // now free to orbit during the op, a whole-viewport drag surface needs
+    // a buttonless way to drive the value. Click (without dragging) arms
+    // sticky, cursor motion feeds the distance, click again to release.
+    if (vp.trackpadInput && !vp.uiCaptured) {
+        if (vp.clicked) m_stickyPressWasDrag = false;
+        if (vp.dragging) m_stickyPressWasDrag = true;
+        if (vp.released && !m_stickyPressWasDrag) m_sticky = !m_sticky;
+    }
+    if (m_sticky && (vp.mouseDelta.x != 0.0f || vp.mouseDelta.y != 0.0f)) {
+        m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
+        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        updateExtrude(ctx);
+    }
 }
 
 void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
@@ -467,6 +483,8 @@ void ExtrudeController::panelBody(const IopContext&, bool&) {
 }
 
 void ExtrudeController::onCleanup() {
+    m_sticky = false;
+    m_stickyPressWasDrag = false;
     m_profile.Nullify();
     m_mode = ExtrudeMode::NewBody;
     m_targetBody = -1;
