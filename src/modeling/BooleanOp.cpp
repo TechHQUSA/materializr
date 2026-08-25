@@ -3,6 +3,7 @@
 #include <Message_ProgressScope.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <ctime>
+#include <algorithm>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -162,6 +163,22 @@ bool BooleanOp::execute(Document& doc) {
             GProp_GProps gp;
             BRepGProp::VolumeProperties(s, gp);
             if (gp.Mass() < 1e-6) return TopoDS_Shape();
+            // A union can never be smaller than its largest input. OCCT can
+            // return a VALID solid that silently dropped one operand (seen on
+            // a tangent-contact fuse: result 37045 of a 37067 body + 3513
+            // tool). Volume is the one invariant that catches it.
+            if (m_mode == BooleanMode::Union) {
+                GProp_GProps ga, gb;
+                BRepGProp::VolumeProperties(m_previousTargetShape, ga);
+                BRepGProp::VolumeProperties(m_previousToolShape,  gb);
+                const double biggest = std::max(ga.Mass(), gb.Mass());
+                if (gp.Mass() < biggest - 1e-4 * std::max(1.0, biggest)) {
+                    std::fprintf(stderr, "[Boolean] union came back SMALLER than "
+                                 "an input (%.3f < %.3f) -- an operand was lost; "
+                                 "rejecting.\n", gp.Mass(), biggest);
+                    return TopoDS_Shape();
+                }
+            }
             // Reject topologically INVALID results (self-intersections, bad
             // faces) — a fuzzy boolean can return a non-null, non-zero-volume
             // shape that's still garbage. Only a valid solid is worth committing;
