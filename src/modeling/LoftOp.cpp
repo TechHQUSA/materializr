@@ -10,6 +10,10 @@
 #include <GeomAPI_Interpolate.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <TopoDS_Edge.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepOffsetAPI_MakeFilling.hxx>
+#include <TopoDS_Shell.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepAdaptor_CompCurve.hxx>
@@ -194,17 +198,49 @@ TopoDS_Shape tipSplitLoft(const std::vector<TopoDS_Wire>& profiles, bool solid, 
     const double dx=x1-x0, dy=y1-y0, dz=z1-z0;
     const int axis = (dx >= dy && dx >= dz) ? 0 : (dy >= dz ? 1 : 2);
     try {
-        BRepOffsetAPI_ThruSections t(solid ? Standard_True : Standard_False,
-                                     ruled ? Standard_True : Standard_False);
+        std::vector<TopoDS_Wire> split;
+        split.reserve(profiles.size());
         for (const auto& w : profiles) {
             const TopoDS_Wire sw = tipSplitWire(w, axis);
             if (sw.IsNull()) return TopoDS_Shape();
-            t.AddWire(sw);
+            split.push_back(sw);
         }
+        // Walls only from ThruSections. For a SOLID the end caps are built with
+        // MakeFilling rather than letting ThruSections cap with planes: these
+        // sections are usually not planar (sketch profiles bow out of plane --
+        // float32 sketch storage), and a planar cap whose boundary sits 0.1 mm
+        // off its own surface poisons every boolean the body later takes part
+        // in. A filled cap actually contains its edges (tol ~1e-7 measured, vs
+        // a plane face lying to the kernel), and the walls+caps sew closed with
+        // zero free edges on the part this was built against.
+        BRepOffsetAPI_ThruSections t(Standard_False,
+                                     ruled ? Standard_True : Standard_False);
+        for (const auto& sw : split) t.AddWire(sw);
         t.Build();
         if (!t.IsDone() || t.Shape().IsNull()) return TopoDS_Shape();
-        if (!BRepCheck_Analyzer(t.Shape()).IsValid()) return TopoDS_Shape();
-        return t.Shape();
+        if (!solid) {
+            return BRepCheck_Analyzer(t.Shape()).IsValid() ? t.Shape() : TopoDS_Shape();
+        }
+        BRepBuilderAPI_Sewing sew(1e-4);
+        for (TopExp_Explorer ex(t.Shape(), TopAbs_FACE); ex.More(); ex.Next())
+            sew.Add(ex.Current());
+        for (const TopoDS_Wire* w : {&split.front(), &split.back()}) {
+            BRepOffsetAPI_MakeFilling fill;
+            for (TopExp_Explorer ex(*w, TopAbs_EDGE); ex.More(); ex.Next())
+                fill.Add(TopoDS::Edge(ex.Current()), GeomAbs_C0);
+            fill.Build();
+            if (!fill.IsDone() || fill.Shape().IsNull()) return TopoDS_Shape();
+            sew.Add(fill.Shape());
+        }
+        sew.Perform();
+        if (sew.SewedShape().IsNull() || sew.NbFreeEdges() > 0) return TopoDS_Shape();
+        for (TopExp_Explorer ex(sew.SewedShape(), TopAbs_SHELL); ex.More(); ex.Next()) {
+            BRepBuilderAPI_MakeSolid ms(TopoDS::Shell(ex.Current()));
+            if (!ms.IsDone()) break;
+            const TopoDS_Shape r = ms.Solid();
+            return BRepCheck_Analyzer(r).IsValid() ? r : TopoDS_Shape();
+        }
+        return TopoDS_Shape();
     } catch (...) { return TopoDS_Shape(); }
 }
 
