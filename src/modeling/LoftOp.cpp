@@ -5,8 +5,237 @@
 #include <GProp_GProps.hxx>
 #include <Standard_ErrorHandler.hxx> // OCC_CATCH_SIGNALS
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BOPAlgo_ArgumentAnalyzer.hxx>
+#include <BOPAlgo_CheckResult.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
+#include <TopoDS_Edge.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepAdaptor_CompCurve.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <TopTools_SequenceOfShape.hxx>
+#include <TopoDS_Compound.hxx>
+#include <cstdlib>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepTools_WireExplorer.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Vec.hxx>
+#include <cstdio>
+#include <vector>
 #include <imgui.h>
+
+namespace {
+
+// What ThruSections is actually being handed. The sections it pairs are
+// COMPUTED REGIONS, not the raw sketch geometry, so nothing about them can be
+// worked out from the project file alone -- a twisted loft had to be diagnosed
+// from here.
+//
+// Winding is the number to watch: ThruSections joins wire A's parameter t to
+// wire B's parameter t, so two sections whose loops run opposite ways around
+// their own normals get connected front-to-back and the surface crosses itself.
+gp_Vec wireWinding(const TopoDS_Wire& w) {
+    std::vector<gp_Pnt> v;
+    for (BRepTools_WireExplorer ex(w); ex.More(); ex.Next())
+        v.push_back(BRep_Tool::Pnt(ex.CurrentVertex()));
+    gp_Vec n(0, 0, 0);
+    for (std::size_t i = 0; i < v.size(); ++i) {          // Newell's method
+        const gp_Pnt& a = v[i];
+        const gp_Pnt& b = v[(i + 1) % v.size()];
+        n += gp_Vec((a.Y() - b.Y()) * (a.Z() + b.Z()),
+                    (a.Z() - b.Z()) * (a.X() + b.X()),
+                    (a.X() - b.X()) * (a.Y() + b.Y()));
+    }
+    if (n.Magnitude() > 1e-12) n.Normalize();
+    return n;
+}
+
+// Write the sections to a BREP file when MATERIALIZR_DUMP_LOFT names a path.
+// The profiles ThruSections receives are COMPUTED REGIONS, so they cannot be
+// reconstructed from the project file -- without this, every hypothesis about a
+// bad loft has to be tested by asking the user to re-run the app.
+void dumpSections(const std::vector<TopoDS_Wire>& profiles) {
+    const char* path = std::getenv("MATERIALIZR_DUMP_LOFT");
+    if (!path || !*path) return;
+    try {
+        BRep_Builder b;
+        TopoDS_Compound c;
+        b.MakeCompound(c);
+        for (const auto& w : profiles)
+            if (!w.IsNull()) b.Add(c, w);
+        if (BRepTools::Write(c, path))
+            std::fprintf(stderr, "[Loft] sections written to %s\n", path);
+    } catch (...) {}
+}
+
+// ─── Tip-split fallback for a self-intersecting loft ────────────────────────
+//
+// ThruSections pairs single-loop sections by arc-length parameter, which folds
+// the surface whenever the loops' features sit at different perimeter
+// fractions. Worst case measured (robot dog cover.mzr, two ~2 mm-wide C-shaped
+// rim bands sharing the same two tips): every parameterisation-level remedy
+// failed --
+//
+//     raw wires                          self-intersecting (vol 2856)
+//     BRepFill_CompatibleWires           self-intersecting, vol NEGATIVE (-770)
+//     single approximated curve/section  collapsed (vol 150-674)
+//     arc-length resample + best seam    still folded (rms misfit 18.7 mm)
+//
+// because on a thin band the wrong run-pairing differs by only the band width,
+// which no distance metric can see. What DOES work is structural: split each
+// closed section into exactly TWO edges at its extreme points along the loft
+// set's longest axis (the band tips), and let ThruSections' vertex matching pin
+// tip to tip. Same part, this path: vol 3502, valid, no self-intersection.
+//
+// The fallback only runs when the normal loft came out self-intersecting, so
+// well-behaved lofts keep their exact geometry and pay nothing.
+bool selfIntersects(const TopoDS_Shape& s) {
+    try {
+        BOPAlgo_ArgumentAnalyzer an;
+        an.SetShape1(s);
+        an.OperationType() = BOPAlgo_UNKNOWN;
+        an.SelfInterMode() = Standard_True;
+        an.Perform();
+        for (BOPAlgo_ListIteratorOfListOfCheckResult it(an.GetCheckResult());
+             it.More(); it.Next())
+            if (it.Value().GetCheckStatus() == BOPAlgo_SelfIntersect) return true;
+    } catch (...) {}
+    return false;
+}
+
+std::vector<gp_Pnt> densePoly(const TopoDS_Wire& w, int n) {
+    std::vector<gp_Pnt> out; out.reserve(n);
+    try {
+        BRepAdaptor_CompCurve cc(w);
+        const double L = GCPnts_AbscissaPoint::Length(cc);
+        const double t0 = cc.FirstParameter();
+        if (L < 1e-9) return out;
+        for (int i = 0; i < n; ++i) {
+            GCPnts_AbscissaPoint ap(cc, L * (double)i / n, t0);
+            out.push_back(cc.Value(ap.IsDone() ? ap.Parameter() : t0));
+        }
+    } catch (...) { out.clear(); }
+    return out;
+}
+
+TopoDS_Edge interpolatedEdge(const std::vector<gp_Pnt>& pts) {
+    try {
+        Handle(TColgp_HArray1OfPnt) a = new TColgp_HArray1OfPnt(1, (int)pts.size());
+        for (std::size_t i = 0; i < pts.size(); ++i) a->SetValue((int)i + 1, pts[i]);
+        GeomAPI_Interpolate ip(a, Standard_False, 1e-7);
+        ip.Perform();
+        if (!ip.IsDone()) return TopoDS_Edge();
+        return BRepBuilderAPI_MakeEdge(ip.Curve()).Edge();
+    } catch (...) { return TopoDS_Edge(); }
+}
+
+// Rebuild one closed loop as a 2-edge wire split at its extremes along `axis`
+// (0=X 1=Y 2=Z). Runs are resampled uniformly by arc length.
+TopoDS_Wire tipSplitWire(const TopoDS_Wire& w, int axis) {
+    const std::vector<gp_Pnt> p = densePoly(w, 2048);
+    if (p.size() < 8) return TopoDS_Wire();
+    auto coord = [axis](const gp_Pnt& q) {
+        return axis == 0 ? q.X() : axis == 1 ? q.Y() : q.Z();
+    };
+    int iMin = 0, iMax = 0;
+    const int n = (int)p.size();
+    for (int i = 1; i < n; ++i) {
+        if (coord(p[i]) < coord(p[iMin])) iMin = i;
+        if (coord(p[i]) > coord(p[iMax])) iMax = i;
+    }
+    if (iMin == iMax) return TopoDS_Wire();
+    auto walk = [&](int a, int b) {
+        std::vector<gp_Pnt> r;
+        for (int i = a;; i = (i + 1) % n) { r.push_back(p[i]); if (i == b) break; }
+        return r;
+    };
+    auto resample = [](const std::vector<gp_Pnt>& r, int k) {
+        std::vector<double> cum(r.size(), 0.0);
+        for (std::size_t i = 1; i < r.size(); ++i) cum[i] = cum[i-1] + r[i-1].Distance(r[i]);
+        const double L = cum.back();
+        std::vector<gp_Pnt> out; out.reserve(k);
+        std::size_t j = 0;
+        for (int i = 0; i < k; ++i) {
+            const double s = L * (double)i / (k - 1);
+            while (j + 1 < cum.size() && cum[j+1] < s) ++j;
+            const double seg = cum[j+1] - cum[j];
+            const double t = seg > 1e-12 ? (s - cum[j]) / seg : 0.0;
+            out.push_back(gp_Pnt(r[j].X() + (r[j+1].X()-r[j].X())*t,
+                                 r[j].Y() + (r[j+1].Y()-r[j].Y())*t,
+                                 r[j].Z() + (r[j+1].Z()-r[j].Z())*t));
+        }
+        return out;
+    };
+    const TopoDS_Edge e1 = interpolatedEdge(resample(walk(iMax, iMin), 80));
+    const TopoDS_Edge e2 = interpolatedEdge(resample(walk(iMin, iMax), 80));
+    if (e1.IsNull() || e2.IsNull()) return TopoDS_Wire();
+    try {
+        BRepBuilderAPI_MakeWire mk(e1); mk.Add(e2);
+        if (!mk.IsDone()) return TopoDS_Wire();
+        return mk.Wire();
+    } catch (...) { return TopoDS_Wire(); }
+}
+
+// The whole fallback: rebuild every section tip-split along the loft set's
+// longest axis and loft again. Returns null on any failure.
+TopoDS_Shape tipSplitLoft(const std::vector<TopoDS_Wire>& profiles, bool solid, bool ruled) {
+    Bnd_Box bb;
+    for (const auto& w : profiles) { try { BRepBndLib::Add(w, bb); } catch (...) {} }
+    if (bb.IsVoid()) return TopoDS_Shape();
+    double x0,y0,z0,x1,y1,z1; bb.Get(x0,y0,z0,x1,y1,z1);
+    const double dx=x1-x0, dy=y1-y0, dz=z1-z0;
+    const int axis = (dx >= dy && dx >= dz) ? 0 : (dy >= dz ? 1 : 2);
+    try {
+        BRepOffsetAPI_ThruSections t(solid ? Standard_True : Standard_False,
+                                     ruled ? Standard_True : Standard_False);
+        for (const auto& w : profiles) {
+            const TopoDS_Wire sw = tipSplitWire(w, axis);
+            if (sw.IsNull()) return TopoDS_Shape();
+            t.AddWire(sw);
+        }
+        t.Build();
+        if (!t.IsDone() || t.Shape().IsNull()) return TopoDS_Shape();
+        if (!BRepCheck_Analyzer(t.Shape()).IsValid()) return TopoDS_Shape();
+        return t.Shape();
+    } catch (...) { return TopoDS_Shape(); }
+}
+
+void describeSections(const std::vector<TopoDS_Wire>& profiles) {
+    gp_Vec prev(0, 0, 0);
+    for (std::size_t i = 0; i < profiles.size(); ++i) {
+        const TopoDS_Wire& w = profiles[i];
+        if (w.IsNull()) { std::fprintf(stderr, "[Loft] section %zu: NULL\n", i); continue; }
+        int edges = 0;
+        for (TopExp_Explorer ex(w, TopAbs_EDGE); ex.More(); ex.Next()) ++edges;
+        double len = 0.0;
+        try { BRepAdaptor_CompCurve cc(w); len = GCPnts_AbscissaPoint::Length(cc); } catch (...) {}
+        Bnd_Box bb; try { BRepBndLib::Add(w, bb); } catch (...) {}
+        double x0=0,y0=0,z0=0,x1=0,y1=0,z1=0;
+        if (!bb.IsVoid()) bb.Get(x0,y0,z0,x1,y1,z1);
+        const gp_Vec n = wireWinding(w);
+        const double dot = (i == 0) ? 1.0 : n.Dot(prev);
+        std::fprintf(stderr,
+            "[Loft] section %zu: %d edges, closed=%s, perimeter %.3f, "
+            "winding (%.3f,%.3f,%.3f), dot-with-previous %+.3f%s\n",
+            i, edges, BRep_Tool::IsClosed(w) ? "yes" : "NO", len,
+            n.X(), n.Y(), n.Z(), dot,
+            (i > 0 && dot < 0.0) ? "   <-- OPPOSITE WINDING, will twist" : "");
+        std::fprintf(stderr,
+            "[Loft]            bbox X %.2f..%.2f  Y %.2f..%.2f  Z %.2f..%.2f\n",
+            x0, x1, y0, y1, z0, z1);
+        prev = n;
+    }
+}
+
+} // namespace
 
 LoftOp::LoftOp() = default;
 
@@ -49,7 +278,12 @@ bool LoftOp::execute(Document& doc) {
         BRepOffsetAPI_ThruSections thruSections(m_solid ? Standard_True : Standard_False,
                                                  m_ruled ? Standard_True : Standard_False);
 
-        for (const auto& wire : m_profiles) {
+        describeSections(m_profiles);
+        dumpSections(m_profiles);
+
+        std::vector<TopoDS_Wire> profiles = m_profiles;
+
+        for (const auto& wire : profiles) {
             thruSections.AddWire(wire);
         }
 
@@ -59,6 +293,25 @@ bool LoftOp::execute(Document& doc) {
         }
 
         TopoDS_Shape loftedShape = thruSections.Shape();
+
+        // A loft that folds through itself still reads as "valid" to BRepCheck
+        // and has a plausible volume, so the fold must be looked for
+        // explicitly. Only sections without holes take the fallback -- the
+        // tip-split rebuild does not carry hole channels through.
+        bool holesPresent = false;
+        for (const auto& hp : m_holeProfiles) if (!hp.empty()) { holesPresent = true; break; }
+        if (!holesPresent && !loftedShape.IsNull() && selfIntersects(loftedShape)) {
+            std::fprintf(stderr, "[Loft] result self-intersects -- retrying with "
+                                 "tip-split sections.\n");
+            const TopoDS_Shape retry = tipSplitLoft(profiles, m_solid, m_ruled);
+            if (!retry.IsNull() && !selfIntersects(retry)) {
+                std::fprintf(stderr, "[Loft] tip-split loft is clean -- using it.\n");
+                loftedShape = retry;
+            } else {
+                std::fprintf(stderr, "[Loft] tip-split retry did not help; keeping "
+                                     "the original result.\n");
+            }
+        }
 
         // Tube support: if the profiles carry holes (e.g. concentric circles),
         // loft each hole-channel into its own inner solid and cut it from the
