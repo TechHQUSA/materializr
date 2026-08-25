@@ -803,6 +803,7 @@ void Application::beginLoft() {
     };
     // Selected FACES are sections too, in click order alongside sketches.
     std::vector<TopoDS_Shape> faceShapes;
+    std::vector<int> faceBodyIds;
     for (const auto& e : m_selection->getSelection()) {
         if ((e.type == SelectionType::Sketch ||
              e.type == SelectionType::SketchRegion) && e.sketchId >= 0) {
@@ -811,7 +812,7 @@ void Application::beginLoft() {
                    e.shape.ShapeType() == TopAbs_FACE) {
             bool dup = false;
             for (const auto& f : faceShapes) if (f.IsSame(e.shape)) { dup = true; break; }
-            if (!dup) faceShapes.push_back(e.shape);
+            if (!dup) { faceShapes.push_back(e.shape); faceBodyIds.push_back(e.bodyId); }
         }
     }
     {
@@ -850,6 +851,19 @@ void Application::beginLoft() {
     m_loftRails.clear();
     m_loftRailsMode = false;
     int unusable = 0;
+    // All sections faces of ONE body -> the loft can bridge into that body
+    // (consume the faces, sew, one solid) instead of adding a separate body
+    // that can never be unioned. See LoftOp::setBridge.
+    m_loftBridgeBodyId = -1;
+    m_loftBridgeFaces.clear();
+    if (sketchIds.empty() && faceShapes.size() >= 2 && !faceBodyIds.empty()) {
+        bool sameBody = faceBodyIds[0] >= 0;
+        for (int id : faceBodyIds) if (id != faceBodyIds[0]) { sameBody = false; break; }
+        if (sameBody) {
+            m_loftBridgeBodyId = faceBodyIds[0];
+            m_loftBridgeFaces = faceShapes;
+        }
+    }
     for (const TopoDS_Shape& fs : faceShapes) {
         LoftSection sec;
         sec.sketchId = -1;                  // a face section has no sketch
@@ -987,6 +1001,8 @@ void Application::updateLoft() {
     }
     op->setSolid(m_loftSolid);
     op->setRuled(m_loftRuled);
+    if (m_loftBridgeBodyId >= 0)
+        op->setBridge(m_loftBridgeBodyId, m_loftBridgeFaces);
     m_loftPreview.apply(*m_document);
     m_meshesDirty = true;
 }

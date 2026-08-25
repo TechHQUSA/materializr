@@ -244,6 +244,98 @@ TopoDS_Shape tipSplitLoft(const std::vector<TopoDS_Wire>& profiles, bool solid, 
     } catch (...) { return TopoDS_Shape(); }
 }
 
+// Sew the loft into the body it was lofted from: body faces minus the source
+// faces, plus the loft's wall faces (no caps -- the holes ARE the caps).
+//
+// The direct alternative -- add the loft as a body and Fuse -- was measured
+// exhaustively on robot dog cover.mzr and fails at every OCCT setting: exact,
+// fuzzy 1e-5/1e-3, glue, 0.2 mm forced interpenetration, healed inputs. The
+// contact is two long ~2 mm-wide tangent strips, and BOP either returns an
+// invalid shred, drops an operand, or an empty compound (123 s, 0 faces).
+// The body itself is fine: it fuses with plain boxes anywhere, instantly.
+//
+// Sewing needs a tolerance ladder because the loft's boundary is a resampled
+// approximation of the rim outline (a few micron off along the runs, up to
+// ~20 micron where interpolation rounds the band tips). On the same part:
+// 1e-3 leaves 21 free edges, 2e-2 closes all of them, and the result is a
+// valid solid within 0.13% of body+skirt volume.
+//
+// Known wart, logged when it happens: where the section bands terminate
+// against a body wall that spans the gap, the loft wall wraps the band tip and
+// laps that wall by a hair -- BOP's self-intersection probe flags it, but the
+// solid is valid, meshes fine, and the volume is right. Fixing it needs local
+// face surgery at the tips; not attempted here.
+TopoDS_Shape bridgeIntoBody(const TopoDS_Shape& body,
+                            const std::vector<TopoDS_Shape>& consumedFaces,
+                            const std::vector<TopoDS_Wire>& sections,
+                            bool ruled) {
+    if (body.IsNull() || sections.size() < 2) return TopoDS_Shape();
+    // Wall shell between the sections (tip-split for sane correspondence).
+    Bnd_Box bb;
+    for (const auto& w : sections) { try { BRepBndLib::Add(w, bb); } catch (...) {} }
+    if (bb.IsVoid()) return TopoDS_Shape();
+    double x0,y0,z0,x1,y1,z1; bb.Get(x0,y0,z0,x1,y1,z1);
+    const double dx=x1-x0, dy=y1-y0, dz=z1-z0;
+    const int axis = (dx >= dy && dx >= dz) ? 0 : (dy >= dz ? 1 : 2);
+    TopoDS_Shape walls;
+    try {
+        BRepOffsetAPI_ThruSections t(Standard_False,
+                                     ruled ? Standard_True : Standard_False);
+        for (const auto& w : sections) {
+            const TopoDS_Wire sw = tipSplitWire(w, axis);
+            if (sw.IsNull()) return TopoDS_Shape();
+            t.AddWire(sw);
+        }
+        t.Build();
+        if (!t.IsDone() || t.Shape().IsNull()) return TopoDS_Shape();
+        walls = t.Shape();
+    } catch (...) { return TopoDS_Shape(); }
+
+    GProp_GProps gb; BRepGProp::VolumeProperties(body, gb);
+    const double vBody = gb.Mass();
+
+    for (double tol : {1e-3, 5e-3, 2e-2}) {
+        try {
+            BRepBuilderAPI_Sewing sew(tol);
+            int dropped = 0;
+            for (TopExp_Explorer ex(body, TopAbs_FACE); ex.More(); ex.Next()) {
+                bool consumed = false;
+                for (const auto& cf : consumedFaces)
+                    if (ex.Current().IsSame(cf)) { consumed = true; break; }
+                if (consumed) { ++dropped; continue; }
+                sew.Add(ex.Current());
+            }
+            if (dropped != static_cast<int>(consumedFaces.size())) return TopoDS_Shape();
+            for (TopExp_Explorer ex(walls, TopAbs_FACE); ex.More(); ex.Next())
+                sew.Add(ex.Current());
+            sew.Perform();
+            if (sew.SewedShape().IsNull()) continue;
+            if (sew.NbFreeEdges() > 0) {
+                std::fprintf(stderr, "[Loft] bridge sew at %.0e: %d free edge(s).\n",
+                             tol, sew.NbFreeEdges());
+                continue;
+            }
+            for (TopExp_Explorer ex(sew.SewedShape(), TopAbs_SHELL); ex.More(); ex.Next()) {
+                BRepBuilderAPI_MakeSolid ms(TopoDS::Shell(ex.Current()));
+                if (!ms.IsDone()) break;
+                TopoDS_Shape solid = ms.Solid();
+                GProp_GProps g; BRepGProp::VolumeProperties(solid, g);
+                if (g.Mass() < 0) { solid.Reverse();
+                                    BRepGProp::VolumeProperties(solid, g); }
+                // Adding material: the merged body must not be smaller than the
+                // input body, nor absurdly larger.
+                if (g.Mass() < vBody - 1e-4 * vBody) break;
+                if (g.Mass() > vBody * 2.0 + 1e4) break;
+                if (!BRepCheck_Analyzer(solid).IsValid()) break;
+                std::fprintf(stderr, "[Loft] bridged into the body at sew tol %.0e "
+                             "(vol %.3f -> %.3f).\n", tol, vBody, g.Mass());
+                return solid;
+            }
+        } catch (...) {}
+    }
+    return TopoDS_Shape();
+}
+
 void describeSections(const std::vector<TopoDS_Wire>& profiles) {
     gp_Vec prev(0, 0, 0);
     for (std::size_t i = 0; i < profiles.size(); ++i) {
@@ -296,6 +388,11 @@ void LoftOp::setSolid(bool solid) {
 
 void LoftOp::setRuled(bool ruled) {
     m_ruled = ruled;
+}
+
+void LoftOp::setBridge(int bodyId, const std::vector<TopoDS_Shape>& sourceFaces) {
+    m_bridgeBodyId = bodyId;
+    m_bridgeFaces = sourceFaces;
 }
 
 bool LoftOp::execute(Document& doc) {
@@ -397,6 +494,28 @@ bool LoftOp::execute(Document& doc) {
         }
         if (!BRepCheck_Analyzer(loftedShape).IsValid()) return false;
 
+        // Bridge mode: consume the source faces instead of adding a body.
+        m_bridged = false;
+        if (m_bridgeBodyId >= 0 && !m_bridgeFaces.empty() && m_solid) {
+            bool holesPresent2 = false;
+            for (const auto& hp : m_holeProfiles)
+                if (!hp.empty()) { holesPresent2 = true; break; }
+            if (!holesPresent2) {
+                const TopoDS_Shape host = doc.getBody(m_bridgeBodyId);
+                if (!host.IsNull()) {
+                    const TopoDS_Shape merged =
+                        bridgeIntoBody(host, m_bridgeFaces, profiles, m_ruled);
+                    if (!merged.IsNull()) {
+                        m_bridgePreviousShape = host;
+                        doc.updateBody(m_bridgeBodyId, merged);
+                        m_bridged = true;
+                        return true;
+                    }
+                    std::fprintf(stderr, "[Loft] bridge failed -- keeping the loft "
+                                 "as its own body.\n");
+                }
+            }
+        }
         doc.addOrPutBody(m_createdBodyId, loftedShape, "Loft");
 
         return true;
@@ -406,6 +525,11 @@ bool LoftOp::execute(Document& doc) {
 }
 
 bool LoftOp::undo(Document& doc) {
+    if (m_bridged && m_bridgeBodyId >= 0 && !m_bridgePreviousShape.IsNull()) {
+        doc.updateBody(m_bridgeBodyId, m_bridgePreviousShape);
+        m_bridged = false;
+        return true;
+    }
     try {
         if (m_createdBodyId >= 0) {
             doc.removeBody(m_createdBodyId);

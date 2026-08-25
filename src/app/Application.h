@@ -1541,6 +1541,9 @@ private:
     };
     bool m_loftActive = false;
     std::vector<LoftSection> m_loftSections;
+    // Bridge candidate: set when every loft section is a face of one body.
+    int m_loftBridgeBodyId = -1;
+    std::vector<TopoDS_Shape> m_loftBridgeFaces;
     bool m_loftSolid = true;
     bool m_loftRuled = false;
     // ONE LoftOp (or GuidedLoftOp in rails mode) toggled against the document;
