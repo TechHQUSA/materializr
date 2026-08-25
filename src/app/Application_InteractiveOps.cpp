@@ -761,6 +761,33 @@ static TopoDS_Wire outermostRegionWire(materializr::Sketch* sk,
     return {};
 }
 
+// The outer boundary of a face, as a loft section.
+//
+// A face already carries a real closed loop with real edges and real vertices,
+// so this sidesteps the sketch region builder entirely. That matters: a section
+// synthesised from spline-heavy sketch geometry can come out with corners that
+// do not correspond between sections, which lofts into a self-intersecting
+// solid (issue #83). Picking two faces gives ThruSections two clean loops.
+//
+// Inner wires come along as holes, so lofting between two ring-shaped faces
+// still produces a tube.
+static TopoDS_Wire faceSectionWire(const TopoDS_Shape& faceShape,
+                                   std::vector<TopoDS_Wire>& holesOut) {
+    holesOut.clear();
+    if (faceShape.IsNull() || faceShape.ShapeType() != TopAbs_FACE) return {};
+    const TopoDS_Face f = TopoDS::Face(faceShape);
+    TopoDS_Wire outer;
+    try {
+        outer = BRepTools::OuterWire(f);
+    } catch (...) { return {}; }
+    if (outer.IsNull()) return {};
+    for (TopExp_Explorer ex(f, TopAbs_WIRE); ex.More(); ex.Next()) {
+        const TopoDS_Wire w = TopoDS::Wire(ex.Current());
+        if (!w.IsSame(outer)) holesOut.push_back(w);
+    }
+    return outer;
+}
+
 void Application::beginLoft() {
     if (refuseMeshSelection("Loft")) return;
     if (!m_selection || !m_document) return;
@@ -774,13 +801,44 @@ void Application::beginLoft() {
         for (int x : sketchIds) if (x == id) return;
         sketchIds.push_back(id);
     };
+    // Selected FACES are sections too, in click order alongside sketches.
+    std::vector<TopoDS_Shape> faceShapes;
     for (const auto& e : m_selection->getSelection()) {
         if ((e.type == SelectionType::Sketch ||
              e.type == SelectionType::SketchRegion) && e.sketchId >= 0) {
             addId(e.sketchId);
+        } else if (e.type == SelectionType::Face && !e.shape.IsNull() &&
+                   e.shape.ShapeType() == TopAbs_FACE) {
+            bool dup = false;
+            for (const auto& f : faceShapes) if (f.IsSame(e.shape)) { dup = true; break; }
+            if (!dup) faceShapes.push_back(e.shape);
         }
     }
-    if (sketchIds.size() < 2) return;
+    {
+        // What the selection actually held when Loft was pressed. Without this
+        // a face selection that quietly fails is indistinguishable from one
+        // that was never seen.
+        int nSketch=0, nRegion=0, nFace=0, nBody=0, nEdge=0, nOther=0;
+        for (const auto& e : m_selection->getSelection()) {
+            switch (e.type) {
+                case SelectionType::Sketch:       ++nSketch; break;
+                case SelectionType::SketchRegion: ++nRegion; break;
+                case SelectionType::Face:         ++nFace;   break;
+                case SelectionType::Body:         ++nBody;   break;
+                case SelectionType::Edge:         ++nEdge;   break;
+                default:                          ++nOther;  break;
+            }
+        }
+        std::fprintf(stderr,
+            "[Loft] beginLoft: selection has %d sketch, %d region, %d face, "
+            "%d body, %d edge, %d other -> %zu sketch id(s), %zu face shape(s)\n",
+            nSketch, nRegion, nFace, nBody, nEdge, nOther,
+            sketchIds.size(), faceShapes.size());
+    }
+    if (sketchIds.size() + faceShapes.size() < 2) {
+        std::fprintf(stderr, "[Loft] beginLoft: fewer than 2 sections, giving up.\n");
+        return;
+    }
 
 
     // Classify each sketch: a closed region = a SECTION; no closed region but
@@ -792,6 +850,21 @@ void Application::beginLoft() {
     m_loftRails.clear();
     m_loftRailsMode = false;
     int unusable = 0;
+    for (const TopoDS_Shape& fs : faceShapes) {
+        LoftSection sec;
+        sec.sketchId = -1;                  // a face section has no sketch
+        sec.outer = faceSectionWire(fs, sec.holes);
+        if (sec.outer.IsNull()) {
+            std::fprintf(stderr, "[Loft] a selected face has no usable outer wire.\n");
+            ++unusable;
+            continue;
+        }
+        int n = 0;
+        for (TopExp_Explorer ex(sec.outer, TopAbs_EDGE); ex.More(); ex.Next()) ++n;
+        std::fprintf(stderr, "[Loft] face section: %d edges, %zu hole(s).\n",
+                     n, sec.holes.size());
+        m_loftSections.push_back(std::move(sec));
+    }
     for (int id : sketchIds) {
         LoftSection sec;
         sec.sketchId = id;

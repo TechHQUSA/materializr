@@ -4,6 +4,9 @@
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
 #include "../modeling/Sketch.h"
+#include <TopoDS.hxx>
+#include <TopoDS_Shape.hxx>
+#include <vector>
 #include "../modeling/LoftOp.h"
 #include <TopoDS_Wire.hxx>
 #include <cstdio>
@@ -40,14 +43,25 @@ REGISTER_PLUGIN(Loft, [](materializr::PluginContext& ctx) {
             for (int x : sketchIds) if (x == id) return;
             sketchIds.push_back(id);
         };
+        // Faces count as sections too -- a face's outer wire is a closed loop
+        // already. Counting only sketches here meant a two-face selection fell
+        // through to the "pick another profile" hint and never opened the
+        // popup, even though the button was offered for it.
+        int faceCount = 0;
+        std::vector<TopoDS_Shape> seenFaces;
         for (const auto& e : sel) {
             if ((e.type == SelectionType::Sketch ||
                  e.type == SelectionType::SketchRegion) && e.sketchId >= 0) {
                 add(e.sketchId);
+            } else if (e.type == SelectionType::Face && !e.shape.IsNull() &&
+                       e.shape.ShapeType() == TopAbs_FACE) {
+                bool dup = false;
+                for (const auto& f : seenFaces) if (f.IsSame(e.shape)) { dup = true; break; }
+                if (!dup) { seenFaces.push_back(e.shape); ++faceCount; }
             }
         }
 
-        if (sketchIds.size() < 2) {
+        if (static_cast<int>(sketchIds.size()) + faceCount < 2) {
             ctx.requestInteractiveOp(materializr::InteractiveOp::LoftPickSecond);
             return;
         }
@@ -72,7 +86,9 @@ REGISTER_PLUGIN(Loft, [](materializr::PluginContext& ctx) {
         "perpendicular planes or with very different vertex counts produce a "
         "tent / pyramid surface — that's the loft algorithm being honest, not "
         "a bug. For floor-to-vertical transitions, a Sweep along a guide curve "
-        "is usually what you want instead.";
+        "is usually what you want instead.\n\n"
+        "Sections can be SKETCHES or FACES -- pick two faces to loft straight "
+        "between them, which avoids the profile-building step entirely.";
 
     ctx.registerToolbarButton({"Loft", "Loft",
         materializr::SelectionContext::HasSketches, 400,
@@ -80,5 +96,13 @@ REGISTER_PLUGIN(Loft, [](materializr::PluginContext& ctx) {
 
     ctx.registerToolbarButton({"Loft", "Loft",
         materializr::SelectionContext::HasSketchRegions, 400,
+        action, nullptr, tooltip});
+
+    // Faces are sections too. A face's outer wire is already a closed loop of
+    // real edges, so it skips the sketch region builder -- which is where
+    // spline-heavy profiles pick up corners that do not correspond between
+    // sections and loft into a self-intersecting solid (issue #83).
+    ctx.registerToolbarButton({"Loft", "Loft",
+        materializr::SelectionContext::HasFaces, 400,
         action, nullptr, tooltip});
 })

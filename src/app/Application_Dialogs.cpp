@@ -1857,7 +1857,11 @@ void Application::renderLoftPanel() {
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
-        ImGui::TextUnformatted(sketchLabel(sec.sketchId).c_str());
+        // sketchId < 0 marks a section taken from a picked FACE, which has no
+        // sketch to name it after.
+        ImGui::TextUnformatted(sec.sketchId >= 0
+                                   ? sketchLabel(sec.sketchId).c_str()
+                                   : "Face");
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - uiSz(50, 0).x);
         if (ImGui::Checkbox("Flip", &sec.reverse)) changed = true;
         ImGui::SetItemTooltip("Reverse this profile's vertex order. Use it if "
