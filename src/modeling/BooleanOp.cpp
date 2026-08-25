@@ -1,4 +1,8 @@
 #include "BooleanOp.h"
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressScope.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <ctime>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -42,14 +46,50 @@ bool BooleanOp::execute(Document& doc) {
         // escalate the fuzzy value instead of committing junk. (IsDone() is
         // necessary but not sufficient — OCCT can report success yet hand back a
         // null or zero-volume compound.)
+        // A boolean on pathological contact geometry (a solid sitting
+        // skin-tight on another, tangent B-spline walls) can grind for tens of
+        // minutes single-threaded -- and this runs on the UI thread, so the
+        // whole app reads as hung. Measured on robot dog cover.mzr fusing a
+        // lofted skirt: 12+ minutes and counting before the user killed it,
+        // and the attempt ladder below would have run FOUR of those.
+        //
+        // Two containments:
+        //   * RunParallel -- OCCT parallelises the intersection stage well.
+        //   * a hard time-box per attempt via the progress callback's user
+        //     break. An attempt that cannot finish inside the budget is
+        //     abandoned and the ladder moves on, so the worst case is bounded
+        //     and the op fails cleanly instead of hanging forever.
+        struct TimeBox : public Message_ProgressIndicator {
+            std::clock_t start; double limit;
+            explicit TimeBox(double seconds)
+                : start(std::clock()), limit(seconds) {}
+            Standard_Boolean UserBreak() override {
+                return double(std::clock() - start) / CLOCKS_PER_SEC > limit;
+            }
+            void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+        };
+        constexpr double kAttemptSeconds = 45.0;
+
         auto attempt = [&](double fuzzy) -> TopoDS_Shape {
             TopoDS_Shape s;
             try {
                 switch (m_mode) {
                     case BooleanMode::Union: {
-                        BRepAlgoAPI_Fuse op(m_previousTargetShape, m_previousToolShape);
+                        BRepAlgoAPI_Fuse op;
+                        {
+                            TopTools_ListOfShape args, tools;
+                            args.Append(m_previousTargetShape);
+                            tools.Append(m_previousToolShape);
+                            op.SetArguments(args);
+                            op.SetTools(tools);
+                        }
+                        op.SetRunParallel(Standard_True);
                         if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
-                        op.Build();
+                        Handle(TimeBox) tb = new TimeBox(kAttemptSeconds);
+                        op.Build(tb->Start());
+                        if (tb->UserBreak())
+                            std::fprintf(stderr, "[Boolean] attempt (fuzzy=%.4g) "
+                                         "abandoned after %.0f s.\n", fuzzy, kAttemptSeconds);
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
                         // Publish face lineage from BOTH inputs so "gen" can
@@ -61,9 +101,21 @@ bool BooleanOp::execute(Document& doc) {
                         break;
                     }
                     case BooleanMode::Subtract: {
-                        BRepAlgoAPI_Cut op(m_previousTargetShape, m_previousToolShape);
+                        BRepAlgoAPI_Cut op;
+                        {
+                            TopTools_ListOfShape args, tools;
+                            args.Append(m_previousTargetShape);
+                            tools.Append(m_previousToolShape);
+                            op.SetArguments(args);
+                            op.SetTools(tools);
+                        }
+                        op.SetRunParallel(Standard_True);
                         if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
-                        op.Build();
+                        Handle(TimeBox) tb = new TimeBox(kAttemptSeconds);
+                        op.Build(tb->Start());
+                        if (tb->UserBreak())
+                            std::fprintf(stderr, "[Boolean] attempt (fuzzy=%.4g) "
+                                         "abandoned after %.0f s.\n", fuzzy, kAttemptSeconds);
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
                         // Publish face lineage from BOTH inputs so "gen" can
@@ -77,9 +129,21 @@ bool BooleanOp::execute(Document& doc) {
                         break;
                     }
                     case BooleanMode::Intersect: {
-                        BRepAlgoAPI_Common op(m_previousTargetShape, m_previousToolShape);
+                        BRepAlgoAPI_Common op;
+                        {
+                            TopTools_ListOfShape args, tools;
+                            args.Append(m_previousTargetShape);
+                            tools.Append(m_previousToolShape);
+                            op.SetArguments(args);
+                            op.SetTools(tools);
+                        }
+                        op.SetRunParallel(Standard_True);
                         if (fuzzy > 0) op.SetFuzzyValue(fuzzy);
-                        op.Build();
+                        Handle(TimeBox) tb = new TimeBox(kAttemptSeconds);
+                        op.Build(tb->Start());
+                        if (tb->UserBreak())
+                            std::fprintf(stderr, "[Boolean] attempt (fuzzy=%.4g) "
+                                         "abandoned after %.0f s.\n", fuzzy, kAttemptSeconds);
                         if (!op.IsDone()) return TopoDS_Shape();
                         s = op.Shape();
                         // Publish face lineage from BOTH inputs so "gen" can
