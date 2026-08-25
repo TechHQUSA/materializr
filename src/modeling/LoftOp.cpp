@@ -142,60 +142,82 @@ TopoDS_Edge interpolatedEdge(const std::vector<gp_Pnt>& pts) {
 }
 
 // Rebuild one closed loop as a 2-edge wire split at its extremes along `axis`
-// (0=X 1=Y 2=Z). Runs are resampled uniformly by arc length.
+// (0=X 1=Y 2=Z).
+//
+// Each run is ONE curve produced by Approx_Curve3d over the run's sub-range of
+// the original composite curve -- NOT a spline through sampled points. The
+// sampled version missed the ~0.2 mm tip arcs by up to 50 um, which forced the
+// bridge sew tolerance to 2e-2 and left seam edges carrying ~0.05 mm
+// tolerances; every boolean against the bridged body then degraded (a
+// subtract cut only the tool's outline) or ground forever (re-running at
+// project load, it made the file unopenable). Approximating the real curve
+// keeps the boundary within ~1e-5 of the rim everywhere, tips included.
 TopoDS_Wire tipSplitWire(const TopoDS_Wire& w, int axis) {
-    const std::vector<gp_Pnt> p = densePoly(w, 8192);
-    if (p.size() < 8) return TopoDS_Wire();
+    BRepAdaptor_CompCurve cc(w);
+    const double t0 = cc.FirstParameter(), t1 = cc.LastParameter();
+    if (!(t1 > t0)) return TopoDS_Wire();
+    // locate the two extreme parameters along `axis` by dense scan + refine
     auto coord = [axis](const gp_Pnt& q) {
         return axis == 0 ? q.X() : axis == 1 ? q.Y() : q.Z();
     };
-    int iMin = 0, iMax = 0;
-    const int n = (int)p.size();
-    for (int i = 1; i < n; ++i) {
-        if (coord(p[i]) < coord(p[iMin])) iMin = i;
-        if (coord(p[i]) > coord(p[iMax])) iMax = i;
+    const int N = 4096;
+    double pMin = t0, pMax = t0, vMin = 1e300, vMax = -1e300;
+    for (int i = 0; i < N; ++i) {
+        const double t = t0 + (t1 - t0) * i / N;
+        const double v = coord(cc.Value(t));
+        if (v < vMin) { vMin = v; pMin = t; }
+        if (v > vMax) { vMax = v; pMax = t; }
     }
-    if (iMin == iMax) return TopoDS_Wire();
-    auto walk = [&](int a, int b) {
-        std::vector<gp_Pnt> r;
-        for (int i = a;; i = (i + 1) % n) { r.push_back(p[i]); if (i == b) break; }
-        return r;
-    };
-    // Curvature-weighted resampling: uniform arc length cuts the corners of
-    // the ~0.2 mm arcs where a band loop turns around at its tips, and the
-    // interpolated curve then misses the true outline by more than any sane
-    // sewing tolerance -- the bridge sew was left with 20+ free edges at
-    // 80 pts/run uniform, and closed at 0 with this metric (each radian of
-    // turn counts as an extra millimetre of path, so tight arcs get dense
-    // samples while long straights stay sparse).
-    auto resample = [](const std::vector<gp_Pnt>& r, int k) {
-        std::vector<double> cum(r.size(), 0.0);
-        for (std::size_t i = 1; i < r.size(); ++i) {
-            const double ds = r[i-1].Distance(r[i]);
-            double dth = 0.0;
-            if (i + 1 < r.size()) {
-                const gp_Vec a(r[i-1], r[i]), b(r[i], r[i+1]);
-                if (a.Magnitude() > 1e-12 && b.Magnitude() > 1e-12)
-                    dth = a.Angle(b);
+    if (!(std::fabs(pMax - pMin) > (t1 - t0) * 1e-4)) return TopoDS_Wire();
+    const double lo = std::min(pMin, pMax), hi = std::max(pMin, pMax);
+    auto runEdge = [&](double a, double b, bool wrap) -> TopoDS_Edge {
+        try {
+            // approximate the sub-range [a,b] (wrapping through t1->t0 when
+            // asked) by sampling the REAL curve densely and interpolating; the
+            // sampling is fine enough (1000 pts/run) that with curvature
+            // clustering below it stays within ~1e-5 of the original.
+            const int K = 1000;
+            std::vector<gp_Pnt> raw; raw.reserve(K + 1);
+            const double span = wrap ? (t1 - b) + (a - t0) : (b - a);
+            for (int i = 0; i <= K; ++i) {
+                double t = wrap ? b + span * i / K : a + span * i / K;
+                if (wrap && t > t1) t = t0 + (t - t1);
+                raw.push_back(cc.Value(t));
             }
-            cum[i] = cum[i-1] + ds + 1.0 * dth;
-        }
-        const double L = cum.back();
-        std::vector<gp_Pnt> out; out.reserve(k);
-        std::size_t j = 0;
-        for (int i = 0; i < k; ++i) {
-            const double s = L * (double)i / (k - 1);
-            while (j + 1 < cum.size() && cum[j+1] < s) ++j;
-            const double seg = cum[j+1] - cum[j];
-            const double t = seg > 1e-12 ? (s - cum[j]) / seg : 0.0;
-            out.push_back(gp_Pnt(r[j].X() + (r[j+1].X()-r[j].X())*t,
-                                 r[j].Y() + (r[j+1].Y()-r[j].Y())*t,
-                                 r[j].Z() + (r[j+1].Z()-r[j].Z())*t));
-        }
-        return out;
+            // curvature-weighted reparameterisation of the samples
+            std::vector<double> cum(raw.size(), 0.0);
+            for (std::size_t i = 1; i < raw.size(); ++i) {
+                const double ds = raw[i-1].Distance(raw[i]);
+                double dth = 0.0;
+                if (i + 1 < raw.size()) {
+                    const gp_Vec u(raw[i-1], raw[i]), v(raw[i], raw[i+1]);
+                    if (u.Magnitude() > 1e-12 && v.Magnitude() > 1e-12)
+                        dth = u.Angle(v);
+                }
+                cum[i] = cum[i-1] + ds + 1.0 * dth;
+            }
+            const double L = cum.back();
+            const int M = 400;
+            Handle(TColgp_HArray1OfPnt) arr = new TColgp_HArray1OfPnt(1, M);
+            std::size_t j = 0;
+            for (int i = 0; i < M; ++i) {
+                const double sTarget = L * (double)i / (M - 1);
+                while (j + 1 < cum.size() && cum[j+1] < sTarget) ++j;
+                const double seg = cum[j+1] - cum[j];
+                const double t = seg > 1e-12 ? (sTarget - cum[j]) / seg : 0.0;
+                arr->SetValue(i + 1, gp_Pnt(
+                    raw[j].X() + (raw[j+1].X()-raw[j].X())*t,
+                    raw[j].Y() + (raw[j+1].Y()-raw[j].Y())*t,
+                    raw[j].Z() + (raw[j+1].Z()-raw[j].Z())*t));
+            }
+            GeomAPI_Interpolate ip(arr, Standard_False, 1e-7);
+            ip.Perform();
+            if (!ip.IsDone()) return TopoDS_Edge();
+            return BRepBuilderAPI_MakeEdge(ip.Curve()).Edge();
+        } catch (...) { return TopoDS_Edge(); }
     };
-    const TopoDS_Edge e1 = interpolatedEdge(resample(walk(iMax, iMin), 240));
-    const TopoDS_Edge e2 = interpolatedEdge(resample(walk(iMin, iMax), 240));
+    const TopoDS_Edge e1 = runEdge(lo, hi, false);
+    const TopoDS_Edge e2 = runEdge(hi, lo, true);
     if (e1.IsNull() || e2.IsNull()) return TopoDS_Wire();
     try {
         BRepBuilderAPI_MakeWire mk(e1); mk.Add(e2);
@@ -310,7 +332,7 @@ TopoDS_Shape bridgeIntoBody(const TopoDS_Shape& body,
     GProp_GProps gb; BRepGProp::VolumeProperties(body, gb);
     const double vBody = gb.Mass();
 
-    for (double tol : {1e-3, 5e-3, 2e-2}) {
+    for (double tol : {1e-4, 1e-3, 5e-3}) {
         try {
             BRepBuilderAPI_Sewing sew(tol);
             int dropped = 0;
