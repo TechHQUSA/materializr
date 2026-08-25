@@ -12,6 +12,10 @@
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressScope.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <ctime>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeShape.hxx>
@@ -265,6 +269,39 @@ void ExtrudeOp::setDraftAngle(double degrees) {
     m_draftAngle = degrees;
 }
 
+
+// Time-boxed boolean build, mirroring BooleanOp. An extrude-subtract against a
+// body with tolerance-inflated seams was measured grinding indefinitely -- and
+// these cuts RE-RUN at project load, so one bad step made the file unopenable:
+// the app sat at 98% CPU forever before the window ever appeared.
+namespace {
+struct ExtrudeTimeBox : public Message_ProgressIndicator {
+    std::clock_t start; double limit;
+    explicit ExtrudeTimeBox(double seconds) : start(std::clock()), limit(seconds) {}
+    Standard_Boolean UserBreak() override {
+        return double(std::clock() - start) / CLOCKS_PER_SEC > limit;
+    }
+    void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+};
+template <class OP>
+bool timedBooleanBuild(OP& op, const TopoDS_Shape& a, const TopoDS_Shape& b,
+                       const char* what) {
+    TopTools_ListOfShape la, lb;
+    la.Append(a); lb.Append(b);
+    op.SetArguments(la);
+    op.SetTools(lb);
+    op.SetRunParallel(Standard_True);
+    Handle(ExtrudeTimeBox) tb = new ExtrudeTimeBox(45.0);
+    op.Build(tb->Start());
+    if (tb->UserBreak()) {
+        std::fprintf(stderr, "[Extrude] %s abandoned after 45 s -- the target "
+                     "body's geometry is too degenerate for this boolean.\n", what);
+        return false;
+    }
+    return op.IsDone();
+}
+} // namespace
+
 bool ExtrudeOp::execute(Document& doc) {
     if (m_profile.IsNull()) {
         return false;
@@ -445,11 +482,9 @@ bool ExtrudeOp::execute(Document& doc) {
                 m_prevFaceIds.clear();
                 if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
                     m_prevFaceIds = *im;
-                BRepAlgoAPI_Fuse fuse(m_previousTargetShape, extrudedShape);
-                fuse.Build();
-                if (!fuse.IsDone()) {
-                    return false;
-                }
+                BRepAlgoAPI_Fuse fuse;
+                if (!timedBooleanBuild(fuse, m_previousTargetShape, extrudedShape,
+                                       "fuse")) return false;
                 TopoDS_Shape fused = fuse.Shape();
                 fused = materializr::unifySameDomain(fused, "Extrude fuse");
                 if (!commitGuard(fused)) {
@@ -468,11 +503,9 @@ bool ExtrudeOp::execute(Document& doc) {
                 m_prevFaceIds.clear();
                 if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
                     m_prevFaceIds = *im;
-                BRepAlgoAPI_Cut cut(m_previousTargetShape, extrudedShape);
-                cut.Build();
-                if (!cut.IsDone()) {
-                    return false;
-                }
+                BRepAlgoAPI_Cut cut;
+                if (!timedBooleanBuild(cut, m_previousTargetShape, extrudedShape,
+                                       "cut")) return false;
                 if (!commitGuard(cut.Shape())) {
                     return false;
                 }
