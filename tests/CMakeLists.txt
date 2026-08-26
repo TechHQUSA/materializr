@@ -680,6 +680,12 @@ add_executable(test_mode_inference test_mode_inference.cpp)
 target_link_libraries(test_mode_inference PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_mode_inference COMMAND test_mode_inference)
 
+# test_arc_typed_dimension — the arc tool takes a typed chord, then a typed
+# sweep angle or radius for the apex (SketchTool::ArcDimMode)
+add_executable(test_arc_typed_dimension test_arc_typed_dimension.cpp)
+target_link_libraries(test_arc_typed_dimension PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_arc_typed_dimension COMMAND test_arc_typed_dimension)
+
 # ─── Loader path for a source-built OCCT ─────────────────────────────────────
 # With MZR_OCCT_PREFIX the kernel lives outside the loader's default search
 # path, and the test binaries then die at startup with "libTKBRep.so.7.9:

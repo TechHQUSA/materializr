@@ -7062,6 +7062,26 @@ void Application::renderViewport() {
                          "drives height. Or click for both at once."
                        : "Type height and Enter to commit the rectangle.");
                 break;
+            case SketchToolMode::Arc:
+                // Two stages, like the rectangle: the chord first, then one
+                // number for the bow. Click 3 has no input until the chord
+                // exists, so clickCount drives which is on offer.
+                if (m_sketchTool->getClickCount() == 1) {
+                    dimLabel = "Chord (mm)";
+                    dimHint  = "Type the straight-line distance between the arc's "
+                               "two ends and press Enter — or just click the end.";
+                } else if (m_sketchTool->getClickCount() == 2) {
+                    const bool sweep = m_sketchTool->getArcDimMode() ==
+                                       SketchTool::ArcDimMode::Sweep;
+                    dimLabel = sweep ? "Sweep (deg)" : "Radius (mm)";
+                    dimHint  = sweep
+                      ? "Type the swept angle and Enter. 180 is a semicircle. "
+                        "Move the cursor across the chord to flip which way it bows."
+                      : "Type the radius and Enter. It cannot be smaller than half "
+                        "the chord. Move the cursor across the chord to flip which "
+                        "way it bows.";
+                }
+                break;
             default: dimLabel = nullptr;
         }
         if (dimLabel) {
@@ -7099,6 +7119,29 @@ void Application::renderViewport() {
             ImGui::TextUnformatted(dimHint);
             ImGui::PopTextWrapPos();
 
+            // Arc apex stage: choose what the number MEANS. Sticky across
+            // placements, so a run of same-radius arcs is not a toggle each
+            // time.
+            if (mode == SketchToolMode::Arc && m_sketchTool->getClickCount() == 2) {
+                ImGui::Spacing();
+                const bool sweep = m_sketchTool->getArcDimMode() ==
+                                   SketchTool::ArcDimMode::Sweep;
+                const float halfW = (ImGui::GetContentRegionAvail().x -
+                                     ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+                if (ImGui::RadioButton("Degrees", sweep))
+                    m_sketchTool->setArcDimMode(SketchTool::ArcDimMode::Sweep);
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x +
+                                      std::max(0.0f, halfW - ImGui::GetItemRectSize().x));
+                if (ImGui::RadioButton("Radius", !sweep))
+                    m_sketchTool->setArcDimMode(SketchTool::ArcDimMode::Radius);
+                if (!sweep) {
+                    // The chord's half-length is a hard floor; say so rather
+                    // than let a too-small radius be silently refused.
+                    ImGui::TextDisabled("min %.2f mm (half the chord)",
+                                        m_sketchTool->arcMinRadius());
+                }
+                ImGui::Spacing();
+            }
 
             if (materializr::touchMode()) {
                 // Native keyboard via a focused ImGui field (io.WantTextInput ->
@@ -7160,7 +7203,17 @@ void Application::renderViewport() {
                         ImGuiInputTextFlags_EnterReturnsTrue);
                     ImGui::PopStyleVar();
                     ImGui::Spacing();
-                    ImGui::BeginDisabled(m_sketchDimValue <= 0.0f);
+                    // A radius under half the chord describes no arc through
+                    // the two endpoints, so Apply is dead there rather than
+                    // silently refusing.
+                    const float dimFloor =
+                        (mode == SketchToolMode::Arc &&
+                         m_sketchTool->getClickCount() == 2 &&
+                         m_sketchTool->getArcDimMode() ==
+                             SketchTool::ArcDimMode::Radius)
+                            ? m_sketchTool->arcMinRadius() : 0.0f;
+                    ImGui::BeginDisabled(m_sketchDimValue <= 0.0f ||
+                                         m_sketchDimValue < dimFloor);
                     const bool applied =
                         ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)));
                     ImGui::EndDisabled();

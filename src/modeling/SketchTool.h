@@ -267,6 +267,19 @@ public:
     enum class RectMode { Corner, Center };
     enum class CircleMode { Center, TwoPoint };
 
+    // What a typed value means at the arc's THIRD click. Clicks 1 and 2 fix the
+    // chord, so either the swept angle or the radius pins the apex exactly —
+    // two ways of saying the same thing, and which one you have to hand depends
+    // on the drawing (a 90-degree corner versus a 6 mm fillet run). The cursor's
+    // side of the chord still decides which way the arc bows: that is a
+    // direction, not a dimension, so no number can express it.
+    enum class ArcDimMode { Sweep, Radius };
+    void setArcDimMode(ArcDimMode m) { m_arcDimMode = m; }
+    ArcDimMode getArcDimMode() const { return m_arcDimMode; }
+    // Half the chord — the smallest radius any arc through these two endpoints
+    // can have. Below it no arc exists, so the UI can grey out Apply rather
+    // than let applyDimension silently refuse. 0 when not at the apex stage.
+    float arcMinRadius() const;
     void setRectMode(RectMode m) { m_rectMode = m; }
     RectMode getRectMode() const { return m_rectMode; }
     void setCircleMode(CircleMode m) { m_circleMode = m; }
@@ -381,6 +394,9 @@ private:
     int m_angleSnapDeg = 15; // line angle-snap increment (0 = off)
     RectMode   m_rectMode   = RectMode::Corner;
     CircleMode m_circleMode = CircleMode::Center;
+    // Session-sticky: whichever the user last drew arcs with stays selected, so
+    // a run of fillet arcs is not a mode toggle per arc.
+    ArcDimMode m_arcDimMode = ArcDimMode::Sweep;
     // Hover-charge state (see updateHoverCharge). m_charged is the active
     // reference (Kind::None when nothing's charged); the m_hover* fields
     // track the in-progress dwell on a candidate before it commits.

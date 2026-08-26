@@ -502,8 +502,51 @@ bool SketchTool::applyDimension(float value) {
             }
         }
         case SketchToolMode::Arc: {
-            // Arc needs three clicks; a single value can't fully specify it. No-op.
-            return false;
+            // Click 2 — type the CHORD: the straight-line distance between the
+            // arc's two ends, exactly like a line's length.
+            if (m_clickCount == 1) {
+                handleArcTool(m_firstClick + dir * value);
+                return true;
+            }
+            if (m_clickCount != 2) return false;
+
+            // Click 3 — the chord is already fixed, so ONE number pins the apex.
+            // Which way the arc bows is a direction, not a dimension, so it
+            // still comes from the side of the chord the cursor is on.
+            const glm::vec2 A = m_firstClick, B = m_secondClick;
+            const glm::vec2 chord = B - A;
+            const float L = glm::length(chord);
+            if (L < 1e-4f) return false;
+            const glm::vec2 chordDir = chord / L;
+            glm::vec2 perp(-chordDir.y, chordDir.x);
+            const glm::vec2 M = 0.5f * (A + B);
+            if (glm::dot(m_currentPos - M, perp) < 0.0f) perp = -perp;
+
+            float d = 0.0f;
+            if (m_arcDimMode == ArcDimMode::Sweep) {
+                // Apex sits on the chord's perpendicular bisector at
+                // (L/2)·tan(θ/4) — the same relation snapArcApex uses for its
+                // 15° steps, so a typed 90 lands exactly where the snap would.
+                // A full 360 has no apex to place (tan(90°) is infinite) and
+                // would be a circle, not an arc; clamp just short of it.
+                const float deg = glm::clamp(value, 0.1f, 359.9f);
+                d = (L * 0.5f) *
+                    std::tan(deg * static_cast<float>(M_PI) / 180.0f * 0.25f);
+            } else {
+                // Radius: the centre lies on the bisector at √(R² − (L/2)²)
+                // from the midpoint, and the MINOR arc's apex is on the far
+                // side of the chord, R minus that, away. Half the chord is the
+                // floor — under it no arc passes through both endpoints at all.
+                const float half = L * 0.5f;
+                if (value < half - 1e-4f) return false;
+                const float h =
+                    std::sqrt(std::max(0.0f, value * value - half * half));
+                d = value - h;
+            }
+            // Straight to the handler, NOT through arcApexSnap: a typed value
+            // is exact and must not be pulled onto the nearest 15° sweep.
+            handleArcTool(M + perp * d);
+            return true;
         }
         default:
             return false;
@@ -536,6 +579,11 @@ SketchToolMode SketchTool::getPreviewType() const {
 
 bool SketchTool::isActive() const {
     return m_isPlacing;
+}
+
+float SketchTool::arcMinRadius() const {
+    if (m_mode != SketchToolMode::Arc || m_clickCount != 2) return 0.0f;
+    return 0.5f * glm::length(m_secondClick - m_firstClick);
 }
 
 bool SketchTool::directionalAnchor(glm::vec2& out) const {
