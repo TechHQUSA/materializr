@@ -666,6 +666,20 @@ add_executable(test_cut_target_pick test_cut_target_pick.cpp)
 target_link_libraries(test_cut_target_pick PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_cut_target_pick COMMAND test_cut_target_pick)
 
+# test_tangent_inference — the tangent guide fires at the FULL inference level
+# from an anchor ON a circle/arc (D == R), honours an arc's real span, and
+# names the curve actually aimed at
+add_executable(test_tangent_inference test_tangent_inference.cpp)
+target_link_libraries(test_tangent_inference PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_tangent_inference COMMAND test_tangent_inference)
+
+# test_mode_inference — the directional inference family (angle snap, tangent,
+# perpendicular/parallel-to-previous) works in the arc, circle, polygon and
+# spline tools too, anchored on the point actually being extended
+add_executable(test_mode_inference test_mode_inference.cpp)
+target_link_libraries(test_mode_inference PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_mode_inference COMMAND test_mode_inference)
+
 # ─── Loader path for a source-built OCCT ─────────────────────────────────────
 # With MZR_OCCT_PREFIX the kernel lives outside the loader's default search
 # path, and the test binaries then die at startup with "libTKBRep.so.7.9:

@@ -4,6 +4,7 @@
 #include "touch_mode.h"
 #include "gl_common.h"
 #include <chrono>
+#include <cstdio>
 
 #include <cstdlib>
 #include <filesystem>
@@ -2455,7 +2456,12 @@ void Application::renderViewport() {
                 // killer SketchUp feature ("Endpoint" / "On midpoint" /
                 // "Perpendicular" floating next to the crosshair).
                 if (!m_sketchTool->getActiveInferences().empty()) {
-                    auto kindName = [](InferenceGuide::Kind k) -> const char* {
+                    // The angle-snap increment is a setting, so the label has to
+                    // read it rather than claim 15 degrees.
+                    char angleLbl[32];
+                    std::snprintf(angleLbl, sizeof(angleLbl), "Angle Snap (%d\xc2\xb0)",
+                                  m_sketchTool->getAngleSnapDeg());
+                    auto kindName = [&](InferenceGuide::Kind k) -> const char* {
                         switch (k) {
                             case InferenceGuide::Endpoint:       return "Endpoint";
                             case InferenceGuide::Midpoint:       return "Midpoint";
@@ -2465,9 +2471,9 @@ void Application::renderViewport() {
                             case InferenceGuide::AxisVFromPoint: return "On Vertical Axis";
                             case InferenceGuide::PerpToPrev:     return "Perpendicular";
                             case InferenceGuide::ParallelToPrev: return "Parallel";
-                            case InferenceGuide::AngleSnap:      return "Angle Snap (15°)";
+                            case InferenceGuide::AngleSnap:      return angleLbl;
                             case InferenceGuide::OnLineExtension: return "On Line Extension";
-                            case InferenceGuide::TangentToCircle: return "Tangent to Circle";
+                            case InferenceGuide::TangentToCircle: return "Tangent";
                             case InferenceGuide::PerpToRef:       return "Perpendicular from Point";
                             case InferenceGuide::Symmetry:        return "Symmetry";
                         }
@@ -7092,6 +7098,7 @@ void Application::renderViewport() {
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextUnformatted(dimHint);
             ImGui::PopTextWrapPos();
+
 
             if (materializr::touchMode()) {
                 // Native keyboard via a focused ImGui field (io.WantTextInput ->

@@ -55,7 +55,7 @@ struct InferenceGuide {
         ParallelToPrev,    // cursor is on the parallel-to-previous ray → magenta guide
         AngleSnap,         // cursor is on a 15° / 30° / 45° / etc. ray from the chain anchor → grey guide
         OnLineExtension,   // cursor is on the infinite extension of an existing line → lavender dashed guide
-        TangentToCircle,   // cursor lies on the tangent line touching a circle/arc → orange dashed guide
+        TangentToCircle,   // cursor lies on a tangent line touching a circle, arc or spline → dashed guide
         PerpToRef,         // cursor is on the perpendicular ray through a hover-charged point → cyan guide
         Symmetry,          // cursor snapped to the mirror image of an existing point across a centreline / axis-aligned line → purple guide
     };
@@ -266,6 +266,7 @@ public:
     // passes through the first click — handy to align a circle to a corner).
     enum class RectMode { Corner, Center };
     enum class CircleMode { Center, TwoPoint };
+
     void setRectMode(RectMode m) { m_rectMode = m; }
     RectMode getRectMode() const { return m_rectMode; }
     void setCircleMode(CircleMode m) { m_circleMode = m; }
@@ -307,6 +308,16 @@ public:
     // Trim hover: densified 2D points outlining the segment that would be
     // removed on the next click. Empty when nothing is hovered in Trim mode.
     const std::vector<glm::vec2>& getTrimHoverPoints() const { return m_trimHoverPoints; }
+
+    // Where the directional inference family (perpendicular/parallel-to-
+    // previous, tangent-to-curve, angle snap, hover-charged guides) measures
+    // FROM for the point being placed right now, and whether it applies at all
+    // in the current mode and stage. Every draw tool that asks the user to
+    // choose a DIRECTION from a fixed anchor wants these guides; the family was
+    // written for the Line tool and gated on it, so arcs, circles, polygons and
+    // splines drew with no directional assistance whatsoever. Returns false for
+    // the modes and stages where a direction is not the thing being picked.
+    bool directionalAnchor(glm::vec2& out) const;
 
     // The set of inferences active at the most recent snap. The renderer reads
     // this each frame to draw ghost guide lines. Cleared whenever the cursor
