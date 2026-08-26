@@ -614,7 +614,12 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
             return glm::length(q);
         };
         glm::vec2 cs;
-        const float pick = 12.0f;
+        // Hit radius in PHYSICAL pixels: ImGui runs at device resolution
+        // here (fonts are 15 * uiScale), so a bare 12 px shrank the grab
+        // zone to half the arrow's apparent size on a 2x display (Steve:
+        // "the grab zone on the arrow could be a little bigger").
+        const float pick = (ctx.panel.imTouch ? 30.0f : 20.0f) *
+                           ctx.panel.uiScale;
         if (vp.toScreen(m_mid, cs)) {
             glm::vec2 sa, sb;
             if (m_twoDist && m_hasFaceDirs) {
