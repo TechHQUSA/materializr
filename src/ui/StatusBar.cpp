@@ -4,6 +4,8 @@
 #include "../core/SelectionManager.h"
 #include <imgui.h>
 #include <cstdio>
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -64,7 +66,7 @@ void StatusBar::render() {
         }
 
         // Project name first — the thing people most want to confirm.
-        ImGui::Text("Project: %s",
+        ImGui::Text(materializr::tr("Project: %s"),
                     m_projectName.empty() ? "New project"
                                           : m_projectName.c_str());
         ImGui::SameLine(); ImGui::Text("|"); ImGui::SameLine();
@@ -115,7 +117,7 @@ void StatusBar::render() {
             std::snprintf(selText, sizeof(selText), "Selection: %s (%d)", typeName, count);
             ImGui::Text("%s", selText);
         } else {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Selection: None");
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("Selection: None"));
         }
 
         // Current tool
@@ -132,7 +134,7 @@ void StatusBar::render() {
             ImGui::SameLine();
             ImGui::Text("|");
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.3f, 0.85f, 0.4f, 1.0f), "[SKETCH MODE]");
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 0.4f, 1.0f), materializr::tr("[SKETCH MODE]"));
         }
 
         // Transient message (right-aligned)

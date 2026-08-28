@@ -58,6 +58,7 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepGProp.hxx>
+#include "../i18n.h"
 #include <GProp_GProps.hxx>
 #include <Bnd_Box.hxx>
 #include <Geom_CylindricalSurface.hxx>
@@ -1137,10 +1138,10 @@ std::string Application::linkHintFor(bool isBody, int id) const {
         }
         if (live.empty() && detached.empty()) return "";
         if (!live.empty())
-            return "Built from " + nameList(live, false) +
-                   " — editing it updates this body.";
-        return "Detached from " + nameList(detached, false) +
-               " — moved independently; sketch edits won't update this body.";
+            return std::string(materializr::tr("Built from ")) + nameList(live, false) +
+                   materializr::tr(" — editing it updates this body.");
+        return std::string(materializr::tr("Detached from ")) + nameList(detached, false) +
+               materializr::tr(" — moved independently; sketch edits won't update this body.");
     }
     // Sketch: what body it drives + whether it's detached.
     auto it = links.find(id);
@@ -1148,8 +1149,10 @@ std::string Application::linkHintFor(bool isBody, int id) const {
     auto sk = m_document->getSketch(id);
     std::string bodies = nameList(it->second, true);
     if (sk && sk->isDetachedFromBody())
-        return "Detached — moved independently; edits won't update " + bodies + ".";
-    return "Drives " + bodies + " — editing this sketch updates it.";
+        return std::string(materializr::tr("Detached — moved independently; edits won't update ")) +
+               bodies + ".";
+    return std::string(materializr::tr("Drives ")) + bodies +
+           materializr::tr(" — editing this sketch updates it.");
 }
 
 void Application::cascadeFromSketchEdit(int sketchId) {

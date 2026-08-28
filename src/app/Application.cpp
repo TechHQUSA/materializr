@@ -36,6 +36,7 @@ inline void resetFpuForOcct() {
 #endif
 
 #include "app/Application.h"
+#include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
 #include "touch_mode.h"
@@ -937,6 +938,11 @@ void Application::initImGui() {
         std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
         ImFont* fnt = nullptr;
         if (!path.empty()) {
+            // No explicit glyph range: ImGui 1.92 loads glyphs ON DEMAND and
+            // marks ImFontConfig::GlyphRanges as legacy. That is why the em
+            // dash and ellipsis already used in English render fine even though
+            // they sit above the old 0x00FF default -- and why the translated
+            // accents need nothing here either.
             fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f * uiScale);
             if (fnt) std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
         }
@@ -1420,7 +1426,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     ImGui::Begin("##progress", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextColored(materializr::accentText(), "Working\xE2\x80\xA6");
+    ImGui::TextColored(materializr::accentText(), materializr::tr("Working\xE2\x80\xA6"));
     ImGui::Spacing();
     if (label && label[0]) ImGui::TextWrapped("%s", label);
     ImGui::Spacing();
@@ -1432,7 +1438,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
         ImGui::ProgressBar(fraction, ImVec2(-1, 0), pct);
     }
     ImGui::Spacing();
-    if (ImGui::Button("Cancel", materializr::uiSz(110, 0)) ||
+    if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         m_progressCancelled = true;
     }
@@ -1517,15 +1523,13 @@ void Application::renderSmallScreenWarning() {
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(uiW(440));
         ImGui::TextWrapped(
-            "Materializr is designed for tablets and larger displays. On a small "
-            "screen the panels and toolbars are cramped and some controls may be "
-            "hard to reach — a tablet or larger is strongly recommended.");
+            materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         static bool dontShow = false;
-        ImGui::Checkbox("Don't show this again", &dontShow);
+        ImGui::Checkbox(materializr::tr("Don't show this again"), &dontShow);
         ImGui::Spacing();
-        if (ImGui::Button("OK", uiSz(140, 0))) {
+        if (ImGui::Button(materializr::tr("OK"), uiSz(140, 0))) {
             m_smallScreenAck = true;                 // gone for this run
             if (dontShow) { m_smallScreenWarned = true; saveAppSettings(); }
             ImGui::CloseCurrentPopup();
@@ -1630,6 +1634,12 @@ void Application::loadAppSettings() {
         [this]() { return static_cast<int>(m_uiLayout); },
         [this](int idx) {
             m_uiLayout = static_cast<UiLayout>(idx);
+            saveAppSettings();
+        });
+    materializr::bindLanguageBridge(
+        [this]() { return m_language; },
+        [this](int idx) {
+            m_language = idx;
             saveAppSettings();
         });
     // Welcome screen: every launch until the user becomes a Supporter.
@@ -1793,6 +1803,7 @@ AppSettings Application::currentSettings() const {
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
+    s.language = m_language;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
     s.touchRightTab = m_touchRightTab;
@@ -1871,6 +1882,12 @@ void Application::applyAppSettings(const AppSettings& s) {
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
+    // UI language — also live. -1 means the user has never chosen, which the
+    // setup wizard turns into its opening question; until then, English.
+    m_language = s.language;
+    setLanguage((s.language > 0 && s.language < languageCount())
+                    ? static_cast<Lang>(s.language)
+                    : Lang::English);
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
     m_showFps = s.showFps;
@@ -4419,13 +4436,13 @@ void Application::renderSavePrompt() {
         }
         ImGui::Text("%s", prompt);
         ImGui::Separator();
-        if (ImGui::Button("Save", materializr::uiSz(100, 0))) {
+        if (ImGui::Button(materializr::tr("Save"), materializr::uiSz(100, 0))) {
             m_closeAfterSave = true;
             saveProjectQuick();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Don't Save", materializr::uiSz(100, 0))) {
+        if (ImGui::Button(materializr::tr("Don't Save"), materializr::uiSz(100, 0))) {
             if (m_postSaveAction == PostSaveAction::CloseProject) {
                 doCloseProject();
                 m_postSaveAction = PostSaveAction::None;
@@ -4440,7 +4457,7 @@ void Application::renderSavePrompt() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", materializr::uiSz(100, 0))) {
+        if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(100, 0))) {
             m_closeAfterSave = false;
             m_pendingOpenAction = nullptr;
             m_postSaveAction = PostSaveAction::None;
@@ -6530,17 +6547,17 @@ void Application::renderSketchRecoveryPrompt() {
                                ImGuiWindowFlags_AlwaysAutoResize |
                                ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextUnformatted(
-            "An unfinished sketch from your last session was found.");
+            materializr::tr("An unfinished sketch from your last session was found."));
         ImGui::TextDisabled(
-            "It wasn't committed before the app closed (a crash, or a restart).");
+            materializr::tr("It wasn't committed before the app closed (a crash, or a restart)."));
         ImGui::Spacing();
-        if (ImGui::Button("Restore it", materializr::uiSz(140, 0))) {
+        if (ImGui::Button(materializr::tr("Restore it"), materializr::uiSz(140, 0))) {
             restoreSketchDraftNow();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", materializr::uiSz(140, 0))) {
+        if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
             materializr::clearSketchDraft();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
@@ -6675,21 +6692,20 @@ void Application::renderProjectRecoveryPrompt() {
         materializr::ProjectRecoveryMeta meta;
         materializr::readProjectRecoveryMeta(meta);
         ImGui::TextUnformatted(
-            "Unsaved work from your last session was recovered.");
+            materializr::tr("Unsaved work from your last session was recovered."));
         if (!meta.projectPath.empty())
-            ImGui::TextDisabled("Project: %s", meta.projectPath.c_str());
+            ImGui::TextDisabled(materializr::tr("Project: %s"), meta.projectPath.c_str());
         else
-            ImGui::TextDisabled("An unsaved project (never written to a file).");
-        ImGui::TextDisabled("%d bodies, %d history steps.",
+            ImGui::TextDisabled(materializr::tr("An unsaved project (never written to a file)."));
+        ImGui::TextDisabled(materializr::tr("%d bodies, %d history steps."),
                             meta.bodyCount, meta.stepCount);
         ImGui::TextDisabled(
-            "Materializr didn't close cleanly (a crash, hang, or restart).");
+            materializr::tr("Materializr didn't close cleanly (a crash, hang, or restart)."));
         // One snapshot per tab the dead instance had open — the summary above
         // describes the newest; all of them come back, a tab each.
         const int nOrphans = materializr::projectRecoveryOrphanCount();
         if (nOrphans > 1)
-            ImGui::TextDisabled("%d projects in total — each reopens in its "
-                                "own tab.", nOrphans);
+            ImGui::TextDisabled(materializr::tr("%d projects in total — each reopens in its own tab."), nOrphans);
         ImGui::Spacing();
         if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
                           materializr::uiSz(140, 0))) {
@@ -6698,7 +6714,7 @@ void Application::renderProjectRecoveryPrompt() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", materializr::uiSz(140, 0))) {
+        if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
             // These are the dead session's orphaned snapshots — our own live
             // slot is separate and untouched. Discard means ALL of them, to
             // match the restore: leaving the rest to resurface on the next
@@ -7470,11 +7486,8 @@ void Application::run() {
                     bool open = true;
                     if (ImGui::Begin("Pick more sketches", &open, flags)) {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f),
-                                           "Loft needs at least two profiles.");
-                        ImGui::TextWrapped("Ctrl-click the other sketches (or "
-                                           "their regions) in loft order — as "
-                                           "many as you like — then click Loft "
-                                           "again.");
+                                           materializr::tr("Loft needs at least two profiles."));
+                        ImGui::TextWrapped(materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;

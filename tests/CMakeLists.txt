@@ -35,6 +35,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/BatchTransformOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/PushPullOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Sketch.cpp
+    ${CMAKE_SOURCE_DIR}/src/i18n.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchTool.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchEditOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DuplicateSketchOp.cpp
@@ -685,6 +686,12 @@ add_test(NAME test_mode_inference COMMAND test_mode_inference)
 add_executable(test_arc_typed_dimension test_arc_typed_dimension.cpp)
 target_link_libraries(test_arc_typed_dimension PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_arc_typed_dimension COMMAND test_arc_typed_dimension)
+
+# test_i18n — the translation layer: ImGui ##id suffixes survive translation,
+# and every shipped string fits the glyph range the font atlas is built with
+add_executable(test_i18n test_i18n.cpp)
+target_link_libraries(test_i18n PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_i18n COMMAND test_i18n)
 
 # ─── Loader path for a source-built OCCT ─────────────────────────────────────
 # With MZR_OCCT_PREFIX the kernel lives outside the loader's default search

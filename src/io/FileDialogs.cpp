@@ -26,6 +26,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "../i18n.h"
 #endif
 
 namespace materializr {
@@ -480,9 +481,9 @@ void FileDialogs::render() {
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
                                 ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal("Export", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Export %s", s_export.name.c_str());
+            ImGui::Text(materializr::tr("Export %s"), s_export.name.c_str());
             ImGui::Spacing();
-            if (ImGui::Button("Share\xE2\x80\xA6", uiSz(170, 0))) {
+            if (ImGui::Button(materializr::tr("Share\xE2\x80\xA6"), uiSz(170, 0))) {
                 std::string tmp = mobileTmpPath(s_export.name);
                 if (s_export.writeFn && s_export.writeFn(tmp))
                     materializr::mobileShareFile(tmp, s_export.mime);
@@ -490,7 +491,7 @@ void FileDialogs::render() {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Save to device\xE2\x80\xA6", uiSz(210, 0))) {
+            if (ImGui::Button(materializr::tr("Save to device\xE2\x80\xA6"), uiSz(210, 0))) {
                 auto wf = s_export.writeFn;
                 std::string name = s_export.name, mime = s_export.mime;
                 s_export.reset();
@@ -503,7 +504,7 @@ void FileDialogs::render() {
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
-            if (ImGui::Button("Cancel", uiSz(110, 0))) { s_export.reset(); ImGui::CloseCurrentPopup(); }
+            if (ImGui::Button(materializr::tr("Cancel"), uiSz(110, 0))) { s_export.reset(); ImGui::CloseCurrentPopup(); }
             ImGui::EndPopup();
         }
     }
@@ -587,7 +588,7 @@ void FileDialogs::render() {
     }
 
     // Path bar
-    ImGui::Text("Location:");
+    ImGui::Text(materializr::tr("Location:"));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
     if (ImGui::InputText("##path", s_state.pathBuf, sizeof(s_state.pathBuf),
@@ -600,7 +601,7 @@ void FileDialogs::render() {
 
     // Filter
     if (!s_state.filters.empty()) {
-        ImGui::Text("Filter:");
+        ImGui::Text(materializr::tr("Filter:"));
         ImGui::SameLine();
         ImGui::SetNextItemWidth(300);
         if (ImGui::BeginCombo("##filter",
@@ -662,7 +663,7 @@ void FileDialogs::render() {
 
     // Save: filename input
     if (s_state.isSave) {
-        ImGui::Text("Name:");
+        ImGui::Text(materializr::tr("Name:"));
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-160);
         ImGui::InputText("##name", s_state.nameBuf, sizeof(s_state.nameBuf));
@@ -681,7 +682,7 @@ void FileDialogs::render() {
         if (s_state.callback) s_state.callback(result);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", materializr::uiSz(70, 0))) {
+    if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(70, 0))) {
         s_state.open = false;
         if (s_state.callback) s_state.callback("");
     }

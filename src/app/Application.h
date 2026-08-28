@@ -930,6 +930,9 @@ private:
     // Live-switchable: read every frame by run()/renderViewport(); persisted
     // on save. The helpers below are the preferred spelling at call sites.
     UiLayout m_uiLayout = UiLayout::Classic;
+    // UI language index, mirroring materializr::Lang. -1 = never chosen, which
+    // is what makes the setup wizard open with the language question.
+    int m_language = -1;
     bool classicLayout() const { return m_uiLayout == UiLayout::Classic; }
     bool modernLayout()  const { return m_uiLayout == UiLayout::Modern;  }
     bool imTouchLayout() const { return m_uiLayout == UiLayout::ImTouch; }

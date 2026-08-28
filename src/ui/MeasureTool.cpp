@@ -17,6 +17,8 @@
 #include <cmath>
 #include <cstdio>
 #include <set>
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -192,29 +194,27 @@ void MeasureTool::renderPanel() {
     // Prompt + results per mode.
     switch (m_mode) {
         case MeasureMode::PickMode:
-            ImGui::TextWrapped("Pick a measurement mode above.");
+            ImGui::TextWrapped(materializr::tr("Pick a measurement mode above."));
             break;
         case MeasureMode::Object:
-            ImGui::TextWrapped("Click a body in the viewport — clicking a face counts. "
-                               "Ctrl+click to add more bodies, or use box-select.");
+            ImGui::TextWrapped(materializr::tr("Click a body in the viewport — clicking a face counts. Ctrl+click to add more bodies, or use box-select."));
             ImGui::Spacing();
             ImGui::TextColored(materializr::accentText(),
-                               "Selected: %d %s", bodyIds, bodyIds == 1 ? "body" : "bodies");
+                               materializr::tr("Selected: %d %s"), bodyIds, bodyIds == 1 ? "body" : "bodies");
             break;
         case MeasureMode::Edge:
-            ImGui::TextWrapped("Click within ~8 px of an edge to pick it. "
-                               "Ctrl+click to add more edges to the sum.");
+            ImGui::TextWrapped(materializr::tr("Click within ~8 px of an edge to pick it. Ctrl+click to add more edges to the sum."));
             ImGui::Spacing();
             ImGui::TextColored(materializr::accentText(),
-                               "Selected: %d %s", edges, edges == 1 ? "edge" : "edges");
+                               materializr::tr("Selected: %d %s"), edges, edges == 1 ? "edge" : "edges");
             break;
         case MeasureMode::Line:
             if (m_pointsCaptured == 0)
-                ImGui::TextDisabled("Click the first point in the viewport…");
+                ImGui::TextDisabled(materializr::tr("Click the first point in the viewport…"));
             else if (m_pointsCaptured == 1)
-                ImGui::TextDisabled("…now click the second point.");
+                ImGui::TextDisabled(materializr::tr("…now click the second point."));
             else
-                ImGui::TextDisabled("Click again to start a new measurement.");
+                ImGui::TextDisabled(materializr::tr("Click again to start a new measurement."));
             break;
         default: break;
     }
@@ -230,24 +230,24 @@ void MeasureTool::renderPanel() {
         ImGui::Separator();
         switch (r.type) {
             case MeasureResult::Distance:
-                ImGui::Text("Distance: %.3f mm", r.value);
+                ImGui::Text(materializr::tr("Distance: %.3f mm"), r.value);
                 ImGui::Text("  ΔX %.3f   ΔY %.3f   ΔZ %.3f", r.dimX, r.dimY, r.dimZ);
-                ImGui::Text("  From: (%.2f, %.2f, %.2f)", r.pointA.x, r.pointA.y, r.pointA.z);
-                ImGui::Text("  To:   (%.2f, %.2f, %.2f)", r.pointB.x, r.pointB.y, r.pointB.z);
+                ImGui::Text(materializr::tr("  From: (%.2f, %.2f, %.2f)"), r.pointA.x, r.pointA.y, r.pointA.z);
+                ImGui::Text(materializr::tr("  To:   (%.2f, %.2f, %.2f)"), r.pointB.x, r.pointB.y, r.pointB.z);
                 break;
             case MeasureResult::EdgeLength:
-                ImGui::Text("%s: %.3f mm", r.label.c_str(), r.value);
+                ImGui::Text(materializr::tr("%s: %.3f mm"), r.label.c_str(), r.value);
                 break;
             case MeasureResult::FaceArea:
-                ImGui::Text("Area: %.3f mm\xC2\xB2", r.value);
+                ImGui::Text(materializr::tr("Area: %.3f mm\xC2\xB2"), r.value);
                 break;
             case MeasureResult::BoundingBox:
                 ImGui::Text("%s", r.label.c_str());
-                ImGui::Text("  X: %.3f mm", r.dimX);
-                ImGui::Text("  Y: %.3f mm", r.dimY);
-                ImGui::Text("  Z: %.3f mm", r.dimZ);
-                ImGui::Text("  Min: (%.2f, %.2f, %.2f)", r.pointA.x, r.pointA.y, r.pointA.z);
-                ImGui::Text("  Max: (%.2f, %.2f, %.2f)", r.pointB.x, r.pointB.y, r.pointB.z);
+                ImGui::Text(materializr::tr("  X: %.3f mm"), r.dimX);
+                ImGui::Text(materializr::tr("  Y: %.3f mm"), r.dimY);
+                ImGui::Text(materializr::tr("  Z: %.3f mm"), r.dimZ);
+                ImGui::Text(materializr::tr("  Min: (%.2f, %.2f, %.2f)"), r.pointA.x, r.pointA.y, r.pointA.z);
+                ImGui::Text(materializr::tr("  Max: (%.2f, %.2f, %.2f)"), r.pointB.x, r.pointB.y, r.pointB.z);
                 break;
             default: break;
         }

@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <ctime>
 #include <cstring>
+#include "../i18n.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -23,19 +26,19 @@ int VersionPanel::render() {
     ImGui::Begin("Versions");
 
     if (!m_manager) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No version manager available.");
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No version manager available."));
         ImGui::End();
         return -1;
     }
 
     // Save Version section
-    ImGui::TextColored(materializr::accentText(), "Save Version");
+    ImGui::TextColored(materializr::accentText(), materializr::tr("Save Version"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(-80.0f);
     ImGui::InputText("##label", m_labelBuffer, sizeof(m_labelBuffer));
     ImGui::SameLine();
-    if (ImGui::Button("Save", ImVec2(-1, 0))) {
+    if (ImGui::Button(materializr::tr("Save"), ImVec2(-1, 0))) {
         // Save is handled externally since we need the Document;
         // we store the intent in restoreId as a special value
         // Actually, for saving we need a different mechanism.
@@ -47,17 +50,17 @@ int VersionPanel::render() {
     ImGui::Spacing();
 
     // Auto-save settings
-    ImGui::TextColored(materializr::accentText(), "Auto-Save");
+    ImGui::TextColored(materializr::accentText(), materializr::tr("Auto-Save"));
     ImGui::Separator();
 
     int interval = m_manager->getAutoSaveInterval();
     int intervalMinutes = interval / 60;
-    if (ImGui::SliderInt("Interval (min)", &intervalMinutes, 1, 30)) {
+    if (ImGui::SliderInt(materializr::tr("Interval (min)"), &intervalMinutes, 1, 30)) {
         m_manager->setAutoSaveInterval(intervalMinutes * 60);
     }
 
     if (m_manager->isAutoSaveDue()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Auto-save pending...");
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), materializr::tr("Auto-save pending..."));
     } else {
         std::time_t now = std::time(nullptr);
         // Calculate approximate time since last potential auto-save
@@ -71,13 +74,13 @@ int VersionPanel::render() {
     ImGui::Spacing();
 
     // Version list
-    ImGui::TextColored(materializr::accentText(), "Version History");
+    ImGui::TextColored(materializr::accentText(), materializr::tr("Version History"));
     ImGui::Separator();
 
     const auto& versions = m_manager->getVersions();
 
     if (versions.empty()) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No versions saved yet.");
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No versions saved yet."));
     } else {
         ImGui::BeginChild("VersionList", ImVec2(0, 0), true);
 
@@ -102,13 +105,13 @@ int VersionPanel::render() {
                           entry.id, entry.label.c_str());
 
             if (ImGui::TreeNode(headerBuf)) {
-                ImGui::Text("Date: %s", timeBuf);
+                ImGui::Text(materializr::tr("Date: %s"), timeBuf);
 
                 char bodiesBuf[64];
                 std::snprintf(bodiesBuf, sizeof(bodiesBuf), "Bodies: %d", entry.bodyCount);
                 ImGui::Text("%s", bodiesBuf);
 
-                if (ImGui::Button("Restore", ImVec2(-1, 0))) {
+                if (ImGui::Button(materializr::tr("Restore"), ImVec2(-1, 0))) {
                     restoreId = entry.id;
                 }
 

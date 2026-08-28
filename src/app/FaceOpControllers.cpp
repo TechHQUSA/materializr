@@ -47,6 +47,10 @@
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <gp_Pln.hxx>
+#include "../i18n.h"
+#include "../i18n.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -110,7 +114,7 @@ std::unique_ptr<Operation> ShellController::buildOp(const IopContext&) {
 }
 
 void ShellController::panelBody(const IopContext& ctx, bool& changed) {
-    ImGui::TextDisabled("Hollows the body, opening a face.");
+    ImGui::TextDisabled(materializr::tr("Hollows the body, opening a face."));
 
     if (ctx.cornerCommitUi) {
         // im-touch: number-pad amount field — no InputText, no native
@@ -142,7 +146,7 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         }
     }
     ImGui::SameLine();
-    ImGui::Text("mm");
+    ImGui::Text(materializr::tr("mm"));
     }
 
     if (materializr::stepperRow("shellStep", &m_thickness,
@@ -163,12 +167,10 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         const TopoDS_Shape& body = ctx.doc.getBody(bodyId());
         if (faceBordersRounded(body, m_face)) {
             ImGui::TextColored(warn,
-                "Shell failed: OCCT can't open a fillet-bordered face.\n"
-                "Shell the body FIRST, then add the fillets.");
+                materializr::tr("Shell failed: OCCT can't open a fillet-bordered face.\nShell the body FIRST, then add the fillets."));
         } else {
             ImGui::TextColored(warn,
-                "Shell failed - try a thinner wall, or\n"
-                "this body's faces can't be shelled.");
+                materializr::tr("Shell failed - try a thinner wall, or\nthis body's faces can't be shelled."));
         }
     }
 }
@@ -290,36 +292,30 @@ std::unique_ptr<Operation> TaperController::buildOp(const IopContext& ctx) {
 }
 
 void TaperController::panelBody(const IopContext& ctx, bool& changed) {
-    ImGui::TextDisabled("%zu face(s) tilt about the body's base.",
+    ImGui::TextDisabled(materializr::tr("%zu face(s) tilt about the body's base."),
                         m_faces.size());
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled("Tip: pick SIDE walls — a cylinder wall becomes a "
-                        "cone, box sides become a pyramid.");
+    ImGui::TextDisabled(materializr::tr("Tip: pick SIDE walls — a cylinder wall becomes a cone, box sides become a pyramid."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
 
     if (previewOk()) {
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
-                           "Previewing %.1f deg", m_angle);
+                           materializr::tr("Previewing %.1f deg"), m_angle);
     } else if (std::abs(m_angle) < 0.1f) {
         // buildOp() short-circuits at ~0° so no preview is computed —
         // but the face is fine. Don't flash the "can't taper" warning
         // when the user is just sitting on the slider's zero stop.
-        ImGui::TextDisabled("Move the angle slider to preview.");
+        ImGui::TextDisabled(materializr::tr("Move the angle slider to preview."));
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
-                           "No preview: this face can't draft along the "
-                           "current Pull axis. Try another axis, Flip base, "
-                           "or pick a side face.");
-        ImGui::TextDisabled("Note: only flat / cylindrical / conical walls "
-                            "can be drafted (a kernel limit) - for freeform "
-                            "shapes like wing skins, use Scale Face on the "
-                            "END face instead.");
+                           materializr::tr("No preview: this face can't draft along the current Pull axis. Try another axis, Flip base, or pick a side face."));
+        ImGui::TextDisabled(materializr::tr("Note: only flat / cylindrical / conical walls can be drafted (a kernel limit) - for freeform shapes like wing skins, use Scale Face on the END face instead."));
         ImGui::PopTextWrapPos();
     }
 
-    ImGui::TextDisabled("Angle: %.1f deg", m_angle);
+    ImGui::TextDisabled(materializr::tr("Angle: %.1f deg"), m_angle);
     if (materializr::stepperRow("taperStep", &m_angle,
                                 /*allowNegative=*/true, -45.0f, 45.0f))
         changed = true;
@@ -328,7 +324,7 @@ void TaperController::panelBody(const IopContext& ctx, bool& changed) {
                              /*allowSign=*/true, -45.0f, 45.0f))
         changed = true;
 
-    ImGui::Text("Pull axis");
+    ImGui::Text(materializr::tr("Pull axis"));
     ImGui::SameLine();
     const char* axisNames[4] = {"Auto", "X", "Y", "Z"};
     for (int i = 0; i < 4; ++i) {
@@ -338,7 +334,7 @@ void TaperController::panelBody(const IopContext& ctx, bool& changed) {
             changed = true;
         }
     }
-    if (ImGui::Checkbox("Flip base (fixed end)", &m_flipBase))
+    if (ImGui::Checkbox(materializr::tr("Flip base (fixed end)"), &m_flipBase))
         changed = true;
 }
 
@@ -372,21 +368,17 @@ std::unique_ptr<Operation> DefeatureController::buildOp(const IopContext&) {
 
 void DefeatureController::panelBody(const IopContext&, bool&) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled("Removes the selected face(s) and heals the surrounding "
-                        "faces back together — e.g. take a baked fillet back to "
-                        "a sharp edge so you can re-fillet it.");
+    ImGui::TextDisabled(materializr::tr("Removes the selected face(s) and heals the surrounding faces back together — e.g. take a baked fillet back to a sharp edge so you can re-fillet it."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
-    ImGui::Text("%zu face(s) selected", m_faces.size());
+    ImGui::Text(materializr::tr("%zu face(s) selected"), m_faces.size());
 
     if (previewOk()) {
-        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Previewing removal");
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), materializr::tr("Previewing removal"));
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
-                           "Can't remove: the neighbouring faces can't be "
-                           "extended to close the gap. Try a different face — a "
-                           "single fillet / round usually works.");
+                           materializr::tr("Can't remove: the neighbouring faces can't be extended to close the gap. Try a different face — a single fillet / round usually works."));
         ImGui::PopTextWrapPos();
     }
 }
@@ -452,10 +444,8 @@ std::unique_ptr<Operation> ProjectSketchController::buildOp(
 
 void ProjectSketchController::panelBody(const IopContext& ctx,
                                         bool& changed) {
-    ImGui::TextDisabled("Projects the sketch onto this face along the\n"
-                        "sketch's normal, then cuts in or raises out.");
-    ImGui::TextWrapped("Click the sketch elements you want projected — click "
-                       "each to add or remove. Use Select all / Clear below.");
+    ImGui::TextDisabled(materializr::tr("Projects the sketch onto this face along the\nsketch's normal, then cuts in or raises out."));
+    ImGui::TextWrapped(materializr::tr("Click the sketch elements you want projected — click each to add or remove. Use Select all / Clear below."));
 
     // Live region scoping: clicking sketch regions in the viewport while this
     // panel is open narrows the projection to just those (each click toggles —
@@ -511,7 +501,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     }
     // Select all → then click the few you DON'T want to drop them (easier than
     // hand-picking every letter of a long inscription). Clear → back to none.
-    if (ImGui::SmallButton("Select all")) {
+    if (ImGui::SmallButton(materializr::tr("Select all"))) {
         if (auto sk = ctx.doc.getSketch(m_sketchIds[m_sketchPick])) {
             const int sid = m_sketchIds[m_sketchPick];
             const int n = static_cast<int>(sk->buildRegions().size());
@@ -534,7 +524,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
         }
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Clear")) {
+    if (ImGui::SmallButton(materializr::tr("Clear"))) {
         ctx.selection.clear();
         changed = true;
     }
@@ -543,7 +533,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     // lands close to what you want (loops-only = letters, counters hollow);
     // fix the stragglers by clicking. An "island" is a region whose interior
     // sits inside another region's solid (a counter that should be a hole).
-    if (ImGui::SmallButton("Cycle loops/islands")) {
+    if (ImGui::SmallButton(materializr::tr("Cycle loops/islands"))) {
         if (auto sk = ctx.doc.getSketch(m_sketchIds[m_sketchPick])) {
             auto regions = sk->buildRegions();
             const int sid = m_sketchIds[m_sketchPick];
@@ -575,26 +565,23 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     ImGui::TextDisabled("(%s)", m_cycleMode == 0 ? "all"
                               : m_cycleMode == 1 ? "loops" : "islands");
     if (!m_regionFilter.empty()) {
-        ImGui::TextDisabled("%d region(s) selected - click any to add or\n"
-                            "remove. Use Clear to reset.",
+        ImGui::TextDisabled(materializr::tr("%d region(s) selected - click any to add or\nremove. Use Clear to reset."),
                             static_cast<int>(m_regionFilter.size()));
     } else {
-        ImGui::TextDisabled("All regions. Click elements to project only\n"
-                            "those (click each to add or remove).");
+        ImGui::TextDisabled(materializr::tr("All regions. Click elements to project only\nthose (click each to add or remove)."));
     }
 
     if (!wantsLivePreview(ctx)) {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-                           "%d regions - live preview is off here.\n"
-                           "Confirm to apply (may take a moment).",
+                           materializr::tr("%d regions - live preview is off here.\nConfirm to apply (may take a moment)."),
                            effectiveRegionCount(ctx));
     }
 
-    if (ImGui::RadioButton("Engrave", &m_mode, 0)) changed = true;
+    if (ImGui::RadioButton(materializr::tr("Engrave"), &m_mode, 0)) changed = true;
     ImGui::SameLine();
-    if (ImGui::RadioButton("Emboss", &m_mode, 1)) changed = true;
+    if (ImGui::RadioButton(materializr::tr("Emboss"), &m_mode, 1)) changed = true;
 
-    ImGui::TextDisabled("Depth: %.2f mm", m_depth);
+    ImGui::TextDisabled(materializr::tr("Depth: %.2f mm"), m_depth);
     if (materializr::stepperRow("projDepthStep", &m_depth,
                                 /*allowNegative=*/false, 0.1f, 10.0f)) {
         changed = true;
@@ -606,8 +593,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
 
     if (!previewOk()) {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
-                           "Projection failed - the selected region(s) couldn't\n"
-                           "be applied (off the face, or too thin/degenerate).");
+                           materializr::tr("Projection failed - the selected region(s) couldn't\nbe applied (off the face, or too thin/degenerate)."));
     }
 }
 
@@ -819,31 +805,27 @@ void ScaleFaceController::drawOverlay(const IopOverlay& ov) const {
 
 void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled("Scale this face; the side walls re-slope to follow. "
-                        "Under 100%% shrinks it, over 100%% grows it. Full "
-                        "length = walls follow from the base; shorter = blend "
-                        "only near the face.");
+    ImGui::TextDisabled(materializr::tr("Scale this face; the side walls re-slope to follow. Under 100%% shrinks it, over 100%% grows it. Full length = walls follow from the base; shorter = blend only near the face."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
 
     if (previewOk()) {
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
-                           "Previewing %.0f%% x %.0f%% over %.1f mm",
+                           materializr::tr("Previewing %.0f%% x %.0f%% over %.1f mm"),
                            m_pctU, m_pctV, m_len);
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f),
-                           "No preview: needs a FLAT end face (and 100%% is "
-                           "a no-op). Try another face or tweak values.");
+                           materializr::tr("No preview: needs a FLAT end face (and 100%% is a no-op). Try another face or tweak values."));
         ImGui::PopTextWrapPos();
     }
 
-    if (ImGui::Checkbox("Uniform", &m_uniform) && m_uniform) {
+    if (ImGui::Checkbox(materializr::tr("Uniform"), &m_uniform) && m_uniform) {
         m_pctV = m_pctU;
         changed = true;
     }
     if (m_uniform) {
-        ImGui::TextDisabled("Scale: %.0f %%", m_pctU);
+        ImGui::TextDisabled(materializr::tr("Scale: %.0f %%"), m_pctU);
         if (materializr::stepperRow("scaleStep", &m_pctU,
                                     /*allowNegative=*/true, 5.0f, maxPct(),
                                     /*zeroValue=*/100.0f)) {
@@ -863,7 +845,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
         //  truncating "Scale U" / "Scale V" to just "S" at the right edge.)
         const ImVec4 redCol (0.92f, 0.35f, 0.35f, 1.0f); // matches the red arrow
         const ImVec4 blueCol(0.35f, 0.59f, 0.92f, 1.0f); // matches the blue arrow
-        ImGui::TextColored(redCol, "Red line");
+        ImGui::TextColored(redCol, materializr::tr("Red line"));
         ImGui::SameLine(); ImGui::TextDisabled("%.0f %%", m_pctU);
         if (materializr::stepperRow("scaleUStep", &m_pctU,
                                     /*allowNegative=*/true, 5.0f, maxPct(),
@@ -873,7 +855,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
             touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,
                                  /*allowSign=*/false, 5.0f, maxPct()))
             changed = true;
-        ImGui::TextColored(blueCol, "Blue line");
+        ImGui::TextColored(blueCol, materializr::tr("Blue line"));
         ImGui::SameLine(); ImGui::TextDisabled("%.0f %%", m_pctV);
         if (materializr::stepperRow("scaleVStep", &m_pctV,
                                     /*allowNegative=*/true, 5.0f, maxPct(),
@@ -884,8 +866,8 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
                                  /*allowSign=*/false, 5.0f, maxPct()))
             changed = true;
     }
-    ImGui::TextDisabled("Or drag the two arrows on the face.");
-    ImGui::TextDisabled("Length: %.1f mm", m_len);
+    ImGui::TextDisabled(materializr::tr("Or drag the two arrows on the face."));
+    ImGui::TextDisabled(materializr::tr("Length: %.1f mm"), m_len);
     if (materializr::stepperRow("lenStep", &m_len,
                                 /*allowNegative=*/false, 0.5f,
                                 std::max(m_lenMax, 1.0f)))
@@ -960,14 +942,14 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
                         m_pick.isHole ? "hole" : "outer face");
 
     if (bothEnds) {
-        ImGui::Text("Original: %.2f mm", m_pick.topR * 2.0);
+        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.topR * 2.0);
     } else if (m_pick.editBottom) {
-        ImGui::Text("Original: %.2f mm", m_pick.bottomR * 2.0);
-        ImGui::TextDisabled("Top stays at %.2f mm — drag this end to make a cone.",
+        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.bottomR * 2.0);
+        ImGui::TextDisabled(materializr::tr("Top stays at %.2f mm — drag this end to make a cone."),
                             m_pick.topR * 2.0);
     } else {
-        ImGui::Text("Original: %.2f mm", m_pick.topR * 2.0);
-        ImGui::TextDisabled("Bottom stays at %.2f mm — drag this end to make a cone.",
+        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.topR * 2.0);
+        ImGui::TextDisabled(materializr::tr("Bottom stays at %.2f mm — drag this end to make a cone."),
                             m_pick.bottomR * 2.0);
     }
 
@@ -1002,7 +984,7 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
         edited = materializr::parseFinite(buf, parsed) &&
                  std::abs(parsed - *val) > 0.001;
         ImGui::SameLine();
-        ImGui::Text("mm");
+        ImGui::Text(materializr::tr("mm"));
     }
     if (edited) {
         *val = parsed;
@@ -1021,12 +1003,10 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
     // invalid diameter before anything had been typed.
     if (!previewOk() && !m_deferred && changedFromOriginal()) {
         ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.35f, 1.0f),
-                           "Invalid diameter for this feature —\n"
-                           "a hole can't exceed the surrounding wall.");
+                           materializr::tr("Invalid diameter for this feature —\na hole can't exceed the surrounding wall."));
     }
     if (m_deferred) {
-        ImGui::TextDisabled("Threaded body — applies on OK,\n"
-                            "then the thread re-cuts in background.");
+        ImGui::TextDisabled(materializr::tr("Threaded body — applies on OK,\nthen the thread re-cuts in background."));
     }
 }
 
@@ -2030,17 +2010,17 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         // Colour the label to the active ring (red = axis B, green = A).
         ImVec4 lc = (m_st.moveFaceGrab == 1) ? ImVec4(0.4f, 0.95f, 0.45f, 1.0f)
                                              : ImVec4(1.0f, 0.45f, 0.45f, 1.0f);
-        ImGui::TextColored(lc, "Tilt (deg)"); ImGui::Separator();
+        ImGui::TextColored(lc, materializr::tr("Tilt (deg)")); ImGui::Separator();
         float deg = m_st.moveFaceAngle * 57.2957795f;
         bool ch = false;
         ImGui::SetNextItemWidth(150);
-        ImGui::TextDisabled("%.1f deg", deg);
+        ImGui::TextDisabled(materializr::tr("%.1f deg"), deg);
         if (materializr::stepperRow("tiltStep", &deg,
                                     /*allowNegative=*/true, -90.0f, 90.0f))
             ch = true;
         ImGui::SetNextItemWidth(90);
-        if (materializr::inputNumber("deg", &deg, 1.0f, 5.0f, "%.1f")) ch = true;
-        ImGui::Checkbox("Snap 1 deg", &m_st.moveFaceRotSnap);
+        if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;
+        ImGui::Checkbox(materializr::tr("Snap 1 deg"), &m_st.moveFaceRotSnap);
         if (ch) {
             if (m_st.moveFaceRotSnap) deg = std::round(deg);
             m_st.moveFaceAngle = deg / 57.2957795f;
@@ -2052,17 +2032,17 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         // Twist = the third (blue) ring, about the face normal. Editable
         // here too so an exact angle can be dialled without dragging.
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.55f, 0.68f, 1.0f, 1.0f), "Twist (deg)");
+        ImGui::TextColored(ImVec4(0.55f, 0.68f, 1.0f, 1.0f), materializr::tr("Twist (deg)"));
         ImGui::Separator();
         float twdeg = m_st.moveFaceTwist * 57.2957795f;
         bool twch = false;
         ImGui::SetNextItemWidth(150);
-        ImGui::TextDisabled("%.1f deg", twdeg);
+        ImGui::TextDisabled(materializr::tr("%.1f deg"), twdeg);
         if (materializr::stepperRow("twistStep", &twdeg,
                                     /*allowNegative=*/true, -180.0f, 180.0f))
             twch = true;
         ImGui::SetNextItemWidth(90);
-        if (materializr::inputNumber("deg##tw", &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
+        if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;
         if (twch) {
             if (m_st.moveFaceRotSnap) twdeg = std::round(twdeg);
             m_st.moveFaceTwist = twdeg / 57.2957795f;
@@ -2072,15 +2052,13 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.80f, 0.35f, 1.0f));
         ImGui::PushTextWrapPos(230.0f);
         ImGui::TextWrapped(
-            "Tilt and Twist are separate ops — one gesture does either a "
-            "tilt OR a twist, not both. For a tapered-and-twisted face, "
-            "commit one then the other.");
+            materializr::tr("Tilt and Twist are separate ops — one gesture does either a tilt OR a twist, not both. For a tapered-and-twisted face, commit one then the other."));
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     } else if (isScl) {
-        ImGui::Text("Scale (%%)"); ImGui::Separator();
+        ImGui::Text(materializr::tr("Scale (%%)")); ImGui::Separator();
         bool ch = false;
-        if (ImGui::Checkbox("Uniform", &m_st.moveFaceScaleUniform)) {
+        if (ImGui::Checkbox(materializr::tr("Uniform"), &m_st.moveFaceScaleUniform)) {
             if (m_st.moveFaceScaleUniform)
                 m_st.moveFaceScale = 0.5f * (m_st.moveFaceScaleA + m_st.moveFaceScaleB);
             else
@@ -2100,7 +2078,7 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
             if (ch) m_st.moveFaceScale = std::max(0.1f, pct / 100.0f);
         } else {
             float a = m_st.moveFaceScaleA * 100.0f, b = m_st.moveFaceScaleB * 100.0f;
-            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Axis A (red)");
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), materializr::tr("Axis A (red)"));
             ImGui::SetNextItemWidth(150);
             ImGui::TextDisabled("%.0f %%", a);
             if (materializr::stepperRow("sclAStep", &a,
@@ -2109,7 +2087,7 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
                 ch = true;
             ImGui::SetNextItemWidth(90);
             if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;
-            ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.45f, 1.0f), "Axis B (green)");
+            ImGui::TextColored(ImVec4(0.4f, 0.95f, 0.45f, 1.0f), materializr::tr("Axis B (green)"));
             ImGui::SetNextItemWidth(150);
             ImGui::TextDisabled("%.0f %%", b);
             if (materializr::stepperRow("sclBStep", &b,
@@ -2125,7 +2103,7 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         }
         if (ch) updateMoveFace(ctx);
     } else {
-        ImGui::Text("Slide (mm)"); ImGui::Separator();
+        ImGui::Text(materializr::tr("Slide (mm)")); ImGui::Separator();
         ImGui::Text("(%.1f, %.1f, %.1f)  |%.1f|",
                     m_st.moveFaceVec.x, m_st.moveFaceVec.y, m_st.moveFaceVec.z,
                     glm::length(m_st.moveFaceVec));
@@ -2140,10 +2118,9 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         for (bool v : m_st.moveFaceHoleVertical) if (v) ++nvert;
         for (bool s : m_st.moveFaceHoleSlant)    if (s) ++nslant;
         int nstatic = static_cast<int>(m_st.moveFaceHoleVertical.size()) - nvert - nslant;
-        ImGui::TextWrapped("Holes: %d stay, %d slant, %d vertical.",
+        ImGui::TextWrapped(materializr::tr("Holes: %d stay, %d slant, %d vertical."),
                            nstatic, nslant, nvert);
-        ImGui::TextDisabled("Pick a hole's top edge to slant it, its wall to "
-                            "keep it a vertical tube.");
+        ImGui::TextDisabled(materializr::tr("Pick a hole's top edge to slant it, its wall to keep it a vertical tube."));
     }
 
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead

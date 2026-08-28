@@ -207,6 +207,7 @@ add_executable(materializr
     src/main.cpp
     src/app/Application.cpp
     src/app/ui_layout_bridge.cpp
+    src/i18n.cpp
     src/app/InteractiveOpController.cpp
     src/app/FaceOpControllers.cpp
     src/app/ExtrudeController.cpp
