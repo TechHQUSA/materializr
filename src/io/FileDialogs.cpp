@@ -1,5 +1,9 @@
 #include "ui_scale.h"
 #include "FileDialogs.h"
+// Unconditional: tr() is used on every platform. The i18n_wrap tool once
+// auto-inserted this after the LAST include, which sat inside the non-Windows
+// half of a platform #ifdef -- gcc built, MSVC did not (CI run 33129846885).
+#include "../i18n.h"
 #include <imgui.h>
 #include <memory>
 #include <filesystem>
@@ -26,7 +30,6 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "../i18n.h"
 #endif
 
 namespace materializr {

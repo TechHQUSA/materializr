@@ -108,8 +108,12 @@ def wrap(path):
     if hits[0]:
         if '"i18n.h"' not in out:
             lines = out.split("\n")
-            last = max(i for i, l in enumerate(lines[:90]) if l.startswith("#include"))
-            lines.insert(last + 1, include_for(path))
+            # After the FIRST include, not the last: the last include of a
+            # header block can sit inside a platform #ifdef, and an include
+            # inserted there vanishes on the other platform (MSVC broke on
+            # FileDialogs.cpp exactly this way).
+            first = min(i for i, l in enumerate(lines[:90]) if l.startswith("#include"))
+            lines.insert(first + 1, include_for(path))
             out = "\n".join(lines)
         open(path, "w", encoding="utf-8").write(out)
     return hits[0]
