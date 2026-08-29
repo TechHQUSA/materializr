@@ -137,7 +137,7 @@ std::string TaperOp::description() const {
 }
 
 void TaperOp::renderProperties() {
-    ImGui::Text(materializr::tr("Draft"));
+    ImGui::Text("%s", materializr::tr("Draft"));
     ImGui::Separator();
     materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");
     ImGui::Text(materializr::tr("Faces: %d"), m_faces.Size());

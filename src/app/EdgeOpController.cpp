@@ -849,7 +849,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text(materializr::tr("mm"));
+        ImGui::Text("%s", materializr::tr("mm"));
     }
 
     // Quick-nudge stepper (replaces the slider). Positive-only for a radius /
@@ -877,8 +877,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         }
         if (m_twoDist) {
             if (!imTouch)
-                ImGui::TextColored(materializr::accentText(),
-                                   materializr::tr("Distance B (other face)"));
+                ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Distance B (other face)"));
             if (imTouch) {
                 if (touchui::amountField("edgeAmt2", materializr::tr("Distance B"), &m_value2,
                                          "mm", 1, /*allowSign=*/false,
@@ -902,7 +901,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
                     }
                 }
                 ImGui::SameLine();
-                ImGui::Text(materializr::tr("mm"));
+                ImGui::Text("%s", materializr::tr("mm"));
             }
             if (!imTouch &&
                 materializr::stepperRow("edgeStep2", &m_value2,

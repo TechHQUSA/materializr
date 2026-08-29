@@ -69,12 +69,12 @@ std::string CopyOp::description() const {
 }
 
 void CopyOp::renderProperties() {
-    ImGui::Text(materializr::tr("Duplicate"));
+    ImGui::Text("%s", materializr::tr("Duplicate"));
     ImGui::Separator();
 
     materializr::inputNumberInt("Source Body ID", &m_sourceBodyId);
 
-    ImGui::Text(materializr::tr("Offset"));
+    ImGui::Text("%s", materializr::tr("Offset"));
     materializr::inputNumber("X", &m_dx, 0.1, 1.0, "%g");
     materializr::inputNumber("Y", &m_dy, 0.1, 1.0, "%g");
     materializr::inputNumber("Z", &m_dz, 0.1, 1.0, "%g");

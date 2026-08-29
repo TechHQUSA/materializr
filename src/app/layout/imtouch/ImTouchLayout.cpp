@@ -640,7 +640,7 @@ void Application::renderImTouchLayout() {
                 }
             }
             if (!any)
-                ImGui::TextColored(touchui::textDim(), materializr::tr("Nothing here yet"));
+                ImGui::TextColored(touchui::textDim(), "%s", materializr::tr("Nothing here yet"));
         }
         ImGui::End();
 
@@ -1085,8 +1085,7 @@ void Application::renderImTouchLayout() {
             // Empty history still shows a hint so toggling History in a fresh
             // project doesn't look like it did nothing.
             if (steps == 0)
-                ImGui::TextColored(touchui::textDim(),
-                                   materializr::tr("History: no steps yet"));
+                ImGui::TextColored(touchui::textDim(), "%s", materializr::tr("History: no steps yet"));
             const int curr = m_history->currentStep();
             const int failedAt = m_history->lastReplayFailure();
             const bool histLocked = anyInteractivePreviewActive();
@@ -1152,22 +1151,19 @@ void Application::renderImTouchLayout() {
                     ImGui::TextColored(touchui::textPrimary(), "%d. %s",
                                        i + 1, detail.c_str());
                     if (!op->isEnabled())
-                        ImGui::TextColored(touchui::textDim(), materializr::tr("Disabled"));
+                        ImGui::TextColored(touchui::textDim(), "%s", materializr::tr("Disabled"));
                     if (i > curr)
-                        ImGui::TextColored(touchui::textDim(),
-                                           materializr::tr("Undone \xE2\x80\x94 Go Here replays it."));
+                        ImGui::TextColored(touchui::textDim(), "%s", materializr::tr("Undone \xE2\x80\x94 Go Here replays it."));
                     if (i == failedAt) {
                         ImGui::PushTextWrapPos(0.0f);
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
-                            materializr::tr("Couldn't recompute after an upstream change. Edit its parameters, fix the step before it, or delete it."));
+                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f), "%s", materializr::tr("Couldn't recompute after an upstream change. Edit its parameters, fix the step before it, or delete it."));
                         ImGui::PopTextWrapPos();
                     }
                     ImGui::Separator();
 
                     if (op->isReloaded()) {
                         ImGui::PushTextWrapPos(0.0f);
-                        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f),
-                            materializr::tr("Restored from an older save \xE2\x80\x94 no editable parameters. Undo/redo still work."));
+                        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "%s", materializr::tr("Restored from an older save \xE2\x80\x94 no editable parameters. Undo/redo still work."));
                         ImGui::PopTextWrapPos();
                     } else {
                         // The op's own parameter editor — identical widgets to

@@ -121,7 +121,7 @@ public:
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text(materializr::tr("Distance (mm)"));
+        ImGui::Text("%s", materializr::tr("Distance (mm)"));
         ImGui::Separator();
 
         if (m_inputFocus) {
@@ -146,7 +146,7 @@ public:
         }
 
         ImGui::SameLine();
-        ImGui::Text(materializr::tr("mm"));
+        ImGui::Text("%s", materializr::tr("mm"));
 
         if (materializr::stepperRow("ppStep", &m_distance,
                                     /*allowNegative=*/true, -50.0f, 50.0f)) {

@@ -138,11 +138,11 @@ std::unique_ptr<Operation> SplitController::buildOp(const IopContext&) {
 
 void SplitController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled(materializr::tr("Cut the body in two with a plane. The ghost rectangle in the viewport is where the cut lands."));
+    ImGui::TextDisabled("%s", materializr::tr("Cut the body in two with a plane. The ghost rectangle in the viewport is where the cut lands."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
 
-    ImGui::TextDisabled(materializr::tr("Axis"));
+    ImGui::TextDisabled("%s", materializr::tr("Axis"));
     for (int a = 0; a < 3; ++a) {
         if (a) ImGui::SameLine();
         if (ImGui::RadioButton(axisName(a), m_axis == a) && m_axis != a) {

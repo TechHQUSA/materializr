@@ -73,7 +73,7 @@ std::string AlignOp::description() const {
 }
 
 void AlignOp::renderProperties() {
-    ImGui::Text(materializr::tr("Align"));
+    ImGui::Text("%s", materializr::tr("Align"));
     ImGui::Separator();
 
     materializr::inputNumberInt("Body ID", &m_bodyId);
@@ -81,14 +81,14 @@ void AlignOp::renderProperties() {
     double sx = m_source.X(), sy = m_source.Y(), sz = m_source.Z();
     double tx = m_target.X(), ty = m_target.Y(), tz = m_target.Z();
 
-    ImGui::Text(materializr::tr("Source Point"));
+    ImGui::Text("%s", materializr::tr("Source Point"));
     if (materializr::inputNumber(materializr::tr("Src X"), &sx, 0.1, 1.0, "%g") ||
         materializr::inputNumber(materializr::tr("Src Y"), &sy, 0.1, 1.0, "%g") ||
         materializr::inputNumber(materializr::tr("Src Z"), &sz, 0.1, 1.0, "%g")) {
         m_source.SetCoord(sx, sy, sz);
     }
 
-    ImGui::Text(materializr::tr("Target Point"));
+    ImGui::Text("%s", materializr::tr("Target Point"));
     if (materializr::inputNumber(materializr::tr("Tgt X"), &tx, 0.1, 1.0, "%g") ||
         materializr::inputNumber(materializr::tr("Tgt Y"), &ty, 0.1, 1.0, "%g") ||
         materializr::inputNumber(materializr::tr("Tgt Z"), &tz, 0.1, 1.0, "%g")) {

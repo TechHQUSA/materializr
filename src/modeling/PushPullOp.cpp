@@ -632,7 +632,7 @@ std::string PushPullOp::description() const {
 }
 
 void PushPullOp::renderProperties() {
-    ImGui::Text(materializr::tr("Push/Pull"));
+    ImGui::Text("%s", materializr::tr("Push/Pull"));
     ImGui::Separator();
     materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");
     ImGui::Text(materializr::tr("Regions: %zu"), m_targets.size());

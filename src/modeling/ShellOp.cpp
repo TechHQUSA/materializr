@@ -318,7 +318,7 @@ std::string ShellOp::description() const {
 }
 
 void ShellOp::renderProperties() {
-    ImGui::Text(materializr::tr("Shell"));
+    ImGui::Text("%s", materializr::tr("Shell"));
     ImGui::Separator();
 
     materializr::inputNumber(materializr::tr("Thickness"), &m_thickness, 0.1, 1.0, "%g");

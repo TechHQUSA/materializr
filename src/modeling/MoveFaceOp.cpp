@@ -579,7 +579,7 @@ std::string MoveFaceOp::description() const {
 }
 
 void MoveFaceOp::renderProperties() {
-    ImGui::Text(materializr::tr("Move Face"));
+    ImGui::Text("%s", materializr::tr("Move Face"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
     ImGui::Text(materializr::tr("Move: (%.2f, %.2f, %.2f) mm"), m_move.X(), m_move.Y(), m_move.Z());

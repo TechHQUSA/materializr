@@ -219,7 +219,7 @@ std::string ConstructionPlaneOp::description() const {
 }
 
 void ConstructionPlaneOp::renderProperties() {
-    ImGui::Text(materializr::tr("Construction Plane"));
+    ImGui::Text("%s", materializr::tr("Construction Plane"));
     ImGui::Separator();
 
     // Plane name
@@ -250,12 +250,12 @@ void ConstructionPlaneOp::renderProperties() {
         case PlaneCreationType::XY:
         case PlaneCreationType::XZ:
         case PlaneCreationType::YZ:
-            ImGui::TextWrapped(materializr::tr("Standard reference plane through the origin."));
+            ImGui::TextWrapped("%s", materializr::tr("Standard reference plane through the origin."));
             break;
 
         case PlaneCreationType::OffsetFromPlane:
             materializr::inputNumber(materializr::tr("Offset Distance"), &m_offset, 0.1, 1.0, "%g");
-            ImGui::TextWrapped(materializr::tr("Creates a plane parallel to the base plane, offset along its normal."));
+            ImGui::TextWrapped("%s", materializr::tr("Creates a plane parallel to the base plane, offset along its normal."));
             break;
 
         case PlaneCreationType::ThroughThreePoints: {
@@ -280,7 +280,7 @@ void ConstructionPlaneOp::renderProperties() {
             if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, coords, 3, nullptr, nullptr, "%.3f")) {
                 m_p1.SetCoord(coords[0], coords[1], coords[2]);
             }
-            ImGui::TextWrapped(materializr::tr("Creates a plane parallel to the selected face, passing through the specified point."));
+            ImGui::TextWrapped("%s", materializr::tr("Creates a plane parallel to the selected face, passing through the specified point."));
             break;
         }
     }

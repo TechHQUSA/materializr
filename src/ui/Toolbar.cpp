@@ -632,7 +632,7 @@ void Toolbar::renderAddAxisMenu() {
 ToolAction Toolbar::renderSketchTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Sketch Tools"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Sketch Tools"));
     // Constraint status badge — only appears once the sketch has constraints.
     // Green = Fully constrained, blue = Under (free DOF), red = Over
     // (contradictory). Hover shows the precise degree-of-freedom count.
@@ -808,7 +808,7 @@ ToolAction Toolbar::renderNoSelectionTools() {
     ToolAction action = ToolAction::None;
 
     // Start a sketch on a base plane — lets you model from scratch with no body.
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Create"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Create"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Sketch on XY"), ImVec2(-1, bh(30)))) action = ToolAction::StartSketchXY;
     tip(materializr::tr("Start a new sketch on the world XY (floor) plane."));
@@ -842,7 +842,7 @@ ToolAction Toolbar::renderNoSelectionTools() {
 ToolAction Toolbar::renderBodyTools(bool primaryContext) {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Transform"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
     ImGui::Separator();
 
     // Gizmo modes side by side, then Mirror.
@@ -903,7 +903,7 @@ ToolAction Toolbar::renderBodyTools(bool primaryContext) {
     // "Unfold Faces" button already covers it.
     if (primaryContext && m_selection && m_selection->selectedBodyCount() == 1) {
         ImGui::Spacing();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Fabrication"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Fabrication"));
         ImGui::Separator();
         if (ImGui::Button(materializr::tr("Unfold / Flatten"), ImVec2(-1, bh(30))))
             action = ToolAction::Unfold;
@@ -929,7 +929,7 @@ ToolAction Toolbar::renderBodyTools(bool primaryContext) {
 ToolAction Toolbar::renderFaceTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Face Operations"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Face Operations"));
     ImGui::Separator();
 
     // Every gate below is the catalogue's (railTools()); the wording, order
@@ -1011,8 +1011,7 @@ ToolAction Toolbar::renderFaceTools() {
     // point the user at Repair Geometry — restore the edge, then re-fillet.
     if (m_selFrozenRound) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-        ImGui::TextColored(materializr::dimText(),
-            materializr::tr("This round is frozen (saved before edit support). Use Repair Geometry above to restore the sharp edge, then re-fillet."));
+        ImGui::TextColored(materializr::dimText(), "%s", materializr::tr("This round is frozen (saved before edit support). Use Repair Geometry above to restore the sharp edge, then re-fillet."));
         ImGui::PopTextWrapPos();
     }
 
@@ -1029,9 +1028,9 @@ ToolAction Toolbar::renderFaceTools() {
 ToolAction Toolbar::renderSketchSelectedTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Sketch"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Sketch"));
     ImGui::Separator();
-    ImGui::TextWrapped(materializr::tr("Tip: hover a sketch region to highlight it, click to select, Ctrl+click to add to selection."));
+    ImGui::TextWrapped("%s", materializr::tr("Tip: hover a sketch region to highlight it, click to select, Ctrl+click to add to selection."));
     ImGui::Separator();
 
     if (catalogOffers(ToolAction::EditSketch)) {
@@ -1058,7 +1057,7 @@ ToolAction Toolbar::renderSketchSelectedTools() {
             action = ToolAction::SubtractSketch;
         tip(materializr::tr("Extrude the sketch's regions and cut the result out of the body they\nrun into \xE2\x80\x94 the host body when the sketch sits on one, otherwise\nwhichever body the sweep reaches."));
     }
-    ImGui::TextWrapped(materializr::tr("Subtract sweeps the profile like Extrude, then cuts that volume out of the body it reaches."));
+    ImGui::TextWrapped("%s", materializr::tr("Subtract sweeps the profile like Extrude, then cuts that volume out of the body it reaches."));
 
     // Move / Rotate gizmo modes — appear here so a selected sketch behaves
     // like a movable construction plane. Bodies have these in renderBodyTools;
@@ -1066,7 +1065,7 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     // "Sketch" / "Loft" section-label convention so the toolbar reads as a
     // sequence of clearly-titled groups.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Transform"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Move"), ImVec2(-1, bh(30))))
         action = ToolAction::Move;
@@ -1090,14 +1089,14 @@ ToolAction Toolbar::renderSketchSelectedTools() {
 
 ToolAction Toolbar::renderPlaneSelectedTools() {
     ToolAction action = ToolAction::None;
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Construction Plane"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Plane"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Sketch on this Plane"), ImVec2(-1, bh(30))))
         action = ToolAction::SketchOnFace; // dispatched on Plane in handler
     tip(materializr::tr("Start a new sketch lying on this construction plane — same workflow as Sketch on Face, just with the plane as the host."));
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Transform"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Move"), ImVec2(-1, bh(30))))   action = ToolAction::Move;
     tip(materializr::tr("Show the Move gizmo on this plane. Drag an axis arrow to nudge it; the live readout pinned to the cursor shows the offset along the plane's own normal."));
@@ -1117,12 +1116,12 @@ ToolAction Toolbar::renderPlaneSelectedTools() {
 
 ToolAction Toolbar::renderAxisSelectedTools() {
     ToolAction action = ToolAction::None;
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Construction Axis"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Axis"));
     ImGui::Separator();
-    ImGui::TextWrapped(materializr::tr("Axes are 1-D primitives — they'll feed Revolve and future Pattern-Around-Axis ops. For now you can move them; rotate isn't meaningful on a line."));
+    ImGui::TextWrapped("%s", materializr::tr("Axes are 1-D primitives — they'll feed Revolve and future Pattern-Around-Axis ops. For now you can move them; rotate isn't meaningful on a line."));
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Transform"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Move"), ImVec2(-1, bh(30)))) action = ToolAction::Move;
     tip(materializr::tr("Show the Move gizmo on this axis. Drag an arrow to translate the axis origin; the direction is preserved."));
@@ -1137,7 +1136,7 @@ ToolAction Toolbar::renderAxisSelectedTools() {
 ToolAction Toolbar::renderSketchRegionTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Region"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Region"));
     ImGui::Separator();
     int n = m_selection ? m_selection->selectedSketchRegionCount() : 0;
     ImGui::Text(materializr::tr("%d region%s selected"), n, n == 1 ? "" : "s");
@@ -1178,7 +1177,7 @@ ToolAction Toolbar::renderSketchRegionTools() {
     // its sketch for these ops. Hidden in ortho view (gizmo's own rule) but
     // the buttons stay visible so the user understands the action exists.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Transform"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Move"), ImVec2(-1, bh(30))))
         action = ToolAction::Move;
@@ -1193,7 +1192,7 @@ ToolAction Toolbar::renderSketchRegionTools() {
                                          ToolAction::Move, ToolAction::Rotate});
 
     ImGui::Spacing();
-    ImGui::TextWrapped(materializr::tr("Drag positive distance to extrude, negative to cut into the body the sketch sits on."));
+    ImGui::TextWrapped("%s", materializr::tr("Drag positive distance to extrude, negative to cut into the body the sketch sits on."));
 
     return action;
 }
@@ -1201,7 +1200,7 @@ ToolAction Toolbar::renderSketchRegionTools() {
 ToolAction Toolbar::renderEdgeTools() {
     ToolAction action = ToolAction::None;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Edge Ops"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Edge Ops"));
     ImGui::Separator();
     // Availability comes from the catalogue (railTools()); the wording and
     // placement below are classic's own. "Move Hole" used to be gated on a

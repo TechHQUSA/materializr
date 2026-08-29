@@ -26,13 +26,13 @@ int VersionPanel::render() {
     ImGui::Begin("Versions");
 
     if (!m_manager) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No version manager available."));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No version manager available."));
         ImGui::End();
         return -1;
     }
 
     // Save Version section
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Save Version"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Save Version"));
     ImGui::Separator();
 
     ImGui::SetNextItemWidth(-80.0f);
@@ -50,7 +50,7 @@ int VersionPanel::render() {
     ImGui::Spacing();
 
     // Auto-save settings
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Auto-Save"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Auto-Save"));
     ImGui::Separator();
 
     int interval = m_manager->getAutoSaveInterval();
@@ -60,7 +60,7 @@ int VersionPanel::render() {
     }
 
     if (m_manager->isAutoSaveDue()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), materializr::tr("Auto-save pending..."));
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "%s", materializr::tr("Auto-save pending..."));
     } else {
         std::time_t now = std::time(nullptr);
         // Calculate approximate time since last potential auto-save
@@ -74,13 +74,13 @@ int VersionPanel::render() {
     ImGui::Spacing();
 
     // Version list
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Version History"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Version History"));
     ImGui::Separator();
 
     const auto& versions = m_manager->getVersions();
 
     if (versions.empty()) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No versions saved yet."));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No versions saved yet."));
     } else {
         ImGui::BeginChild("VersionList", ImVec2(0, 0), true);
 

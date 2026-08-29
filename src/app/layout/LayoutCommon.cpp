@@ -324,7 +324,7 @@ void Application::renderTouchTabsSheet() {
     // each row's ⋮ opens the shared Save / Save As / Close menu; the last
     // row starts a fresh tab.
     if (!ImGui::BeginPopup("##TouchTabs")) return;
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Open projects"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Open projects"));
     ImGui::Separator();
     for (size_t i = 0; i < m_sessions.size(); ++i) {
         ImGui::PushID(static_cast<int>(i));

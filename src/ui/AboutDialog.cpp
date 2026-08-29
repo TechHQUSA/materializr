@@ -53,7 +53,7 @@ void AboutDialog::render() {
         ImGui::GetFont()->Scale = 2.0f;
         ImGui::PushFont(ImGui::GetFont());
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Materializr").x) * 0.5f);
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Materializr"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Materializr"));
         ImGui::GetFont()->Scale = origScale;
         ImGui::PopFont();
 
@@ -70,19 +70,18 @@ void AboutDialog::render() {
         ImGui::Text("%s", desc);
 
         ImGui::Spacing();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Credits"));
-        ImGui::BulletText(materializr::tr("R4stl1n — original project"));
-        ImGui::BulletText(materializr::tr("stevebushwa — design, testing, direction"));
-        ImGui::BulletText(materializr::tr("Claude (Anthropic) — pair-coding collaborator"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Credits"));
+        ImGui::BulletText("%s", materializr::tr("R4stl1n — original project"));
+        ImGui::BulletText("%s", materializr::tr("stevebushwa — design, testing, direction"));
+        ImGui::BulletText("%s", materializr::tr("Claude (Anthropic) — pair-coding collaborator"));
 
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
-                           materializr::tr("Built with OpenCASCADE, Dear ImGui, SDL2, GLM, libcurl."));
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", materializr::tr("Built with OpenCASCADE, Dear ImGui, SDL2, GLM, libcurl."));
         // GPLv3 since 0.9.8 (the old "MIT" line survived the relicense);
         // section-7 additional permissions live in LICENSE-EXCEPTIONS.md.
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-        ImGui::TextWrapped(materializr::tr("License: GNU GPLv3, with additional permissions"));
-        ImGui::TextWrapped(materializr::tr("(see LICENSE and LICENSE-EXCEPTIONS.md in the source repository)"));
+        ImGui::TextWrapped("%s", materializr::tr("License: GNU GPLv3, with additional permissions"));
+        ImGui::TextWrapped("%s", materializr::tr("(see LICENSE and LICENSE-EXCEPTIONS.md in the source repository)"));
         ImGui::PopStyleColor();
 
         ImGui::Spacing();

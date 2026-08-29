@@ -312,7 +312,7 @@ std::string BooleanOp::description() const {
 }
 
 void BooleanOp::renderProperties() {
-    ImGui::Text(materializr::tr("Boolean Operation"));
+    ImGui::Text("%s", materializr::tr("Boolean Operation"));
     ImGui::Separator();
 
     const char* modeItems[] = { "Union", "Subtract", "Intersect" };

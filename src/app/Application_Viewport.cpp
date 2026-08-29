@@ -1988,7 +1988,7 @@ void Application::renderViewport() {
                             // matches Modern. The placeholder shows the dragged
                             // diameter until you type an exact value; empty
                             // buffer = keep the drag (handled at commit).
-                            ImGui::TextDisabled(materializr::tr("Diameter (mm)"));
+                            ImGui::TextDisabled("%s", materializr::tr("Diameter (mm)"));
                             char hint[32];
                             std::snprintf(hint, sizeof(hint), "%.1f (drag)", diaNow);
                             ImGui::SetNextItemWidth(touchui::numberPadWidth(keySide));
@@ -2021,11 +2021,11 @@ void Application::renderViewport() {
                             const float fieldW = touchui::numberPadWidth(keySide);
                             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                                 ImVec2(uiW(10.0f), uiW(10.0f)));
-                            ImGui::TextDisabled(materializr::tr("Width (mm)"));
+                            ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
                             ImGui::SetNextItemWidth(fieldW);
                             materializr::inputNumber("##bubbleW", &m_sketchShapeDimW,
                                               0.0f, 0.0f, "%.2f");
-                            ImGui::TextDisabled(materializr::tr("Height (mm)"));
+                            ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
                             ImGui::SetNextItemWidth(fieldW);
                             materializr::inputNumber("##bubbleH", &m_sketchShapeDimH,
                                               0.0f, 0.0f, "%.2f");
@@ -3178,7 +3178,7 @@ void Application::renderViewport() {
                                     ImGui::CloseCurrentPopup();
                                 }
                                 ImGui::SameLine();
-                                ImGui::TextDisabled(materializr::tr("(equal length / radius)"));
+                                ImGui::TextDisabled("%s", materializr::tr("(equal length / radius)"));
                             }
                         }
                         // Delete removes the dimension constraint entirely, as
@@ -3198,7 +3198,7 @@ void Application::renderViewport() {
                             ImGui::CloseCurrentPopup();
                         }
                         ImGui::SameLine();
-                        ImGui::TextDisabled(materializr::tr("(Del)"));
+                        ImGui::TextDisabled("%s", materializr::tr("(Del)"));
                         ImGui::EndPopup();
                     } else {
                         // Popup closed without committing — drop edit state.
@@ -5828,8 +5828,7 @@ void Application::renderViewport() {
                         ImVec2(8.0f * uiScale(), 8.0f * uiScale()));
                     if (ImGui::BeginPopup("##SketchRotateAdjust",
                                           ImGuiWindowFlags_AlwaysAutoResize)) {
-                        ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f),
-                                           materializr::tr("Rotation (deg)"));
+                        ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f), "%s", materializr::tr("Rotation (deg)"));
                         ImGui::SetNextItemWidth(150.0f);
                         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
                         float rotPadV = m_sketchGizmoRotateDegrees;
@@ -6522,7 +6521,7 @@ void Application::renderViewport() {
                 bool hov = ImGui::IsItemHovered();
                 if (m_moveModeToggle) ImGui::PopStyleColor(3);
                 if (clicked) m_moveModeToggle = !m_moveModeToggle;
-                if (hov) ImGui::SetTooltip(materializr::tr("Navigation lock: one finger orbits;\ntaps don't draw or select"));
+                if (hov) ImGui::SetTooltip("%s", materializr::tr("Navigation lock: one finger orbits;\ntaps don't draw or select"));
                 anyBtn = true;
             }
 
@@ -6541,7 +6540,7 @@ void Application::renderViewport() {
                         m_multiSelectToggle = !m_multiSelectToggle;
                     bool hov = ImGui::IsItemHovered();
                     if (pops) ImGui::PopStyleColor(pops);
-                    if (hov) ImGui::SetTooltip(materializr::tr("Add taps to the current selection\n(the touch equivalent of holding Ctrl)"));
+                    if (hov) ImGui::SetTooltip("%s", materializr::tr("Add taps to the current selection\n(the touch equivalent of holding Ctrl)"));
                 }
 
                 // Delete the selected sketch elements — the touch twin of the
@@ -6556,7 +6555,7 @@ void Application::renderViewport() {
                     bool dhov = ImGui::IsItemHovered();
                     ImGui::PopStyleColor(2);
                     if (del) deleteSelectedSketchElements();
-                    if (dhov) ImGui::SetTooltip(materializr::tr("Delete the selected sketch elements (undoable)"));
+                    if (dhov) ImGui::SetTooltip("%s", materializr::tr("Delete the selected sketch elements (undoable)"));
                 }
             }
             if (placing && classicLayout()) {
@@ -6584,7 +6583,7 @@ void Application::renderViewport() {
                         bool fhov = ImGui::IsItemHovered();
                         ImGui::PopStyleColor(2);
                         if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
-                        if (fhov) ImGui::SetTooltip(materializr::tr("Finish the current shape, keeping the points placed"));
+                        if (fhov) ImGui::SetTooltip("%s", materializr::tr("Finish the current shape, keeping the points placed"));
                     }
                     // "Back" drops the last placed segment / control point and
                     // keeps the chain going. Only when there is one to drop.
@@ -6600,7 +6599,7 @@ void Application::renderViewport() {
                         bool bhov = ImGui::IsItemHovered();
                         ImGui::PopStyleColor(2);
                         if (back) sketchChainBack();
-                        if (bhov) ImGui::SetTooltip(materializr::tr("Remove the last segment and keep drawing"));
+                        if (bhov) ImGui::SetTooltip("%s", materializr::tr("Remove the last segment and keep drawing"));
                     }
                     // "Cancel" — for a chain, discard the WHOLE chain; for arc,
                     // discard the in-progress shape.
@@ -6642,7 +6641,7 @@ void Application::renderViewport() {
         // pick from a double-click body pick the way a mouse does). Each branch
         // first selects its entity, then lists its specific actions; body-level
         // actions that aren't face-specific are dual-listed under both.
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Object"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Object"));
         ImGui::Separator();
 
         const int bid = m_contextMenuBodyId;
@@ -6894,7 +6893,7 @@ void Application::renderViewport() {
     // the viewport.
     if (ImGui::BeginPopup("PlaneContextMenu")) {
         const int pid = m_contextMenuPlaneId;
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Construction Plane"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Plane"));
         ImGui::Separator();
         if (ImGui::MenuItem(materializr::tr("Flip Normal"))) {
             m_document->flipPlaneNormal(pid);
@@ -6976,7 +6975,7 @@ void Application::renderViewport() {
             // ImGui automatically greys out an empty submenu, but we want to
             // hint at the cause when nothing matches the selection.
             if (nPts == 0 && nLns == 0) {
-                ImGui::TextDisabled(materializr::tr("(nothing selected)"));
+                ImGui::TextDisabled("%s", materializr::tr("(nothing selected)"));
             }
             ImGui::EndMenu();
         }
@@ -7163,10 +7162,10 @@ void Application::renderViewport() {
                     }
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                         ImVec2(uiW(10.0f), uiW(10.0f)));
-                    ImGui::TextDisabled(materializr::tr("Width (mm)"));
+                    ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
                     ImGui::SetNextItemWidth(-1.0f);
                     materializr::inputNumber("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
-                    ImGui::TextDisabled(materializr::tr("Height (mm)"));
+                    ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
                     ImGui::SetNextItemWidth(-1.0f);
                     materializr::inputNumber("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
                     ImGui::PopStyleVar();

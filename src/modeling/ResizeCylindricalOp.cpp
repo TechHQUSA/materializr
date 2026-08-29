@@ -696,7 +696,7 @@ void ResizeCylindricalOp::renderProperties() {
     ImGui::Text(materializr::tr("Length: %.2f mm"), m_height);
     // WRAPPED: inline history-panel editor — see ThreadOp for the same note.
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-    ImGui::TextWrapped(materializr::tr("Clicking the circular edge / face in the viewport also re-edits."));
+    ImGui::TextWrapped("%s", materializr::tr("Clicking the circular edge / face in the viewport also re-edits."));
     ImGui::PopStyleColor();
 }
 

@@ -551,7 +551,7 @@ std::string MergeFacesOp::description() const {
 }
 
 void MergeFacesOp::renderProperties() {
-    ImGui::Text(materializr::tr("Merge Faces"));
+    ImGui::Text("%s", materializr::tr("Merge Faces"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Scope: %s"), isFaceScoped() ? "selected faces" : "whole body");
     ImGui::Text(materializr::tr("Faces: %d -> %d"), m_facesBefore, m_facesAfter);

@@ -1426,7 +1426,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     ImGui::Begin("##progress", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Working\xE2\x80\xA6"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Working\xE2\x80\xA6"));
     ImGui::Spacing();
     if (label && label[0]) ImGui::TextWrapped("%s", label);
     ImGui::Spacing();
@@ -1522,8 +1522,7 @@ void Application::renderSmallScreenWarning() {
     if (ImGui::BeginPopupModal("Small screen", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(uiW(440));
-        ImGui::TextWrapped(
-            materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         static bool dontShow = false;
@@ -6548,8 +6547,7 @@ void Application::renderSketchRecoveryPrompt() {
                                ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextUnformatted(
             materializr::tr("An unfinished sketch from your last session was found."));
-        ImGui::TextDisabled(
-            materializr::tr("It wasn't committed before the app closed (a crash, or a restart)."));
+        ImGui::TextDisabled("%s", materializr::tr("It wasn't committed before the app closed (a crash, or a restart)."));
         ImGui::Spacing();
         if (ImGui::Button(materializr::tr("Restore it"), materializr::uiSz(140, 0))) {
             restoreSketchDraftNow();
@@ -6696,11 +6694,10 @@ void Application::renderProjectRecoveryPrompt() {
         if (!meta.projectPath.empty())
             ImGui::TextDisabled(materializr::tr("Project: %s"), meta.projectPath.c_str());
         else
-            ImGui::TextDisabled(materializr::tr("An unsaved project (never written to a file)."));
+            ImGui::TextDisabled("%s", materializr::tr("An unsaved project (never written to a file)."));
         ImGui::TextDisabled(materializr::tr("%d bodies, %d history steps."),
                             meta.bodyCount, meta.stepCount);
-        ImGui::TextDisabled(
-            materializr::tr("Materializr didn't close cleanly (a crash, hang, or restart)."));
+        ImGui::TextDisabled("%s", materializr::tr("Materializr didn't close cleanly (a crash, hang, or restart)."));
         // One snapshot per tab the dead instance had open — the summary above
         // describes the newest; all of them come back, a tab each.
         const int nOrphans = materializr::projectRecoveryOrphanCount();
@@ -7485,9 +7482,8 @@ void Application::run() {
                         ImGuiWindowFlags_NoNav;
                     bool open = true;
                     if (ImGui::Begin("Pick more sketches", &open, flags)) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f),
-                                           materializr::tr("Loft needs at least two profiles."));
-                        ImGui::TextWrapped(materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f), "%s", materializr::tr("Loft needs at least two profiles."));
+                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;

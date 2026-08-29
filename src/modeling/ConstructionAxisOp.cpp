@@ -156,7 +156,7 @@ std::string ConstructionAxisOp::description() const {
 }
 
 void ConstructionAxisOp::renderProperties() {
-    ImGui::Text(materializr::tr("Construction Axis"));
+    ImGui::Text("%s", materializr::tr("Construction Axis"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Name: %s"), m_axisName.c_str());
     ImGui::Text(materializr::tr("Origin: (%.2f, %.2f, %.2f)"),

@@ -253,7 +253,7 @@ std::string TransformOp::description() const {
 }
 
 void TransformOp::renderProperties() {
-    ImGui::Text(materializr::tr("Transform"));
+    ImGui::Text("%s", materializr::tr("Transform"));
     ImGui::Separator();
 
     const char* typeItems[] = { "Translate", "Rotate", "Scale" };

@@ -39,7 +39,7 @@ bool MaterialPanel::render()
     ImGui::Begin("Materials");
 
     // Material preset list
-    ImGui::Text(materializr::tr("Presets"));
+    ImGui::Text("%s", materializr::tr("Presets"));
     ImGui::Separator();
 
     const auto& materials = m_library->getAll();

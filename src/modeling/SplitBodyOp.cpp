@@ -114,7 +114,7 @@ std::string SplitBodyOp::description() const {
 }
 
 void SplitBodyOp::renderProperties() {
-    ImGui::Text(materializr::tr("Split Body"));
+    ImGui::Text("%s", materializr::tr("Split Body"));
     ImGui::Separator();
 
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);

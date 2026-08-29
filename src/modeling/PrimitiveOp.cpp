@@ -160,7 +160,7 @@ void PrimitiveOp::renderProperties() {
             break;
     }
     ImGui::Spacing();
-    ImGui::Text(materializr::tr("Origin"));
+    ImGui::Text("%s", materializr::tr("Origin"));
     materializr::inputNumber("X", &m_ox, 0.1, 1.0, "%g");
     materializr::inputNumber("Y", &m_oy, 0.1, 1.0, "%g");
     materializr::inputNumber("Z", &m_oz, 0.1, 1.0, "%g");

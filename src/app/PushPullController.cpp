@@ -559,7 +559,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text(materializr::tr("mm"));
+        ImGui::Text("%s", materializr::tr("mm"));
     }
 
     // Quick-nudge stepper (replaces the slider). Symmetric sweeps both ways, so

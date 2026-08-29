@@ -591,7 +591,7 @@ void FileDialogs::render() {
     }
 
     // Path bar
-    ImGui::Text(materializr::tr("Location:"));
+    ImGui::Text("%s", materializr::tr("Location:"));
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
     if (ImGui::InputText("##path", s_state.pathBuf, sizeof(s_state.pathBuf),
@@ -604,7 +604,7 @@ void FileDialogs::render() {
 
     // Filter
     if (!s_state.filters.empty()) {
-        ImGui::Text(materializr::tr("Filter:"));
+        ImGui::Text("%s", materializr::tr("Filter:"));
         ImGui::SameLine();
         ImGui::SetNextItemWidth(300);
         if (ImGui::BeginCombo("##filter",
@@ -666,7 +666,7 @@ void FileDialogs::render() {
 
     // Save: filename input
     if (s_state.isSave) {
-        ImGui::Text(materializr::tr("Name:"));
+        ImGui::Text("%s", materializr::tr("Name:"));
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-160);
         ImGui::InputText("##name", s_state.nameBuf, sizeof(s_state.nameBuf));

@@ -201,7 +201,7 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
             }
             bool canApply = !cutters.empty() && !targets.empty();
             if (!canApply)
-                ImGui::TextDisabled(materializr::tr("Need at least one cutter (ticked) and one body to keep."));
+                ImGui::TextDisabled("%s", materializr::tr("Need at least one cutter (ticked) and one body to keep."));
 
             bool apply = false;
             ImGui::BeginDisabled(!canApply);

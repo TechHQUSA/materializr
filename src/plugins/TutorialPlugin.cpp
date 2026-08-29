@@ -287,7 +287,7 @@ void renderLanguagePage(bool& close) {
 // LIVE (the app behind the modal is the preview). Continue starts the tour.
 void renderLayoutPicker(bool& close) {
     using namespace materializr;
-    ImGui::TextDisabled(materializr::tr("First, make it yours"));
+    ImGui::TextDisabled("%s", materializr::tr("First, make it yours"));
     ImGui::SeparatorText(materializr::tr("Choose your workspace"));
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextUnformatted(

@@ -45,7 +45,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
         ImGui::GetFont()->Scale = 2.0f;
         ImGui::PushFont(ImGui::GetFont());
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Materializr").x) * 0.5f);
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Materializr"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Materializr"));
         ImGui::GetFont()->Scale = origScale;
         ImGui::PopFont();
 
@@ -58,8 +58,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
         ImGui::Spacing();
 
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + uiSz(400, 0).x);
-        ImGui::TextWrapped(
-            materializr::tr("Materializr is free and open source, and always will be. If it has earned a place in your workflow, please consider supporting development — it keeps the project moving."));
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is free and open source, and always will be. If it has earned a place in your workflow, please consider supporting development — it keeps the project moving."));
         ImGui::PopTextWrapPos();
 
         ImGui::Spacing();

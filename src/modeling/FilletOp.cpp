@@ -641,7 +641,7 @@ std::string FilletOp::description() const {
 }
 
 void FilletOp::renderProperties() {
-    ImGui::Text(materializr::tr("Fillet"));
+    ImGui::Text("%s", materializr::tr("Fillet"));
     ImGui::Separator();
 
     materializr::inputNumber(materializr::tr("Radius"), &m_radius, 0.1, 1.0, "%g");

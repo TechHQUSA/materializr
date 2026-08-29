@@ -595,14 +595,13 @@ std::string LoftOp::description() const {
 }
 
 void LoftOp::renderProperties() {
-    ImGui::Text(materializr::tr("Loft"));
+    ImGui::Text("%s", materializr::tr("Loft"));
     ImGui::Separator();
 
     ImGui::Text(materializr::tr("Profiles: %d"), static_cast<int>(m_profiles.size()));
 
     if (m_profiles.size() < 2) {
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
-                           materializr::tr("At least 2 profiles required"));
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", materializr::tr("At least 2 profiles required"));
     } else {
         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
                            materializr::tr("%d profiles ready"), static_cast<int>(m_profiles.size()));

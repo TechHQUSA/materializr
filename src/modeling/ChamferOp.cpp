@@ -792,7 +792,7 @@ std::string ChamferOp::description() const {
 }
 
 void ChamferOp::renderProperties() {
-    ImGui::Text(materializr::tr("Chamfer"));
+    ImGui::Text("%s", materializr::tr("Chamfer"));
     ImGui::Separator();
 
     materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");

@@ -29,8 +29,7 @@ void HelpPanel::render() {
     }
     if (!ImGui::Begin("User Guide", &m_visible)) { ImGui::End(); return; }
 
-    ImGui::TextWrapped(
-        materializr::tr("Welcome to Materializr — a parametric 3D CAD app. This guide covers the basics so you can get something on screen quickly. Camera controls and key bindings can be changed in File → Settings."));
+    ImGui::TextWrapped("%s", materializr::tr("Welcome to Materializr — a parametric 3D CAD app. This guide covers the basics so you can get something on screen quickly. Camera controls and key bindings can be changed in File → Settings."));
 
     section("Navigating the viewport",
         "Drag the middle mouse button to orbit, the right button to pan, and "
@@ -88,8 +87,7 @@ void HelpPanel::render() {
 
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextDisabled(
-        materializr::tr("Tip: press Esc to cancel any in-progress operation. Ctrl+Z / Ctrl+Y undo and redo history steps."));
+    ImGui::TextDisabled("%s", materializr::tr("Tip: press Esc to cancel any in-progress operation. Ctrl+Z / Ctrl+Y undo and redo history steps."));
 
     ImGui::End();
 }

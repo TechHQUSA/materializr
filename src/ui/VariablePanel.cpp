@@ -23,7 +23,7 @@ bool VariablePanel::render() {
     ImGui::Begin("Variables");
 
     if (!m_manager) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No variable manager"));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No variable manager"));
         ImGui::End();
         return false;
     }
@@ -93,7 +93,7 @@ bool VariablePanel::render() {
                     std::snprintf(valText, sizeof(valText), "%.4g", var.value);
                     ImGui::Text("%s", valText);
                 } else {
-                    ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), materializr::tr("ERR"));
+                    ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", materializr::tr("ERR"));
                     if (ImGui::IsItemHovered() && !var.error.empty()) {
                         ImGui::SetTooltip("%s", var.error.c_str());
                     }
@@ -117,13 +117,13 @@ bool VariablePanel::render() {
             ImGui::EndTable();
         }
     } else {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No variables defined"));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No variables defined"));
     }
 
     // Add Variable section
     ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Add Variable"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Add Variable"));
 
     ImGui::SetNextItemWidth(100.0f);
     ImGui::InputText("##NewName", m_newName, sizeof(m_newName));

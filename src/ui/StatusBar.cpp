@@ -117,7 +117,7 @@ void StatusBar::render() {
             std::snprintf(selText, sizeof(selText), "Selection: %s (%d)", typeName, count);
             ImGui::Text("%s", selText);
         } else {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("Selection: None"));
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Selection: None"));
         }
 
         // Current tool
@@ -134,7 +134,7 @@ void StatusBar::render() {
             ImGui::SameLine();
             ImGui::Text("|");
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.3f, 0.85f, 0.4f, 1.0f), materializr::tr("[SKETCH MODE]"));
+            ImGui::TextColored(ImVec4(0.3f, 0.85f, 0.4f, 1.0f), "%s", materializr::tr("[SKETCH MODE]"));
         }
 
         // Transient message (right-aligned)

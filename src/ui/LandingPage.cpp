@@ -186,7 +186,7 @@ LandingPage::Action LandingPage::render() {
         ImGui::SameLine();
     }
     ImGui::SetWindowFontScale(1.5f);
-    ImGui::TextColored(accentText(), materializr::tr("Materializr"));
+    ImGui::TextColored(accentText(), "%s", materializr::tr("Materializr"));
     ImGui::SetWindowFontScale(1.0f);
     ImGui::SameLine();
     ImGui::TextColored(dimText(), "v" MATERIALIZR_VERSION);
@@ -208,15 +208,15 @@ LandingPage::Action LandingPage::render() {
         if (ImGui::Button(openLbl)) action.type = ActionType::OpenFileDialog;
         ImGui::SameLine();
         if (ImGui::Button(helpLbl)) action.type = ActionType::OpenHelp;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(materializr::tr("User guide"));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", materializr::tr("User guide"));
         ImGui::SameLine();
         if (ImGui::Button(gearLbl)) action.type = ActionType::OpenSettings;
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(materializr::tr("Settings"));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", materializr::tr("Settings"));
         if (m_canDismiss) {
             ImGui::SameLine();
             if (ImGui::Button(backLbl)) action.type = ActionType::Dismiss;
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip(materializr::tr("Back to the open project"));
+                ImGui::SetTooltip("%s", materializr::tr("Back to the open project"));
         }
     }
     ImGui::Spacing();
@@ -266,8 +266,7 @@ LandingPage::Action LandingPage::render() {
     if (m_entries.empty()) {
         if (col != 0) ImGui::NewLine();
         ImGui::Spacing();
-        ImGui::TextColored(dimText(),
-                           materializr::tr("Projects you open or save appear here."));
+        ImGui::TextColored(dimText(), "%s", materializr::tr("Projects you open or save appear here."));
     }
     ImGui::EndChild();
 

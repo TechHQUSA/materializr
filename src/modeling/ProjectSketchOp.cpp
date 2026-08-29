@@ -528,7 +528,7 @@ std::string ProjectSketchOp::description() const {
 }
 
 void ProjectSketchOp::renderProperties() {
-    ImGui::Text(materializr::tr("Projection"));
+    ImGui::Text("%s", materializr::tr("Projection"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Mode: %s"),
                 m_mode == Mode::Engrave ? "Engrave" : "Emboss");

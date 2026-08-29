@@ -359,7 +359,7 @@ void SketchEditOp::applyCircleRadiusToSnapshots(int circleId, double radius) {
 
 void SketchEditOp::renderProperties() {
     if (!m_after) {
-        ImGui::TextDisabled(materializr::tr("No snapshot"));
+        ImGui::TextDisabled("%s", materializr::tr("No snapshot"));
         return;
     }
     // Edit dimensional values inline. For each change we re-solve `m_after`
@@ -480,9 +480,9 @@ void SketchEditOp::renderProperties() {
     // directly and is undoable, so that's the single home for resizing.
 
     if (!anyDim) {
-        ImGui::TextWrapped(materializr::tr("Nothing editable in this step. Resize lines, rectangles and arcs from the Properties panel while editing the sketch."));
+        ImGui::TextWrapped("%s", materializr::tr("Nothing editable in this step. Resize lines, rectangles and arcs from the Properties panel while editing the sketch."));
     } else {
-        ImGui::TextDisabled(materializr::tr("Press Enter to commit a value, then Apply Changes."));
+        ImGui::TextDisabled("%s", materializr::tr("Press Enter to commit a value, then Apply Changes."));
     }
 }
 

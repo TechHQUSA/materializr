@@ -205,7 +205,7 @@ bool PatternOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*/)
 }
 
 void PatternOp::renderProperties() {
-    ImGui::Text(materializr::tr("Pattern"));
+    ImGui::Text("%s", materializr::tr("Pattern"));
     ImGui::Separator();
 
     const char* typeItems[] = { "Linear", "Circular" };

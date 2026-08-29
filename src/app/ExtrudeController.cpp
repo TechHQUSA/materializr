@@ -377,7 +377,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     opDialogDragGrip(s);
 
     if (!imTouch) {   // im-touch: just the value well below
-        ImGui::Text(materializr::tr("Extrude Distance (mm)"));
+        ImGui::Text("%s", materializr::tr("Extrude Distance (mm)"));
         ImGui::Separator();
     }
 
@@ -420,7 +420,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text(materializr::tr("mm"));
+        ImGui::Text("%s", materializr::tr("mm"));
     }
 
     // Quick-nudge stepper (replaces the slider): ±10/1/0.1, and 0 to clear
@@ -452,8 +452,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         } else {
             ImGui::Checkbox(materializr::tr("Cut every body it reaches"), &m_cutAllBodies);
         }
-        ImGui::SetItemTooltip(
-            materializr::tr("Off: cut ONE body \xE2\x80\x94 the one the sketch sits on when it has a host, otherwise whichever the sweep reaches most of.\nOn: cut every body the swept profile reaches, each as its own undoable step."));
+        ImGui::SetItemTooltip("%s", materializr::tr("Off: cut ONE body \xE2\x80\x94 the one the sketch sits on when it has a host, otherwise whichever the sweep reaches most of.\nOn: cut every body the swept profile reaches, each as its own undoable step."));
     }
 
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead

@@ -772,7 +772,7 @@ std::string ExtrudeOp::description() const {
 }
 
 void ExtrudeOp::renderProperties() {
-    ImGui::Text(materializr::tr("Extrude"));
+    ImGui::Text("%s", materializr::tr("Extrude"));
     ImGui::Separator();
 
     materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");

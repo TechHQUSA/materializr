@@ -46,7 +46,7 @@ bool HistoryPanel::renderContent() {
     m_hoveredStep = -1; // recomputed below from whichever row the cursor is over
 
     if (!m_history || !m_document) {
-        ImGui::TextColored(materializr::dimText(), materializr::tr("No history available."));
+        ImGui::TextColored(materializr::dimText(), "%s", materializr::tr("No history available."));
         return false;
     }
 
@@ -54,7 +54,7 @@ bool HistoryPanel::renderContent() {
     int currentStep = m_history->currentStep();
     int breakpoint = m_history->getBreakpoint();
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Operation History"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Operation History"));
     if (!m_showUndoRedo) {
         // No bottom button row (the host provides undo/redo) — the step
         // counter rides beside the label instead.
@@ -79,12 +79,10 @@ bool HistoryPanel::renderContent() {
         // produces the same state on a brand-new save — a bug to report, not an
         // old file.)
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f),
-            materializr::tr("Amber (frozen) steps reloaded without editable parameters. (hover for more)"));
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "%s", materializr::tr("Amber (frozen) steps reloaded without editable parameters. (hover for more)"));
         ImGui::PopTextWrapPos();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(
-                materializr::tr("Undo/redo still work; to change one, select its feature and\nuse Repair Geometry, then redo it.\n(Usual cause: a save from an older version.)"));
+            ImGui::SetTooltip("%s", materializr::tr("Undo/redo still work; to change one, select its feature and\nuse Repair Geometry, then redo it.\n(Usual cause: a save from an older version.)"));
         ImGui::Separator();
     }
 
@@ -221,7 +219,7 @@ bool HistoryPanel::renderContent() {
         if (i == m_enableFailStep) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 250.0f);
-            ImGui::TextWrapped(materializr::tr("Re-enabled, but this step still can't find the geometry it referenced on the current body, so it produces nothing. Delete it and re-apply the feature on the updated body."));
+            ImGui::TextWrapped("%s", materializr::tr("Re-enabled, but this step still can't find the geometry it referenced on the current body, so it produces nothing. Delete it and re-apply the feature on the updated body."));
             ImGui::PopTextWrapPos();
             ImGui::PopStyleColor();
         }
@@ -380,8 +378,7 @@ bool HistoryPanel::renderContent() {
     }
 
     if (m_deleteConflict) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                           materializr::tr("Can't delete: a later operation depends on it."));
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", materializr::tr("Can't delete: a later operation depends on it."));
     }
 
     // Draw breakpoint line at the end if breakpoint is at last step

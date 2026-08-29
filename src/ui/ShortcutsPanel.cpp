@@ -122,13 +122,13 @@ void ShortcutsPanel::render() {
     section("While a tool is running", "scTools", kTools, IM_ARRAYSIZE(kTools));
     section("In a sketch", "scSketch", kSketch, IM_ARRAYSIZE(kSketch));
     ImGui::Spacing();
-    ImGui::TextDisabled(materializr::tr("The drawing tools (Line, Circle, Rectangle, Arc,"));
-    ImGui::TextDisabled(materializr::tr("Spline, Polygon, Trim) are on the toolbar only."));
+    ImGui::TextDisabled("%s", materializr::tr("The drawing tools (Line, Circle, Rectangle, Arc,"));
+    ImGui::TextDisabled("%s", materializr::tr("Spline, Polygon, Trim) are on the toolbar only."));
 
     section("Mouse", "scMouse", kMouse, IM_ARRAYSIZE(kMouse));
     ImGui::Spacing();
-    ImGui::TextDisabled(materializr::tr("Orbit and pan buttons are configurable in"));
-    ImGui::TextDisabled(materializr::tr("Settings \xE2\x86\x92 Navigation."));
+    ImGui::TextDisabled("%s", materializr::tr("Orbit and pan buttons are configurable in"));
+    ImGui::TextDisabled("%s", materializr::tr("Settings \xE2\x86\x92 Navigation."));
 
     section("Touch", "scTouch", kTouch, IM_ARRAYSIZE(kTouch));
 

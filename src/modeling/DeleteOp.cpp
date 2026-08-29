@@ -56,7 +56,7 @@ std::string DeleteOp::description() const {
 }
 
 void DeleteOp::renderProperties() {
-    ImGui::Text(materializr::tr("Delete"));
+    ImGui::Text("%s", materializr::tr("Delete"));
     ImGui::Separator();
 
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);

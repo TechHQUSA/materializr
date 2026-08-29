@@ -171,7 +171,7 @@ std::string BoundaryFillOp::description() const {
 
 void BoundaryFillOp::renderProperties() {
     ImGui::Text(materializr::tr("Silhouettes: %d"), static_cast<int>(m_outers.size()));
-    ImGui::TextWrapped(materializr::tr("Each profile is extruded through the others and the prisms are intersected (visual hull)."));
+    ImGui::TextWrapped("%s", materializr::tr("Each profile is extruded through the others and the prisms are intersected (visual hull)."));
 }
 
 std::string BoundaryFillOp::serializeParams() const {

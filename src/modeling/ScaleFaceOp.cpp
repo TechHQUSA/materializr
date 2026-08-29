@@ -320,7 +320,7 @@ std::string ScaleFaceOp::description() const {
 }
 
 void ScaleFaceOp::renderProperties() {
-    ImGui::Text(materializr::tr("Scale Face"));
+    ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
     materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");
     materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");

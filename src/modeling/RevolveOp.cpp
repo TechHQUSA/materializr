@@ -271,7 +271,7 @@ std::string RevolveOp::description() const {
 }
 
 void RevolveOp::renderProperties() {
-    ImGui::Text(materializr::tr("Lathe"));
+    ImGui::Text("%s", materializr::tr("Lathe"));
     ImGui::Separator();
 
     materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");
@@ -279,13 +279,13 @@ void RevolveOp::renderProperties() {
     if (m_angle > 360.0) m_angle = 360.0;
 
     ImGui::Separator();
-    ImGui::Text(materializr::tr("Axis Origin"));
+    ImGui::Text("%s", materializr::tr("Axis Origin"));
     materializr::inputNumber(materializr::tr("Origin X"), &m_axisOriginX, 0.1, 1.0, "%g");
     materializr::inputNumber(materializr::tr("Origin Y"), &m_axisOriginY, 0.1, 1.0, "%g");
     materializr::inputNumber(materializr::tr("Origin Z"), &m_axisOriginZ, 0.1, 1.0, "%g");
 
     ImGui::Separator();
-    ImGui::Text(materializr::tr("Axis Direction"));
+    ImGui::Text("%s", materializr::tr("Axis Direction"));
     materializr::inputNumber(materializr::tr("Dir X"), &m_axisDirX, 0.1, 1.0, "%g");
     materializr::inputNumber(materializr::tr("Dir Y"), &m_axisDirY, 0.1, 1.0, "%g");
     materializr::inputNumber(materializr::tr("Dir Z"), &m_axisDirZ, 0.1, 1.0, "%g");

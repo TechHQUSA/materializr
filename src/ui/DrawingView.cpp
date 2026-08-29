@@ -290,7 +290,7 @@ void DrawingView::render() {
     ImGui::Begin("2D Drawing");
 
     if (!m_document) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No document loaded."));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No document loaded."));
         ImGui::End();
         return;
     }

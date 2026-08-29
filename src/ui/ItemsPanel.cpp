@@ -60,7 +60,7 @@ bool ItemsPanel::renderContent() {
                                        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
     if (!m_document) {
-        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("No document loaded."));
+        ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No document loaded."));
         return false;
     }
 
@@ -75,7 +75,7 @@ bool ItemsPanel::renderContent() {
                 m_selectedBodyIdsFrame.insert(e.bodyId);
 
     // Filter toggles at top
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Filter"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Filter"));
     ImGui::Separator();
 
     // The toggles wrap to fit whatever width the host panel has — each one
@@ -120,7 +120,7 @@ bool ItemsPanel::renderContent() {
 
     // Bodies section
     if (m_showBodies) {
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Bodies"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Bodies"));
         // "+ New folder" button at the section header creates an empty folder
         // (bodies join via right-click → Move to folder…).
         ImGui::SameLine();
@@ -250,7 +250,7 @@ bool ItemsPanel::renderContent() {
         }
         if (ImGui::BeginPopupModal("New Folder##itemspanel", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text(materializr::tr("Folder name:"));
+            ImGui::Text("%s", materializr::tr("Folder name:"));
             if (m_newFolderFocusInput) {
                 ImGui::SetKeyboardFocusHere();
                 m_newFolderFocusInput = false;
@@ -284,11 +284,11 @@ bool ItemsPanel::renderContent() {
     // Sketches section
     if (m_showSketches) {
         ImGui::Separator();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Sketches"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Sketches"));
 
         std::vector<int> sketchIds = m_document->getAllSketchIds();
         if (sketchIds.empty()) {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("(none)"));
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("(none)"));
         }
         for (int id : sketchIds) {
             ImGui::PushID(1000000 + id); // namespace away from body ids
@@ -420,11 +420,11 @@ bool ItemsPanel::renderContent() {
     // Construction (planes + axes) section
     if (m_showPlanes) {
         ImGui::Separator();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Construction Planes"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Planes"));
 
         std::vector<int> planeIds = m_document->getAllPlaneIds();
         if (planeIds.empty()) {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("(none)"));
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("(none)"));
         }
         for (int id : planeIds) {
             ImGui::PushID(2000000 + id); // namespace away from body/sketch ids
@@ -511,11 +511,11 @@ bool ItemsPanel::renderContent() {
         }
 
         ImGui::Spacing();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Construction Axes"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Axes"));
 
         std::vector<int> axisIds = m_document->getAllAxisIds();
         if (axisIds.empty()) {
-            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), materializr::tr("(none)"));
+            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("(none)"));
         }
         for (int id : axisIds) {
             ImGui::PushID(3000000 + id);
@@ -692,7 +692,7 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
                           ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f));
     if (isMesh) ImGui::PopStyleColor();
     if (isMesh && ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(materializr::tr("Imported mesh \xE2\x80\x94 a reference body.\nSketch on it and snap to it; modelling operations (booleans, fillets, push/pull) decline it."));
+        ImGui::SetTooltip("%s", materializr::tr("Imported mesh \xE2\x80\x94 a reference body.\nSketch on it and snap to it; modelling operations (booleans, fillets, push/pull) decline it."));
     }
     if (rowClicked) {
         if (m_selection) {

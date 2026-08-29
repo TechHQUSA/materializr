@@ -111,7 +111,7 @@ std::string MirrorOp::description() const {
 }
 
 void MirrorOp::renderProperties() {
-    ImGui::Text(materializr::tr("Mirror"));
+    ImGui::Text("%s", materializr::tr("Mirror"));
     ImGui::Separator();
 
     const char* planeItems[] = { "XY", "XZ", "YZ", "Custom" };

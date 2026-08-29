@@ -161,7 +161,7 @@ void Application::renderSettings() {
                 if (ImGui::BeginTabItem(materializr::tr("General###General"))) {
                     ImGui::SeparatorText(materializr::tr("Autosave"));
                     if (ImGui::Checkbox(materializr::tr("Autosave saved projects"), &m_autosaveEnabled)) changed = true;
-                    ImGui::TextWrapped(materializr::tr("Periodically re-saves the project once it has been saved to a file at least once."));
+                    ImGui::TextWrapped("%s", materializr::tr("Periodically re-saves the project once it has been saved to a file at least once."));
                     ImGui::BeginDisabled(!m_autosaveEnabled);
                     int interval = static_cast<int>(m_autosaveIntervalSec);
                     if (ImGui::SliderInt(materializr::tr("Interval (s)"), &interval, 15, 600, "%d s")) {
@@ -170,8 +170,7 @@ void Application::renderSettings() {
                     }
                     ImGui::EndDisabled();
                     if (m_autosaveEnabled && m_currentProjectPath.empty()) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                            materializr::tr("Save the project once to start autosaving."));
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "%s", materializr::tr("Save the project once to start autosaving."));
                     }
 
                     ImGui::Spacing();
@@ -179,19 +178,19 @@ void Application::renderSettings() {
                     if (ImGui::Checkbox(materializr::tr("Reopen last session on launch"), &m_autoOpenLastProject)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("If on, Materializr reopens every project you had open when you quit — one tab each — and skips the home screen. Closing a project's tab before quitting leaves it out; projects that have never been saved aren't restored here (crash recovery offers those separately)."));
+                    ImGui::TextWrapped("%s", materializr::tr("If on, Materializr reopens every project you had open when you quit — one tab each — and skips the home screen. Closing a project's tab before quitting leaves it out; projects that have never been saved aren't restored here (crash recovery offers those separately)."));
 
                     ImGui::Spacing();
                     if (ImGui::Checkbox(materializr::tr("Check for updates on launch"), &m_checkForUpdatesOnLaunch)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("If on, Materializr asks GitHub for the latest release at startup and pops a small dialog when a newer build is available. Turn off for offline or portable use; you can still check manually via Help → Check for Updates."));
+                    ImGui::TextWrapped("%s", materializr::tr("If on, Materializr asks GitHub for the latest release at startup and pops a small dialog when a newer build is available. Turn off for offline or portable use; you can still check manually via Help → Check for Updates."));
 
                     ImGui::Spacing();
                     if (ImGui::Checkbox(materializr::tr("Include pre-release (beta) builds"), &m_includePrereleases)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("Join the beta channel: update checks also consider pre-release builds (e.g. 1.3.0-beta.1) — early access to the next version's features, which may be rougher. Off keeps you on stable releases only."));
+                    ImGui::TextWrapped("%s", materializr::tr("Join the beta channel: update checks also consider pre-release builds (e.g. 1.3.0-beta.1) — early access to the next version's features, which may be rougher. Off keeps you on stable releases only."));
                     ImGui::EndTabItem();
                 }
 
@@ -238,14 +237,12 @@ void Application::renderSettings() {
                         m_uiLayout = static_cast<UiLayout>(layoutMode);
                         changed = true;
                     }
-                    ImGui::TextWrapped(
-                        materializr::tr("Classic: the traditional docked panels and menu bar. Modern: a top app bar, tool rail and side panel. im-touch: a near-zero-chrome full-screen viewport with floating controls only. Switches immediately; each layout keeps its own arrangement."));
+                    ImGui::TextWrapped("%s", materializr::tr("Classic: the traditional docked panels and menu bar. Modern: a top app bar, tool rail and side panel. im-touch: a near-zero-chrome full-screen viewport with floating controls only. Switches immediately; each layout keeps its own arrangement."));
 
                     ImGui::Spacing();
                     if (ImGui::Button(materializr::tr("Reset panel layout"))) resetLayout();
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip(
-                            materializr::tr("Restore the default panel arrangement — use this if a panel gets dragged off-screen or docking gets messy. Also re-applies the interface scale to the panel widths."));
+                        ImGui::SetTooltip("%s", materializr::tr("Restore the default panel arrangement — use this if a panel gets dragged off-screen or docking gets messy. Also re-applies the interface scale to the panel widths."));
 
                     ImGui::Spacing();
                     // Touch mode is a separate axis (input model), independent of
@@ -254,16 +251,15 @@ void Application::renderSettings() {
                     if (ImGui::Checkbox(materializr::tr("Touch mode (large UI + touch gestures)"), &m_touchMode)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("On: finger-sized UI, long-press menus, on-screen toggles, trackpad navigation. Off: the desktop mouse/keyboard layout — use it with an attached mouse/keyboard. Takes full effect on restart."));
+                    ImGui::TextWrapped("%s", materializr::tr("On: finger-sized UI, long-press menus, on-screen toggles, trackpad navigation. Off: the desktop mouse/keyboard layout — use it with an attached mouse/keyboard. Takes full effect on restart."));
                     // Numeric entry rides on this flag (ui/NumField.h gates the
                     // in-app pad on touchMode()), which is not something anyone
                     // would guess from "Touch mode". Say so here rather than add
                     // a second setting for it: with a keyboard attached, turning
                     // this off is already the way back to typing.
-                    ImGui::TextWrapped(materializr::tr("Also switches numeric fields between the in-app number pad and the system keyboard."));
+                    ImGui::TextWrapped("%s", materializr::tr("Also switches numeric fields between the in-app number pad and the system keyboard."));
                     if (materializr::touchMode() != m_touchMode) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                            materializr::tr("Restart Materializr to apply the new mode."));
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "%s", materializr::tr("Restart Materializr to apply the new mode."));
                     }
 
                     ImGui::Spacing();
@@ -280,14 +276,14 @@ void Application::renderSettings() {
                     if (ImGui::Checkbox(materializr::tr("Show toolbar tooltips"), &m_showToolbarTooltips)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("Hover any toolbar button for a short description of what it does. Turn off if you already know the tools and find the pop-ups distracting."));
+                    ImGui::TextWrapped("%s", materializr::tr("Hover any toolbar button for a short description of what it does. Turn off if you already know the tools and find the pop-ups distracting."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Overlays"));
                     if (ImGui::Checkbox(materializr::tr("Show FPS counter"), &m_showFps)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("Show a small frames-per-second readout at the top of the screen (im-touch layout). Turn off to hide it entirely."));
+                    ImGui::TextWrapped("%s", materializr::tr("Show a small frames-per-second readout at the top of the screen (im-touch layout). Turn off to hide it entirely."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Selection"));
@@ -298,7 +294,7 @@ void Application::renderSettings() {
                         applyRenderingSettings();
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Thickness of the highlight drawn over selected edges and bodies. Increase to make selected edges easier to see."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Thickness of the highlight drawn over selected edges and bodies. Increase to make selected edges easier to see."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Sketch"));
@@ -309,19 +305,17 @@ void Application::renderSettings() {
                         applyRenderingSettings();
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Thickness of sketch lines, circles and arcs (and the vertex dots). Increase if sketch geometry is too thin or blends into the grid."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Thickness of sketch lines, circles and arcs (and the vertex dots). Increase if sketch geometry is too thin or blends into the grid."));
                     if (ImGui::SliderFloat(materializr::tr("Grid opacity"), &m_sketchGridOpacity,
                                            0.0f, 1.0f, "%.2f")) {
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(
-                        materializr::tr("Opacity of the sketch-plane grid. Lower it if the grid competes with your sketch lines; 0 hides it."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Opacity of the sketch-plane grid. Lower it if the grid competes with your sketch lines; 0 hides it."));
                     if (ImGui::SliderFloat(materializr::tr("Grid thickness"), &m_sketchGridThickness,
                                            0.1f, 2.0f, "%.2fx")) {
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(
-                        materializr::tr("Sketch grid line width, as a multiplier of the default (1.0x). Raise it for a bolder grid, lower it for a finer one. Only affects the sketch-plane grid, not the ground."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Sketch grid line width, as a multiplier of the default (1.0x). Raise it for a bolder grid, lower it for a finer one. Only affects the sketch-plane grid, not the ground."));
                     ImGui::EndTabItem();
                 }
 
@@ -332,8 +326,7 @@ void Application::renderSettings() {
                 // menu. This tab keeps the toolbar-tooltip toggle.
                 if (ImGui::BeginTabItem(materializr::tr("Sketch###Sketch"))) {
                     ImGui::SeparatorText(materializr::tr("Drawing inferences"));
-                    ImGui::TextWrapped(
-                        materializr::tr("As you draw, coloured ghost guides show alignment (perpendicular, parallel, on-axis, on-midpoint, etc.) and the cursor snaps. Full adds hover-to-charge references (dwell on a point / midpoint / face vertex to align from it). Reduced is the classic guides only, no hover-charging. Off is grid + endpoint only. Constraints live on the sketch right-click \"Add Constraint\" menu."));
+                    ImGui::TextWrapped("%s", materializr::tr("As you draw, coloured ghost guides show alignment (perpendicular, parallel, on-axis, on-midpoint, etc.) and the cursor snaps. Full adds hover-to-charge references (dwell on a point / midpoint / face vertex to align from it). Reduced is the classic guides only, no hover-charging. Off is grid + endpoint only. Constraints live on the sketch right-click \"Add Constraint\" menu."));
 
                     ImGui::Spacing();
                     {
@@ -357,7 +350,7 @@ void Application::renderSettings() {
                             }
                             changed = true;
                         }
-                        ImGui::SetItemTooltip(materializr::tr("Max widens snap/alignment catch ranges for fingertips — stronger than Full. Full and below behave the same on every device."));
+                        ImGui::SetItemTooltip("%s", materializr::tr("Max widens snap/alignment catch ranges for fingertips — stronger than Full. Full and below behave the same on every device."));
                     }
 
                     ImGui::Spacing();
@@ -374,8 +367,7 @@ void Application::renderSettings() {
                             if (m_sketchTool) m_sketchTool->setAngleSnapDeg(kDegs[idx]);
                             changed = true;
                         }
-                        ImGui::SetItemTooltip(
-                            materializr::tr("While drawing a line, snap its direction to multiples of this angle from the start point. Lower = more snap rays (15° is the classic CAD default); higher = only the cardinal angles; Off = free angles."));
+                        ImGui::SetItemTooltip("%s", materializr::tr("While drawing a line, snap its direction to multiples of this angle from the start point. Lower = more snap rays (15° is the classic CAD default); higher = only the cardinal angles; Off = free angles."));
                     }
 
                     ImGui::Spacing();
@@ -383,7 +375,7 @@ void Application::renderSettings() {
                                         &m_showInferenceToolbarToggle)) {
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("Off hides the live Full / Reduced / Off cycle button from the sketch toolbar — use this combo instead. On (default) keeps the per-session button visible."));
+                    ImGui::TextWrapped("%s", materializr::tr("Off hides the live Full / Reduced / Off cycle button from the sketch toolbar — use this combo instead. On (default) keeps the per-session button visible."));
 
                     ImGui::EndTabItem();
                 }
@@ -391,7 +383,7 @@ void Application::renderSettings() {
                 // ── Navigation (camera + touch) ───────────────────────────
                 if (ImGui::BeginTabItem(materializr::tr("Navigation###Navigation"))) {
                     ImGui::SeparatorText(materializr::tr("Mouse"));
-                    ImGui::TextWrapped(materializr::tr("Choose which mouse button orbits and which pans. Zoom is always the scroll wheel."));
+                    ImGui::TextWrapped("%s", materializr::tr("Choose which mouse button orbits and which pans. Zoom is always the scroll wheel."));
                     ImGui::Spacing();
 
                     const char* buttons[] = { materializr::tr("Left"), materializr::tr("Middle"),
@@ -416,10 +408,9 @@ void Application::renderSettings() {
                     if (ImGui::Combo(materializr::tr("Pan"), &panC, buttons, 3)) m_settingsPanButton = fromCombo(panC);
 
                     if (!trackpad && (m_settingsOrbitButton == 0 || m_settingsPanButton == 0)) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                            materializr::tr("Note: Left is also used to select; assigning it here may conflict."));
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "%s", materializr::tr("Note: Left is also used to select; assigning it here may conflict."));
                     }
-                    ImGui::TextDisabled(materializr::tr("Orbit/Pan buttons take effect on Apply."));
+                    ImGui::TextDisabled("%s", materializr::tr("Orbit/Pan buttons take effect on Apply."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Double-click"));
@@ -433,7 +424,7 @@ void Application::renderSettings() {
                         ImGui::GetIO().MouseDoubleClickTime = m_doubleClickTime;
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Max time between two clicks to count as a double-click. Raise it if double-clicking to select a body feels too fast on a trackpad. Default 0.30 s."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Max time between two clicks to count as a double-click. Raise it if double-clicking to select a body feels too fast on a trackpad. Default 0.30 s."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Mouse sensitivity"));
@@ -448,7 +439,7 @@ void Application::renderSettings() {
                             m_viewport->getCamera().setMouseSensitivity(sens);
                             changed = true;
                         }
-                        ImGui::TextWrapped(materializr::tr("Scales orbit, pan, and zoom uniformly. Lower it if a trackpad feels too fast compared to desktop cursor speed; raise it for a snappier feel with a mouse. 1.00x is the default baseline."));
+                        ImGui::TextWrapped("%s", materializr::tr("Scales orbit, pan, and zoom uniformly. Lower it if a trackpad feels too fast compared to desktop cursor speed; raise it for a snappier feel with a mouse. 1.00x is the default baseline."));
                     }
 
                     ImGui::Spacing();
@@ -459,7 +450,7 @@ void Application::renderSettings() {
                         m_viewport->getCamera().setLevelOrbit(level);
                         changed = true;
                     }
-                    ImGui::TextWrapped(materializr::tr("On: orbiting is a level turntable. Off: free trackball that can tumble in any direction."));
+                    ImGui::TextWrapped("%s", materializr::tr("On: orbiting is a level turntable. Off: free trackball that can tumble in any direction."));
 
                     // Invert the cube-drag → orbit direction.
                     if (ImGui::Checkbox(materializr::tr("Invert ViewCube drag direction"), &m_invertCubeDrag)) {
@@ -469,7 +460,7 @@ void Application::renderSettings() {
                     if (materializr::touchMode()) {
                         ImGui::Spacing();
                         ImGui::SeparatorText(materializr::tr("Touch sensitivity"));
-                        ImGui::TextWrapped(materializr::tr("Scale how far the camera moves per gesture (1.00x = default)."));
+                        ImGui::TextWrapped("%s", materializr::tr("Scale how far the camera moves per gesture (1.00x = default)."));
                         // ##suffix keeps the visible label ("Orbit"/"Pan") but
                         // gives a unique ID: the Orbit/Pan mouse-button Combos
                         // above share this tab's ID scope, so a bare "Orbit"/"Pan"
@@ -482,7 +473,7 @@ void Application::renderSettings() {
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Panels (Materializr classic UI)"));
-                    ImGui::TextWrapped(materializr::tr("Show or hide the classic interface's docked panels. Applies to the classic UI only — the im-touch shell arranges its own panels."));
+                    ImGui::TextWrapped("%s", materializr::tr("Show or hide the classic interface's docked panels. Applies to the classic UI only — the im-touch shell arranges its own panels."));
                     if (ImGui::Checkbox(materializr::tr("Tools"),        &m_showTools))        changed = true;
                     if (ImGui::Checkbox(materializr::tr("Interactions"), &m_showInteractions)) changed = true;
                     if (ImGui::Checkbox(materializr::tr("History"),      &m_showHistory))      changed = true;
@@ -495,17 +486,17 @@ void Application::renderSettings() {
                 if (ImGui::BeginTabItem(materializr::tr("Rendering###Rendering"))) {
                     ImGui::SeparatorText(materializr::tr("Lighting"));
                     // Lighting — tame the harsh single-direction shadows.
-                    ImGui::TextWrapped(materializr::tr("Lighting controls how evenly the model is lit."));
+                    ImGui::TextWrapped("%s", materializr::tr("Lighting controls how evenly the model is lit."));
                     if (ImGui::SliderFloat(materializr::tr("Ambient"), &m_lightAmbient, 0.0f, 1.0f, "%.2f")) {
                         applyRenderingSettings();
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Higher values brighten shadowed faces for more uniform lighting."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Higher values brighten shadowed faces for more uniform lighting."));
                     if (ImGui::Checkbox(materializr::tr("Headlight (light follows camera)"), &m_lightHeadlight)) {
                         applyRenderingSettings();
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("The face you're looking at is always lit; removes large cast shadows."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("The face you're looking at is always lit; removes large cast shadows."));
                     if (ImGui::Checkbox(materializr::tr("Fill light (soften opposite side)"), &m_lightFill)) {
                         applyRenderingSettings();
                         changed = true;
@@ -523,7 +514,7 @@ void Application::renderSettings() {
                         applyRenderingSettings();
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Multisampling (MSAA) smooths jagged edges in the viewport."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Multisampling (MSAA) smooths jagged edges in the viewport."));
 
                     // Mesh quality — denser tessellation for smoother curved surfaces.
                     const char* mqItems[] = { materializr::tr("Low"), materializr::tr("Medium"),
@@ -534,7 +525,7 @@ void Application::renderSettings() {
                         m_meshesDirty = true; // re-tessellate at the new density
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Higher quality uses more polygons, smoothing curves and holes."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Higher quality uses more polygons, smoothing curves and holes."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Imported meshes (STL)"));
@@ -545,14 +536,14 @@ void Application::renderSettings() {
                             if (m_document->isBodyMesh(id)) markBodyDirty(id);
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Draw the facet edges of imported STL bodies. Turn off for a clean shaded surface to sketch on."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Draw the facet edges of imported STL bodies. Turn off for a clean shaded surface to sketch on."));
                     // Default fidelity pre-filling the STL import dialog's slider.
                     if (ImGui::SliderFloat(materializr::tr("Default STL accuracy"), &m_stlImportAccuracy,
                                            0.0f, 1.0f, "%.2f")) {
                         m_stlImportAccuracy = std::clamp(m_stlImportAccuracy, 0.0f, 1.0f);
                         changed = true;
                     }
-                    ImGui::SetItemTooltip(materializr::tr("Pre-fills the STL import dialog. Lower = coarser/faster with larger merged flat faces; higher = more faithful but heavier."));
+                    ImGui::SetItemTooltip("%s", materializr::tr("Pre-fills the STL import dialog. Lower = coarser/faster with larger merged flat faces; higher = more faithful but heavier."));
                     ImGui::EndTabItem();
                 }
 
@@ -598,7 +589,7 @@ void Application::renderMirrorPopup() {
         m_showMirrorPopup = false;
     }
     if (ImGui::BeginPopup("MirrorPopup")) {
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Mirror across"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Mirror across"));
         ImGui::Separator();
 
         // Mirror the body across the plane on its own bounding box for the chosen
@@ -681,9 +672,8 @@ void Application::renderUpdatePopup() {
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
                                materializr::tr("Couldn't reach GitHub: %s"), m_updateMessage.c_str());
         } else if (m_updateAvailable) {
-            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.6f, 1.0f),
-                               materializr::tr("A newer release is available."));
-            ImGui::TextWrapped(materializr::tr("Download the new build from the release page; the installer or portable zip will replace this one."));
+            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.6f, 1.0f), "%s", materializr::tr("A newer release is available."));
+            ImGui::TextWrapped("%s", materializr::tr("Download the new build from the release page; the installer or portable zip will replace this one."));
             ImGui::Spacing();
             if (ImGui::Button(materializr::tr("Open Release Page"), materializr::uiSz(180, 0))) {
                 // m_updateReleaseUrl is the GitHub API's html_url — server
@@ -693,8 +683,7 @@ void Application::renderUpdatePopup() {
                 materializr::openUrl(m_updateReleaseUrl, "https://github.com/");
             }
         } else {
-            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.6f, 1.0f),
-                               materializr::tr("You are running the latest release."));
+            ImGui::TextColored(ImVec4(0.6f, 1.0f, 0.6f, 1.0f), "%s", materializr::tr("You are running the latest release."));
         }
 
         ImGui::Spacing();
@@ -740,7 +729,7 @@ void Application::renderMultiTransformPanel() {
     // button below, so either way auto-reopen logic above takes effect.
     if (!ImGui::Begin(title, &m_multiTransformPanelOpen)) { ImGui::End(); return; }
 
-    ImGui::TextWrapped(materializr::tr("Type exact angles instead of dragging the gizmo — useful when the selection is too large for a smooth live drag. Rotation is composed X → Y → Z around the selection centroid."));
+    ImGui::TextWrapped("%s", materializr::tr("Type exact angles instead of dragging the gizmo — useful when the selection is too large for a smooth live drag. Rotation is composed X → Y → Z around the selection centroid."));
     ImGui::Spacing();
 
     const char* axisLabels[3] = { "X", "Y", "Z" };
@@ -977,7 +966,7 @@ void Application::renderScalePanel() {
                 edit.initialExtent = userExtents[i];
             }
             if (ImGui::IsItemDeactivatedAfterEdit()) edit.focused = false;
-            ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
             ImGui::PopID();
         }
     }
@@ -1164,9 +1153,9 @@ void Application::renderSketchPatternPopup() {
         ImGuiWindowFlags_AlwaysAutoResize);
 
     if (m_sketchPatternKind == PatternKind::Linear) {
-        ImGui::TextDisabled(materializr::tr("Copies along the sketch +X axis."));
+        ImGui::TextDisabled("%s", materializr::tr("Copies along the sketch +X axis."));
     } else {
-        ImGui::TextDisabled(materializr::tr("Rotates copies around the (x, y) origin in sketch coords."));
+        ImGui::TextDisabled("%s", materializr::tr("Rotates copies around the (x, y) origin in sketch coords."));
     }
     ImGui::Separator();
 
@@ -1175,7 +1164,7 @@ void Application::renderSketchPatternPopup() {
         m_sketchPatternFocusInput = false;
     }
     bool changed = false;
-    ImGui::Text(materializr::tr("Copies")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Copies")); ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputText("##spcount", m_sketchPatternCountBuf,
                      sizeof(m_sketchPatternCountBuf),
@@ -1187,12 +1176,12 @@ void Application::renderSketchPatternPopup() {
     if (newCount != m_sketchPatternCount) { m_sketchPatternCount = newCount; changed = true; }
 
     if (m_sketchPatternKind == PatternKind::Linear) {
-        ImGui::Text(materializr::tr("Spacing")); ImGui::SameLine();
+        ImGui::Text("%s", materializr::tr("Spacing")); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##spdist", m_sketchPatternDistanceBuf,
                          sizeof(m_sketchPatternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
         float newDist = m_sketchPatternDistance;
         if (materializr::parseFinite(m_sketchPatternDistanceBuf, newDist) &&
             std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
@@ -1215,7 +1204,7 @@ void Application::renderSketchPatternPopup() {
             changed = true;
         }
     } else {
-        ImGui::Text(materializr::tr("Sweep")); ImGui::SameLine();
+        ImGui::Text("%s", materializr::tr("Sweep")); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##spangle", m_sketchPatternAngleBuf,
                          sizeof(m_sketchPatternAngleBuf),
@@ -1244,12 +1233,11 @@ void Application::renderSketchPatternPopup() {
         }
 
         ImGui::Separator();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Origin"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Origin"));
         ImGui::Text(materializr::tr("(%.2f, %.2f) sketch coords"),
                     m_sketchPatternOriginX, m_sketchPatternOriginY);
         if (m_sketchPatternPickingOrigin) {
-            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
-                               materializr::tr("Click a point in the sketch… (Esc to cancel)"));
+            ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "%s", materializr::tr("Click a point in the sketch… (Esc to cancel)"));
             if (ImGui::Button(materializr::tr("Cancel picking"), ImVec2(-1, materializr::uiW(0)))) {
                 m_sketchPatternPickingOrigin = false;
             }
@@ -1257,7 +1245,7 @@ void Application::renderSketchPatternPopup() {
             if (ImGui::Button(materializr::tr("Pick origin in sketch"), ImVec2(-1, materializr::uiW(0)))) {
                 m_sketchPatternPickingOrigin = true;
             }
-            ImGui::TextDisabled(materializr::tr("Click in the sketch — snaps to the grid."));
+            ImGui::TextDisabled("%s", materializr::tr("Click in the sketch — snaps to the grid."));
         }
     }
 
@@ -1296,7 +1284,7 @@ void Application::renderPatternPanel() {
     bool axisChanged = false;
     if (m_patternKind == PatternKind::Linear) {
         // ---- Direction radio buttons (X / Y / Z) ----
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Direction"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Direction"));
         const char* labels[] = { "X", "Y", "Z" };
         for (int i = 0; i < 3; ++i) {
             if (i > 0) ImGui::SameLine();
@@ -1309,7 +1297,7 @@ void Application::renderPatternPanel() {
         // ---- Rotation axis combo: construction axes + world X/Y/Z ----
         // Mirrors the Revolve axis picker so any construction axis the user
         // made can drive the pattern (the headline of "axes feed patterns").
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Rotation axis"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Rotation axis"));
         std::vector<int> axisIds = m_document->getAllAxisIds();
         std::string current;
         const char* userLabels[3] = {"X (user)", "Y (user)", "Z (user, floor-up)"};
@@ -1344,7 +1332,7 @@ void Application::renderPatternPanel() {
     ImGui::Separator();
 
     // ---- Count ----
-    ImGui::Text(materializr::tr("Copies")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Copies")); ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     if (m_patternInputFocus) {
         ImGui::SetKeyboardFocusHere();
@@ -1362,12 +1350,12 @@ void Application::renderPatternPanel() {
     // ---- Distance (linear) or Angle (radial) ----
     bool distChanged = false;
     if (m_patternKind == PatternKind::Linear) {
-        ImGui::Text(materializr::tr("Spacing")); ImGui::SameLine();
+        ImGui::Text("%s", materializr::tr("Spacing")); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##patdist", m_patternDistanceBuf,
                          sizeof(m_patternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
         float parsed = m_patternDistance;
         if (materializr::parseFinite(m_patternDistanceBuf, parsed) &&
             std::abs(parsed - m_patternDistance) > 1e-4f) {
@@ -1387,7 +1375,7 @@ void Application::renderPatternPanel() {
             distChanged = true;
         }
     } else {
-        ImGui::Text(materializr::tr("Sweep")); ImGui::SameLine();
+        ImGui::Text("%s", materializr::tr("Sweep")); ImGui::SameLine();
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##patangle", m_patternAngleBuf,
                          sizeof(m_patternAngleBuf),
@@ -1413,19 +1401,18 @@ void Application::renderPatternPanel() {
 
         // ---- Axis origin (radial only) ----
         ImGui::Separator();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Axis origin"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Axis origin"));
         if (m_patternAxisId >= 0) {
             // A construction axis defines its own origin — copies orbit its
             // centreline, so the manual origin picker doesn't apply.
             if (const auto* a = m_document->getAxis(m_patternAxisId)) {
                 ImGui::Text("(%.2f, %.2f, %.2f)", a->origin.X(), a->origin.Y(), a->origin.Z());
             }
-            ImGui::TextDisabled(materializr::tr("From the selected construction axis."));
+            ImGui::TextDisabled("%s", materializr::tr("From the selected construction axis."));
         } else {
             ImGui::Text("(%.2f, %.2f, %.2f)", m_patternOriginX, m_patternOriginY, m_patternOriginZ);
             if (m_patternPickingOrigin) {
-                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f),
-                                   materializr::tr("Pick a point in the viewport… (Esc to cancel)"));
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "%s", materializr::tr("Pick a point in the viewport… (Esc to cancel)"));
                 if (ImGui::Button(materializr::tr("Cancel picking"), ImVec2(-1, materializr::uiW(0)))) {
                     m_patternPickingOrigin = false;
                 }
@@ -1433,7 +1420,7 @@ void Application::renderPatternPanel() {
                 if (ImGui::Button(materializr::tr("Pick axis origin in viewport"), ImVec2(-1, materializr::uiW(0)))) {
                     m_patternPickingOrigin = true;
                 }
-                ImGui::TextDisabled(materializr::tr("Click a point in the viewport — snaps to the grid."));
+                ImGui::TextDisabled("%s", materializr::tr("Click a point in the viewport — snaps to the grid."));
             }
         }
     }
@@ -1498,9 +1485,9 @@ void Application::renderThreadPanel() {
                 // Standard sweeps in ~200ms; the maker profiles cut per-turn,
                 // so a long thread is a genuinely heavy op — set expectations.
                 if (m_threadProfile != 0)
-                    ImGui::TextDisabled(materializr::tr("Shaped profiles cut per-turn \xE2\x80\x94 a long thread can take up to a minute."));
+                    ImGui::TextDisabled("%s", materializr::tr("Shaped profiles cut per-turn \xE2\x80\x94 a long thread can take up to a minute."));
                 else
-                    ImGui::TextDisabled(materializr::tr("A few seconds for typical threads."));
+                    ImGui::TextDisabled("%s", materializr::tr("A few seconds for typical threads."));
                 ImGui::Spacing();
                 // Escape hatch: signal the worker (it aborts between turns
                 // and mid-boolean via user-break), abandon the future, and
@@ -1536,7 +1523,7 @@ void Application::renderThreadPanel() {
             ImGui::Spacing();
             drawIndeterminateBar();
             ImGui::Spacing();
-            ImGui::TextDisabled(materializr::tr("Sharp profiles can take a while on long threads."));
+            ImGui::TextDisabled("%s", materializr::tr("Sharp profiles can take a while on long threads."));
             ImGui::Spacing();
             if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(120, 0)) ||
                 ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -1571,7 +1558,7 @@ void Application::renderThreadPanel() {
             std::snprintf(m_threadPitchBuf, sizeof(m_threadPitchBuf), "%.2f",
                           m_threadPitch);
     } else {
-    ImGui::Text(materializr::tr("Pitch")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Pitch")); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
@@ -1579,7 +1566,7 @@ void Application::renderThreadPanel() {
         if (materializr::parseFinite(m_threadPitchBuf, v) && v >= 0.1f)
             m_threadPitch = v;
     }
-    ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
     }
 
     if (imTouchLayout()) {
@@ -1588,7 +1575,7 @@ void Application::renderThreadPanel() {
             std::snprintf(m_threadDepthBuf, sizeof(m_threadDepthBuf), "%.2f",
                           m_threadDepth);
     } else {
-    ImGui::Text(materializr::tr("Depth")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Depth")); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
@@ -1596,7 +1583,7 @@ void Application::renderThreadPanel() {
         if (materializr::parseFinite(m_threadDepthBuf, v) && v >= 0.05f)
             m_threadDepth = v;
     }
-    ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
     }
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
     // beyond ~45% of the radius it eats the core. Multi-start Rounded cuts
@@ -1629,11 +1616,11 @@ void Application::renderThreadPanel() {
         ImGui::Combo(materializr::tr("Profile"), &m_threadProfile, kProfiles,
                      IM_ARRAYSIZE(kProfiles));
         if (m_threadProfile != 0) {
-            ImGui::Text(materializr::tr("Fit clearance")); ImGui::SameLine();
+            ImGui::Text("%s", materializr::tr("Fit clearance")); ImGui::SameLine();
             ImGui::SetNextItemWidth(90);
             materializr::inputNumber("##thrClr", &m_threadClearance, 0.05f, 0.1f, "%.2f");
             if (m_threadClearance < 0.0f) m_threadClearance = 0.0f;
-            ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
             ImGui::SetItemTooltip(materializr::tr("Radial gap so a PRINTED thread fits its mate (0.2\xE2\x80\x93""0.4mm typical). 0 = exact."));
         }
         // Groove width: normally a fixed fraction of the pitch, so a coarse
@@ -1643,13 +1630,13 @@ void Application::renderThreadPanel() {
         // their groove this way; Standard and Rounded are swept forms.
         if (ThreadOp::profileTakesGrooveWidth(
                 static_cast<ThreadProfile>(m_threadProfile))) {
-            ImGui::Text(materializr::tr("Groove width")); ImGui::SameLine();
+            ImGui::Text("%s", materializr::tr("Groove width")); ImGui::SameLine();
             ImGui::SetNextItemWidth(90);
             materializr::inputNumber("##thrGWidth", &m_threadGrooveWidth, 0.1f, 0.5f,
                               "%.2f");
             if (m_threadGrooveWidth < 0.0f) m_threadGrooveWidth = 0.0f;
-            ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
-            ImGui::SetItemTooltip(materializr::tr("Width of the cut at the surface. 0 = automatic (a set fraction of the pitch, which is how threads are normally proportioned)."));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+            ImGui::SetItemTooltip("%s", materializr::tr("Width of the cut at the surface. 0 = automatic (a set fraction of the pitch, which is how threads are normally proportioned)."));
             const float autoW = static_cast<float>(
                 ThreadOp::profileOpenFraction(
                     static_cast<ThreadProfile>(m_threadProfile))) *
@@ -1669,7 +1656,7 @@ void Application::renderThreadPanel() {
     // starts with a coarse pitch). Stepped field, not a slider (Steve);
     // im-touch gets bare +/- buttons — a text field would summon the mobile
     // keyboard for a single-digit value.
-    ImGui::Text(materializr::tr("Starts")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Starts")); ImGui::SameLine();
     if (imTouchLayout()) {
         if (ImGui::Button("-##thrStartsDn") && m_threadStarts > 1)
             --m_threadStarts;
@@ -1690,7 +1677,7 @@ void Application::renderThreadPanel() {
         // The single-start sweep shortcuts don't apply to interleaved
         // helixes — every multi-start thread is a boolean cut.
         if (m_threadProfile == 0 || m_threadProfile == 4)
-            ImGui::TextDisabled(materializr::tr("Multi-start cuts per-groove — slower than a single start."));
+            ImGui::TextDisabled("%s", materializr::tr("Multi-start cuts per-groove — slower than a single start."));
     }
 
     // "Turns" a user perceives = revolutions of one helix (length/lead);
@@ -1705,14 +1692,12 @@ void Application::renderThreadPanel() {
     else
         ImGui::TextDisabled(materializr::tr("%.0f turns over the face"), crests);
     if (crests > 300.0) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                           materializr::tr("Too many turns (max 300) — raise the pitch."));
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", materializr::tr("Too many turns (max 300) — raise the pitch."));
     } else if (m_threadStarts > 1 && crests > 120.0) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                           materializr::tr("Multi-start beyond 120 crests can fail the cut — raise the pitch."));
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", materializr::tr("Multi-start beyond 120 crests can fail the cut — raise the pitch."));
     }
-    ImGui::TextDisabled(materializr::tr("Computed on Apply — may take a few seconds."));
-    ImGui::TextWrapped(materializr::tr("Later cuts (holes, slots, chamfers) reorder beneath the thread automatically; the thread then re-cuts in the background. Sharp profiles on long threads can take a while each re-cut, so threading last is still fastest."));
+    ImGui::TextDisabled("%s", materializr::tr("Computed on Apply — may take a few seconds."));
+    ImGui::TextWrapped("%s", materializr::tr("Later cuts (holes, slots, chamfers) reorder beneath the thread automatically; the thread then re-cuts in the background. Sharp profiles on long threads can take a while each re-cut, so threading last is still fastest."));
 
     // Apply / Cancel — im-touch hosts them as corner ✓/✗ FABs instead.
     bool applyClicked = false, cancelClicked = false;
@@ -1767,14 +1752,14 @@ void Application::renderLoftPanel() {
     //    curves. A different machine entirely (GuidedLoftOp), so the panel
     //    swaps to a read-only summary + the Solid toggle.
     if (m_loftRailsMode) {
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Guided loft"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Guided loft"));
         ImGui::TextWrapped(materializr::tr("Base: %s"),
                            m_loftSections.empty() ? "?"
                                : sketchLabel(m_loftSections[0].sketchId).c_str());
         for (size_t i = 0; i < m_loftRails.size(); ++i)
             ImGui::TextWrapped(materializr::tr("Rail %zu: %s"), i + 1,
                                sketchLabel(m_loftRails[i].sketchId).c_str());
-        ImGui::TextDisabled(materializr::tr("The base profile shrinks/grows to follow the\nrails as it rises; rails meeting a single point\nclose to an apex."));
+        ImGui::TextDisabled("%s", materializr::tr("The base profile shrinks/grows to follow the\nrails as it rises; rails meeting a single point\nclose to an apex."));
         ImGui::Separator();
         if (ImGui::Checkbox(materializr::tr("Solid (off = surface shell)"), &m_loftSolid))
             changed = true;
@@ -1796,7 +1781,7 @@ void Application::renderLoftPanel() {
     //    its neighbours).
     ImGui::TextColored(materializr::accentText(), materializr::tr("Sections (%d)"),
                        static_cast<int>(m_loftSections.size()));
-    ImGui::SetItemTooltip(materializr::tr("Profiles are skinned in this order — top of the list is one end of the loft. Reorder with the arrows if the surface jumps back and forth. Flip a section if the loft pinches or twists there."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Profiles are skinned in this order — top of the list is one end of the loft. Reorder with the arrows if the surface jumps back and forth. Flip a section if the loft pinches or twists there."));
     for (int i = 0; i < static_cast<int>(m_loftSections.size()); ++i) {
         LoftSection& sec = m_loftSections[i];
         ImGui::PushID(i);
@@ -1822,7 +1807,7 @@ void Application::renderLoftPanel() {
                                    : "Face");
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - uiSz(50, 0).x);
         if (ImGui::Checkbox(materializr::tr("Flip"), &sec.reverse)) changed = true;
-        ImGui::SetItemTooltip(materializr::tr("Reverse this profile's vertex order. Use it if the loft pinches to an apex or twists at this section — usually means its start vertex isn't lined up with the neighbouring profiles'."));
+        ImGui::SetItemTooltip("%s", materializr::tr("Reverse this profile's vertex order. Use it if the loft pinches to an apex or twists at this section — usually means its start vertex isn't lined up with the neighbouring profiles'."));
         ImGui::PopID();
     }
 
@@ -1843,17 +1828,16 @@ void Application::renderLoftPanel() {
         }
         if (skewed) {
             ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + uiSz(260, 0).x);
-            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1.0f),
-                materializr::tr("Sections sit on very different planes. Loft skins them in list order (a stack of cross-sections), so this will likely fold through itself. For a base + side-wall shape, draw the side silhouettes as OPEN curves instead - one closed profile plus open curves lofts guided by them as rails."));
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1.0f), "%s", materializr::tr("Sections sit on very different planes. Loft skins them in list order (a stack of cross-sections), so this will likely fold through itself. For a base + side-wall shape, draw the side silhouettes as OPEN curves instead - one closed profile plus open curves lofts guided by them as rails."));
             ImGui::PopTextWrapPos();
         }
     }
 
     ImGui::Separator();
     if (ImGui::Checkbox(materializr::tr("Solid (off = surface shell)"), &m_loftSolid)) changed = true;
-    ImGui::SetItemTooltip(materializr::tr("On: ThruSections caps the ends and produces a solid body. Off: open shell — useful when one profile is open or you want a swept surface."));
+    ImGui::SetItemTooltip("%s", materializr::tr("On: ThruSections caps the ends and produces a solid body. Off: open shell — useful when one profile is open or you want a swept surface."));
     if (ImGui::Checkbox(materializr::tr("Ruled surface (off = smooth)"), &m_loftRuled)) changed = true;
-    ImGui::SetItemTooltip(materializr::tr("Ruled draws straight-line ribs between matching vertices on adjacent profiles. Smooth interpolates a curved surface — usually nicer between similar profiles, less predictable between dissimilar ones."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Ruled draws straight-line ribs between matching vertices on adjacent profiles. Smooth interpolates a curved surface — usually nicer between similar profiles, less predictable between dissimilar ones."));
 
     ImGui::Separator();
     bool applyClicked  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(120, 0));
@@ -1975,7 +1959,7 @@ void Application::renderRefImagePanel() {
         m_document->setRefImageOpacity(planeId, opacity);
         markDirty();
     }
-    ImGui::SetItemTooltip(materializr::tr("Underlay strength — drop it until your sketch lines read clearly on top of the photo."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Underlay strength — drop it until your sketch lines read clearly on top of the photo."));
 
     float widthMM = static_cast<float>(img->widthMM);
     ImGui::SetNextItemWidth(uiSz(120, 0).x);
@@ -1986,7 +1970,7 @@ void Application::renderRefImagePanel() {
             markDirty();
         }
     }
-    ImGui::SetItemTooltip(materializr::tr("Physical width of the photo's full frame. Height follows the image's aspect ratio. Use Calibrate to derive this from a ruler in the shot."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Physical width of the photo's full frame. Height follows the image's aspect ratio. Use Calibrate to derive this from a ruler in the shot."));
 
     if (ImGui::Button(materializr::tr("Calibrate scale..."), ImVec2(uiSz(135, 0).x, 0))) {
         m_refImgCalibPlane = planeId;
@@ -1994,7 +1978,7 @@ void Application::renderRefImagePanel() {
         m_refImgCalibZoom = 1.0f;
         m_refImgCalibPan[0] = m_refImgCalibPan[1] = 0.0f;
     }
-    ImGui::SetItemTooltip(materializr::tr("Click two points a known distance apart in the photo (the ruler you photographed), type that distance, and the image scales to real millimetres."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Click two points a known distance apart in the photo (the ruler you photographed), type that distance, and the image scales to real millimetres."));
     ImGui::SameLine();
     if (ImGui::Button(materializr::tr("Remove"), ImVec2(uiSz(90, 0).x, 0))) {
         // Removing the image removes its host plane too — the plane existed
@@ -2009,7 +1993,7 @@ void Application::renderRefImagePanel() {
     }
 
     ImGui::Separator();
-    ImGui::TextWrapped(materializr::tr("Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo."));
+    ImGui::TextWrapped("%s", materializr::tr("Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo."));
     ImGui::End();
 
     // ── Calibration popup ────────────────────────────────────────────────
@@ -2064,7 +2048,7 @@ void Application::renderRefImagePanel() {
                  ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_AlwaysAutoResize);
 
-    ImGui::TextWrapped(materializr::tr("Click two points a KNOWN distance apart (e.g. two marks on the ruler in your photo), then enter that distance."));
+    ImGui::TextWrapped("%s", materializr::tr("Click two points a KNOWN distance apart (e.g. two marks on the ruler in your photo), then enter that distance."));
     ImGui::Spacing();
 
     // Fit the image INSIDE the viewport, preserving aspect — sizing by width
@@ -2238,7 +2222,7 @@ void Application::renderBoundaryFillPanel() {
         }
         ImGui::BulletText("%s", label.c_str());
     }
-    ImGui::TextDisabled(materializr::tr("Each sketch is the body's outline seen from\nits plane's direction; the solid is what\nmatches ALL of them (order doesn't matter)."));
+    ImGui::TextDisabled("%s", materializr::tr("Each sketch is the body's outline seen from\nits plane's direction; the solid is what\nmatches ALL of them (order doesn't matter)."));
 
     ImGui::Separator();
     bool applyClicked  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(120, 0));
@@ -2293,7 +2277,7 @@ void Application::renderSketchMovePanel() {
         ImGui::End(); return;
     }
 
-    ImGui::TextWrapped(materializr::tr("Type an exact offset to translate the sketch's plane by - useful when you want the second \"construction plane\" at a precise distance instead of dragging the gizmo. Apply nudges the sketch by the typed values (from its current pose) and resets the fields."));
+    ImGui::TextWrapped("%s", materializr::tr("Type an exact offset to translate the sketch's plane by - useful when you want the second \"construction plane\" at a precise distance instead of dragging the gizmo. Apply nudges the sketch by the typed values (from its current pose) and resets the fields."));
     ImGui::Spacing();
 
     // Buffer-based inputs: more reliable than ImGui::InputFloat for our case.
@@ -2314,7 +2298,7 @@ void Application::renderSketchMovePanel() {
                          ImGuiInputTextFlags_CharsDecimal |
                          ImGuiInputTextFlags_CharsNoBlank |
                          ImGuiInputTextFlags_AutoSelectAll);
-        ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
         { float mv = m_sketchMove[i];
           if (materializr::parseFinite(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv; }
         ImGui::SameLine();
@@ -2438,8 +2422,8 @@ void Application::renderSnapWidget() {
         ImGui::BeginTooltip();
         ImGui::Text(materializr::tr("Snap step: %.3g mm   |   %s"), m_sketchGridStep,
                     m_snapToGrid ? "Snap ON" : "Snap off");
-        ImGui::TextDisabled(materializr::tr("Click: open snap settings"));
-        ImGui::TextDisabled(materializr::tr("Right-click: toggle snap"));
+        ImGui::TextDisabled("%s", materializr::tr("Click: open snap settings"));
+        ImGui::TextDisabled("%s", materializr::tr("Right-click: toggle snap"));
         ImGui::EndTooltip();
     }
     if (clicked) ImGui::OpenPopup("SnapSettings");
@@ -2484,7 +2468,7 @@ void Application::renderSnapWidget() {
 
 void Application::renderSnapSettingsPopup() {
     if (ImGui::BeginPopup("SnapSettings")) {
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Snap & Grid"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Snap & Grid"));
         ImGui::Separator();
         bool snap = m_snapToGrid;
         if (ImGui::Checkbox(materializr::tr("Snap to grid"), &snap)) {
@@ -2493,7 +2477,7 @@ void Application::renderSnapSettingsPopup() {
             saveAppSettings();
         }
         ImGui::Spacing();
-        ImGui::Text(materializr::tr("Step (mm)"));
+        ImGui::Text("%s", materializr::tr("Step (mm)"));
         const float steps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
         const char* labels[] = { "0.1", "0.5", "1", "10" };
         for (int i = 0; i < 4; ++i) {
@@ -2511,7 +2495,7 @@ void Application::renderSnapSettingsPopup() {
             if (active) ImGui::PopStyleColor();
         }
         ImGui::Spacing();
-        ImGui::TextDisabled(materializr::tr("Settings persist across launches."));
+        ImGui::TextDisabled("%s", materializr::tr("Settings persist across launches."));
         ImGui::EndPopup();
     }
 }
@@ -2528,7 +2512,7 @@ void Application::renderConstructionPlanePanel() {
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_AlwaysAutoResize);
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Alignment"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Alignment"));
     bool kindChanged = false;
     auto kindRadio = [&](const char* label, int idx, bool enabled = true) {
         if (!enabled) ImGui::BeginDisabled();
@@ -2548,7 +2532,7 @@ void Application::renderConstructionPlanePanel() {
             kindChanged = true;
         }
     } else {
-        ImGui::TextDisabled(materializr::tr("(Select a planar face to enable Parallel-to-face.)"));
+        ImGui::TextDisabled("%s", materializr::tr("(Select a planar face to enable Parallel-to-face.)"));
     }
 
     // Derived modes — each enabled only when its required selection exists.
@@ -2571,11 +2555,11 @@ void Application::renderConstructionPlanePanel() {
         }
     }
     if (!m_planeOpHaveTwoPlanes && !m_planeOpHaveAxis && !m_planeOpHaveCylinder) {
-        ImGui::TextDisabled(materializr::tr("(Select 2 planes/faces, an axis/edge, or a cylinder\n for Midplane / Normal-to-axis / Tangent.)"));
+        ImGui::TextDisabled("%s", materializr::tr("(Select 2 planes/faces, an axis/edge, or a cylinder\n for Midplane / Normal-to-axis / Tangent.)"));
     }
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Offset"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Offset"));
     // Sync the slider/field with the live preview plane's distance from
     // world origin along its current normal, so the value reflects gizmo
     // drags and rotations rather than only the popup-input history. Skip
@@ -2601,7 +2585,7 @@ void Application::renderConstructionPlanePanel() {
             }
         }
     }
-    ImGui::Text(materializr::tr("Distance")); ImGui::SameLine();
+    ImGui::Text("%s", materializr::tr("Distance")); ImGui::SameLine();
     ImGui::SetNextItemWidth(100);
     bool offsetChanged = false;
     if (ImGui::InputText("##planeoffset", m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf),
@@ -2613,19 +2597,19 @@ void Application::renderConstructionPlanePanel() {
             offsetChanged = true;
         }
     }
-    ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
     float offsetF = static_cast<float>(m_planeOpOffset);
     if (ImGui::SliderFloat("##planeoffsetslider", &offsetF, -100.0f, 100.0f, "%.2f mm")) {
         m_planeOpOffset = offsetF;
         std::snprintf(m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf), "%.2f", m_planeOpOffset);
         offsetChanged = true;
     }
-    ImGui::TextDisabled(materializr::tr("Pushes the plane along its normal. Negative for the opposite side."));
+    ImGui::TextDisabled("%s", materializr::tr("Pushes the plane along its normal. Negative for the opposite side."));
 
     // Gizmo for the preview plane appears automatically (the popup auto-
     // selects the just-pushed plane). Switch modes with W/E or click the
     // plane after committing.
-    ImGui::TextDisabled(materializr::tr("W = Move gizmo, E = Rotate gizmo."));
+    ImGui::TextDisabled("%s", materializr::tr("W = Move gizmo, E = Rotate gizmo."));
 
     // Type-an-exact-angle rotation. Applies on top of whatever the popup
     // base orientation + gizmo edits produced; lets the user dial in a
@@ -2633,7 +2617,7 @@ void Application::renderConstructionPlanePanel() {
     // Axis labels use Z-up convention (user X = world X, user Y = world Z,
     // user Z = world Y), so picking "Z" rotates around the up axis.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Rotate by"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Rotate by"));
     ImGui::SetNextItemWidth(80);
     // Enter in the field is equivalent to clicking Apply — same shortcut the
     // sketch dim popup uses, so the user can dial in 23.5°, press Enter,
@@ -2642,7 +2626,7 @@ void Application::renderConstructionPlanePanel() {
                                      sizeof(m_planeOpRotBuf),
                                      ImGuiInputTextFlags_CharsDecimal |
                                      ImGuiInputTextFlags_EnterReturnsTrue);
-    ImGui::SameLine(); ImGui::Text(materializr::tr("\xC2\xB0 around"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("\xC2\xB0 around"));
     ImGui::SameLine();
     if (ImGui::RadioButton("X##planeRotX", m_planeOpRotAxisIdx == 0)) m_planeOpRotAxisIdx = 0;
     ImGui::SameLine();
@@ -2781,7 +2765,7 @@ void Application::renderRevolvePopup() {
     // Both flows want a body shown (Rotate Body operates on it; Sweep
     // boolean modes target it). Sketch only matters in Sweep mode.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Selection"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Selection"));
     const int bodyCount = static_cast<int>(m_revolveBodyIds.size());
     if (bodyCount == 1) {
         ImGui::Text(materializr::tr("• Body: %s (id %d)"),
@@ -2790,7 +2774,7 @@ void Application::renderRevolvePopup() {
     } else if (bodyCount > 1) {
         ImGui::Text(materializr::tr("• %d bodies — rotate together around the axis"), bodyCount);
     } else {
-        ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f), materializr::tr("• Body: none"));
+        ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f), "%s", materializr::tr("• Body: none"));
     }
     if (m_revolveWhatIdx == 1) {
         if (m_revolveSketchId >= 0) {
@@ -2798,8 +2782,7 @@ void Application::renderRevolvePopup() {
                         m_document->getSketchName(m_revolveSketchId).c_str(),
                         m_revolveSketchId);
         } else {
-            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f),
-                               materializr::tr("• Sketch: none — select one and re-open."));
+            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f), "%s", materializr::tr("• Sketch: none — select one and re-open."));
         }
     }
 
@@ -2807,7 +2790,7 @@ void Application::renderRevolvePopup() {
     // document plus the canonical user-Z-up world axes at the bottom.
     // Solves the "I can't pick the axis I just made" report.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Axis"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Axis"));
     std::vector<int> axisIds = m_document->getAllAxisIds();
     std::string current;
     if (m_revolveAxisId >= 0) {
@@ -2841,7 +2824,7 @@ void Application::renderRevolvePopup() {
     }
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Angle"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Angle"));
     ImGui::SetNextItemWidth(100);
     bool angleChanged = false;
     if (ImGui::InputText("##revAng", m_revolveAngleBuf, sizeof(m_revolveAngleBuf),
@@ -2881,7 +2864,7 @@ void Application::renderRevolvePopup() {
     // an in-place transform, no mode choice.
     if (m_revolveWhatIdx == 1) {
         ImGui::Separator();
-        ImGui::TextColored(materializr::accentText(), materializr::tr("Mode"));
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Mode"));
         const char* modes[] = {materializr::tr("New Body"), materializr::tr("Union"),
                                materializr::tr("Cut"), materializr::tr("Intersect")};
         for (int i = 0; i < 4; ++i) {
@@ -2890,8 +2873,7 @@ void Application::renderRevolvePopup() {
                 m_revolveModeIdx = i;
         }
         if (m_revolveModeIdx != 0 && m_revolveBodyId < 0) {
-            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f),
-                               materializr::tr("Boolean modes need a target body in the selection."));
+            ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.35f, 1.0f), "%s", materializr::tr("Boolean modes need a target body in the selection."));
         }
     }
 
@@ -3126,7 +3108,7 @@ void Application::renderAlignFacePopup() {
 
     bool changed = false;
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Target plane"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Target plane"));
     std::vector<std::string> names = {"Ground (XZ)", "XY plane", "YZ plane"};
     if (m_document)
         for (int pid : m_document->getAllPlaneIds())
@@ -3141,10 +3123,10 @@ void Application::renderAlignFacePopup() {
     }
     if (ImGui::Checkbox(materializr::tr("Flip side"), &m_alignFlip)) changed = true;
     ImGui::SameLine();
-    ImGui::TextDisabled(materializr::tr("(body on the other side of the plane)"));
+    ImGui::TextDisabled("%s", materializr::tr("(body on the other side of the plane)"));
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Offset from plane"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Offset from plane"));
     ImGui::SetNextItemWidth(100);
     if (ImGui::InputText("##alignOff", m_alignOffsetBuf, sizeof(m_alignOffsetBuf),
                          ImGuiInputTextFlags_CharsDecimal)) {
@@ -3152,7 +3134,7 @@ void Application::renderAlignFacePopup() {
         if (materializr::parseFinite(m_alignOffsetBuf, a)) m_alignOffset = a;
         changed = true;
     }
-    ImGui::SameLine(); ImGui::Text(materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
 
     ImGui::Separator();
     if (ImGui::Checkbox(materializr::tr("Set position on plane"), &m_alignSetPos)) {
@@ -3173,7 +3155,7 @@ void Application::renderAlignFacePopup() {
         changed = true;
     }
     if (m_alignSetPos) {
-        ImGui::TextDisabled(materializr::tr("Face centre, along the plane's own axes"));
+        ImGui::TextDisabled("%s", materializr::tr("Face centre, along the plane's own axes"));
         ImGui::SetNextItemWidth(90);
         if (ImGui::InputText("U##alignU", m_alignUBuf, sizeof(m_alignUBuf),
                              ImGuiInputTextFlags_CharsDecimal)) {
@@ -3280,7 +3262,7 @@ void Application::renderRotatePlaneAboutAxisPopup() {
 
     // Hinge picker — the lines computed at open time.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Hinge"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Hinge"));
     const char* curLabel =
         (m_rotPlaneHingeIdx >= 0 &&
          m_rotPlaneHingeIdx < static_cast<int>(m_rotPlaneHingeLabels.size()))
@@ -3299,7 +3281,7 @@ void Application::renderRotatePlaneAboutAxisPopup() {
 
     // Angle — typed entry + slider, both live-preview on change.
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Angle"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Angle"));
     ImGui::SetNextItemWidth(100);
     bool angleChanged = false;
     if (ImGui::InputText("##rotPlaneAng", m_rotPlaneAngleBuf, sizeof(m_rotPlaneAngleBuf),
@@ -3625,7 +3607,7 @@ void Application::renderConstructionAxisPanel() {
         ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_AlwaysAutoResize);
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Direction"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Direction"));
     bool kindChanged = false;
     auto kindRadio = [&](const char* label, int idx) {
         if (idx > 0) ImGui::SameLine();
@@ -3640,10 +3622,10 @@ void Application::renderConstructionAxisPanel() {
     kindRadio("X", 0);
     kindRadio("Y", 1);
     kindRadio("Z", 2);
-    ImGui::TextDisabled(materializr::tr("Labels are user-Z-up: Z is the floor-up axis."));
+    ImGui::TextDisabled("%s", materializr::tr("Labels are user-Z-up: Z is the floor-up axis."));
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Origin (mm)"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Origin (mm)"));
     bool originChanged = false;
     const char* axisLetters[3] = {"X", "Y", "Z"};
     for (int i = 0; i < 3; ++i) {
@@ -3663,7 +3645,7 @@ void Application::renderConstructionAxisPanel() {
         ImGui::PopID();
         if (i < 2) ImGui::SameLine();
     }
-    ImGui::TextDisabled(materializr::tr("Point the axis passes through. Drag the gizmo later (after Apply) to fine-tune."));
+    ImGui::TextDisabled("%s", materializr::tr("Point the axis passes through. Drag the gizmo later (after Apply) to fine-tune."));
 
     ImGui::Separator();
     bool applyClicked  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(120, 0));
@@ -3795,7 +3777,7 @@ void Application::renderSectionPanel() {
         if (ImGui::Checkbox(materializr::tr("Flip side"), &m_sectionFlip))
             m_sectionDirty = true;
 
-        ImGui::TextDisabled(materializr::tr("View-only: bodies are not modified."));
+        ImGui::TextDisabled("%s", materializr::tr("View-only: bodies are not modified."));
         ImGui::Separator();
         if (ImGui::Button(materializr::tr("Exit Section View"), materializr::uiSz(200, 0)) ||
             ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -3920,7 +3902,7 @@ void Application::renderTextToolPanel() {
             // Touch has no hover: drag in the sketch to slide the preview anchor
             // (the Move toggle frees the camera; two-finger still pans/zooms),
             // then commit with Place. Remove-last walks back through stamps.
-            ImGui::TextDisabled(materializr::tr("Drag in the sketch to position."));
+            ImGui::TextDisabled("%s", materializr::tr("Drag in the sketch to position."));
             if (ImGui::Button(materializr::tr("Place Here")))
                 recordSketchMutation([&]{ m_sketchTool->commitStamp(); });
             if (m_sketchTool->hasLastStamp()) {
@@ -3929,13 +3911,12 @@ void Application::renderTextToolPanel() {
                     recordSketchMutation([&]{ m_sketchTool->undoLastStamp(); });
             }
         } else {
-            ImGui::TextDisabled(materializr::tr("Click in the sketch to place."));
+            ImGui::TextDisabled("%s", materializr::tr("Click in the sketch to place."));
             if (m_sketchTool->hasLastStamp())
-                ImGui::TextDisabled(materializr::tr("Backspace removes the last placement."));
+                ImGui::TextDisabled("%s", materializr::tr("Backspace removes the last placement."));
         }
         if (m_sketchTool->getTextFontPath().empty()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
-                               materializr::tr("Font file not found - cannot place text."));
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "%s", materializr::tr("Font file not found - cannot place text."));
         }
 
     }
@@ -3990,11 +3971,11 @@ void Application::renderSvgToolPanel() {
         if (materializr::touchMode()) {
             // Touch has no hover: drag in the sketch to slide the preview anchor
             // (the Move toggle frees the camera; two-finger still pans/zooms).
-            ImGui::TextDisabled(materializr::tr("Drag in the sketch to position, then Place Here."));
+            ImGui::TextDisabled("%s", materializr::tr("Drag in the sketch to position, then Place Here."));
             if (ImGui::Button(materializr::tr("Place Here")))
                 recordSketchMutation([&]{ m_sketchTool->commitStamp(); });
         } else {
-            ImGui::TextDisabled(materializr::tr("Click in the sketch to place (Backspace undoes the last)."));
+            ImGui::TextDisabled("%s", materializr::tr("Click in the sketch to place (Backspace undoes the last)."));
         }
 
         ImGui::Separator();
@@ -4004,12 +3985,12 @@ void Application::renderSvgToolPanel() {
         if (m_sketchTool->hasLastStamp()) {
             if (ImGui::Button(materializr::tr("Undo Last Placement")))
                 recordSketchMutation([&]{ m_sketchTool->undoLastStamp(); });
-            ImGui::SetItemTooltip(materializr::tr("Remove the outlines from the most recent placement (also Backspace). Press again to walk back further."));
+            ImGui::SetItemTooltip("%s", materializr::tr("Remove the outlines from the most recent placement (also Backspace). Press again to walk back further."));
             ImGui::SameLine();
         }
         if (ImGui::Button(materializr::tr("Finish")))
             m_sketchTool->setMode(SketchToolMode::Select);
-        ImGui::SetItemTooltip(materializr::tr("Done placing — return to the Select tool (same as the window's X)."));
+        ImGui::SetItemTooltip("%s", materializr::tr("Done placing — return to the Select tool (same as the window's X)."));
     }
     ImGui::End();
     if (!open) m_sketchTool->setMode(SketchToolMode::Select);
@@ -4100,7 +4081,7 @@ void Application::renderPrimitivePopup() {
                  ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_AlwaysAutoResize);
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Dimensions"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Dimensions"));
     // im-touch: number-pad amount fields (the native keyboard froze iOS);
     // other layouts keep the typed InputDouble spinners.
     auto dimField = [&](const char* label, double* v) {
@@ -4130,16 +4111,16 @@ void Application::renderPrimitivePopup() {
     case 4: // Torus
         dimField("Major radius",  &m_primitivePopupRadius);
         dimField("Minor radius",  &m_primitivePopupMinorRadius);
-        ImGui::TextDisabled(materializr::tr("Major must exceed minor — equal radii are a degenerate self-touching torus."));
+        ImGui::TextDisabled("%s", materializr::tr("Major must exceed minor — equal radii are a degenerate self-touching torus."));
         break;
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Origin (mm)"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Origin (mm)"));
     materializr::inputNumber("X", &m_primitivePopupOrigin[0], 0.1, 1.0, "%.3f");
     materializr::inputNumber("Y", &m_primitivePopupOrigin[1], 0.1, 1.0, "%.3f");
     materializr::inputNumber("Z", &m_primitivePopupOrigin[2], 0.1, 1.0, "%.3f");
-    ImGui::TextDisabled(materializr::tr("Box origin = corner; the rest use it as the axis base / centre."));
+    ImGui::TextDisabled("%s", materializr::tr("Box origin = corner; the rest use it as the axis base / centre."));
 
     // Geometric validity check — must mirror the bounds in PrimitiveOp::
     // execute(). If the user typed a degenerate combination (zero/negative
@@ -4278,7 +4259,7 @@ void Application::renderStlImportDialog() {
                  ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_AlwaysAutoResize);
 
-    ImGui::TextColored(materializr::accentText(), materializr::tr("File"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("File"));
     if (ImGui::Button(materializr::tr("Browse\xE2\x80\xA6"), materializr::uiSz(90, 0))) {
         // Deferred/non-blocking: the callback fires on a later frame and just
         // stores the path; the dialog stays open meanwhile.
@@ -4293,7 +4274,7 @@ void Application::renderStlImportDialog() {
     }
     ImGui::SameLine();
     if (m_stlDialogPath.empty()) {
-        ImGui::TextDisabled(materializr::tr("(no file chosen)"));
+        ImGui::TextDisabled("%s", materializr::tr("(no file chosen)"));
     } else {
         // Show just the file name; full path on hover.
         size_t slash = m_stlDialogPath.find_last_of("/\\");
@@ -4304,21 +4285,20 @@ void Application::renderStlImportDialog() {
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(materializr::accentText(), materializr::tr("Detail"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Detail"));
     ImGui::SetNextItemWidth(180.0f);
     ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");
     m_stlDialogAccuracy = std::clamp(m_stlDialogAccuracy, 0.0f, 1.0f);
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 280.0f);
-    ImGui::TextDisabled(materializr::tr("Lower = coarser, faster, with larger merged flat faces to sketch on. Higher = more faithful but heavier; very high may take a few seconds."));
+    ImGui::TextDisabled("%s", materializr::tr("Lower = coarser, faster, with larger merged flat faces to sketch on. Higher = more faithful but heavier; very high may take a few seconds."));
     ImGui::PopTextWrapPos();
 
     ImGui::Spacing();
     ImGui::Checkbox(materializr::tr("Show facet wireframe"), &m_stlDialogWireframe);
-    ImGui::SetItemTooltip(materializr::tr("Off gives a clean shaded body. You can also toggle this later in Settings \xE2\x96\xB8 Rendering."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Off gives a clean shaded body. You can also toggle this later in Settings \xE2\x96\xB8 Rendering."));
     if (m_stlDialogWireframe) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 280.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f),
-                           materializr::tr("Note: drawing the facet wireframe has a performance cost on dense meshes \xE2\x80\x94 turn it off if the viewport feels sluggish."));
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.35f, 1.0f), "%s", materializr::tr("Note: drawing the facet wireframe has a performance cost on dense meshes \xE2\x80\x94 turn it off if the viewport feels sluggish."));
         ImGui::PopTextWrapPos();
     }
 
@@ -4827,35 +4807,33 @@ void Application::renderUnfoldDialog() {
     ImGui::SetNextItemWidth(160.0f);
     if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))
         recomputeUnfold();
-    ImGui::SetItemTooltip(materializr::tr("How finely curved surfaces are faceted (max angle per facet). Larger = coarser: fewer, bigger pieces/score lines. Smaller = closer to the true curve but many more cuts."));
+    ImGui::SetItemTooltip("%s", materializr::tr("How finely curved surfaces are faceted (max angle per facet). Larger = coarser: fewer, bigger pieces/score lines. Smaller = closer to the true curve but many more cuts."));
 
     // Conformal (LSCM) unwrap: one connected stretchy piece for a doubly-curved
     // surface, instead of splitting into developable pieces. Best for materials
     // that conform (vinyl, Monokote, fabric); the cost is some area stretch.
     if (ImGui::Checkbox(materializr::tr("Conformal unwrap (stretch to fit)"), &m_unfoldConformal))
         recomputeUnfold();
-    ImGui::SetItemTooltip(materializr::tr("LSCM, like a Blender UV unwrap. One connected piece with the distortion spread out — cut it and let a pliable material stretch to shape. Off = accurate developable pieces (for rigid stock)."));
+    ImGui::SetItemTooltip("%s", materializr::tr("LSCM, like a Blender UV unwrap. One connected piece with the distortion spread out — cut it and let a pliable material stretch to shape. Off = accurate developable pieces (for rigid stock)."));
 
     // Bind AFTER any recompute above (recomputeUnfold replaces m_unfoldPattern).
     if (!m_unfoldPattern) { ImGui::End(); return; }
     const materializr::FlatPattern& fp = *m_unfoldPattern;
 
     if (fm == materializr::FoldMode::None) {
-        ImGui::Text(materializr::tr("Boundary cut only"));
+        ImGui::Text("%s", materializr::tr("Boundary cut only"));
     } else {
         ImGui::Text(materializr::tr("%zu fold/score line%s"), fp.folds.size(), fp.folds.size() == 1 ? "" : "s");
         // ~30 score lines on one piece is the practical ceiling for any material
         // (holes don't count). Past that, suggest coarsening or splitting.
         if (fp.folds.size() > 30) {
             ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
-                               materializr::tr("  — a lot to cut; coarsen the bevel or split the piece"));
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "%s", materializr::tr("  — a lot to cut; coarsen the bevel or split the piece"));
         }
     }
     if (fp.hasOverlap) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f),
-                           materializr::tr("  ⚠ net overlaps — may need cutting into pieces"));
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "%s", materializr::tr("  ⚠ net overlaps — may need cutting into pieces"));
     }
     // Developability: ~0 = unrolls exactly; large = doubly-curved.
     if (m_unfoldConformal) {
@@ -4871,7 +4849,7 @@ void Application::renderUnfoldDialog() {
             ImGui::TextColored(ImVec4(0.6f, 0.8f, 1.0f, 1.0f),
                 materializr::tr("Conformal unwrap — one piece, up to %.0f%% area stretch (a pliable material takes up the difference)."), fp.distortionPct);
         else
-            ImGui::TextDisabled(materializr::tr("Conformal unwrap — one piece, ~no stretch."));
+            ImGui::TextDisabled("%s", materializr::tr("Conformal unwrap — one piece, ~no stretch."));
         ImGui::PopTextWrapPos();
     } else if (fp.curvatureDeg > 12.0) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 360.0f);
@@ -4881,7 +4859,7 @@ void Application::renderUnfoldDialog() {
     } else if (fp.curvatureDeg > 1.5) {
         ImGui::TextDisabled(materializr::tr("Nearly developable (~%.1f° curvature)."), fp.curvatureDeg);
     } else {
-        ImGui::TextDisabled(materializr::tr("Developable — unrolls exactly."));
+        ImGui::TextDisabled("%s", materializr::tr("Developable — unrolls exactly."));
     }
 
     // ── Layout: rotate the pattern + preview the PDF page split ──
@@ -4889,10 +4867,10 @@ void Application::renderUnfoldDialog() {
     ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");
     ImGui::SameLine();
     if (ImGui::Button("-", materializr::uiSz(24, 0))) { m_unfoldRotationDeg -= 1.0f; if (m_unfoldRotationDeg < -180.0f) m_unfoldRotationDeg += 360.0f; }
-    ImGui::SetItemTooltip(materializr::tr("Rotate -1°"));
+    ImGui::SetItemTooltip("%s", materializr::tr("Rotate -1°"));
     ImGui::SameLine();
     if (ImGui::Button("+", materializr::uiSz(24, 0))) { m_unfoldRotationDeg += 1.0f; if (m_unfoldRotationDeg > 180.0f) m_unfoldRotationDeg -= 360.0f; }
-    ImGui::SetItemTooltip(materializr::tr("Rotate +1°"));
+    ImGui::SetItemTooltip("%s", materializr::tr("Rotate +1°"));
     ImGui::SameLine();
     if (ImGui::Button("+90°")) {
         m_unfoldRotationDeg += 90.0f;
@@ -4916,7 +4894,7 @@ void Application::renderUnfoldDialog() {
         }
         m_unfoldRotationDeg = bestAng;
     }
-    ImGui::SetItemTooltip(materializr::tr("Rotate to the orientation that needs the fewest PDF pages."));
+    ImGui::SetItemTooltip("%s", materializr::tr("Rotate to the orientation that needs the fewest PDF pages."));
 
     // The rotated pattern drives the canvas AND the exporters — what you see is
     // what you get.
@@ -5040,7 +5018,7 @@ void Application::renderUnfoldDialog() {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(110);
         ImGui::Combo(materializr::tr("Marks"), &m_unfoldRegDensity, "None\0Sparse\0Normal\0Dense\0");
-        ImGui::SetItemTooltip(materializr::tr("Alignment crosses in the page overlaps for precise assembly."));
+        ImGui::SetItemTooltip("%s", materializr::tr("Alignment crosses in the page overlaps for precise assembly."));
     }
     if (ImGui::Button(materializr::tr("Export…"), materializr::uiSz(110, 0))) {
         const double th = m_unfoldThicknessMm;
