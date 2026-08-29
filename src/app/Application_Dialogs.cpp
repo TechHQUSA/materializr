@@ -1621,7 +1621,7 @@ void Application::renderThreadPanel() {
             materializr::inputNumber("##thrClr", &m_threadClearance, 0.05f, 0.1f, "%.2f");
             if (m_threadClearance < 0.0f) m_threadClearance = 0.0f;
             ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
-            ImGui::SetItemTooltip(materializr::tr("Radial gap so a PRINTED thread fits its mate (0.2\xE2\x80\x93""0.4mm typical). 0 = exact."));
+            ImGui::SetItemTooltip("%s", materializr::tr("Radial gap so a PRINTED thread fits its mate (0.2\xE2\x80\x93""0.4mm typical). 0 = exact."));
         }
         // Groove width: normally a fixed fraction of the pitch, so a coarse
         // pitch always means a wide groove. Setting it explicitly decouples
