@@ -21,12 +21,13 @@ enum class UiLayout { Classic = 0, Modern = 1, ImTouch = 2 };
 // key is missing or unreadable in the settings file.
 struct AppSettings {
     int  theme              = 0;    // 0 = Dark, 1 = Light
-    // Desktop interface scale on Linux (Settings → Appearance → Interface
-    // scale). Linux/Xwayland X11 clients get no compositor-side HiDPI scaling,
-    // so on a high-DPI panel the UI renders tiny; this lets the user pick.
-    // 1.0 = Low DPI (default, unchanged), 2.0 = High DPI. Applied at startup
-    // (fonts bake at 15×scale), so a change needs a restart. Ignored on
-    // Windows/macOS (they scale via DPI-awareness / Retina framebuffer).
+    // LEGACY — read and written so an existing settings file round-trips, but
+    // NOTHING consumes it any more. The Linux desktop scale used to be a manual
+    // Low/High pick here (Settings → Appearance, plus a first-run picker)
+    // because DPI auto-detection was believed unreliable on X11/Xwayland. It
+    // isn't: SDL reads the per-OUTPUT RandR physical size and gets the true DPI
+    // (see Window::linuxAutoUiScale), so the scale is detected and both pickers
+    // are gone. --ui-scale is the escape hatch. Don't wire this back up.
     float desktopUiScale    = 1.0f;
     // Touch mode: large UI + touch-gesture interaction. Defaults on for Android,
     // off elsewhere; a saved setting so a tablet with a mouse/keyboard can run
@@ -182,6 +183,13 @@ struct AppSettings {
     // Line angle-snap increment in degrees (0 = off). The line tool snaps its
     // direction to multiples of this from the segment anchor. Default 15.
     int  angleSnapDeg = 15;
+
+    // --- Language ---
+    // UI language index; mirrors materializr::Lang (0 = English, then Spanish,
+    // Portuguese, French, German, Italian). Kept as an int so this header does
+    // not depend on i18n.h. -1 means "never chosen", which is what makes the
+    // setup wizard ask on first run.
+    int  language = -1;
 
     // --- STL import ---
     // Default fidelity for STL import, 0..1 (coarse/fast .. faithful/slow). Pre-

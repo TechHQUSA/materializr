@@ -1,12 +1,13 @@
 #include "ui_layout_bridge.h"
+#include "../i18n.h"
 
 namespace materializr {
 
 namespace {
 std::function<int()>     g_get;
 std::function<void(int)> g_set;
-std::function<float()>      g_getScale;
-std::function<void(float)>  g_setScale;
+std::function<int()>     g_langGet;
+std::function<void(int)> g_langSet;
 } // namespace
 
 int currentUiLayoutIndex() { return g_get ? g_get() : 0; }
@@ -20,15 +21,23 @@ void bindUiLayoutBridge(std::function<int()> get, std::function<void(int)> set) 
     g_set = std::move(set);
 }
 
-float currentUiScalePref() { return g_getScale ? g_getScale() : 1.0f; }
+int currentLanguageIndex() { return g_langGet ? g_langGet() : -1; }
 
-void requestUiScalePref(float scale) {
-    if (g_setScale && scale > 0.0f) g_setScale(scale);
+void requestLanguage(int index) {
+    if (index < 0 || index >= languageCount()) return;
+    // Switch the live UI first so the caller's own frame is already translated,
+    // then persist. setLanguage is cheap (one hash-map rebuild) and needs no
+    // font atlas work, so this is safe to call mid-frame.
+    setLanguage(static_cast<Lang>(index));
+    if (g_langSet) g_langSet(index);
 }
 
-void bindUiScaleBridge(std::function<float()> get, std::function<void(float)> set) {
-    g_getScale = std::move(get);
-    g_setScale = std::move(set);
+void bindLanguageBridge(std::function<int()> get, std::function<void(int)> set) {
+    g_langGet = std::move(get);
+    g_langSet = std::move(set);
 }
+
+
+
 
 } // namespace materializr

@@ -1,6 +1,7 @@
 #pragma once
 #include "../core/Operation.h"
 #include "../core/Document.h"
+#include <TopoDS_Shape.hxx>
 #include <TopoDS_Wire.hxx>
 #include <vector>
 #include <string>
@@ -20,6 +21,13 @@ public:
     void clearProfiles();
     void setSolid(bool solid);   // true = solid, false = shell
     void setRuled(bool ruled);   // true = ruled surface, false = smooth
+    // BRIDGE MODE: every section came from a face of ONE body. Instead of
+    // adding the loft as a new body (which then cannot be unioned -- the fuse
+    // of skin-tight tangent contact defeats OCCT at every setting), the loft
+    // CONSUMES those faces: they are removed from the body, the loft walls are
+    // sewn into the holes, and the body is replaced by the single merged
+    // solid. No boolean runs at any point.
+    void setBridge(int bodyId, const std::vector<TopoDS_Shape>& sourceFaces);
 
     // Getters
     bool isSolid() const { return m_solid; }
@@ -47,6 +55,11 @@ private:
     std::vector<std::vector<TopoDS_Wire>> m_holeProfiles;
     bool m_solid = true;
     bool m_ruled = false;
+    // Bridge mode (see setBridge). previousShape backs undo.
+    int m_bridgeBodyId = -1;
+    std::vector<TopoDS_Shape> m_bridgeFaces;
+    TopoDS_Shape m_bridgePreviousShape;
+    bool m_bridged = false;   // this execute() replaced the body (vs added one)
 
     // For undo
     int m_createdBodyId = -1;

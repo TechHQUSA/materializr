@@ -347,7 +347,8 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         for (const auto& p : pts)
             ofs << "P " << p.id << " " << p.pos.x << " " << p.pos.y << " "
                 << (p.isConstruction ? 1 : 0) << " "
-                << (p.fromText ? 1 : 0) << "\n";
+                << (p.fromText ? 1 : 0) << " "
+                << p.onCurveId << "\n";
 
         const auto& lns = sk->getLines();
         ofs << "LINE_COUNT " << static_cast<int>(lns.size()) << "\n";
@@ -687,6 +688,11 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 std::istringstream s(line); std::string t; SketchPoint p; int c = 0;
                 s >> t >> p.id >> p.pos.x >> p.pos.y >> c; p.isConstruction = (c != 0);
                 int ft = 0; if (s >> ft) p.fromText = (ft != 0); // optional (added post-0.8.4)
+                // The sticky circle/arc attachment, also optional: a file from
+                // before it existed simply has a free point, which is what the
+                // default already says. Trailing token so an older build reads
+                // this file and ignores it rather than choking.
+                int oc = -1; if (s >> oc) p.onCurveId = oc;
                 bump(p.id); sk.addRawPoint(p);
             }
         } else if (tok == "LINE_COUNT") {
@@ -1552,7 +1558,8 @@ void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
     os << "POINT_COUNT " << static_cast<int>(pts.size()) << "\n";
     for (const auto& p : pts)
         os << "P " << p.id << " " << p.pos.x << " " << p.pos.y << " "
-           << (p.isConstruction ? 1 : 0) << " " << (p.fromText ? 1 : 0) << "\n";
+           << (p.isConstruction ? 1 : 0) << " " << (p.fromText ? 1 : 0) << " "
+           << p.onCurveId << "\n";
 
     const auto& lns = sk.getLines();
     os << "LINE_COUNT " << static_cast<int>(lns.size()) << "\n";

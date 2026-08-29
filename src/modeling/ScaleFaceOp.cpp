@@ -34,6 +34,8 @@
 #include <gp_Pln.hxx>
 #include <imgui.h>
 #include "../ui/NumField.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 ScaleFaceOp::ScaleFaceOp() = default;
 
@@ -276,13 +278,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         // split — the grown cap arrived as the ORIGINAL top disc plus a
         // coplanar annulus stacked at the same height. Merge them, the same
         // way Push/Pull does after its cut/fuse.
-        try {
-            ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
-            unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-            unifier.Build();
-            TopoDS_Shape unified = unifier.Shape();
-            if (!unified.IsNull()) result = unified;
-        } catch (...) {}
+        result = materializr::unifySameDomain(result, "ScaleFace");
 
         // Sanity: the result must still have volume, and pinch must not
         // have annihilated the body.
@@ -324,13 +320,13 @@ std::string ScaleFaceOp::description() const {
 }
 
 void ScaleFaceOp::renderProperties() {
-    ImGui::Text("Scale Face");
+    ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
-    materializr::inputNumber("Scale U (%)", &m_scaleU, 1.0, 10.0, "%.1f");
-    materializr::inputNumber("Scale V (%)", &m_scaleV, 1.0, 10.0, "%.1f");
-    materializr::inputNumber("Length (mm)", &m_length, 0.5, 5.0, "%.2f");
-    ImGui::Text("Mode: %s", m_mode == Mode::Extend ? "Extend" : "Pinch");
-    ImGui::Text("Body ID: %d", m_bodyId);
+    materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");
+    materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");
+    materializr::inputNumber(materializr::tr("Length (mm)"), &m_length, 0.5, 5.0, "%.2f");
+    ImGui::Text(materializr::tr("Mode: %s"), m_mode == Mode::Extend ? "Extend" : "Pinch");
+    ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
 }
 
 std::string ScaleFaceOp::serializeParams() const {

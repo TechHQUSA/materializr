@@ -4,6 +4,7 @@
 #include "touch_mode.h"
 #include "gl_common.h"
 #include <chrono>
+#include <cstdio>
 
 #include <cstdlib>
 #include <filesystem>
@@ -87,6 +88,8 @@ namespace materializr { namespace force_link { void linkAll(); } }
 
 #include <imgui.h>
 #include <imgui_internal.h> // FindWindowByName/DockBuilder: viewport re-dock after im-touch
+#include "../i18n.h"
+#include "../i18n.h"
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -98,6 +101,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Geom_Plane.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -611,8 +615,14 @@ void Application::renderViewport() {
         // plane quads) draw between the grid/background and the body/edge
         // pass. PluginContext receives the same view+proj, and each pass'
         // initialize() ran in initRenderers so GL state is ready.
-        // Passes that draw BEHIND geometry. The reference photo (priority 490)
-        // belongs here: it is meant to be traced over.
+        // Passes that draw BEHIND geometry. Nothing registers here today: the
+        // reference photo used to (priority 490, "it is meant to be traced
+        // over"), but drawing early does NOT put a translucent overlay behind
+        // the model — with glDepthMask(GL_FALSE) it leaves no depth, so it
+        // loses to every body regardless of where it actually sits in 3D. A
+        // photo the camera is nearer to than the part vanished anyway. Depth
+        // TEST does the "behind" part correctly on its own, so the photo moved
+        // up with the planes (see the in-front block below).
         if (m_pluginContext) {
             for (auto& pass :
                  materializr::PluginRegistry::instance().renderPasses()) {
@@ -718,7 +728,8 @@ void Application::renderViewport() {
         }
         m_shapeRenderer->render(view, proj, cam.getPosition());
         m_edgeRenderer->render(view, proj);
-        // Passes that draw IN FRONT — construction planes (500) and axes (501),
+        // Passes that draw IN FRONT — the reference photo (500), construction
+        // planes (501) and axes (502),
         // which is what both already claim ("above body") but never got: the
         // whole block ran before the bodies, and PlaneRenderer draws with
         // glDepthMask(GL_FALSE). Correct for a transparent overlay, but it
@@ -1977,7 +1988,7 @@ void Application::renderViewport() {
                             // matches Modern. The placeholder shows the dragged
                             // diameter until you type an exact value; empty
                             // buffer = keep the drag (handled at commit).
-                            ImGui::TextDisabled("Diameter (mm)");
+                            ImGui::TextDisabled("%s", materializr::tr("Diameter (mm)"));
                             char hint[32];
                             std::snprintf(hint, sizeof(hint), "%.1f (drag)", diaNow);
                             ImGui::SetNextItemWidth(touchui::numberPadWidth(keySide));
@@ -2010,11 +2021,11 @@ void Application::renderViewport() {
                             const float fieldW = touchui::numberPadWidth(keySide);
                             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                                 ImVec2(uiW(10.0f), uiW(10.0f)));
-                            ImGui::TextDisabled("Width (mm)");
+                            ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
                             ImGui::SetNextItemWidth(fieldW);
                             materializr::inputNumber("##bubbleW", &m_sketchShapeDimW,
                                               0.0f, 0.0f, "%.2f");
-                            ImGui::TextDisabled("Height (mm)");
+                            ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
                             ImGui::SetNextItemWidth(fieldW);
                             materializr::inputNumber("##bubbleH", &m_sketchShapeDimH,
                                               0.0f, 0.0f, "%.2f");
@@ -2108,6 +2119,7 @@ void Application::renderViewport() {
                         case InferenceGuide::Endpoint:
                         case InferenceGuide::Midpoint:
                         case InferenceGuide::OnLine:
+                        case InferenceGuide::OnCircle:
                             // Markers: shape carries the meaning.
                             break;
                         case InferenceGuide::AxisHFromPoint:
@@ -2150,8 +2162,11 @@ void Application::renderViewport() {
                         ImVec2 t2(sa.x + r,     sa.y + r * 0.6f);
                         dl->AddTriangle(t0, t1, t2, halo, 4.0f);
                         dl->AddTriangle(t0, t1, t2, col, 2.5f);
-                    } else if (g.kind == InferenceGuide::OnLine) {
-                        // Diamond marker with halo.
+                    } else if (g.kind == InferenceGuide::OnLine ||
+                               g.kind == InferenceGuide::OnCircle) {
+                        // Diamond marker with halo. A rim landing gets the same
+                        // shape as an on-edge landing because it means the same
+                        // thing to the user — the point is ON that geometry.
                         const float r = 5.0f;
                         ImVec2 d0(sa.x,     sa.y - r);
                         ImVec2 d1(sa.x + r, sa.y);
@@ -2222,14 +2237,22 @@ void Application::renderViewport() {
                 // so the user sees exactly where it will land before
                 // clicking. Baseline drawn solid for orientation.
                 if ((m_sketchTool->getMode() == SketchToolMode::Text ||
-                     m_sketchTool->getMode() == SketchToolMode::Svg) &&
+                     m_sketchTool->getMode() == SketchToolMode::Svg ||
+                     m_sketchTool->getMode() == SketchToolMode::Airfoil) &&
                     m_sketchTool->hasTextPreviewBox()) {
                     const glm::vec2 anchor = m_sketchTool->getCurrentPos();
                     const glm::vec2 mn = m_sketchTool->getTextPreviewMin();
                     const glm::vec2 mx = m_sketchTool->getTextPreviewMax();
-                    // Anchor at the box CENTER (not baseline-left), matching the
-                    // SVG tool and the stamp in handleTextTool.
-                    const glm::vec2 center = (mn + mx) * 0.5f;
+                    // Anchor the box where the STAMP actually anchors, or the
+                    // preview lies about where the geometry will land. Text and
+                    // SVG stamp about their bounding-box centre; an airfoil
+                    // stamps its LEADING EDGE, which is box-space (0,0) -- the
+                    // box was drawn centred for it and the profile then landed
+                    // half a chord away from where it was shown.
+                    const glm::vec2 center =
+                        (m_sketchTool->getMode() == SketchToolMode::Airfoil)
+                            ? glm::vec2(0.0f, 0.0f)
+                            : (mn + mx) * 0.5f;
                     const float a = glm::radians(
                         static_cast<float>(m_sketchTool->getTextAngle()));
                     const float ca = std::cos(a), sa2 = std::sin(a);
@@ -2443,18 +2466,24 @@ void Application::renderViewport() {
                 // killer SketchUp feature ("Endpoint" / "On midpoint" /
                 // "Perpendicular" floating next to the crosshair).
                 if (!m_sketchTool->getActiveInferences().empty()) {
-                    auto kindName = [](InferenceGuide::Kind k) -> const char* {
+                    // The angle-snap increment is a setting, so the label has to
+                    // read it rather than claim 15 degrees.
+                    char angleLbl[32];
+                    std::snprintf(angleLbl, sizeof(angleLbl), "Angle Snap (%d\xc2\xb0)",
+                                  m_sketchTool->getAngleSnapDeg());
+                    auto kindName = [&](InferenceGuide::Kind k) -> const char* {
                         switch (k) {
                             case InferenceGuide::Endpoint:       return "Endpoint";
                             case InferenceGuide::Midpoint:       return "Midpoint";
                             case InferenceGuide::OnLine:         return "On Line";
+                            case InferenceGuide::OnCircle:       return "On Circle";
                             case InferenceGuide::AxisHFromPoint: return "On Horizontal Axis";
                             case InferenceGuide::AxisVFromPoint: return "On Vertical Axis";
                             case InferenceGuide::PerpToPrev:     return "Perpendicular";
                             case InferenceGuide::ParallelToPrev: return "Parallel";
-                            case InferenceGuide::AngleSnap:      return "Angle Snap (15°)";
+                            case InferenceGuide::AngleSnap:      return angleLbl;
                             case InferenceGuide::OnLineExtension: return "On Line Extension";
-                            case InferenceGuide::TangentToCircle: return "Tangent to Circle";
+                            case InferenceGuide::TangentToCircle: return "Tangent";
                             case InferenceGuide::PerpToRef:       return "Perpendicular from Point";
                             case InferenceGuide::Symmetry:        return "Symmetry";
                         }
@@ -3040,7 +3069,7 @@ void Application::renderViewport() {
                         ImGuiStyleVar_WindowPadding,
                         ImVec2(8.0f * uiScale(), 8.0f * uiScale()));
                     if (ImGui::BeginPopup("##DimEdit")) {
-                        ImGui::TextUnformatted("Edit dimension");
+                        ImGui::TextUnformatted(materializr::tr("Edit dimension"));
                         ImGui::Separator();
                         if (m_dimEditingFocus) {
                             ImGui::SetKeyboardFocusHere();
@@ -3112,7 +3141,7 @@ void Application::renderViewport() {
                             if (cur && constraintSupportsReference(cur->type)) {
                                 ImGui::Spacing();
                                 bool drv = cur->isDriving;
-                                if (ImGui::Checkbox("Driving", &drv)) {
+                                if (ImGui::Checkbox(materializr::tr("Driving"), &drv)) {
                                     recordSketchMutation([&]{
                                         for (auto& cn : m_activeSketch->getMutableConstraints()) {
                                             if (cn.id != m_dimEditingId) continue;
@@ -3137,7 +3166,7 @@ void Application::renderViewport() {
                             int eqA = -1, eqB = -1;
                             if (cur && dimensionEqualPair(*m_activeSketch, *cur, eqA, eqB)) {
                                 ImGui::Spacing();
-                                if (ImGui::Button("Make equal")) {
+                                if (ImGui::Button(materializr::tr("Make equal"))) {
                                     int convId = m_dimEditingId;
                                     recordSketchMutation([&]{
                                         for (auto& cn : m_activeSketch->getMutableConstraints()) {
@@ -3157,13 +3186,13 @@ void Application::renderViewport() {
                                     ImGui::CloseCurrentPopup();
                                 }
                                 ImGui::SameLine();
-                                ImGui::TextDisabled("(equal length / radius)");
+                                ImGui::TextDisabled("%s", materializr::tr("(equal length / radius)"));
                             }
                         }
                         // Delete removes the dimension constraint entirely, as
                         // one undoable step ("Remove …" in History).
                         ImGui::Spacing();
-                        if (ImGui::Button("Delete") ||
+                        if (ImGui::Button(materializr::tr("Delete")) ||
                             ImGui::IsKeyPressed(ImGuiKey_Delete, false) ||
                             ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
                             int delId = m_dimEditingId;
@@ -3177,7 +3206,7 @@ void Application::renderViewport() {
                             ImGui::CloseCurrentPopup();
                         }
                         ImGui::SameLine();
-                        ImGui::TextDisabled("(Del)");
+                        ImGui::TextDisabled("%s", materializr::tr("(Del)"));
                         ImGui::EndPopup();
                     } else {
                         // Popup closed without committing — drop edit state.
@@ -3373,7 +3402,8 @@ void Application::renderViewport() {
             bool gizmoOwnsDrag = m_gizmoDragging ||
                                  anyIopDraggingHandle() ||
                                  m_edgeCtl.dragging() ||
-                                 m_ppCtl.sticky();
+                                 m_ppCtl.sticky() ||
+                                 m_extrudeCtl.sticky();
             if (materializr::touchMode()) {
                 // A one-finger press-and-hold drives box-select, not orbit/pan — so
                 // suppress the camera drag (and the two-finger consume below) while
@@ -3385,6 +3415,22 @@ void Application::renderViewport() {
             // (touch has no hover), so don't orbit. Two-finger pan/zoom still
             // works — it's gated on gizmoOwnsDrag, not this local.
             bool suppressCamDrag = gizmoOwnsDrag;
+            // Shift+Left is the trackpad-mode pan gesture (orbit and pan are
+            // both bound to Left, so Shift is the only thing telling them
+            // apart). It has to lock the tools out from the PRESS frame, not
+            // just once the drag is recognised: camDragging below only turns
+            // true after ImGui's drag threshold, and a drawing tool places its
+            // point on the press — so Shift+drag panned AND left a stray line
+            // or circle behind, unless the user first switched to Select
+            // (Steve: "i cannot do that without first changing to select/move,
+            // otherwise i am drawing sketch elements even if i shift+click").
+            // Shift means nothing to the sketch tools or the viewport picker
+            // (multi-select is Ctrl), so swallowing it costs nothing. Touch
+            // pans with two fingers and has no Shift to hold.
+            const bool shiftPanGesture =
+                !materializr::touchMode() && io.KeyShift &&
+                (m_orbitButton == ImGuiMouseButton_Left ||
+                 m_panButton   == ImGuiMouseButton_Left);
             // A primary drag should drive the ACTIVE TOOL, not the camera, while a
             // tool owns it. In sketch mode that's the rubber-band; during an
             // interactive op it's the op's arrow/handle (push/pull, extrude, edge
@@ -3415,7 +3461,21 @@ void Application::renderViewport() {
                 // while sketching. Shift held → don't suppress → the Shift-pan
                 // below fires and camDragging turns the sketch input off, so it
                 // pans without also drawing.
-                if (toolWantsDrag && leftIsCamera && !io.KeyShift) suppressCamDrag = true;
+                // Handle-aware, not blanket. The blanket version locked the
+                // camera for the WHOLE op, so in trackpad mode (orbit and pan
+                // both on Left) there was no way to orbit while a fillet /
+                // chamfer / push-pull was underway. The controllers hit-test
+                // on the press frame (edge arrows within 12 px, gizmo axes,
+                // push-pull sticky), so gizmoOwnsDrag already says whether
+                // THIS drag is the op's -- an empty-canvas drag orbits, a
+                // handle drag drives the value, exactly like default
+                // bindings where middle-orbit stays live during an op.
+                // Sketch mode keeps the blanket: the rubber-band preview
+                // owns the cursor with no handle to test against.
+                if (leftIsCamera && !shiftPanGesture) {
+                    if (m_inSketchMode) suppressCamDrag = true;
+                    else if (toolWantsDrag) suppressCamDrag = gizmoOwnsDrag;
+                }
                 // Alt+Left-drag is reserved for box-select when left IS the camera
                 // (trackpad / left-orbit mode) — Alt is otherwise unused, and Shift
                 // is already pan. Don't let it orbit; the box-select code below
@@ -4261,6 +4321,35 @@ void Application::renderViewport() {
                                 // PlaneTransformOp (before = m_planeGizmoDrag's
                                 // stored pose, after = current) so Ctrl+Z works.
                                 // One batched op covers a multi-plane drag.
+                                // A plane still being previewed by the Construction
+                                // Plane popup is ALREADY in the document, so the gizmo
+                                // will happily drag it -- but its ConstructionPlaneOp
+                                // does not reach history until the popup is committed.
+                                // Recording the move first leaves history in an order
+                                // that cannot replay: move, move, then create. On the
+                                // next load the moves apply and the creation then puts
+                                // the plane back at its birth pose, so a plane the user
+                                // positioned and saved reopens at the origin.
+                                //
+                                // Seen on robot dog cover.mzr: of 156 steps exactly one
+                                // ran backwards in time -- the construction_plane at
+                                // t=1787594362 sitting after its own moves at t=...368
+                                // and t=...377, with the saved CPLANE back at (0,0,0)
+                                // despite the moves recording (0,0,0) -> (-84,0,0) ->
+                                // (-84,65,0).
+                                //
+                                // So commit the creation before recording the move. The
+                                // user dragging the previewed plane is a clear enough
+                                // signal they want to keep it; Esc after this undoes
+                                // both steps rather than discarding the preview, which
+                                // is the ordinary history behaviour.
+                                if (m_planeOpActive) {
+                                    std::fprintf(stderr,
+                                        "[Plane] gizmo moved a plane still previewed by the "
+                                        "popup - committing its creation first so history "
+                                        "stays in order.\n");
+                                    commitConstructionPlane();
+                                }
                                 if (m_history) {
                                     std::vector<PlaneTransformOp::Entry> entries;
                                     for (auto& [pid, plnBefore] : m_planeGizmoDrag) {
@@ -4668,7 +4757,8 @@ void Application::renderViewport() {
                         !m_ppCtl.active() && !m_extrudeCtl.active() &&
                         !m_patternActive && !anyIopActive() &&
                         !m_threadActive &&
-                        !m_moveModeToggle;   // Move (nav lock): taps don't select
+                        !m_moveModeToggle &&  // Move (nav lock): taps don't select
+                        !shiftPanGesture;     // Shift+Left is a pan, not a pick
                     // Touch: commit selection on a GENUINE tap-LIFT (Window::
                     // consumeSingleTap), not the press frame — else the first
                     // finger-down of a following nav gesture (one-finger orbit /
@@ -5296,10 +5386,14 @@ void Application::renderViewport() {
 
             // Sketch mode mouse input — ray-plane intersection. Skipped while
             // the camera is being dragged so the in-progress preview (e.g. the
-            // line endpoint following the cursor) doesn't jolt as the view moves.
+            // line endpoint following the cursor) doesn't jolt as the view moves,
+            // and while Shift is held in trackpad mode — that press belongs to
+            // the pan gesture, and a drawing tool would otherwise place its point
+            // on it before the drag was ever recognised (see shiftPanGesture).
             // Suppress while the ViewCube widget is being hovered/dragged so its
             // click doesn't pass through and start a line draw underneath.
             if (m_inSketchMode && m_activeSketch && !camDragging &&
+                !shiftPanGesture &&
                 !m_viewCube->wasHovered() && !m_snapWidgetHovered &&
                 !m_revolveArcWasHovered) {
                 ImVec2 mousePos = ImGui::GetMousePos();
@@ -5742,8 +5836,7 @@ void Application::renderViewport() {
                         ImVec2(8.0f * uiScale(), 8.0f * uiScale()));
                     if (ImGui::BeginPopup("##SketchRotateAdjust",
                                           ImGuiWindowFlags_AlwaysAutoResize)) {
-                        ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f),
-                                           "Rotation (deg)");
+                        ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.30f, 1.0f), "%s", materializr::tr("Rotation (deg)"));
                         ImGui::SetNextItemWidth(150.0f);
                         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
                         float rotPadV = m_sketchGizmoRotateDegrees;
@@ -5773,9 +5866,9 @@ void Application::renderViewport() {
                             }
                         }
                         ImGui::Separator();
-                        bool apply  = ImGui::Button("Apply", ImVec2(70, 0)) || typedEnter;
+                        bool apply  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(70, 0)) || typedEnter;
                         ImGui::SameLine();
-                        bool cancel = ImGui::Button("Cancel", ImVec2(70, 0));
+                        bool cancel = ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(70, 0));
 
                         if (apply) {
                             float deg = m_sketchGizmoRotateDegrees;
@@ -6436,7 +6529,7 @@ void Application::renderViewport() {
                 bool hov = ImGui::IsItemHovered();
                 if (m_moveModeToggle) ImGui::PopStyleColor(3);
                 if (clicked) m_moveModeToggle = !m_moveModeToggle;
-                if (hov) ImGui::SetTooltip("Navigation lock: one finger orbits;\ntaps don't draw or select");
+                if (hov) ImGui::SetTooltip("%s", materializr::tr("Navigation lock: one finger orbits;\ntaps don't draw or select"));
                 anyBtn = true;
             }
 
@@ -6455,7 +6548,7 @@ void Application::renderViewport() {
                         m_multiSelectToggle = !m_multiSelectToggle;
                     bool hov = ImGui::IsItemHovered();
                     if (pops) ImGui::PopStyleColor(pops);
-                    if (hov) ImGui::SetTooltip("Add taps to the current selection\n(the touch equivalent of holding Ctrl)");
+                    if (hov) ImGui::SetTooltip("%s", materializr::tr("Add taps to the current selection\n(the touch equivalent of holding Ctrl)"));
                 }
 
                 // Delete the selected sketch elements — the touch twin of the
@@ -6470,7 +6563,7 @@ void Application::renderViewport() {
                     bool dhov = ImGui::IsItemHovered();
                     ImGui::PopStyleColor(2);
                     if (del) deleteSelectedSketchElements();
-                    if (dhov) ImGui::SetTooltip("Delete the selected sketch elements (undoable)");
+                    if (dhov) ImGui::SetTooltip("%s", materializr::tr("Delete the selected sketch elements (undoable)"));
                 }
             }
             if (placing && classicLayout()) {
@@ -6498,7 +6591,7 @@ void Application::renderViewport() {
                         bool fhov = ImGui::IsItemHovered();
                         ImGui::PopStyleColor(2);
                         if (finish) recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
-                        if (fhov) ImGui::SetTooltip("Finish the current shape, keeping the points placed");
+                        if (fhov) ImGui::SetTooltip("%s", materializr::tr("Finish the current shape, keeping the points placed"));
                     }
                     // "Back" drops the last placed segment / control point and
                     // keeps the chain going. Only when there is one to drop.
@@ -6514,7 +6607,7 @@ void Application::renderViewport() {
                         bool bhov = ImGui::IsItemHovered();
                         ImGui::PopStyleColor(2);
                         if (back) sketchChainBack();
-                        if (bhov) ImGui::SetTooltip("Remove the last segment and keep drawing");
+                        if (bhov) ImGui::SetTooltip("%s", materializr::tr("Remove the last segment and keep drawing"));
                     }
                     // "Cancel" — for a chain, discard the WHOLE chain; for arc,
                     // discard the in-progress shape.
@@ -6556,7 +6649,7 @@ void Application::renderViewport() {
         // pick from a double-click body pick the way a mouse does). Each branch
         // first selects its entity, then lists its specific actions; body-level
         // actions that aren't face-specific are dual-listed under both.
-        ImGui::TextColored(materializr::accentText(), "Object");
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Object"));
         ImGui::Separator();
 
         const int bid = m_contextMenuBodyId;
@@ -6564,12 +6657,26 @@ void Application::renderViewport() {
         // Shared body-level actions — they operate on the whole body the face
         // belongs to, so they appear under both the Face and Body branches.
         auto sharedBodyOps = [&]() {
+            // Lay Flat: planar faces only -- the alignment needs a face
+            // normal that means something over the whole face.
+            if (!m_contextMenuFace.IsNull() &&
+                m_contextMenuFace.ShapeType() == TopAbs_FACE) {
+                bool planar = false;
+                try {
+                    planar = BRepAdaptor_Surface(TopoDS::Face(m_contextMenuFace))
+                                 .GetType() == GeomAbs_Plane;
+                } catch (...) {}
+                if (planar && ImGui::MenuItem(materializr::tr("Lay Flat on Plane…"))) {
+                    beginAlignFaceToPlane(bid, m_contextMenuFace);
+                    m_contextMenuFace.Nullify();
+                }
+            }
             // Both actions change visibility flags, and the renderer only
             // reflects those on a rebuild — m_meshesDirty is required or the
             // menu item "doesn't seem to do anything" (markDirty() alone only
             // flags the PROJECT as unsaved). The full rebuild skips invisible
             // bodies, so post-isolate it re-tessellates just the one body.
-            if (ImGui::MenuItem("Isolate")) {
+            if (ImGui::MenuItem(materializr::tr("Isolate"))) {
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, o == bid);
                 markDirty();
@@ -6578,7 +6685,7 @@ void Application::renderViewport() {
             }
             // The way back from Isolate — without this the only recovery is
             // re-ticking every body's checkbox in the Items panel.
-            if (ImGui::MenuItem("Show All Bodies")) {
+            if (ImGui::MenuItem(materializr::tr("Show All Bodies"))) {
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, true);
                 markDirty();
@@ -6595,7 +6702,7 @@ void Application::renderViewport() {
                 std::vector<std::string> fmts;
                 for (const auto& f : PluginRegistry::instance().ioFormats())
                     if (f.canExport && f.exportDocFn) fmts.push_back(f.name);
-                if (!fmts.empty() && ImGui::BeginMenu("Export")) {
+                if (!fmts.empty() && ImGui::BeginMenu(materializr::tr("Export"))) {
                     std::vector<int> targets;
                     if (m_selection) {
                         for (const auto& e : m_selection->getSelection())
@@ -6607,7 +6714,7 @@ void Application::renderViewport() {
                         std::find(targets.begin(), targets.end(), bid) != targets.end();
                     if (!multi) { targets.clear(); targets.push_back(bid); }
                     if (multi)
-                        ImGui::TextDisabled("%zu selected bodies", targets.size());
+                        ImGui::TextDisabled(materializr::tr("%zu selected bodies"), targets.size());
                     for (const auto& fmt : fmts) {
                         if (ImGui::MenuItem((fmt + "…").c_str())) {
                             exportBodiesAs(targets, fmt);
@@ -6620,7 +6727,7 @@ void Application::renderViewport() {
             // Baked copy of this body into a fresh project — the "use this
             // part elsewhere" flow. Single body by design (it names the new
             // file after the part), so it stays out of the Export submenu.
-            if (ImGui::MenuItem("Export to New Project")) {
+            if (ImGui::MenuItem(materializr::tr("Export to New Project"))) {
                 std::vector<int> targets;
                 if (m_selection) {
                     for (const auto& e : m_selection->getSelection())
@@ -6642,7 +6749,7 @@ void Application::renderViewport() {
             TopoDS_Shape bshape;
             try { bshape = m_document->getBody(bid); } catch (...) {}
             if (m_history && SeparateBodyOp::solidCount(bshape) > 1) {
-                if (ImGui::MenuItem("Separate")) {
+                if (ImGui::MenuItem(materializr::tr("Separate"))) {
                     auto op = std::make_unique<SeparateBodyOp>();
                     op->setBody(bid);
                     m_history->pushOperation(std::move(op), *m_document);
@@ -6678,8 +6785,8 @@ void Application::renderViewport() {
             }
         };
 
-        if (!m_contextMenuFace.IsNull() && ImGui::BeginMenu("Face")) {
-            if (ImGui::MenuItem("Select Face")) {
+        if (!m_contextMenuFace.IsNull() && ImGui::BeginMenu(materializr::tr("Face"))) {
+            if (ImGui::MenuItem(materializr::tr("Select Face"))) {
                 SelectionEntry entry;
                 entry.type = SelectionType::Face;
                 entry.bodyId = bid;
@@ -6688,12 +6795,12 @@ void Application::renderViewport() {
                 else          m_selection->select(entry);
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Select All Edges of Face")) {
+            if (ImGui::MenuItem(materializr::tr("Select All Edges of Face"))) {
                 // All edges bounding this face — e.g. fillet a pocket's whole rim.
                 selectAllEdgesOf(m_contextMenuFace);
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Sketch on this Face")) {
+            if (ImGui::MenuItem(materializr::tr("Sketch on this Face"))) {
                 // Select the face, then enter sketch mode (enterSketchMode reads the selection)
                 SelectionEntry entry;
                 entry.type = SelectionType::Face;
@@ -6703,7 +6810,7 @@ void Application::renderViewport() {
                 enterSketchMode();
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Extrude Face")) {
+            if (ImGui::MenuItem(materializr::tr("Extrude Face"))) {
                 beginInteractiveExtrude(m_contextMenuFace, ExtrudeMode::NewBody, -1);
                 m_contextMenuFace.Nullify();
             }
@@ -6711,8 +6818,8 @@ void Application::renderViewport() {
             sharedBodyOps();
             ImGui::EndMenu();
         }
-        if (bid >= 0 && ImGui::BeginMenu("Body")) {
-            if (ImGui::MenuItem("Select Body")) {
+        if (bid >= 0 && ImGui::BeginMenu(materializr::tr("Body"))) {
+            if (ImGui::MenuItem(materializr::tr("Select Body"))) {
                 SelectionEntry entry;
                 entry.type = SelectionType::Body;
                 entry.bodyId = bid;
@@ -6721,7 +6828,7 @@ void Application::renderViewport() {
                 else          m_selection->select(entry);
                 m_contextMenuFace.Nullify();
             }
-            if (ImGui::MenuItem("Select All Edges of Body")) {
+            if (ImGui::MenuItem(materializr::tr("Select All Edges of Body"))) {
                 // Every edge on the body — e.g. break all sharp edges at once.
                 TopoDS_Shape body;
                 try { body = m_document->getBody(bid); } catch (...) {}
@@ -6735,7 +6842,7 @@ void Application::renderViewport() {
         // Sketch submenu — shown when a committed sketch is in the clicked area
         // (possibly alongside a Face/Body, e.g. a sketch lying on a face). The
         // transform actions select the sketch first so the gizmo targets it.
-        if (m_contextMenuSketchId >= 0 && ImGui::BeginMenu("Sketch")) {
+        if (m_contextMenuSketchId >= 0 && ImGui::BeginMenu(materializr::tr("Sketch"))) {
             const int sid = m_contextMenuSketchId;
             auto selectThisSketch = [&]() {
                 if (!m_selection) return;
@@ -6745,31 +6852,35 @@ void Application::renderViewport() {
                 e.sketchId = sid;
                 m_selection->addToSelection(e);
             };
-            if (ImGui::MenuItem("Edit Sketch")) {
+            if (ImGui::MenuItem(materializr::tr("Edit Sketch"))) {
                 editSketch(sid);
                 m_contextMenuSketchId = -1;
             }
-            if (ImGui::MenuItem("Export as SVG…")) {
+            if (ImGui::MenuItem(materializr::tr("Lay Flat on Plane…"))) {
+                beginAlignSketchToPlane(sid);
+                m_contextMenuSketchId = -1;
+            }
+            if (ImGui::MenuItem(materializr::tr("Export as SVG…"))) {
                 exportSketchAsSvg(sid);
                 m_contextMenuSketchId = -1;
             }
-            if (ImGui::MenuItem("Export as DXF…")) {
+            if (ImGui::MenuItem(materializr::tr("Export as DXF…"))) {
                 exportSketchAsDxf(sid);
                 m_contextMenuSketchId = -1;
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Move")) {
+            if (ImGui::MenuItem(materializr::tr("Move"))) {
                 selectThisSketch();
                 handleToolAction(static_cast<int>(ToolAction::Move));
                 m_contextMenuSketchId = -1;
             }
-            if (ImGui::MenuItem("Rotate")) {
+            if (ImGui::MenuItem(materializr::tr("Rotate"))) {
                 selectThisSketch();
                 handleToolAction(static_cast<int>(ToolAction::Rotate));
                 m_contextMenuSketchId = -1;
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Delete")) {
+            if (ImGui::MenuItem(materializr::tr("Delete"))) {
                 if (m_document) m_document->removeSketch(sid);
                 if (m_selection) m_selection->clear();
                 markDirty();
@@ -6778,7 +6889,7 @@ void Application::renderViewport() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Cancel")) {
+        if (ImGui::MenuItem(materializr::tr("Cancel"))) {
             m_contextMenuFace.Nullify();
             m_contextMenuSketchId = -1;
         }
@@ -6790,17 +6901,17 @@ void Application::renderViewport() {
     // the viewport.
     if (ImGui::BeginPopup("PlaneContextMenu")) {
         const int pid = m_contextMenuPlaneId;
-        ImGui::TextColored(materializr::accentText(), "Construction Plane");
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Plane"));
         ImGui::Separator();
-        if (ImGui::MenuItem("Flip Normal")) {
+        if (ImGui::MenuItem(materializr::tr("Flip Normal"))) {
             m_document->flipPlaneNormal(pid);
             markDirty();
         }
-        if (ImGui::MenuItem("Rotate About Axis…")) {
+        if (ImGui::MenuItem(materializr::tr("Rotate About Axis…"))) {
             beginRotatePlaneAboutAxis(pid);
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Delete")) {
+        if (ImGui::MenuItem(materializr::tr("Delete"))) {
             m_document->removePlane(pid);
             if (m_selection) m_selection->clear();
             m_contextMenuPlaneId = -1;
@@ -6823,56 +6934,56 @@ void Application::renderViewport() {
         int nArc = static_cast<int>(m_sketchTool->getSelectedArcs().size());
         int nCur = nCir + nArc; // any curve selection
         ImGui::TextColored(materializr::accentText(),
-                           "Selection: %d point%s, %d line%s, %d curve%s",
+                           materializr::tr("Selection: %d point%s, %d line%s, %d curve%s"),
                            nPts, nPts == 1 ? "" : "s",
                            nLns, nLns == 1 ? "" : "s",
                            nCur, nCur == 1 ? "" : "s");
         ImGui::Separator();
-        if (ImGui::BeginMenu("Add Constraint")) {
+        if (ImGui::BeginMenu(materializr::tr("Add Constraint"))) {
             if (nLns >= 1) {
-                if (ImGui::MenuItem("Horizontal"))
+                if (ImGui::MenuItem(materializr::tr("Horizontal")))
                     applySketchConstraint(ConstraintType::Horizontal);
-                if (ImGui::MenuItem("Vertical"))
+                if (ImGui::MenuItem(materializr::tr("Vertical")))
                     applySketchConstraint(ConstraintType::Vertical);
             }
             if (nPts >= 2) {
-                if (ImGui::MenuItem("Coincident"))
+                if (ImGui::MenuItem(materializr::tr("Coincident")))
                     applySketchConstraint(ConstraintType::Coincident);
-                if (ImGui::MenuItem("Distance … (current value)"))
+                if (ImGui::MenuItem(materializr::tr("Distance … (current value)")))
                     applySketchConstraint(ConstraintType::Distance);
             }
             if (nLns >= 2) {
-                if (ImGui::MenuItem("Parallel"))
+                if (ImGui::MenuItem(materializr::tr("Parallel")))
                     applySketchConstraint(ConstraintType::Parallel);
-                if (ImGui::MenuItem("Perpendicular"))
+                if (ImGui::MenuItem(materializr::tr("Perpendicular")))
                     applySketchConstraint(ConstraintType::Perpendicular);
-                if (ImGui::MenuItem("Equal length"))
+                if (ImGui::MenuItem(materializr::tr("Equal length")))
                     applySketchConstraint(ConstraintType::Equal);
-                if (ImGui::MenuItem("Angle … (current value)"))
+                if (ImGui::MenuItem(materializr::tr("Angle … (current value)")))
                     applySketchConstraint(ConstraintType::Angle);
             }
             if (nPts >= 1) {
-                if (ImGui::MenuItem("Fix Position"))
+                if (ImGui::MenuItem(materializr::tr("Fix Position")))
                     applySketchConstraint(ConstraintType::Fixed);
             }
             if (nCur >= 1) {
-                if (ImGui::MenuItem("Radius … (current value)"))
+                if (ImGui::MenuItem(materializr::tr("Radius … (current value)")))
                     applySketchConstraint(ConstraintType::Radius);
             }
             if (nCur >= 1 && nLns >= 1) {
-                if (ImGui::MenuItem("Tangent (curve + line)"))
+                if (ImGui::MenuItem(materializr::tr("Tangent (curve + line)")))
                     applySketchConstraint(ConstraintType::Tangent);
             }
             if (nCur >= 2) {
-                if (ImGui::MenuItem("Concentric"))
+                if (ImGui::MenuItem(materializr::tr("Concentric")))
                     applySketchConstraint(ConstraintType::Concentric);
-                if (ImGui::MenuItem("Equal radius"))
+                if (ImGui::MenuItem(materializr::tr("Equal radius")))
                     applySketchConstraint(ConstraintType::Equal);
             }
             // ImGui automatically greys out an empty submenu, but we want to
             // hint at the cause when nothing matches the selection.
             if (nPts == 0 && nLns == 0) {
-                ImGui::TextDisabled("(nothing selected)");
+                ImGui::TextDisabled("%s", materializr::tr("(nothing selected)"));
             }
             ImGui::EndMenu();
         }
@@ -6960,6 +7071,26 @@ void Application::renderViewport() {
                          "drives height. Or click for both at once."
                        : "Type height and Enter to commit the rectangle.");
                 break;
+            case SketchToolMode::Arc:
+                // Two stages, like the rectangle: the chord first, then one
+                // number for the bow. Click 3 has no input until the chord
+                // exists, so clickCount drives which is on offer.
+                if (m_sketchTool->getClickCount() == 1) {
+                    dimLabel = "Chord (mm)";
+                    dimHint  = "Type the straight-line distance between the arc's "
+                               "two ends and press Enter — or just click the end.";
+                } else if (m_sketchTool->getClickCount() == 2) {
+                    const bool sweep = m_sketchTool->getArcDimMode() ==
+                                       SketchTool::ArcDimMode::Sweep;
+                    dimLabel = sweep ? "Sweep (deg)" : "Radius (mm)";
+                    dimHint  = sweep
+                      ? "Type the swept angle and Enter. 180 is a semicircle. "
+                        "Move the cursor across the chord to flip which way it bows."
+                      : "Type the radius and Enter. It cannot be smaller than half "
+                        "the chord. Move the cursor across the chord to flip which "
+                        "way it bows.";
+                }
+                break;
             default: dimLabel = nullptr;
         }
         if (dimLabel) {
@@ -6989,13 +7120,37 @@ void Application::renderViewport() {
                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking);
             opDialogDragGrip(uiScale());
 
-            ImGui::TextColored(materializr::accentText(), "%s", dimLabel);
+            ImGui::TextColored(materializr::accentText(), "%s", materializr::tr(dimLabel));
             ImGui::Separator();
             // Window width is fixed now, so wrapping at the window edge is safe
             // (no feedback loop).
             ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextUnformatted(dimHint);
+            ImGui::TextUnformatted(materializr::tr(dimHint));
             ImGui::PopTextWrapPos();
+
+            // Arc apex stage: choose what the number MEANS. Sticky across
+            // placements, so a run of same-radius arcs is not a toggle each
+            // time.
+            if (mode == SketchToolMode::Arc && m_sketchTool->getClickCount() == 2) {
+                ImGui::Spacing();
+                const bool sweep = m_sketchTool->getArcDimMode() ==
+                                   SketchTool::ArcDimMode::Sweep;
+                const float halfW = (ImGui::GetContentRegionAvail().x -
+                                     ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+                if (ImGui::RadioButton(materializr::tr("Degrees"), sweep))
+                    m_sketchTool->setArcDimMode(SketchTool::ArcDimMode::Sweep);
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x +
+                                      std::max(0.0f, halfW - ImGui::GetItemRectSize().x));
+                if (ImGui::RadioButton(materializr::tr("Radius"), !sweep))
+                    m_sketchTool->setArcDimMode(SketchTool::ArcDimMode::Radius);
+                if (!sweep) {
+                    // The chord's half-length is a hard floor; say so rather
+                    // than let a too-small radius be silently refused.
+                    ImGui::TextDisabled(materializr::tr("min %.2f mm (half the chord)"),
+                                        m_sketchTool->arcMinRadius());
+                }
+                ImGui::Spacing();
+            }
 
             if (materializr::touchMode()) {
                 // Native keyboard via a focused ImGui field (io.WantTextInput ->
@@ -7015,17 +7170,17 @@ void Application::renderViewport() {
                     }
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                         ImVec2(uiW(10.0f), uiW(10.0f)));
-                    ImGui::TextDisabled("Width (mm)");
+                    ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
                     ImGui::SetNextItemWidth(-1.0f);
                     materializr::inputNumber("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
-                    ImGui::TextDisabled("Height (mm)");
+                    ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
                     ImGui::SetNextItemWidth(-1.0f);
                     materializr::inputNumber("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
                     ImGui::PopStyleVar();
                     if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                     if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;
                     ImGui::Spacing();
-                    if (ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)))) {
+                    if (ImGui::Button(materializr::tr("Apply"), ImVec2(-1.0f, uiW(44.0f)))) {
                         const glm::vec2 ps = m_sketchTool->getPreviewStart();
                         const glm::vec2 pe = m_sketchTool->getPreviewEnd();
                         glm::vec2 dir(pe.x >= ps.x ? 1.0f : -1.0f,
@@ -7057,9 +7212,19 @@ void Application::renderViewport() {
                         ImGuiInputTextFlags_EnterReturnsTrue);
                     ImGui::PopStyleVar();
                     ImGui::Spacing();
-                    ImGui::BeginDisabled(m_sketchDimValue <= 0.0f);
+                    // A radius under half the chord describes no arc through
+                    // the two endpoints, so Apply is dead there rather than
+                    // silently refusing.
+                    const float dimFloor =
+                        (mode == SketchToolMode::Arc &&
+                         m_sketchTool->getClickCount() == 2 &&
+                         m_sketchTool->getArcDimMode() ==
+                             SketchTool::ArcDimMode::Radius)
+                            ? m_sketchTool->arcMinRadius() : 0.0f;
+                    ImGui::BeginDisabled(m_sketchDimValue <= 0.0f ||
+                                         m_sketchDimValue < dimFloor);
                     const bool applied =
-                        ImGui::Button("Apply", ImVec2(-1.0f, uiW(44.0f)));
+                        ImGui::Button(materializr::tr("Apply"), ImVec2(-1.0f, uiW(44.0f)));
                     ImGui::EndDisabled();
                     if ((entered || applied) && m_sketchDimValue > 0.0f) {
                         const float v = m_sketchDimValue;

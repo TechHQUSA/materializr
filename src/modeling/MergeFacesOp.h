@@ -39,6 +39,39 @@
 // empty step in the timeline.
 class MergeFacesOp : public Operation {
 public:
+    // Why a merge did not happen, so the UI can say which it was.
+    //
+    // The toast used to be one catch-all string -- "they aren't close enough to
+    // one surface, or the merge wouldn't hold together" -- shown for EVERY
+    // failure. It names a tolerance problem, so a user whose faces could never
+    // merge for a structural reason (they point opposite ways; they don't touch)
+    // reads it as the tolerance being too tight and goes looking for a setting
+    // that would not have helped. Two of these cases no tolerance can reach.
+    enum class Refusal {
+        None,            // merged fine, or not attempted
+        Internal,        // no body / null shape: not the user's doing
+        FacesNotFound,   // picked faces are no longer on the body
+        NeedTwoFaces,    // fewer than two distinct faces survived rebinding
+        OppositeNormals, // antiparallel outward normals: material on both sides
+        NotAdjacent,     // no shared edge, so there is no seam to dissolve
+        NotSameSurface,  // adjacent, but not one surface at any tolerance
+        Unsafe,          // a merge WAS produced, and the guard rejected it
+    };
+
+    // Reason the most recent execute() refused.
+    //
+    // Static because History::pushOperation takes the op BY VALUE and destroys
+    // it when it returns false, so the caller has no object left to ask. Merges
+    // are driven one at a time from the UI thread, so a single slot is enough;
+    // read it immediately after the failed push.
+    static Refusal lastRefusal();
+
+    // Clear it before a push. History::pushOperation can decline WITHOUT ever
+    // calling execute() (the thread-reflow fallback does), and a stale reason
+    // from an earlier merge would then be reported as this one's cause -- a
+    // confidently wrong message being worse than the vague one it replaced.
+    static void resetLastRefusal();
+
     MergeFacesOp();
     ~MergeFacesOp() override = default;
 

@@ -2,6 +2,8 @@
 #include "ui_scale.h"
 #include "ShortcutsPanel.h"
 #include <imgui.h>
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -33,9 +35,9 @@ void section(const char* title, const char* tableId,
                                   ImGuiTableFlags_RowBg |
                                   ImGuiTableFlags_SizingStretchProp;
     if (!ImGui::BeginTable(tableId, 2, flags)) return;
-    ImGui::TableSetupColumn("Shortcut", ImGuiTableColumnFlags_WidthFixed,
+    ImGui::TableSetupColumn(materializr::tr("Shortcut"), ImGuiTableColumnFlags_WidthFixed,
                             uiSz(170, 0).x);
-    ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(materializr::tr("Action"), ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableHeadersRow();
     for (int i = 0; i < count; ++i) {
         ImGui::TableNextRow();
@@ -120,13 +122,13 @@ void ShortcutsPanel::render() {
     section("While a tool is running", "scTools", kTools, IM_ARRAYSIZE(kTools));
     section("In a sketch", "scSketch", kSketch, IM_ARRAYSIZE(kSketch));
     ImGui::Spacing();
-    ImGui::TextDisabled("The drawing tools (Line, Circle, Rectangle, Arc,");
-    ImGui::TextDisabled("Spline, Polygon, Trim) are on the toolbar only.");
+    ImGui::TextDisabled("%s", materializr::tr("The drawing tools (Line, Circle, Rectangle, Arc,"));
+    ImGui::TextDisabled("%s", materializr::tr("Spline, Polygon, Trim) are on the toolbar only."));
 
     section("Mouse", "scMouse", kMouse, IM_ARRAYSIZE(kMouse));
     ImGui::Spacing();
-    ImGui::TextDisabled("Orbit and pan buttons are configurable in");
-    ImGui::TextDisabled("Settings \xE2\x86\x92 Navigation.");
+    ImGui::TextDisabled("%s", materializr::tr("Orbit and pan buttons are configurable in"));
+    ImGui::TextDisabled("%s", materializr::tr("Settings \xE2\x86\x92 Navigation."));
 
     section("Touch", "scTouch", kTouch, IM_ARRAYSIZE(kTouch));
 

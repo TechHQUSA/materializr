@@ -132,11 +132,23 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
         case SketchToolMode::Svg:
             handleSvgTool(snapped);
             break;
+        case SketchToolMode::Airfoil:
+            handleAirfoilTool(snapped);
+            break;
         case SketchToolMode::Dimension:
             handleDimensionTool(snapped);
             break;
         default:
             break;
+    }
+
+    // If that click landed on a circle/arc rim, mark whatever point ended up
+    // there as stuck to it. Done HERE, once, rather than in each tool's
+    // handler: every draw tool routes through this dispatch, so a new tool
+    // cannot forget to do it.
+    if (m_snapRimId >= 0 && m_sketch) {
+        const int pid = findCoincidentPoint(snapped, -1);
+        if (pid >= 0) m_sketch->setPointOnCurve(pid, m_snapRimId);
     }
 }
 
@@ -232,6 +244,10 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
                 glm::vec2 target = p->pos + delta;
                 glm::vec2 inferred = snap(target);
                 m_snapExcludePoints.clear();
+                // A point already stuck to a rim rides it; snap()'s answer only
+                // applies once the attachment has been let go.
+                inferred = slideOrRelease(m_dragPointId, inferred,
+                                          /*wholeSelection=*/false);
                 m_sketch->movePoint(m_dragPointId, inferred);
             }
         } else {
@@ -240,16 +256,26 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
             // rounded to the nearest grid increment so a group drag still
             // adheres to the chosen step (otherwise the offset accumulates
             // sub-grid float drift across many drags).
-            bool gridSnap = m_snapToGridEnabled && m_gridStep > 0.0f;
-            for (int pid : pts) {
-                const SketchPoint* p = m_sketch->getPoint(pid);
-                if (!p) continue;
-                glm::vec2 target = p->pos + delta;
-                if (gridSnap) {
-                    target.x = std::round(target.x / m_gridStep) * m_gridStep;
-                    target.y = std::round(target.y / m_gridStep) * m_gridStep;
+            // Quantise the DELTA, not each point. Rounding every point to the
+            // lattice teleported anything that was deliberately off it — a line
+            // with its ends on two circles lost both, 0.6mm off the rim, and
+            // came out rotated 30 -> 33.7 degrees and shorter. It also fired on
+            // a drag of nearly zero length, so merely pressing and twitching on
+            // a line moved it. A whole-step delta keeps the shape rigid and
+            // still prevents sub-grid drift accumulating across many drags.
+            glm::vec2 step = delta;
+            if (m_snapToGridEnabled && m_gridStep > 0.0f) {
+                step.x = std::round(step.x / m_gridStep) * m_gridStep;
+                step.y = std::round(step.y / m_gridStep) * m_gridStep;
+            }
+            if (step != glm::vec2(0.0f)) {
+                for (int pid : pts) {
+                    const SketchPoint* p = m_sketch->getPoint(pid);
+                    if (!p) continue;
+                    m_sketch->movePoint(
+                        pid, slideOrRelease(pid, p->pos + step,
+                                            /*wholeSelection=*/true));
                 }
-                m_sketch->movePoint(pid, target);
             }
             // Multi-point drag doesn't fire inferences; clear any stale ones
             // so the overlay doesn't draw guides from the previous frame.
@@ -479,8 +505,51 @@ bool SketchTool::applyDimension(float value) {
             }
         }
         case SketchToolMode::Arc: {
-            // Arc needs three clicks; a single value can't fully specify it. No-op.
-            return false;
+            // Click 2 — type the CHORD: the straight-line distance between the
+            // arc's two ends, exactly like a line's length.
+            if (m_clickCount == 1) {
+                handleArcTool(m_firstClick + dir * value);
+                return true;
+            }
+            if (m_clickCount != 2) return false;
+
+            // Click 3 — the chord is already fixed, so ONE number pins the apex.
+            // Which way the arc bows is a direction, not a dimension, so it
+            // still comes from the side of the chord the cursor is on.
+            const glm::vec2 A = m_firstClick, B = m_secondClick;
+            const glm::vec2 chord = B - A;
+            const float L = glm::length(chord);
+            if (L < 1e-4f) return false;
+            const glm::vec2 chordDir = chord / L;
+            glm::vec2 perp(-chordDir.y, chordDir.x);
+            const glm::vec2 M = 0.5f * (A + B);
+            if (glm::dot(m_currentPos - M, perp) < 0.0f) perp = -perp;
+
+            float d = 0.0f;
+            if (m_arcDimMode == ArcDimMode::Sweep) {
+                // Apex sits on the chord's perpendicular bisector at
+                // (L/2)·tan(θ/4) — the same relation snapArcApex uses for its
+                // 15° steps, so a typed 90 lands exactly where the snap would.
+                // A full 360 has no apex to place (tan(90°) is infinite) and
+                // would be a circle, not an arc; clamp just short of it.
+                const float deg = glm::clamp(value, 0.1f, 359.9f);
+                d = (L * 0.5f) *
+                    std::tan(deg * static_cast<float>(M_PI) / 180.0f * 0.25f);
+            } else {
+                // Radius: the centre lies on the bisector at √(R² − (L/2)²)
+                // from the midpoint, and the MINOR arc's apex is on the far
+                // side of the chord, R minus that, away. Half the chord is the
+                // floor — under it no arc passes through both endpoints at all.
+                const float half = L * 0.5f;
+                if (value < half - 1e-4f) return false;
+                const float h =
+                    std::sqrt(std::max(0.0f, value * value - half * half));
+                d = value - h;
+            }
+            // Straight to the handler, NOT through arcApexSnap: a typed value
+            // is exact and must not be pulled onto the nearest 15° sweep.
+            handleArcTool(M + perp * d);
+            return true;
         }
         default:
             return false;
@@ -515,6 +584,58 @@ bool SketchTool::isActive() const {
     return m_isPlacing;
 }
 
+float SketchTool::arcMinRadius() const {
+    if (m_mode != SketchToolMode::Arc || m_clickCount != 2) return 0.0f;
+    return 0.5f * glm::length(m_secondClick - m_firstClick);
+}
+
+bool SketchTool::directionalAnchor(glm::vec2& out) const {
+    if (!m_isPlacing || !m_sketch) return false;
+    switch (m_mode) {
+    case SketchToolMode::Line:
+        // Chains: handleLineTool re-seats m_firstClick on every committed
+        // vertex, so this is always the point being drawn FROM.
+        out = m_firstClick;
+        return true;
+    case SketchToolMode::Spline:
+        // m_firstClick stays on control point #1 for the life of the spline,
+        // so it is the wrong anchor from the third point on — measure from the
+        // point actually being extended.
+        if (m_splinePoints.empty()) return false;
+        if (const SketchPoint* p = m_sketch->getPoint(m_splinePoints.back())) {
+            out = p->pos;
+            return true;
+        }
+        return false;
+    case SketchToolMode::Arc:
+        // Click 2 places the far end of the chord — a direction from the start
+        // point, exactly like a line. Click 3 sweeps the apex, which has its
+        // own 15-degree sweep snap (arcApexSnap); a directional guide there
+        // would pull against it.
+        if (m_clickCount != 1) return false;
+        out = m_firstClick;
+        return true;
+    case SketchToolMode::Polygon:
+        // The drag sets the circumradius AND the polygon's rotation, so the
+        // direction is real geometry — snapping it is how you get a hexagon
+        // sitting flat instead of a degree and a half off.
+        out = m_firstClick;
+        return true;
+    case SketchToolMode::Circle:
+        // Two-point mode drags a DIAMETER, whose direction is real. In
+        // centre-radius the direction means nothing — only the distance does —
+        // and steering it would just perturb the radius, which
+        // snapRadialToGrid already looks after.
+        if (m_circleMode != CircleMode::TwoPoint) return false;
+        out = m_firstClick;
+        return true;
+    default:
+        // Rectangle is axis-aligned by construction; Select/Trim/Dimension/
+        // Text/Svg place no directed point.
+        return false;
+    }
+}
+
 glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
     // Directional inferences (perpendicular / parallel / tangent / axis /
     // angle) override grid snap by design — but when the inferred segment
@@ -524,8 +645,9 @@ glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
     // inference while it's genuinely slanted; once it gets close to
     // parallel with an axis, the axis wins — flatten exactly, and re-grid
     // the free coordinate so the endpoint is lattice-true again.
-    if (!m_isPlacing) return target;
-    glm::vec2 d = target - m_firstClick;
+    glm::vec2 anchor;
+    if (!directionalAnchor(anchor)) return target;
+    glm::vec2 d = target - anchor;
     float len = glm::length(d);
     if (len < 1e-4f) return target;
     const float axisTol = glm::radians(4.0f) * angleScale();
@@ -547,20 +669,23 @@ glm::vec2 SketchTool::rectifyNearAxis(glm::vec2 target) const {
     // 4° rule. (Steve: a 1 mm rise over a long run must not snap to horizontal.)
     const float crossCap = gridOn ? m_gridStep * 0.5f + 1e-3f : 1e30f;
     if ((nearAng(0.0f) || nearAng(PI) || nearAng(-PI)) &&
-        std::abs(target.y - m_firstClick.y) < crossCap) {
-        target.y = m_firstClick.y;       // exactly horizontal
+        std::abs(target.y - anchor.y) < crossCap) {
+        target.y = anchor.y;             // exactly horizontal
         target.x = grid(target.x);
     } else if ((nearAng(PI * 0.5f) || nearAng(-PI * 0.5f)) &&
-               std::abs(target.x - m_firstClick.x) < crossCap) {
-        target.x = m_firstClick.x;       // exactly vertical
+               std::abs(target.x - anchor.x) < crossCap) {
+        target.x = anchor.x;             // exactly vertical
         target.y = grid(target.y);
     }
     return target;
 }
 
 void SketchTool::updateHoverCharge(double tNow, glm::vec2 cursor) {
-    // Only charge while actively placing a line at the Full or Max tier.
-    if (!m_sketch || !m_isPlacing || m_mode != SketchToolMode::Line ||
+    // Only charge while actively placing a DIRECTED point at the Full or Max
+    // tier — the charged reference exists to give perpendicular/axis guides off
+    // the dwelt-on feature, which is meaningless where no direction is picked.
+    glm::vec2 chargeAnchor;
+    if (!m_sketch || !directionalAnchor(chargeAnchor) ||
         (m_inferenceLevel != InferenceLevel::Full &&
          m_inferenceLevel != InferenceLevel::Max)) {
         m_hoverCandidate = {};
@@ -714,7 +839,15 @@ static bool snapCurveToGrid(glm::vec2 center, float radius, glm::vec2 pos,
     return true;
 }
 
+// Rim snapping predates the guide overlay and drew nothing, so landing on a
+// circle looked identical to landing nowhere. Publish a guide so it reads like
+// every other inference — same diamond marker as On Line, its own label.
+void SketchTool::noteRimGuide(glm::vec2 at, int curveId) const {
+    m_activeInferences.push_back({InferenceGuide::OnCircle, at, at, curveId});
+}
+
 glm::vec2 SketchTool::snap(glm::vec2 pos) const {
+    m_snapRimId = -1;
     // Fresh inference set every snap — the renderer treats this as "what's
     // active right now".
     m_activeInferences.clear();
@@ -835,12 +968,14 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                 glm::vec2 gc;
                 if (snapCurveToGrid(center->pos, r, pos, m_gridStep,
                                     std::max(curveSnapThreshold, m_gridStep * 0.6f), gc))
-                    return gc;
+                    { m_snapRimId = c.id; noteRimGuide(gc, c.id); return gc; }
             }
             // Reduced (and Full/Max fallback): grid wins ties — only land on the
             // bare perimeter when it's genuinely closer than the nearest grid pt.
             if (gridActive && std::abs(dist - r) >= gridDist) continue;
-            return center->pos + (v / dist) * r;
+            m_snapRimId = c.id;
+            { const glm::vec2 rp = center->pos + (v / dist) * r;
+              noteRimGuide(rp, c.id); return rp; }
         }
     }
     const auto& arcs = m_sketch->getArcs();
@@ -881,15 +1016,19 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                                            gc.x - center->pos.x) - startA;
                     while (gcA < 0.0f)    gcA += TWO_PI;
                     while (gcA >= TWO_PI) gcA -= TWO_PI;
-                    if (gcA <= sweep) return gc;
+                    if (gcA <= sweep) { m_snapRimId = a.id; noteRimGuide(gc, a.id); return gc; }
                 }
                 // No grid crossing on the arc — fall through to the plain
                 // perimeter point so arcs behave like circles (any on-arc point
                 // is reachable even when no grid line crosses the arc span).
-                return center->pos + (v / dist) * r;
+                m_snapRimId = a.id;
+                { const glm::vec2 rp = center->pos + (v / dist) * r;
+                  noteRimGuide(rp, a.id); return rp; }
             }
             if (gridActive && std::abs(dist - r) >= gridDist) continue;
-            return center->pos + (v / dist) * r;
+            m_snapRimId = a.id;
+            { const glm::vec2 rp = center->pos + (v / dist) * r;
+              noteRimGuide(rp, a.id); return rp; }
         }
     }
     // Face-reference circular / arc edges — continuous perimeter snapping for
@@ -1330,15 +1469,19 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // Perpendicular / parallel to previous: within ~5° of perp or parallel
     // to the chain's last committed segment, anchored at the current first
     // click. Geometrically mutually exclusive — whichever is closer fires.
-    if (allowDirectional && m_isPlacing && m_hasPrevLineDir &&
-        m_mode == SketchToolMode::Line) {
+    glm::vec2 dirAnchor;
+    const bool haveDirAnchor = directionalAnchor(dirAnchor);
+    // m_hasPrevLineDir is the mode guard here: only the Line chain and the
+    // spline control polygon ever set it, and setMode clears it, so an arc or
+    // polygon can never inherit a previous leg from an earlier draw.
+    if (allowDirectional && haveDirAnchor && m_hasPrevLineDir) {
         glm::vec2 perpDir(-m_prevLineDir.y, m_prevLineDir.x);
         glm::vec2 parDir = m_prevLineDir;
-        glm::vec2 v = pos - m_firstClick;
+        glm::vec2 v = pos - dirAnchor;
         float len = glm::length(v);
         if (len > 1e-6f) {
-            glm::vec2 perpProj = m_firstClick + perpDir * glm::dot(v, perpDir);
-            glm::vec2 parProj  = m_firstClick + parDir  * glm::dot(v, parDir);
+            glm::vec2 perpProj = dirAnchor + perpDir * glm::dot(v, perpDir);
+            glm::vec2 parProj  = dirAnchor + parDir  * glm::dot(v, parDir);
             float perpOffset = glm::distance(pos, perpProj);
             float parOffset  = glm::distance(pos, parProj);
             // Within ~5° (sin5° ≈ 0.087) of perp / parallel, OR within
@@ -1348,61 +1491,170 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             bool perpClose = perpOffset < tol;
             bool parClose  = parOffset  < tol;
             if (perpClose && (!parClose || perpOffset <= parOffset)) {
-                cands.push_back({m_firstClick, perpDir, InferenceGuide::PerpToPrev,
-                                 -1, m_firstClick, false, 0.0f, perpProj, perpOffset, true});
+                cands.push_back({dirAnchor, perpDir, InferenceGuide::PerpToPrev,
+                                 -1, dirAnchor, false, 0.0f, perpProj, perpOffset, true});
             } else if (parClose) {
-                cands.push_back({m_firstClick, parDir, InferenceGuide::ParallelToPrev,
-                                 -1, m_firstClick, false, 0.0f, parProj, parOffset, true});
+                cands.push_back({dirAnchor, parDir, InferenceGuide::ParallelToPrev,
+                                 -1, dirAnchor, false, 0.0f, parProj, parOffset, true});
             }
         }
     }
 
     // Tangent-to-circle / arc: cursor direction from anchor within ~3° of
-    // a tangent ray to a circle/arc. First match wins (multiple curves
-    // simultaneously tangent is rare and arbitrary which to pick).
-    if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line) {
-        glm::vec2 v = pos - m_firstClick;
+    // a tangent ray to a circle/arc. The BEST-fitting curve wins — with two
+    // holes near the cursor, first-match-wins latched onto whichever happened
+    // to be earlier in the list rather than the one being aimed at.
+    if (allowDirectional && haveDirAnchor) {
+        glm::vec2 v = pos - dirAnchor;
         float len = glm::length(v);
         if (len > 0.5f) {
             float cursorAngle = std::atan2(v.y, v.x);
             const float angTol = 3.0f * static_cast<float>(M_PI) / 180.0f * angleScale();
-            auto angDiff = [](float a, float b) {
-                const float TWO_PI = 2.0f * static_cast<float>(M_PI);
+            const float TWO_PI = 2.0f * static_cast<float>(M_PI);
+            auto angDiff = [&](float a, float b) {
                 float d = std::fmod(std::abs(a - b), TWO_PI);
                 if (d > static_cast<float>(M_PI)) d = TWO_PI - d;
                 return d;
             };
-            bool found = false;
-            auto checkTangent = [&](glm::vec2 cpos, double cradius, int refId) {
-                if (found) return;
-                glm::vec2 toC = cpos - m_firstClick;
+            float bestFit = angTol;
+            bool  haveFit = false;
+            glm::vec2 bestDir(1.0f, 0.0f);
+            int   bestRef = -1;
+            // Every curve kind ends up here: a candidate tangent RAY leaving
+            // the anchor, keyed by how far the cursor is off it.
+            auto considerRay = [&](float ang, int refId) {
+                const float delta = angDiff(cursorAngle, ang);
+                if (delta >= bestFit) return;
+                bestFit = delta;
+                bestDir = glm::vec2(std::cos(ang), std::sin(ang));
+                bestRef = refId;
+                haveFit = true;
+            };
+            // `span` non-null limits the tangency POINT to a real arc: an arc
+            // is not its full circle, and a guide tangent to the phantom part
+            // of the circle points at geometry that isn't there.
+            struct ArcSpan { float startA; float sweep; };
+            auto checkTangent = [&](glm::vec2 cpos, double cradius, int refId,
+                                    const ArcSpan* span) {
+                const float R = static_cast<float>(cradius);
+                if (R <= 1e-6f) return;
+                glm::vec2 toC = cpos - dirAnchor;
                 float D = glm::length(toC);
-                if (D <= static_cast<float>(cradius) + 1e-3f) return;
+                // Only an anchor strictly INSIDE the circle has no tangent
+                // through it. ON the rim there is exactly one, and the
+                // two-tangent formula degenerates cleanly onto it —
+                // asin(R/D) = asin(1) = 90° off the radius, both ways. That
+                // is the case people actually mean by "tangent" (start the
+                // line on the circle and run it off tangentially, or carry on
+                // tangentially from the end of an arc), and the old
+                // `D <= R` guard threw away every one of them: it fired only
+                // for an anchor standing clear of the curve. asin's argument
+                // is clamped because at D == R float error can push R/D a hair
+                // over 1 and hand back a NaN.
+                if (D < R - 1e-3f || D < 1e-6f) return;
                 float baseAngle = std::atan2(toC.y, toC.x);
-                float tangentOffset = std::asin(static_cast<float>(cradius) / D);
-                float ang1 = baseAngle + tangentOffset;
-                float ang2 = baseAngle - tangentOffset;
-                float d1 = angDiff(cursorAngle, ang1);
-                float d2 = angDiff(cursorAngle, ang2);
-                float bestDelta = std::min(d1, d2);
-                if (bestDelta < angTol) {
-                    float snapAng = (d1 < d2) ? ang1 : ang2;
-                    glm::vec2 tDir(std::cos(snapAng), std::sin(snapAng));
-                    glm::vec2 tProj = m_firstClick + tDir * len;
-                    float perpOffset = glm::distance(tProj, pos);
-                    cands.push_back({m_firstClick, tDir, InferenceGuide::TangentToCircle,
-                                     refId, m_firstClick, false, 0.0f,
-                                     tProj, perpOffset, true});
-                    found = true;
+                float tangentOffset = std::asin(std::min(1.0f, R / D));
+                // Distance from the anchor to the point of tangency; 0 when the
+                // anchor is itself on the rim.
+                float tanLen = std::sqrt(std::max(0.0f, D * D - R * R));
+                for (int s = 0; s < 2; ++s) {
+                    const float ang = (s == 0) ? baseAngle + tangentOffset
+                                               : baseAngle - tangentOffset;
+                    if (span) {
+                        const glm::vec2 tDir(std::cos(ang), std::sin(ang));
+                        const glm::vec2 T = dirAnchor + tDir * tanLen;
+                        float tA = std::atan2(T.y - cpos.y, T.x - cpos.x) - span->startA;
+                        while (tA < 0.0f)     tA += TWO_PI;
+                        while (tA >= TWO_PI)  tA -= TWO_PI;
+                        if (tA > span->sweep + 1e-4f) continue;
+                    }
+                    considerRay(ang, refId);
                 }
             };
             for (const auto& circle : m_sketch->getCircles()) {
                 const SketchPoint* center = m_sketch->getPoint(circle.centerPointId);
-                if (center) checkTangent(center->pos, circle.radius, circle.id);
+                if (center) checkTangent(center->pos, circle.radius, circle.id, nullptr);
             }
             for (const auto& arc : m_sketch->getArcs()) {
                 const SketchPoint* center = m_sketch->getPoint(arc.centerPointId);
-                if (center) checkTangent(center->pos, arc.radius, arc.id);
+                const SketchPoint* spt    = m_sketch->getPoint(arc.startPointId);
+                const SketchPoint* ept    = m_sketch->getPoint(arc.endPointId);
+                if (!center || !spt || !ept) continue;
+                // Same CCW start→end convention as the perimeter snap above.
+                ArcSpan span;
+                span.startA = std::atan2(spt->pos.y - center->pos.y,
+                                         spt->pos.x - center->pos.x);
+                span.sweep  = std::atan2(ept->pos.y - center->pos.y,
+                                         ept->pos.x - center->pos.x) - span.startA;
+                while (span.sweep < 0.0f)    span.sweep += TWO_PI;
+                while (span.sweep >= TWO_PI) span.sweep -= TWO_PI;
+                checkTangent(center->pos, arc.radius, arc.id, &span);
+            }
+            // Splines. A spline has no closed-form tangent-from-a-point, but
+            // the sampled polyline buildWires already uses gives one cheaply:
+            // the ray anchor->P is tangent exactly where (P - anchor) turns
+            // parallel to the local tangent there, i.e. where their cross
+            // product changes sign. Walk the samples and interpolate onto each
+            // crossing. fromText splines (SVG / Text import) are skipped for
+            // the same reason every other directional guide skips them — an
+            // imported outline is dense enough to spam a guide per stroke.
+            for (const auto& sp : m_sketch->getSplines()) {
+                if (sp.controlPointIds.size() < 2) continue;
+                bool skip = false;
+                for (int cpid : sp.controlPointIds) {
+                    if (m_snapExcludePoints.count(cpid)) { skip = true; break; }
+                    const SketchPoint* cp = m_sketch->getPoint(cpid);
+                    if (cp && cp->fromText) { skip = true; break; }
+                }
+                if (skip) continue;
+                // Coarser than the 24-per-span the on-curve snap uses: this
+                // scan only needs to BRACKET the sign change, and the linear
+                // interpolation onto the crossing supplies the precision.
+                // Measured against control points laid on a known circle, 8
+                // per span puts the guide within a small fraction of a degree
+                // of the true tangent — against a 3-degree catch window — for
+                // a third of the sampling work on every mouse move.
+                const std::vector<glm::vec2> samp = m_sketch->sampleSpline2D(sp, 8);
+                if (samp.size() < 3) continue;
+                auto cross2 = [](glm::vec2 a, glm::vec2 b) {
+                    return a.x * b.y - a.y * b.x;
+                };
+                bool havePrev = false;
+                float prevF = 0.0f;
+                glm::vec2 prevMid(0.0f);
+                for (size_t k = 0; k + 1 < samp.size(); ++k) {
+                    const glm::vec2 T = samp[k + 1] - samp[k];
+                    const float tl = glm::length(T);
+                    if (tl < 1e-9f) continue;
+                    const glm::vec2 mid = 0.5f * (samp[k] + samp[k + 1]);
+                    const glm::vec2 toP = mid - dirAnchor;
+                    const float pl = glm::length(toP);
+                    if (pl < 1e-6f) { havePrev = false; continue; }
+                    // Normalized so the crossing test is scale-free.
+                    const float f = cross2(toP, T) / (pl * tl);
+                    if (havePrev && ((prevF <= 0.0f && f > 0.0f) ||
+                                     (prevF >= 0.0f && f < 0.0f))) {
+                        const float den = prevF - f;
+                        const float t = (std::abs(den) > 1e-12f)
+                                            ? glm::clamp(prevF / den, 0.0f, 1.0f)
+                                            : 0.5f;
+                        const glm::vec2 touch = prevMid + (mid - prevMid) * t;
+                        const glm::vec2 d = touch - dirAnchor;
+                        if (glm::length(d) > 1e-6f)
+                            considerRay(std::atan2(d.y, d.x), sp.id);
+                    }
+                    prevF = f;
+                    prevMid = mid;
+                    havePrev = true;
+                }
+            }
+
+            if (haveFit) {
+                glm::vec2 tProj = dirAnchor + bestDir * len;
+                float perpOffset = glm::distance(tProj, pos);
+                cands.push_back({dirAnchor, bestDir, InferenceGuide::TangentToCircle,
+                                 bestRef, dirAnchor, false, 0.0f,
+                                 tProj, perpOffset, true});
             }
         }
     }
@@ -1418,8 +1670,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // sketch line midpoint has exactly one touching line (the segment
     // itself); a face vertex / face-edge midpoint use the host-face
     // references in the same way.
-    if (allowCharge && m_isPlacing && m_charged.kind != ChargedRef::Kind::None &&
-        m_mode == SketchToolMode::Line) {
+    if (allowCharge && haveDirAnchor && m_charged.kind != ChargedRef::Kind::None) {
         const glm::vec2 R = m_charged.pos;
         const int chargedSrc = m_charged.sourceId; // sketch refId for the V/H/perp guides
         float dxR = std::abs(pos.x - R.x);
@@ -1671,9 +1922,8 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // Angle-snap fallback: cursor direction from anchor within ~3° of a
     // configurable degree increment (Settings). Only fires when nothing above
     // did — the perp / parallel inferences are stronger semantic intents.
-    if (allowDirectional && m_isPlacing && m_mode == SketchToolMode::Line &&
-        m_angleSnapDeg > 0) {
-        glm::vec2 v = pos - m_firstClick;
+    if (allowDirectional && haveDirAnchor && m_angleSnapDeg > 0) {
+        glm::vec2 v = pos - dirAnchor;
         float len = glm::length(v);
         if (len > 0.5f) {
             float a = std::atan2(v.y, v.x);
@@ -1687,7 +1937,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
             const float angTol = 3.0f * static_cast<float>(M_PI) / 180.0f * angleScale();
             if (angDelta < angTol) {
                 glm::vec2 dir(std::cos(snappedA), std::sin(snappedA));
-                glm::vec2 snappedPos = m_firstClick + dir * len;
+                glm::vec2 snappedPos = dirAnchor + dir * len;
                 float posOff = glm::length(snappedPos - pos);
                 // Capture window: with grid snap on, never wider than half a
                 // grid cell (slightly over, so the exact half-cell boundary
@@ -1714,10 +1964,10 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                     }
                     // Grid-along-line so the ray's endpoint lands on a lattice
                     // step instead of sub-grid drift.
-                    snappedPos = onLattice(gridAlongLine(m_firstClick, dir, false,
+                    snappedPos = onLattice(gridAlongLine(dirAnchor, dir, false,
                                                          0.0f, snappedPos));
                     m_activeInferences.push_back(
-                        {InferenceGuide::AngleSnap, m_firstClick,
+                        {InferenceGuide::AngleSnap, dirAnchor,
                          snappedPos, -1});
                     return rectifyNearAxis(snappedPos);
                 }
@@ -2033,6 +2283,82 @@ void SketchTool::handleRectangleTool(glm::vec2 pos) {
     }
 }
 
+float SketchTool::rimBreakBand(bool wholeSelection) const {
+    // Two bands, because the two gestures mean different things (Steve): moving
+    // the LINE about the circle should keep its end on the circle, while taking
+    // the POINT off the circle is how you say you no longer want it there.
+    //
+    // So dragging a whole selection gets a generous band — the end rides round
+    // the rim through any normal repositioning and only lets go if the line is
+    // hauled somewhere else entirely. Dragging the point alone gets a tight one,
+    // so a deliberate pull detaches immediately.
+    const float tight = std::max(m_gridStep * 0.75f, 0.5f) * snapScale();
+    return wholeSelection ? std::max(tight * 8.0f, 4.0f * m_gridStep) : tight;
+}
+
+// Sticky, not locked. While the drag stays near the rim the point rides it —
+// that is "move the line about the circle and the ends stay on it". Once the
+// drag pulls clear, the attachment is dropped silently and the point goes
+// where it was put. No dialog, no constraint to delete: the user walking away
+// from the rim IS the instruction.
+glm::vec2 SketchTool::slideOrRelease(int pointId, glm::vec2 target,
+                                    bool wholeSelection) {
+    if (!m_sketch) return target;
+    const SketchPoint* p = m_sketch->getPoint(pointId);
+    if (!p || p->onCurveId < 0) return target;
+
+    glm::vec2 centre(0.0f);
+    float radius = 0.0f;
+    bool arcLimited = false;
+    float aStart = 0.0f, aSweep = 0.0f;
+    bool found = false;
+    for (const auto& c : m_sketch->getCircles())
+        if (c.id == p->onCurveId) {
+            const SketchPoint* ctr = m_sketch->getPoint(c.centerPointId);
+            if (ctr) { centre = ctr->pos; radius = float(c.radius); found = true; }
+            break;
+        }
+    if (!found)
+        for (const auto& a : m_sketch->getArcs())
+            if (a.id == p->onCurveId) {
+                const SketchPoint* ctr = m_sketch->getPoint(a.centerPointId);
+                const SketchPoint* sp  = m_sketch->getPoint(a.startPointId);
+                const SketchPoint* ep  = m_sketch->getPoint(a.endPointId);
+                if (ctr && sp && ep) {
+                    centre = ctr->pos; radius = float(a.radius);
+                    aStart = std::atan2(sp->pos.y - ctr->pos.y, sp->pos.x - ctr->pos.x);
+                    float e = std::atan2(ep->pos.y - ctr->pos.y, ep->pos.x - ctr->pos.x);
+                    const float TWO_PI = 2.0f * float(M_PI);
+                    aSweep = e - aStart;
+                    while (aSweep < 0.0f) aSweep += TWO_PI;
+                    arcLimited = true; found = true;
+                }
+                break;
+            }
+    // The rim was deleted out from under it: nothing to hold on to.
+    if (!found || radius < 1e-6f) { m_sketch->setPointOnCurve(pointId, -1); return target; }
+
+    const glm::vec2 v = target - centre;
+    const float dc = glm::length(v);
+    if (dc < 1e-6f) return target;                 // dead centre: no rim point
+    if (std::abs(dc - radius) > rimBreakBand(wholeSelection)) {  // pulled clear
+        m_sketch->setPointOnCurve(pointId, -1);
+        return target;
+    }
+    glm::vec2 onRim = centre + (v / dc) * radius;
+    if (arcLimited) {
+        float a = std::atan2(onRim.y - centre.y, onRim.x - centre.x) - aStart;
+        const float TWO_PI = 2.0f * float(M_PI);
+        while (a < 0.0f) a += TWO_PI;
+        while (a >= TWO_PI) a -= TWO_PI;
+        if (a > aSweep) {           // slid off the end of the sweep
+            m_sketch->setPointOnCurve(pointId, -1);
+            return target;
+        }
+    }
+    return onRim;
+}
+
 glm::vec2 SketchTool::snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const {
     if (!m_snapToGridEnabled || m_gridStep <= 0.0f) return moving;
     glm::vec2 d = moving - fixed;
@@ -2269,6 +2595,25 @@ void SketchTool::handleSplineTool(glm::vec2 pos) {
         m_isPlacing = true;
     }
 
+    // Direction of the control leg just laid down, so the perpendicular- and
+    // parallel-to-previous guides work while the NEXT control point is placed —
+    // the same continuation the line chain gets. A spline's control polygon is
+    // what the user is actually steering, so its last leg is the meaningful
+    // "previous direction" even though the curve itself is smooth.
+    if (m_splinePoints.size() >= 2) {
+        const SketchPoint* a =
+            m_sketch->getPoint(m_splinePoints[m_splinePoints.size() - 2]);
+        const SketchPoint* b = m_sketch->getPoint(m_splinePoints.back());
+        if (a && b) {
+            const glm::vec2 d = b->pos - a->pos;
+            const float dl = glm::length(d);
+            if (dl > 1e-6f) {
+                m_prevLineDir = d / dl;
+                m_hasPrevLineDir = true;
+            }
+        }
+    }
+
     m_clickCount = static_cast<int>(m_splinePoints.size());
     // Also finalized via onConfirm() (Enter key)
 }
@@ -2318,6 +2663,19 @@ void SketchTool::removeLastSplinePoint() {
     if (!referenced) m_sketch->removeElement(id);
 
     m_clickCount = static_cast<int>(m_splinePoints.size());
+    // The leg the perpendicular/parallel guides were following may have just
+    // been removed; recompute it from what is left.
+    m_hasPrevLineDir = false;
+    if (m_splinePoints.size() >= 2) {
+        const SketchPoint* a =
+            m_sketch->getPoint(m_splinePoints[m_splinePoints.size() - 2]);
+        const SketchPoint* b = m_sketch->getPoint(m_splinePoints.back());
+        if (a && b) {
+            const glm::vec2 d = b->pos - a->pos;
+            const float dl = glm::length(d);
+            if (dl > 1e-6f) { m_prevLineDir = d / dl; m_hasPrevLineDir = true; }
+        }
+    }
     if (m_splinePoints.empty()) m_isPlacing = false;
 }
 
@@ -3008,6 +3366,21 @@ void SketchTool::handleTextTool(glm::vec2 pos) {
     recordStamp(p0, l0);
 }
 
+void SketchTool::handleAirfoilTool(glm::vec2 pos) {
+    // Single-click stamp like Text/SVG, but the click is the LEADING EDGE, not
+    // a bounding-box centre: that is the datum a wing's chord and twist are
+    // measured from, so stations stacked for a loft line up on it.
+    if (m_airfoil.empty()) return;
+    const size_t p0 = m_sketch->getPoints().size();
+    const size_t l0 = m_sketch->getLines().size();
+    const size_t s0 = m_sketch->getSplines().size();
+    if (AirfoilImport::place(m_sketch, m_airfoil, pos, m_airfoilChord,
+                             static_cast<float>(m_textAngle),
+                             m_airfoilAnchor) > 0) {
+        recordStamp(p0, l0, s0);
+    }
+}
+
 void SketchTool::handleSvgTool(glm::vec2 pos) {
     // Same single-click stamp as Text; the click point is the artwork's
     // bounding-box centre.
@@ -3019,10 +3392,19 @@ void SketchTool::handleSvgTool(glm::vec2 pos) {
     }
 }
 
-void SketchTool::recordStamp(size_t pointsBefore, size_t linesBefore) {
+void SketchTool::recordStamp(size_t pointsBefore, size_t linesBefore,
+                             size_t splinesBefore) {
     std::vector<int> ids;
     const auto& lns = m_sketch->getLines();
     const auto& pts = m_sketch->getPoints();
+    const auto& spl = m_sketch->getSplines();
+    // Splines are captured too: a stamp that lays down curves (an airfoil
+    // section is two of them) would otherwise leave them behind when the
+    // placement is undone, and only its stray points would disappear.
+    // The default sentinel means "this stamp made no splines" -- Text and SVG
+    // emit line loops only, and must not sweep up pre-existing curves.
+    if (splinesBefore != static_cast<size_t>(-1))
+        for (size_t i = splinesBefore; i < spl.size(); ++i) ids.push_back(spl[i].id);
     for (size_t i = linesBefore; i < lns.size(); ++i) ids.push_back(lns[i].id);
     for (size_t i = pointsBefore; i < pts.size(); ++i) ids.push_back(pts[i].id);
     if (!ids.empty()) m_stampStack.push_back(std::move(ids)); // push, don't overwrite
@@ -3034,6 +3416,7 @@ void SketchTool::commitStamp() {
     // button; desktop stamps directly on click via onMouseDown.
     if (m_mode == SketchToolMode::Text)     handleTextTool(m_currentPos);
     else if (m_mode == SketchToolMode::Svg) handleSvgTool(m_currentPos);
+    else if (m_mode == SketchToolMode::Airfoil) handleAirfoilTool(m_currentPos);
 }
 
 // --- Interactive Mirror ----------------------------------------------------

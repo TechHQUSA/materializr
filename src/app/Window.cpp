@@ -13,21 +13,67 @@
 #include <cmath>
 #include <cfloat>
 #include <cstdint>
+#include <cstdio>
 
 namespace materializr {
 
 // Declared in gl_common.h; overwritten on iOS in the constructor below.
 unsigned int g_windowFramebuffer = 0;
 
-Window::Window(int width, int height, const std::string& title)
+#if defined(__linux__) && !defined(__ANDROID__)
+// ─── Linux HiDPI, detected instead of asked ──────────────────────────────────
+// Issue #26 concluded that DPI auto-detection "is unreliable across X11/
+// Xwayland/GNOME/KDE" and made the scale a manual Low/High setting. That was
+// half right, and the half it got wrong is the half that matters:
+//
+//   xdpyinfo  → "3840x2400 pixels (1016x635 millimeters), 96x96 dpi"
+//   xrandr    → "eDP-2 3840x2400  340mm x 220mm"        = 287 dpi, the truth
+//
+// The SCREEN-level size is a fiction XWayland synthesises by assuming 96 dpi
+// (3840px / 96 = 40in = 1016mm), which is where the "unreliable" reputation
+// comes from. But SDL's X11 backend reads the per-OUTPUT RandR physical size,
+// so SDL_GetDisplayDPI returns the real 284 dpi on the same machine. Measured
+// on Steve's Framework 16, 2026-08-18.
+//
+// Deliberately BINARY (1x or 2x), for two reasons. It exactly replaces the
+// setting it removes — which only ever offered Low/High — so nobody loses a
+// choice they had. And the raw ratio is the wrong target anyway: 284/96 = 2.96
+// would give a 3x UI, where the compositor running that panel is at 200%. What
+// makes the app look native is matching the SESSION's scale, not the physics,
+// and on every panel worth scaling the session's answer is 2x.
+//
+// The 150 dpi threshold sits in the empty gap between the two clusters of real
+// hardware: desktop monitors land at 96–110 (24" 1080p, 27" 1440p), while
+// anything that wants scaling starts around 160 (27" 4K) and climbs through
+// 200 (Framework 13) to 290 (Framework 16). Nothing real sits near 150.
+constexpr float kHiDpiThreshold = 150.0f;
+
+float linuxAutoUiScale() {
+    float ddpi = 0.0f, hdpi = 0.0f, vdpi = 0.0f;
+    // Needs SDL_INIT_VIDEO up; every caller runs after the Window constructor's
+    // SDL_Init. A failure here means "no display info", which is the 1x case.
+    if (SDL_GetDisplayDPI(0, &ddpi, &hdpi, &vdpi) != 0 || ddpi <= 0.0f)
+        return 1.0f;
+    return (ddpi >= kHiDpiThreshold) ? 2.0f : 1.0f;
+}
+#endif
+
+Window::Window(int width, int height, const std::string& title,
+               float uiScaleHint)
     : m_width(width), m_height(height) {
 
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
     // Stop SDL from synthesizing mouse events from touch. On Android that
     // synthesis leaves ImGui's mouse button stuck "down" after a tap (so every
     // gesture reads as click-and-hold). We feed ImGui clean finger events
     // ourselves in pollEvents() instead.
-    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    //
+    // Only when we are actually going to handle finger events. On desktop
+    // without the opt-in we leave SDL's synthesis ALONE: it is the only thing
+    // making a touchscreen work there, and killing it while handleFingerEvent()
+    // stays dormant would take a partly-working touchscreen to a dead one.
+    if (materializr::touchInputActive())
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 
 #if defined(_WIN32)
@@ -43,11 +89,22 @@ Window::Window(int width, int height, const std::string& title)
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 #endif
 
+    // Let the screen blank/lock and the machine idle-suspend normally. SDL
+    // assumes it is running a game and inhibits the screensaver at video init
+    // (on Linux that's a GNOME/freedesktop idle inhibitor literally reasoned
+    // "Playing a game"), which held the idle timer off for as long as the app
+    // was open — laptops left with a model on screen ran their battery flat
+    // instead of suspending. A CAD app is a document editor: it should idle out
+    // like every other one. Must precede SDL_Init — the video subsystem reads
+    // this once as it comes up.
+    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+
     // NOTE: the port uses SDL2 on every platform, so upstream's GLFW-only X11/
     // Wayland drag-and-drop workaround doesn't apply here (kept the SDL init).
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
+
 
     // Request the right GL context per platform. Desktop: GL 3.3 Core. Android:
     // GL ES 3.0 (same shader/feature subset Materializr uses).
@@ -82,24 +139,36 @@ Window::Window(int width, int height, const std::string& title)
     // immersive system-UI flags instead — those hide the bars without that flag,
     // so in a desktop dock the app stays a normal window with the taskbar intact.
 
-#if defined(_WIN32)
-    // DPI-aware ⇒ the window is created in PHYSICAL pixels, so scale the default
-    // logical 1600×900 up by the display DPI — otherwise it would render smaller
-    // on a high-DPI panel than the pre-awareness (virtualised) window did (a
-    // 4K/150% screen used to get a 2400×1350 physical window; without this it'd
-    // drop to 1600×900). Matches uiScale() so the window holds the same amount of
-    // logical UI room at any scaling. The clamp below then caps it to the work
-    // area on genuinely small panels.
+    // The window is created in PHYSICAL pixels while the UI inside it is sized
+    // by uiScale(), so the default 1600×900 has to be scaled by the SAME factor
+    // or a HiDPI panel gets a window holding half as much UI as a low-DPI one —
+    // 1600×900 physical at 2x is 800×450 of usable room, which jams every
+    // toolbar against the viewport. Scaling by uiScale() keeps the LOGICAL size
+    // constant: the app opens showing the same amount at any density.
+    //
+    // At scale 1.0 this multiplies by one, so a low-DPI screen keeps exactly
+    // today's 1600×900 and can't be accidentally oversized. The clamp below
+    // then caps the result to the work area on genuinely small panels.
     {
+        float sc = 1.0f;
+#if defined(_WIN32)
+        // Windows derives it from the display DPI directly (per-monitor-v2
+        // awareness is on, so uiScale() reads the same number).
         float ddpi = 96.0f, hh = 0.0f, vv = 0.0f;
-        if (SDL_GetDisplayDPI(0, &ddpi, &hh, &vv) == 0 && ddpi > 96.0f) {
-            float sc = ddpi / 96.0f;
-            if (sc > 3.0f) sc = 3.0f;
+        if (SDL_GetDisplayDPI(0, &ddpi, &hh, &vv) == 0 && ddpi > 96.0f)
+            sc = std::min(ddpi / 96.0f, 3.0f);
+#elif defined(__linux__) && !defined(__ANDROID__)
+        // Whatever uiScale() will report — the CLI hint when one was passed
+        // (setUiScaleOverride lands too late to be read here), else detection.
+        sc = (uiScaleHint > 0.0f) ? uiScaleHint : linuxAutoUiScale();
+#endif
+        if (sc > 1.0f) {
             m_width  = static_cast<int>(m_width  * sc);
             m_height = static_cast<int>(m_height * sc);
         }
+        std::fprintf(stderr, "[hidpi] initial window scale=%.2f -> %dx%d "
+                             "(hint=%.2f)\n", sc, m_width, m_height, uiScaleHint);
     }
-#endif
 
     // Clamp the fixed initial size to the display's usable area (the screen minus
     // the taskbar) BEFORE creating the window. Now that the process is per-monitor
@@ -256,11 +325,16 @@ int Window::pollEvents(int waitMs) {
                     break;
             }
         }
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
         // Touch gestures, handled directly (SDL's own touch->mouse synthesis is
         // off). One finger drives the left mouse (tap = select, drag = orbit in
         // trackpad mode); two fingers pan/pinch-zoom the camera.
-        if (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION || e.type == SDL_FINGERUP) {
+        //
+        // touchInputActive() is checked FIRST so that on an opted-out desktop
+        // the finger events fall through to ImGui_ImplSDL2_ProcessEvent below
+        // and SDL's synthesis keeps working exactly as it did before.
+        if (materializr::touchInputActive() &&
+            (e.type == SDL_FINGERDOWN || e.type == SDL_FINGERMOTION || e.type == SDL_FINGERUP)) {
             handleFingerEvent(e.type, (std::int64_t)e.tfinger.fingerId, e.tfinger.x, e.tfinger.y);
             continue;   // don't also route finger events through the backend
         }
@@ -281,15 +355,17 @@ int Window::pollEvents(int waitMs) {
                 break;
         }
     }
-#if defined(MZ_MOBILE)
-    updateHoldSelect();          // arm the long-press (box-select on drag / menu on lift)
-    pumpSyntheticRightClick();   // play back a queued long-press context-menu click
+#if defined(MZ_TOUCH_INPUT)
+    if (materializr::touchInputActive()) {
+        updateHoldSelect();      // arm the long-press (box-select on drag / menu on lift)
+        pumpSyntheticRightClick();   // play back a queued long-press context-menu click
+    }
 #endif
     SDL_GetWindowSize(m_window, &m_width, &m_height);
     return result;
 }
 
-#if defined(MZ_MOBILE)
+#if defined(MZ_TOUCH_INPUT)
 void Window::handleFingerEvent(unsigned type, std::int64_t id, float nx, float ny) {
     ImGuiIO& io = ImGui::GetIO();
     const float x = nx * io.DisplaySize.x;   // normalised [0,1] -> pixels
@@ -701,6 +777,35 @@ void Window::framebufferSize(int& w, int& h) const {
     SDL_GL_GetDrawableSize(m_window, &w, &h);
 }
 
+void Window::applyCursorScale() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Cursor size, for the same reason as the UI scale and with the same
+    // answer. We never create a cursor ourselves, but ImGui's SDL backend makes
+    // eight system cursors from the X theme at init — and Xcursor sizes those
+    // from XCURSOR_SIZE as it loads them. A Wayland session exports the
+    // UNSCALED size (24) and scales cursors compositor-side for its OWN
+    // surfaces; our XWayland window gets no such treatment, so the pointer
+    // renders at 24 PHYSICAL pixels and becomes a speck on a HiDPI panel —
+    // which is why it looked fine on the external monitors and vanished on the
+    // Framework's built-in display.
+    //
+    // Call after the UI scale is final (so --ui-scale carries the cursor too)
+    // and BEFORE ImGui_ImplSDL2_Init creates the cursors; nothing re-reads this
+    // afterwards. Only ever RAISES the size — a session that already exported
+    // something larger has a user or a desktop environment behind it, and knows
+    // more than this heuristic does.
+    const int base = 24;   // the X default, and what Wayland sessions export
+    const int want = static_cast<int>(base * uiScale() + 0.5f);
+    const char* cur = SDL_getenv("XCURSOR_SIZE");
+    const int have = cur ? SDL_atoi(cur) : 0;
+    if (want > have) {
+        char buf[16];
+        SDL_snprintf(buf, sizeof(buf), "%d", want);
+        SDL_setenv("XCURSOR_SIZE", buf, 1);
+    }
+#endif
+}
+
 float Window::uiScale() const {
     if (materializr::touchMode()) {
 #if defined(MZ_IOS)
@@ -734,14 +839,25 @@ float Window::uiScale() const {
     if (s < 1.0f) s = 1.0f;     // never shrink below 100%
     if (s > 3.0f) s = 3.0f;     // 300% cap (Windows tops out ~250% on laptops)
     return s;
-#elif defined(__linux__)
-    // Linux desktop: the app is always an X11/Xwayland client (SDL forced to
-    // x11), and no compositor-side scaling reaches it, so on a HiDPI panel the
-    // native-pixel framebuffer renders the UI tiny. Auto-detection is
-    // unreliable across X11/Xwayland/GNOME/KDE (see issue #26), so the user
-    // picks the scale in Settings → Appearance. 0 = Low DPI (unchanged 1.0).
-    if (m_uiScaleOverride > 0.0f) return m_uiScaleOverride;
+#elif defined(__ANDROID__)
+    // Android only reaches here with touch mode turned OFF — a tablet driven by
+    // a mouse and keyboard, which is a supported setup. It must NOT fall into
+    // the Linux desktop branch below: Android defines __linux__ too, but
+    // linuxAutoUiScale() is guarded desktop-only at its definition, so building
+    // it here is what broke the F-Droid/APK build (the desktop CI never
+    // compiles for Android, so nothing caught it until the release preflight).
+    // 1.0 is what the manual desktop scale defaulted to before it was replaced,
+    // so this is the behaviour that path always had.
     return 1.0f;
+#elif defined(__linux__)
+    // Linux desktop: the app is an X11/Xwayland client and no compositor-side
+    // scaling reaches it, so on a HiDPI panel the native-pixel framebuffer
+    // renders the UI tiny. This USED to be a manual Low/High setting because
+    // "auto-detection is unreliable across X11/Xwayland/GNOME/KDE" (issue #26)
+    // — see linuxAutoUiScale() for the measurement that overturned that.
+    // --ui-scale / --hidpi still wins, as the escape hatch.
+    if (m_uiScaleOverride > 0.0f) return m_uiScaleOverride;
+    return materializr::linuxAutoUiScale();
 #else
     // macOS handles HiDPI through the drawable-size / DisplayFramebufferScale
     // path (Retina), so the UI is already right at 1.0.

@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include "../i18n.h"
 
 namespace {
 
@@ -66,7 +67,18 @@ void runChainedBoolean(materializr::PluginContext& ctx,
         allOk = ctx.history().pushOperation(std::move(op), ctx.document());
     }
     if (allOk) { ctx.markMeshesDirty(); ctx.selection().clear(); }
-    else std::fprintf(stderr, "Boolean failed (%zu bodies)\n", bodies.size());
+    else {
+        std::fprintf(stderr, "Boolean failed (%zu bodies)\n", bodies.size());
+        // Say it on screen too. This was stderr-only, so a Union that failed
+        // was indistinguishable from a dead button: no toast, no history step,
+        // no selection change, nothing at all. Subtract has always reported its
+        // failures here; Union and Intersect run the same path and said nothing.
+        ctx.events().publish(materializr::ToastEvent{
+            std::string(mode == BooleanMode::Union ? "Union" : "Intersect") +
+            " couldn't make a valid solid from these bodies \xE2\x80\x94 they "
+            "may not overlap, share a coincident face, or the geometry is too "
+            "degenerate.", 5.0});
+    }
 }
 
 // Subtract is order-dependent, so unlike Union/Intersect we put up a modal: the
@@ -160,8 +172,8 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal("Subtract##boolpick", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted("Tick the cutters \xE2\x80\x94 they're subtracted");
-            ImGui::TextUnformatted("from the unticked bodies, which remain.");
+            ImGui::TextUnformatted(materializr::tr("Tick the cutters \xE2\x80\x94 they're subtracted"));
+            ImGui::TextUnformatted(materializr::tr("from the unticked bodies, which remain."));
             ImGui::Separator();
             for (int id : g_subtractBodies) {
                 std::string label = ctx.document().getBodyName(id);
@@ -177,7 +189,7 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
                 ImGui::PopID();
             }
             ImGui::Separator();
-            ImGui::Checkbox("Keep the cutter bodies after cutting",
+            ImGui::Checkbox(materializr::tr("Keep the cutter bodies after cutting"),
                             &g_subtractKeepCutters);
             ImGui::Separator();
 
@@ -189,14 +201,14 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
             }
             bool canApply = !cutters.empty() && !targets.empty();
             if (!canApply)
-                ImGui::TextDisabled("Need at least one cutter (ticked) and one body to keep.");
+                ImGui::TextDisabled("%s", materializr::tr("Need at least one cutter (ticked) and one body to keep."));
 
             bool apply = false;
             ImGui::BeginDisabled(!canApply);
-            if (ImGui::Button("Apply")) apply = true;
+            if (ImGui::Button(materializr::tr("Apply"))) apply = true;
             ImGui::EndDisabled();
             ImGui::SameLine();
-            bool cancel = ImGui::Button("Cancel");
+            bool cancel = ImGui::Button(materializr::tr("Cancel"));
             if (apply || cancel) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
 

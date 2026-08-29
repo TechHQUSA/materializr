@@ -6,6 +6,9 @@
 #include <imgui.h>
 
 #include <string>
+#include "../i18n.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 #ifndef MATERIALIZR_VERSION
 #define MATERIALIZR_VERSION "0.0.0"
@@ -42,7 +45,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
         ImGui::GetFont()->Scale = 2.0f;
         ImGui::PushFont(ImGui::GetFont());
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - ImGui::CalcTextSize("Materializr").x) * 0.5f);
-        ImGui::TextColored(materializr::accentText(), "Materializr");
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Materializr"));
         ImGui::GetFont()->Scale = origScale;
         ImGui::PopFont();
 
@@ -55,10 +58,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
         ImGui::Spacing();
 
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + uiSz(400, 0).x);
-        ImGui::TextWrapped(
-            "Materializr is free and open source, and always will be. "
-            "If it has earned a place in your workflow, please consider "
-            "supporting development — it keeps the project moving.");
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is free and open source, and always will be. If it has earned a place in your workflow, please consider supporting development — it keeps the project moving."));
         ImGui::PopTextWrapPos();
 
         ImGui::Spacing();
@@ -101,7 +101,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.85f, 0.74f, 0.00f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.10f, 0.10f, 0.10f, 1.0f));
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - btnW) * 0.5f);
-        if (ImGui::Button("Support us — Buy us a Coffee", ImVec2(btnW, 0))) {
+        if (ImGui::Button(materializr::tr("Support us — Buy us a Coffee"), ImVec2(btnW, 0))) {
             materializr::openUrl(bmcUrl);
         }
         ImGui::PopStyleColor(4);
@@ -111,7 +111,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
 
         float contW = uiSz(120, 0).x;
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - contW) * 0.5f);
-        if (ImGui::Button("Continue", ImVec2(contW, 0))) {
+        if (ImGui::Button(materializr::tr("Continue"), ImVec2(contW, 0))) {
             m_visible = false;
             ImGui::CloseCurrentPopup();
         }

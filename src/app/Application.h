@@ -16,6 +16,7 @@
 #include "io/ImageDecode.h"   // DecodedImage — thumbnail peek results
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
+#include <gp_Trsf.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
@@ -121,6 +122,9 @@ private:
     std::string m_toastText;
     double m_toastExpiry = 0.0;
     void renderSvgToolPanel();  // SVG placement settings (floating)
+    void renderAirfoilToolPanel(); // airfoil chord / points / trailing edge
+    std::string m_airfoilSource;   // path the profile came from, for re-reading
+    int  m_airfoilPointBudget = 40; // spline control points per surface
     void renderMirrorToolPanel(); // interactive mirror line controls (floating)
     // Camera-upright default rotation for Text/SVG placement.
     void seedUprightPlacementAngle();
@@ -920,7 +924,6 @@ private:
     // Desktop UI scale preference (Linux HiDPI; Settings → Appearance). Staged
     // value for the Settings dialog + persistence; applied at startup via
     // Window::setUiScaleOverride (a change takes effect on restart). 1.0 = Low.
-    float m_desktopUiScale = 1.0f;
     // --ui-scale / --hidpi command-line override (0 = none). Wins over the
     // saved setting for this launch — an escape hatch when the UI is too small
     // to read to change it in Settings.
@@ -930,6 +933,9 @@ private:
     // Live-switchable: read every frame by run()/renderViewport(); persisted
     // on save. The helpers below are the preferred spelling at call sites.
     UiLayout m_uiLayout = UiLayout::Classic;
+    // UI language index, mirroring materializr::Lang. -1 = never chosen, which
+    // is what makes the setup wizard open with the language question.
+    int m_language = -1;
     bool classicLayout() const { return m_uiLayout == UiLayout::Classic; }
     bool modernLayout()  const { return m_uiLayout == UiLayout::Modern;  }
     bool imTouchLayout() const { return m_uiLayout == UiLayout::ImTouch; }
@@ -1542,6 +1548,9 @@ private:
     };
     bool m_loftActive = false;
     std::vector<LoftSection> m_loftSections;
+    // Bridge candidate: set when every loft section is a face of one body.
+    int m_loftBridgeBodyId = -1;
+    std::vector<TopoDS_Shape> m_loftBridgeFaces;
     bool m_loftSolid = true;
     bool m_loftRuled = false;
     // ONE LoftOp (or GuidedLoftOp in rails mode) toggled against the document;
@@ -1595,6 +1604,11 @@ private:
     // selected) drives opacity / physical width / the ruler-calibration popup.
     void beginRefImageImport();
     void renderRefImagePanel();
+    void renderRefImageControls(int planeId);          // opacity / size / Calibrate
+    void renderRefImageCalibrationPopup(int planeId);  // the two-click ruler popup
+    void attachRefImageToPlane(int planeId);
+    bool loadRefImageFile(const std::string& path, RefImageEntry& out,
+                          std::string& baseName);
     // Calibration popup state: which plane's image is being calibrated
     // (-1 = closed), the ImGui preview texture (panel-owned, one at a time),
     // and up to two picked points in IMAGE-PIXEL coordinates.
@@ -1631,6 +1645,17 @@ private:
     // user can stack multiple rotations by re-clicking Apply.
     float m_planeOpRotDeg = 0.0f;
     char  m_planeOpRotBuf[32] = "0.0";
+    // One per axis: a compound tilt is a single intent, not three sequential
+    // applies through a radio button. The values are ABSOLUTE -- the plane's
+    // total rotation from its chosen alignment -- so the fields keep reading
+    // what you set, and pressing Enter twice cannot silently double it.
+    char  m_planeOpRotBufX[32] = "0.0";
+    char  m_planeOpRotBufY[32] = "0.0";
+    char  m_planeOpRotBufZ[32] = "0.0";
+    // Applied after EVERY preview rebuild, so changing the alignment or
+    // nudging the offset no longer throws the rotation away.
+    float m_planeOpRotX = 0.0f, m_planeOpRotY = 0.0f, m_planeOpRotZ = 0.0f;
+    void applyPlaneOpRotation();
     int   m_planeOpRotAxisIdx = 0; // 0=X, 1=Z (user up), 2=Y
 
     // Selection-derived inputs for the kind-index 4/5/6 creation modes,
@@ -1654,6 +1679,17 @@ private:
     // selection isn't present.
     bool computeDerivedPlaneNP(int kindIdx, gp_Dir& outNormal, gp_Pnt& outPoint) const;
 
+    // Reference image being placed WITH a construction plane. The preview
+    // plane is destroyed and rebuilt on every alignment/offset change
+    // (LiveOpPreview::hold drops the previous instance), so the image cannot
+    // live on it -- it is held here and re-attached after each preview apply.
+    // That is what lets the photo be visible, scaled and calibrated while the
+    // plane is still being positioned, instead of only after Apply.
+    bool m_planeOpWantRefImage = false;
+    bool m_planeOpHasPendingImage = false;
+    RefImageEntry m_planeOpPendingImage;
+    void pickPlaneOpRefImage();
+    void reattachPlaneOpRefImage();
     void beginConstructionPlane();
     // Open the plane popup forced to a specific kind index (4=Midplane,
     // 5=Normal-to-Axis, 6=Tangent), used by the Properties-panel contextual
@@ -1823,6 +1859,37 @@ private:
     // intentionally outside undo — see Application_Viewport.cpp's planeOnly
     // branch). Live preview re-bases from m_rotPlaneOriginal each change;
     // Apply leaves the current pose, Cancel restores the snapshot.
+    // ── Lay Flat on Plane (viewport right-click on a planar face) ──────────
+    // Rotates the body so the picked face sits flush on a chosen plane (world
+    // or construction), with an offset along the plane's normal and an
+    // optional exact position for the face's centre. Live preview against a
+    // snapshot; Apply commits as ordinary Transform history steps (rotate +
+    // translate), so undo/reload need nothing new.
+    bool m_alignActive = false;
+    int  m_alignBodyId = -1;
+    // Sketch mode: exactly one of bodyId / sketchId is >= 0. A sketch aligns
+    // its PLANE onto the target (drawing side up; Flip turns it over) and
+    // commits as ONE SketchTransformOp instead of the body's rotate+move.
+    int  m_alignSketchId = -1;
+    gp_Pln m_alignSketchPlaneBefore;
+    TopoDS_Shape m_alignFace;
+    TopoDS_Shape m_alignSnapshot;
+    int   m_alignPlaneIdx = 0;            // 0..2 world, then construction planes
+    float m_alignOffset = 0.0f;
+    bool  m_alignFlip = false;
+    bool  m_alignSetPos = false;
+    float m_alignU = 0.0f, m_alignV = 0.0f;
+    char  m_alignOffsetBuf[32] = "0.00";
+    char  m_alignUBuf[32] = "0.00";
+    char  m_alignVBuf[32] = "0.00";
+    void beginAlignFaceToPlane(int bodyId, const TopoDS_Shape& face);
+    void beginAlignSketchToPlane(int sketchId);
+    void renderAlignFacePopup();
+    bool computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
+                               gp_Pnt& centerOut, bool& needRot, bool& needMove);
+    void applyAlignPreview();
+    void cancelAlignFace();
+
     bool   m_rotPlaneActive = false;
     int    m_rotPlaneId = -1;             // target plane id
     gp_Pln m_rotPlaneOriginal;            // snapshot for preview re-base + cancel

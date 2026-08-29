@@ -1,5 +1,7 @@
 #pragma once
 #include "platform_defs.h"
+#include "i18n.h"
+#include <cstdlib>
 
 // Runtime "touch mode" flag. When ON, the UI scales up for fingers and input is
 // interpreted as touch gestures (long-press context menus, press-drag-release
@@ -31,11 +33,47 @@ inline bool& touchModeRef() {
 inline bool touchMode() { return touchModeRef(); }
 inline void setTouchMode(bool on) { touchModeRef() = on; }
 
+// Desktop touch gestures: opt-in, via MATERIALIZR_DESKTOP_TOUCH=1.
+//
+// The gesture machine was written and tuned against Android and has never run
+// on a desktop touchscreen, so it stays off by default until it has real
+// mileage -- turning it on unconditionally would change input behaviour for
+// every 2-in-1 and touch-monitor user on the strength of an untested code
+// path. What they get today is SDL's own touch->mouse synthesis, which is
+// crude (no pinch, no long-press) but predictable.
+//
+// Read once and cached: the SDL hint that disables that synthesis is set when
+// the window is built, so the answer must not change underneath a running
+// session. Env var rather than a saved setting for the same reason -- it is a
+// launch-time decision, and it keeps an unproven path out of the Settings UI
+// until it earns a place there.
+inline bool desktopTouchEnabled() {
+    static const bool on = [] {
+        const char* e = std::getenv("MATERIALIZR_DESKTOP_TOUCH");
+        return e && *e && *e != '0';
+    }();
+    return on;
+}
+
+// Should finger events drive the gesture pipeline this run? Always on a
+// touch-first platform; on desktop only when opted in above.
+inline bool touchInputActive() {
+#if defined(MZ_MOBILE)
+    return true;
+#else
+    return desktopTouchEnabled();
+#endif
+}
+
 // Commit/cancel/create button labels. In touch mode drop the keyboard hint —
 // there are no Enter/Esc keys, and "(Enter)" just eats space and confuses. So
 // "Confirm (Enter)" -> "Confirm", "Cancel (Esc)" -> "Cancel", etc.
-inline const char* btnConfirm() { return touchMode() ? "Confirm" : "Confirm (Enter)"; }
-inline const char* btnCancel()  { return touchMode() ? "Cancel"  : "Cancel (Esc)"; }
+inline const char* btnConfirm() {
+    return tr(touchMode() ? "Confirm" : "Confirm (Enter)");
+}
+inline const char* btnCancel()  {
+    return tr(touchMode() ? "Cancel"  : "Cancel (Esc)");
+}
 inline const char* btnCreate()  { return touchMode() ? "Create"  : "Create (Enter)"; }
 
 } // namespace materializr

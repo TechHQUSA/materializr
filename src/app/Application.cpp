@@ -36,6 +36,7 @@ inline void resetFpuForOcct() {
 #endif
 
 #include "app/Application.h"
+#include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
 #include "touch_mode.h"
@@ -103,6 +104,7 @@ inline void resetFpuForOcct() {
 #include "io/DxfExport.h"
 #include "io/FileDialogs.h"
 #include "modeling/SvgImport.h"
+#include "modeling/AirfoilImport.h"
 #include "io/ProjectIO.h"
 #include "io/SketchRecovery.h"
 #include "io/ProjectRecovery.h"
@@ -196,7 +198,9 @@ void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
 
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
-    m_window = std::make_unique<Window>(1600, 900, "Materializr");
+    // The CLI scale has to reach the constructor: the INITIAL window size is
+    // scaled by it, and setUiScaleOverride() below runs too late for that.
+    m_window = std::make_unique<Window>(1600, 900, "Materializr", m_cliUiScale);
     m_viewport = std::make_unique<Viewport>();
     m_grid = std::make_unique<Grid>();
     m_shapeRenderer = std::make_unique<ShapeRenderer>();
@@ -293,14 +297,19 @@ Application::Application(bool safeMode, float uiScaleOverride)
     {
         AppSettings early = SettingsIO::load(SettingsIO::defaultPath());
         materializr::setTouchMode(early.touchMode);
-        // Desktop UI scale (Linux HiDPI, Settings → Appearance) must be known
-        // before the font atlas is baked in initImGui() below — it's applied at
-        // the window level so uiScale() (which fonts + style read) returns it.
-        // A --ui-scale / --hidpi command-line value wins over the saved setting
-        // (the escape hatch for "UI too small to read to change it in Settings").
+        // Desktop UI scale must be known before the font atlas is baked in
+        // initImGui() below — it's applied at the window level so uiScale()
+        // (which fonts + style read) returns it.
+        //
+        // Linux HiDPI is DETECTED now, not asked (Window::linuxAutoUiScale);
+        // the old Low/High setting and its first-run picker are gone. Only
+        // --ui-scale / --hidpi still overrides, as the escape hatch for a
+        // display whose DPI is reported wrongly.
         if (m_window) {
-            float scale = m_cliUiScale > 0.0f ? m_cliUiScale : early.desktopUiScale;
-            m_window->setUiScaleOverride(scale);
+            if (m_cliUiScale > 0.0f) m_window->setUiScaleOverride(m_cliUiScale);
+            // Cursor size rides the same answer, and must be set before
+            // initImGui() creates ImGui's system cursors.
+            m_window->applyCursorScale();
         }
     }
     // Scale the Tools-panel button heights to match the HiDPI font (touch mode),
@@ -339,6 +348,8 @@ Application::Application(bool safeMode, float uiScaleOverride)
         [this](const std::vector<int>& ids) { combineSketches(ids); });
     m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
     m_propertiesPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
+    m_propertiesPanel->setAttachRefImageCallback(
+        [this](int planeId) { attachRefImageToPlane(planeId); });
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
     m_propertiesPanel->setLinkInfoCallback(
         [this](bool isBody, int id) { return linkHintFor(isBody, id); });
@@ -930,6 +941,11 @@ void Application::initImGui() {
         std::string path = resolveBundledFont("JetBrainsMono-Regular.ttf");
         ImFont* fnt = nullptr;
         if (!path.empty()) {
+            // No explicit glyph range: ImGui 1.92 loads glyphs ON DEMAND and
+            // marks ImFontConfig::GlyphRanges as legacy. That is why the em
+            // dash and ellipsis already used in English render fine even though
+            // they sit above the old 0x00FF default -- and why the translated
+            // accents need nothing here either.
             fnt = io.Fonts->AddFontFromFileTTF(path.c_str(), 15.0f * uiScale);
             if (fnt) std::fprintf(stderr, "Loaded font: %s\n", path.c_str());
         }
@@ -1060,9 +1076,13 @@ void Application::renderTransientToast() {
     if (m_toastText.empty()) return;
     if (ImGui::GetTime() > m_toastExpiry) { m_toastText.clear(); return; }
     ImGuiViewport* vp = ImGui::GetMainViewport();
+    // 80px clears classic's menu bar and modern's tab strip. im-touch floats
+    // taller chrome over the viewport and scales it by uiScale, so on a tablet
+    // the fixed offset is not guaranteed to clear it — take whichever is lower.
+    const float y = std::max(vp->WorkPos.y + 80.0f,
+                             materializr::viewportTopChromeBottom() + 12.0f);
     ImGui::SetNextWindowPos(
-        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
-               vp->WorkPos.y + 80.0f),
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, y),
         ImGuiCond_Always, ImVec2(0.5f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.92f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.35f, 0.18f, 0.10f, 1.0f));
@@ -1409,7 +1429,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     ImGui::Begin("##progress", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextColored(materializr::accentText(), "Working\xE2\x80\xA6");
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Working\xE2\x80\xA6"));
     ImGui::Spacing();
     if (label && label[0]) ImGui::TextWrapped("%s", label);
     ImGui::Spacing();
@@ -1421,7 +1441,7 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
         ImGui::ProgressBar(fraction, ImVec2(-1, 0), pct);
     }
     ImGui::Spacing();
-    if (ImGui::Button("Cancel", ImVec2(110, 0)) ||
+    if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(110, 0)) ||
         ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
         m_progressCancelled = true;
     }
@@ -1505,16 +1525,13 @@ void Application::renderSmallScreenWarning() {
     if (ImGui::BeginPopupModal("Small screen", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(uiW(440));
-        ImGui::TextWrapped(
-            "Materializr is designed for tablets and larger displays. On a small "
-            "screen the panels and toolbars are cramped and some controls may be "
-            "hard to reach — a tablet or larger is strongly recommended.");
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         static bool dontShow = false;
-        ImGui::Checkbox("Don't show this again", &dontShow);
+        ImGui::Checkbox(materializr::tr("Don't show this again"), &dontShow);
         ImGui::Spacing();
-        if (ImGui::Button("OK", uiSz(140, 0))) {
+        if (ImGui::Button(materializr::tr("OK"), uiSz(140, 0))) {
             m_smallScreenAck = true;                 // gone for this run
             if (dontShow) { m_smallScreenWarned = true; saveAppSettings(); }
             ImGui::CloseCurrentPopup();
@@ -1621,12 +1638,12 @@ void Application::loadAppSettings() {
             m_uiLayout = static_cast<UiLayout>(idx);
             saveAppSettings();
         });
-    // Same bridge for the desktop UI scale, so the first-run picker can set it
-    // (restart-to-apply — it only bakes into the fonts at startup).
-    materializr::bindUiScaleBridge(
-        [this]() { return m_desktopUiScale; },
-        [this](float s) { m_desktopUiScale = s; saveAppSettings(); });
-
+    materializr::bindLanguageBridge(
+        [this]() { return m_language; },
+        [this](int idx) {
+            m_language = idx;
+            saveAppSettings();
+        });
     // Welcome screen: every launch until the user becomes a Supporter.
     // Suppressed by --safe-mode — no asking for coffee while the user is
     // recovering from a crash — and on the VERY FIRST launch, where the
@@ -1786,9 +1803,9 @@ void Application::meshQualityParams(float& deflection, float& angularDeflection)
 AppSettings Application::currentSettings() const {
     AppSettings s;
     s.theme = (m_themeManager->getTheme() == Theme::Light) ? 1 : 0;
-    s.desktopUiScale = m_desktopUiScale;
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
+    s.language = m_language;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
     s.touchRightTab = m_touchRightTab;
@@ -1866,8 +1883,13 @@ void Application::applyAppSettings(const AppSettings& s) {
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
-    m_desktopUiScale = s.desktopUiScale;  // staged; applied at next startup
     m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
+    // UI language — also live. -1 means the user has never chosen, which the
+    // setup wizard turns into its opening question; until then, English.
+    m_language = s.language;
+    setLanguage((s.language > 0 && s.language < languageCount())
+                    ? static_cast<Lang>(s.language)
+                    : Lang::English);
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
     m_showFps = s.showFps;
@@ -2226,6 +2248,37 @@ void Application::handleToolAction(int action) {
                 }
                 seedUprightPlacementAngle();
                 m_sketchTool->setMode(SketchToolMode::Text);
+            }
+            break;
+
+        case ToolAction::SketchAirfoil:
+            if (m_inSketchMode) {
+                // Filter by CONTENT, not extension: .dat is one of the most
+                // generic extensions there is, and airfoil files also ship as
+                // .txt or .air. The parser is what decides -- it refuses
+                // anything that is not chord-normalised, with a reason.
+                materializr::FileDialogs::openFile(
+                    "Import Airfoil Section",
+                    {{"Airfoil coordinates", "*.dat *.txt *.air *.DAT *.TXT"}},
+                    [this](const std::string& path) {
+                        if (path.empty() || !m_sketchTool) return;
+                        materializr::AirfoilProfile prof;
+                        std::string err;
+                        if (!materializr::AirfoilImport::load(path, prof, &err)) {
+                            showToast(std::string("Not an airfoil file: ") + err);
+                            return;
+                        }
+                        // A published section is typically 60-200 points per
+                        // surface; that many spline control points is slow to
+                        // solve and to walk for regions, and buys nothing at
+                        // model scale. The panel can raise it.
+                        materializr::AirfoilImport::simplify(prof, 40);
+                        m_airfoilPointBudget = 40;
+                        m_airfoilSource = path;
+                        m_sketchTool->setAirfoil(std::move(prof));
+                        seedUprightPlacementAngle();
+                        m_sketchTool->setMode(SketchToolMode::Airfoil);
+                    });
             }
             break;
 
@@ -2603,19 +2656,56 @@ void Application::handleToolAction(int action) {
                     if (e.type == SelectionType::Face && !e.shape.IsNull() &&
                         e.bodyId >= 0)
                         byBody[e.bodyId].push_back(e.shape);
+                MergeFacesOp::Refusal why = MergeFacesOp::Refusal::None;
                 for (auto& [id, faces] : byBody) {
                     if (faces.size() < 2) continue;   // one face alone can't merge
                     ++attempted;
                     auto op = std::make_unique<MergeFacesOp>();
                     op->setBody(id);
                     op->setFaces(faces);
+                    MergeFacesOp::resetLastRefusal();
                     if (m_history->pushOperation(std::move(op), *m_document)) ++merged;
+                    // pushOperation took the op by value and has destroyed it;
+                    // the reason is parked on the class. Read it now.
+                    else if (why == MergeFacesOp::Refusal::None)
+                        why = MergeFacesOp::lastRefusal();
                 }
-                if (merged == 0)
+                if (merged == 0) {
+                    // Say which failure it was. The old text named a tolerance
+                    // problem for every refusal, including the two that no
+                    // tolerance can fix, which sends people hunting for a
+                    // setting instead of looking at the faces they picked.
+                    const char* msg = nullptr;
+                    switch (why) {
+                        case MergeFacesOp::Refusal::OppositeNormals:
+                            msg = "Those faces point in opposite directions \xE2\x80\x94 they "
+                                  "lie in the same plane, but the material is on opposite "
+                                  "sides, so they are different surfaces of the part rather "
+                                  "than two halves of one. Merging can't join them, and "
+                                  "wouldn't add material to either.";
+                            break;
+                        case MergeFacesOp::Refusal::NotAdjacent:
+                            msg = "Those faces don't touch \xE2\x80\x94 merging dissolves the "
+                                  "edge between two faces, and there isn't one. If a small "
+                                  "step separates them, level it first, then merge.";
+                            break;
+                        case MergeFacesOp::Refusal::Unsafe:
+                            msg = "That merge would have moved material, so it was refused "
+                                  "\xE2\x80\x94 the faces are one surface, but joining them "
+                                  "would reshape the part rather than tidy it.";
+                            break;
+                        case MergeFacesOp::Refusal::FacesNotFound:
+                            msg = "Couldn't find those faces on the body any more \xE2\x80\x94 "
+                                  "they may already have been merged.";
+                            break;
+                        default: break;   // NotSameSurface and friends: the tolerance text below is right
+                    }
                     showToast(attempted == 0
                         ? "Pick two or more faces on the SAME body to merge them."
-                        : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
-                          "to one surface, or the merge wouldn't hold together.");
+                        : (msg ? msg
+                               : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                                 "to one surface, or the merge wouldn't hold together."));
+                }
             } else {
                 const std::vector<int> bodies = materializr::selectedBodyIds(*m_selection);
                 if (bodies.empty()) break;
@@ -2981,11 +3071,14 @@ void Application::handleShortcuts() {
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         recordSketchMutation([&] { m_sketchTool->removeLastSplinePoint(); });
     }
-    // Backspace while the Text / SVG tool is active removes the WHOLE last
-    // stamp — re-place a misjudged logo without leaving the tool.
+    // Backspace while the Text / SVG / Airfoil tool is active removes the
+    // WHOLE last stamp — re-place a misjudged logo or section without leaving
+    // the tool. (The panels all advertise Backspace, so every stamp mode has
+    // to honour it.)
     if (m_inSketchMode && m_sketchTool &&
         (m_sketchTool->getMode() == SketchToolMode::Text ||
-         m_sketchTool->getMode() == SketchToolMode::Svg) &&
+         m_sketchTool->getMode() == SketchToolMode::Svg ||
+         m_sketchTool->getMode() == SketchToolMode::Airfoil) &&
         m_sketchTool->hasLastStamp() &&
         !ImGui::GetIO().WantTextInput &&
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
@@ -4379,13 +4472,13 @@ void Application::renderSavePrompt() {
         }
         ImGui::Text("%s", prompt);
         ImGui::Separator();
-        if (ImGui::Button("Save", ImVec2(100, 0))) {
+        if (ImGui::Button(materializr::tr("Save"), materializr::uiSz(100, 0))) {
             m_closeAfterSave = true;
             saveProjectQuick();
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Don't Save", ImVec2(100, 0))) {
+        if (ImGui::Button(materializr::tr("Don't Save"), materializr::uiSz(100, 0))) {
             if (m_postSaveAction == PostSaveAction::CloseProject) {
                 doCloseProject();
                 m_postSaveAction = PostSaveAction::None;
@@ -4400,7 +4493,7 @@ void Application::renderSavePrompt() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+        if (ImGui::Button(materializr::tr("Cancel"), materializr::uiSz(100, 0))) {
             m_closeAfterSave = false;
             m_pendingOpenAction = nullptr;
             m_postSaveAction = PostSaveAction::None;
@@ -6141,19 +6234,16 @@ void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
         return;
     }
 
+    // A Subtract PREFERS the sketch's host body, but no longer requires one: a
+    // free-floating sketch (construction plane, origin plane) or a detached one
+    // cuts whichever body the swept profile actually runs into, resolved from
+    // the tool volume at commit. This used to bail here with a stderr line, so
+    // the Subtract button was a silent no-op on every unattached sketch.
+    // Detached sketches deliberately pass -1: the former host is no longer the
+    // preferred answer, only a candidate like any other.
     int targetBody = -1;
-    if (mode == ExtrudeMode::Subtract) {
-        // A detached sketch no longer belongs to its former host — cutting
-        // that body from a sketch moved elsewhere is never what's meant.
-        targetBody = sketch->isDetachedFromBody() ? -1
-                                                  : sketch->getSourceBody();
-        if (targetBody < 0) {
-            std::fprintf(stderr, "Subtract needs a sketch attached to a body "
-                                 "face; this sketch is free-floating or was "
-                                 "unlinked from its body\n");
-            return;
-        }
-    }
+    if (mode == ExtrudeMode::Subtract && !sketch->isDetachedFromBody())
+        targetBody = sketch->getSourceBody();
     beginInteractiveExtrude(profile, mode, targetBody, sketchId);
 }
 
@@ -6161,15 +6251,11 @@ void Application::subtractSketchRegion(int sketchId, int regionIndex) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
 
-    // Detached sketch: see subtract path above — never cut the former host.
-    int targetBody = sketch->isDetachedFromBody() ? -1
-                                                  : sketch->getSourceBody();
-    if (targetBody < 0) {
-        std::fprintf(stderr, "Subtract needs a sketch attached to a body "
-                             "face; this sketch is free-floating or was "
-                             "unlinked from its body\n");
-        return;
-    }
+    // Preferred host only — see extrudeSketchById: with no attachment the cut
+    // target comes from the swept volume at commit, not from the sketch's
+    // provenance, and a detached sketch's former host gets no special claim.
+    const int targetBody = sketch->isDetachedFromBody() ? -1
+                                                       : sketch->getSourceBody();
 
     auto regions = sketch->buildRegions();
     if (regionIndex < 0 || regionIndex >= static_cast<int>(regions.size())) return;
@@ -6497,17 +6583,16 @@ void Application::renderSketchRecoveryPrompt() {
                                ImGuiWindowFlags_AlwaysAutoResize |
                                ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::TextUnformatted(
-            "An unfinished sketch from your last session was found.");
-        ImGui::TextDisabled(
-            "It wasn't committed before the app closed (a crash, or a restart).");
+            materializr::tr("An unfinished sketch from your last session was found."));
+        ImGui::TextDisabled("%s", materializr::tr("It wasn't committed before the app closed (a crash, or a restart)."));
         ImGui::Spacing();
-        if (ImGui::Button("Restore it", ImVec2(140, 0))) {
+        if (ImGui::Button(materializr::tr("Restore it"), materializr::uiSz(140, 0))) {
             restoreSketchDraftNow();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+        if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
             materializr::clearSketchDraft();
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
@@ -6642,30 +6727,28 @@ void Application::renderProjectRecoveryPrompt() {
         materializr::ProjectRecoveryMeta meta;
         materializr::readProjectRecoveryMeta(meta);
         ImGui::TextUnformatted(
-            "Unsaved work from your last session was recovered.");
+            materializr::tr("Unsaved work from your last session was recovered."));
         if (!meta.projectPath.empty())
-            ImGui::TextDisabled("Project: %s", meta.projectPath.c_str());
+            ImGui::TextDisabled(materializr::tr("Project: %s"), meta.projectPath.c_str());
         else
-            ImGui::TextDisabled("An unsaved project (never written to a file).");
-        ImGui::TextDisabled("%d bodies, %d history steps.",
+            ImGui::TextDisabled("%s", materializr::tr("An unsaved project (never written to a file)."));
+        ImGui::TextDisabled(materializr::tr("%d bodies, %d history steps."),
                             meta.bodyCount, meta.stepCount);
-        ImGui::TextDisabled(
-            "Materializr didn't close cleanly (a crash, hang, or restart).");
+        ImGui::TextDisabled("%s", materializr::tr("Materializr didn't close cleanly (a crash, hang, or restart)."));
         // One snapshot per tab the dead instance had open — the summary above
         // describes the newest; all of them come back, a tab each.
         const int nOrphans = materializr::projectRecoveryOrphanCount();
         if (nOrphans > 1)
-            ImGui::TextDisabled("%d projects in total — each reopens in its "
-                                "own tab.", nOrphans);
+            ImGui::TextDisabled(materializr::tr("%d projects in total — each reopens in its own tab."), nOrphans);
         ImGui::Spacing();
         if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
-                          ImVec2(140, 0))) {
+                          materializr::uiSz(140, 0))) {
             restoreProjectRecoveryNow();
             m_pendingProjectRecovery = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Discard", ImVec2(140, 0))) {
+        if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
             // These are the dead session's orphaned snapshots — our own live
             // slot is separate and untouched. Discard means ALL of them, to
             // match the restore: leaving the rest to resurface on the next
@@ -7099,6 +7182,11 @@ void Application::run() {
         // im-touch shells stand down completely (their floating chrome would
         // draw over the page); classic keeps its menu bar — the one piece of
         // chrome that is useful above the page — and drops the rest below.
+        // No floating chrome until a layout says otherwise. Reset HERE, in the
+        // one place every layout passes through, rather than in each layout's
+        // else-branch — a third layout that forgot would inherit im-touch's
+        // inset from the frame before the user switched.
+        materializr::viewportTopChromeBottom() = 0.0f;
         switch (m_uiLayout) {
             case UiLayout::Classic: renderMenuBar();        break;
             case UiLayout::Modern:
@@ -7431,12 +7519,8 @@ void Application::run() {
                         ImGuiWindowFlags_NoNav;
                     bool open = true;
                     if (ImGui::Begin("Pick more sketches", &open, flags)) {
-                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f),
-                                           "Loft needs at least two profiles.");
-                        ImGui::TextWrapped("Ctrl-click the other sketches (or "
-                                           "their regions) in loft order — as "
-                                           "many as you like — then click Loft "
-                                           "again.");
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f), "%s", materializr::tr("Loft needs at least two profiles."));
+                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;
@@ -7481,6 +7565,7 @@ void Application::run() {
             renderSectionPanel();
             renderTextToolPanel();
             renderSvgToolPanel();
+            renderAirfoilToolPanel();
             renderMirrorToolPanel();
             renderLoftPanel();
             renderBoundaryFillPanel();
@@ -7492,6 +7577,7 @@ void Application::run() {
             renderUnfoldDialog();
             renderRevolvePopup();
             renderRotatePlaneAboutAxisPopup();
+            renderAlignFacePopup();
             renderSketchMovePanel();
             renderSketchPatternPopup();
 

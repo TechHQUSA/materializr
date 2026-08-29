@@ -35,6 +35,8 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/BatchTransformOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/PushPullOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Sketch.cpp
+    ${CMAKE_SOURCE_DIR}/src/i18n.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/AirfoilImport.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchTool.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchEditOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DuplicateSketchOp.cpp
@@ -264,6 +266,11 @@ add_executable(test_face_lineage test_face_lineage.cpp)
 target_link_libraries(test_face_lineage PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_face_lineage COMMAND test_face_lineage)
 
+# Sticky rim attachment: a point placed on a circle/arc rides it, then lets go
+add_executable(test_sticky_rim test_sticky_rim.cpp)
+target_link_libraries(test_sticky_rim PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sticky_rim COMMAND test_sticky_rim)
+
 # Face-sketch grid direction: world-aligned edge beats the longest diagonal
 add_executable(test_sketch_plane_axis test_sketch_plane_axis.cpp)
 target_link_libraries(test_sketch_plane_axis PRIVATE materializr_core gtest gtest_main)
@@ -298,6 +305,10 @@ add_test(NAME test_split_offset COMMAND test_split_offset)
 add_executable(test_merge_faces test_merge_faces.cpp)
 target_link_libraries(test_merge_faces PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_merge_faces COMMAND test_merge_faces)
+
+add_executable(test_unify_guard test_unify_guard.cpp)
+target_link_libraries(test_unify_guard PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_unify_guard COMMAND test_unify_guard)
 
 # Extrude region identity: draw/extrude/draw-more replays correctly (#53)
 add_executable(test_extrude_regions test_extrude_regions.cpp)
@@ -649,6 +660,45 @@ add_test(NAME test_disabled_thread COMMAND test_disabled_thread)
 add_executable(test_plane_axes test_plane_axes.cpp)
 target_link_libraries(test_plane_axes PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_plane_axes COMMAND test_plane_axes)
+
+# test_cut_target_pick — Subtract-from-sketch picks the body it actually cuts
+# (geometry, not the sketch's source-body link), so a free-floating sketch stops
+# being a silent no-op and a sweep that misses can't land an empty History step.
+add_executable(test_cut_target_pick test_cut_target_pick.cpp)
+target_link_libraries(test_cut_target_pick PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_cut_target_pick COMMAND test_cut_target_pick)
+
+# test_tangent_inference — the tangent guide fires at the FULL inference level
+# from an anchor ON a circle/arc (D == R), honours an arc's real span, and
+# names the curve actually aimed at
+add_executable(test_tangent_inference test_tangent_inference.cpp)
+target_link_libraries(test_tangent_inference PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_tangent_inference COMMAND test_tangent_inference)
+
+# test_mode_inference — the directional inference family (angle snap, tangent,
+# perpendicular/parallel-to-previous) works in the arc, circle, polygon and
+# spline tools too, anchored on the point actually being extended
+add_executable(test_mode_inference test_mode_inference.cpp)
+target_link_libraries(test_mode_inference PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_mode_inference COMMAND test_mode_inference)
+
+# test_arc_typed_dimension — the arc tool takes a typed chord, then a typed
+# sweep angle or radius for the apex (SketchTool::ArcDimMode)
+add_executable(test_arc_typed_dimension test_arc_typed_dimension.cpp)
+target_link_libraries(test_arc_typed_dimension PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_arc_typed_dimension COMMAND test_arc_typed_dimension)
+
+# test_i18n — the translation layer: ImGui ##id suffixes survive translation,
+# and every shipped string fits the glyph range the font atlas is built with
+add_executable(test_i18n test_i18n.cpp)
+target_link_libraries(test_i18n PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_i18n COMMAND test_i18n)
+
+# test_airfoil_import — Selig + Lednicer airfoil coordinate files, blunt
+# trailing edges, decimation, and placement as two interpolating splines
+add_executable(test_airfoil_import test_airfoil_import.cpp)
+target_link_libraries(test_airfoil_import PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_airfoil_import COMMAND test_airfoil_import)
 
 # ─── Loader path for a source-built OCCT ─────────────────────────────────────
 # With MZR_OCCT_PREFIX the kernel lives outside the loader's default search

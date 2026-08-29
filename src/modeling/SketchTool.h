@@ -2,6 +2,7 @@
 #include "Sketch.h"
 #include "SketchSolver.h"
 #include "SvgImport.h"
+#include "AirfoilImport.h"
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <functional>
@@ -11,7 +12,11 @@
 
 namespace materializr {
 
-enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text, Svg, Mirror, Dimension };
+// APPEND ONLY. Toolbar mirrors the active tool as this enum's raw INDEX
+// (Application::setActiveSketchMode) and the sketch toolbar hardcodes those
+// indices, so inserting a mode in the middle silently highlights the wrong
+// button -- Dimension would become 13 while the button still tests 12.
+enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text, Svg, Mirror, Dimension, Airfoil };
 
 enum class DimEntityKind { None, Point, Line, Circle, Arc };
 struct DimPick { DimEntityKind kind = DimEntityKind::None; int id = -1; };
@@ -48,13 +53,14 @@ struct InferenceGuide {
         Endpoint,       // cursor snapped onto an existing sketch point
         Midpoint,       // cursor snapped onto the midpoint of a line / arc
         OnLine,         // cursor projected onto an existing line (not at an endpoint/midpoint)
+        OnCircle,       // cursor landed on a circle's or arc's rim → same diamond marker as OnLine
         AxisHFromPoint, // cursor's Y aligns with an existing point's Y → red horizontal guide
         AxisVFromPoint, // cursor's X aligns with an existing point's X → green vertical guide
         PerpToPrev,        // cursor is on the perpendicular ray from the chain's previous segment → orange guide
         ParallelToPrev,    // cursor is on the parallel-to-previous ray → magenta guide
         AngleSnap,         // cursor is on a 15° / 30° / 45° / etc. ray from the chain anchor → grey guide
         OnLineExtension,   // cursor is on the infinite extension of an existing line → lavender dashed guide
-        TangentToCircle,   // cursor lies on the tangent line touching a circle/arc → orange dashed guide
+        TangentToCircle,   // cursor lies on a tangent line touching a circle, arc or spline → dashed guide
         PerpToRef,         // cursor is on the perpendicular ray through a hover-charged point → cyan guide
         Symmetry,          // cursor snapped to the mirror image of an existing point across a centreline / axis-aligned line → purple guide
     };
@@ -174,6 +180,16 @@ public:
     const std::vector<std::vector<glm::vec2>>& getTextPreviewLoops() const {
         return m_textPrevLoops;
     }
+    // Airfoil placement (shares the Text/SVG placement frame: same angle and
+    // stamp/undo machinery). The profile is chord-normalised; chord is the
+    // real-world size in mm, and the click lands on the LEADING EDGE.
+    void setAirfoil(AirfoilProfile prof) { m_airfoil = std::move(prof); }
+    const AirfoilProfile& getAirfoil() const { return m_airfoil; }
+    void  setAirfoilChord(float mm) { m_airfoilChord = (mm < 0.1f) ? 0.1f : mm; }
+    float getAirfoilChord() const { return m_airfoilChord; }
+    void setAirfoilAnchor(AirfoilAnchor a) { m_airfoilAnchor = a; }
+    AirfoilAnchor getAirfoilAnchor() const { return m_airfoilAnchor; }
+
     // SVG placement (shares the Text tool's placement frame: same angle,
     // same cursor preview box, same fromText suppression on the result).
     void setSvgPaths(SvgPaths svg) { m_svgPaths = std::move(svg); }
@@ -265,6 +281,20 @@ public:
     // passes through the first click — handy to align a circle to a corner).
     enum class RectMode { Corner, Center };
     enum class CircleMode { Center, TwoPoint };
+
+    // What a typed value means at the arc's THIRD click. Clicks 1 and 2 fix the
+    // chord, so either the swept angle or the radius pins the apex exactly —
+    // two ways of saying the same thing, and which one you have to hand depends
+    // on the drawing (a 90-degree corner versus a 6 mm fillet run). The cursor's
+    // side of the chord still decides which way the arc bows: that is a
+    // direction, not a dimension, so no number can express it.
+    enum class ArcDimMode { Sweep, Radius };
+    void setArcDimMode(ArcDimMode m) { m_arcDimMode = m; }
+    ArcDimMode getArcDimMode() const { return m_arcDimMode; }
+    // Half the chord — the smallest radius any arc through these two endpoints
+    // can have. Below it no arc exists, so the UI can grey out Apply rather
+    // than let applyDimension silently refuse. 0 when not at the apex stage.
+    float arcMinRadius() const;
     void setRectMode(RectMode m) { m_rectMode = m; }
     RectMode getRectMode() const { return m_rectMode; }
     void setCircleMode(CircleMode m) { m_circleMode = m; }
@@ -306,6 +336,16 @@ public:
     // Trim hover: densified 2D points outlining the segment that would be
     // removed on the next click. Empty when nothing is hovered in Trim mode.
     const std::vector<glm::vec2>& getTrimHoverPoints() const { return m_trimHoverPoints; }
+
+    // Where the directional inference family (perpendicular/parallel-to-
+    // previous, tangent-to-curve, angle snap, hover-charged guides) measures
+    // FROM for the point being placed right now, and whether it applies at all
+    // in the current mode and stage. Every draw tool that asks the user to
+    // choose a DIRECTION from a fixed anchor wants these guides; the family was
+    // written for the Line tool and gated on it, so arcs, circles, polygons and
+    // splines drew with no directional assistance whatsoever. Returns false for
+    // the modes and stages where a direction is not the thing being picked.
+    bool directionalAnchor(glm::vec2& out) const;
 
     // The set of inferences active at the most recent snap. The renderer reads
     // this each frame to draw ghost guide lines. Cleared whenever the cursor
@@ -369,6 +409,9 @@ private:
     int m_angleSnapDeg = 15; // line angle-snap increment (0 = off)
     RectMode   m_rectMode   = RectMode::Corner;
     CircleMode m_circleMode = CircleMode::Center;
+    // Session-sticky: whichever the user last drew arcs with stays selected, so
+    // a run of fillet arcs is not a mode toggle per arc.
+    ArcDimMode m_arcDimMode = ArcDimMode::Sweep;
     // Hover-charge state (see updateHoverCharge). m_charged is the active
     // reference (Kind::None when nothing's charged); the m_hover* fields
     // track the in-progress dwell on a candidate before it commits.
@@ -428,11 +471,23 @@ private:
     // or diameter (2-point mode) to whole grid units, so a 1 mm grid can't
     // produce a 10.05 mm circle. No-op when grid snap is off.
     glm::vec2 snapRadialToGrid(glm::vec2 fixed, glm::vec2 moving) const;
+    // How far a drag may pull a sticky point off its rim before the
+    // attachment simply lets go. Sized to the snap band so attaching and
+    // detaching feel like the same gesture at the same scale.
+    float rimBreakBand(bool wholeSelection) const;
+    // Slide `p` along the rim it is stuck to, or release it. Returns the
+    // position to use. Clears onCurveId when the drag has left the rim.
+    glm::vec2 slideOrRelease(int pointId, glm::vec2 target, bool wholeSelection);
+    // The circle/arc the last snap() landed on, or -1. mutable: snap() is
+    // const and every caller wants the position, not a second return value.
+    mutable int m_snapRimId = -1;
+    void noteRimGuide(glm::vec2 at, int curveId) const;
     void handleSelectTool(glm::vec2 pos);
     void handleSplineTool(glm::vec2 pos);
     void handlePolygonTool(glm::vec2 pos);
     void handleTextTool(glm::vec2 pos);
     void handleSvgTool(glm::vec2 pos);
+    void handleAirfoilTool(glm::vec2 pos);
     // Collapse a directional-inference result onto the axis (+ grid) when
     // it's within a few degrees of horizontal/vertical — crooked-line guard.
     glm::vec2 rectifyNearAxis(glm::vec2 target) const;
@@ -478,6 +533,9 @@ private:
 
     // SVG placement state (see SvgImport.h)
     SvgPaths m_svgPaths;
+    AirfoilProfile m_airfoil;
+    float m_airfoilChord = 100.0f;  // mm, a typical model-wing root chord
+    AirfoilAnchor m_airfoilAnchor = AirfoilAnchor::LeadingEdge;
     float m_svgWidth = 50.0f; // target artwork width, mm
 
     // One entry per Text/SVG stamp (newest last), each holding that stamp's
@@ -486,7 +544,8 @@ private:
     // through every stamp to the original, not just the most recent one.
     // Cleared on setMode so each tool session starts fresh.
     std::vector<std::vector<int>> m_stampStack;
-    void recordStamp(size_t pointsBefore, size_t linesBefore);
+    void recordStamp(size_t pointsBefore, size_t linesBefore,
+                     size_t splinesBefore = static_cast<size_t>(-1));
 
     // --- Interactive Mirror state ---
     bool m_mirrorActive = false;

@@ -42,6 +42,8 @@
 #include <cmath>
 #include <unordered_set>
 #include "../ui/NumField.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 // A point that genuinely lies on the face's MATERIAL. Returns `center` when it's
 // already inside the trimmed face; otherwise samples a UV grid (rejecting points
@@ -361,12 +363,9 @@ bool PushPullOp::execute(Document& doc) {
                 captureLedger(bid, body, cut);
                 TopoDS_Shape rawResult = result;
                 Handle(BRepTools_History) unifyHist;
-                try {
-                    ShapeUpgrade_UnifySameDomain u(result, true, true, true);
-                    u.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    u.Build();
-                    if (!u.Shape().IsNull()) { result = u.Shape(); unifyHist = u.History(); }
-                } catch (...) {}
+                result = materializr::unifySameDomain(result, "Push/Pull cut",
+                                                      /*concatBSplines=*/true,
+                                                      &unifyHist);
                 if (!savedBodies.count(bid)) {
                     m_previousBodies.emplace_back(bid, body);
                     savedBodies.insert(bid);
@@ -541,13 +540,9 @@ bool PushPullOp::execute(Document& doc) {
                 }
                 TopoDS_Shape rawResult = result;
                 Handle(BRepTools_History) unifyHist;
-                try {
-                    ShapeUpgrade_UnifySameDomain unifier(result, true, true, true);
-                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    unifier.Build();
-                    TopoDS_Shape unified = unifier.Shape();
-                    if (!unified.IsNull()) { result = unified; unifyHist = unifier.History(); }
-                } catch (...) {}
+                result = materializr::unifySameDomain(result, "Push/Pull",
+                                                      /*concatBSplines=*/true,
+                                                      &unifyHist);
                 snapshotLineage(doc, tgt.sourceBodyId);
                 doc.updateBody(tgt.sourceBodyId, result);
                 publishLineage(doc, tgt.sourceBodyId, current, rawResult,
@@ -637,10 +632,10 @@ std::string PushPullOp::description() const {
 }
 
 void PushPullOp::renderProperties() {
-    ImGui::Text("Push/Pull");
+    ImGui::Text("%s", materializr::tr("Push/Pull"));
     ImGui::Separator();
-    materializr::inputNumber("Distance", &m_distance, 0.1, 1.0, "%g");
-    ImGui::Text("Regions: %zu", m_targets.size());
+    materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");
+    ImGui::Text(materializr::tr("Regions: %zu"), m_targets.size());
 }
 
 OperationDiff PushPullOp::captureDiff() const {

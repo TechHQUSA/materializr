@@ -131,6 +131,23 @@ jobs:
           Copy-Item -Recurse assets $stage/assets
           Get-ChildItem $stage | Format-Table Name,Length
 
+      # Launch smoke test. CI has always BUILT this exe and never RUN it, which
+      # is how a crash on the FIRST LINE of main() shipped in two releases
+      # (#82 — setvbuf with a size MSVC's UCRT rejects, fail-fasting before any
+      # output). --help returns before a window or GL context exists, so it runs
+      # fine on a headless runner while still covering static init, the CRT
+      # calls, and every DLL the exe imports.
+      - name: Smoke test the packaged exe
+        shell: pwsh
+        working-directory: staging/Materializr
+        run: |
+          $p = Start-Process -FilePath .\materializr.exe -ArgumentList '--help' `
+                 -NoNewWindow -PassThru -Wait
+          if ($p.ExitCode -ne 0) {
+            throw ("materializr.exe --help exited {0} (0x{1:X8}) — the app cannot start" -f $p.ExitCode, $p.ExitCode)
+          }
+          Write-Host "materializr.exe --help exited 0"
+
       - name: Create portable zip
         shell: pwsh
         run: Compress-Archive -Path staging/Materializr/* -DestinationPath Materializr-windows-x64.zip -Force

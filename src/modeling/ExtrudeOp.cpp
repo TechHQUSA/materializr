@@ -12,6 +12,10 @@
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp_Face.hxx>
+#include <Message_ProgressIndicator.hxx>
+#include <Message_ProgressScope.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <ctime>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeShape.hxx>
@@ -54,6 +58,9 @@ void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
 #include <ElSLib.hxx>
 #include <TopExp_Explorer.hxx>
 #include "../ui/NumField.h"
+#include "../i18n.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace {
 // Interior points of `face`, up to `maxPts`, spread over a UV grid. MANY
@@ -133,14 +140,7 @@ std::vector<TopoDS_Face> footprintFacesOnPlane(const TopoDS_Shape& shape,
 // the body (face-count divergence downstream, and chamfer walks fail at the
 // fragment boundaries).
 TopoDS_Shape unifyProfile(const TopoDS_Shape& comp) {
-    try {
-        ShapeUpgrade_UnifySameDomain u(comp, true, true, true);
-        u.SetAngularTolerance(materializr::kUnifyAngularTol);
-        u.Build();
-        TopoDS_Shape s = u.Shape();
-        if (!s.IsNull()) return s;
-    } catch (...) {}
-    return comp;
+    return materializr::unifySameDomain(comp, "Extrude profile");
 }
 
 std::vector<std::pair<double,double>> footprintPoints(
@@ -272,6 +272,39 @@ void ExtrudeOp::setDraftAngle(double degrees) {
     m_draftAngle = degrees;
 }
 
+
+// Time-boxed boolean build, mirroring BooleanOp. An extrude-subtract against a
+// body with tolerance-inflated seams was measured grinding indefinitely -- and
+// these cuts RE-RUN at project load, so one bad step made the file unopenable:
+// the app sat at 98% CPU forever before the window ever appeared.
+namespace {
+struct ExtrudeTimeBox : public Message_ProgressIndicator {
+    std::clock_t start; double limit;
+    explicit ExtrudeTimeBox(double seconds) : start(std::clock()), limit(seconds) {}
+    Standard_Boolean UserBreak() override {
+        return double(std::clock() - start) / CLOCKS_PER_SEC > limit;
+    }
+    void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+};
+template <class OP>
+bool timedBooleanBuild(OP& op, const TopoDS_Shape& a, const TopoDS_Shape& b,
+                       const char* what) {
+    TopTools_ListOfShape la, lb;
+    la.Append(a); lb.Append(b);
+    op.SetArguments(la);
+    op.SetTools(lb);
+    op.SetRunParallel(Standard_True);
+    Handle(ExtrudeTimeBox) tb = new ExtrudeTimeBox(45.0);
+    op.Build(tb->Start());
+    if (tb->UserBreak()) {
+        std::fprintf(stderr, "[Extrude] %s abandoned after 45 s -- the target "
+                     "body's geometry is too degenerate for this boolean.\n", what);
+        return false;
+    }
+    return op.IsDone();
+}
+} // namespace
+
 bool ExtrudeOp::execute(Document& doc) {
     if (m_profile.IsNull()) {
         return false;
@@ -349,13 +382,7 @@ bool ExtrudeOp::execute(Document& doc) {
             fuse.Build();
             if (!fuse.IsDone()) return false;
             extrudedShape = fuse.Shape();
-            try {
-                ShapeUpgrade_UnifySameDomain unifier(extrudedShape, true, true, true);
-                unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                unifier.Build();
-                TopoDS_Shape unified = unifier.Shape();
-                if (!unified.IsNull()) extrudedShape = unified;
-            } catch (...) { /* keep un-unified result */ }
+            extrudedShape = materializr::unifySameDomain(extrudedShape, "Extrude");
         } else {
             gp_Vec direction = faceNormal * m_distance;
             BRepPrimAPI_MakePrism prism(ownProfile, direction);
@@ -458,19 +485,11 @@ bool ExtrudeOp::execute(Document& doc) {
                 m_prevFaceIds.clear();
                 if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
                     m_prevFaceIds = *im;
-                BRepAlgoAPI_Fuse fuse(m_previousTargetShape, extrudedShape);
-                fuse.Build();
-                if (!fuse.IsDone()) {
-                    return false;
-                }
+                BRepAlgoAPI_Fuse fuse;
+                if (!timedBooleanBuild(fuse, m_previousTargetShape, extrudedShape,
+                                       "fuse")) return false;
                 TopoDS_Shape fused = fuse.Shape();
-                try {
-                    ShapeUpgrade_UnifySameDomain unifier(fused, true, true, true);
-                    unifier.SetAngularTolerance(materializr::kUnifyAngularTol);
-                    unifier.Build();
-                    TopoDS_Shape unified = unifier.Shape();
-                    if (!unified.IsNull()) fused = unified;
-                } catch (...) { /* keep un-unified result */ }
+                fused = materializr::unifySameDomain(fused, "Extrude fuse");
                 if (!commitGuard(fused)) {
                     return false;
                 }
@@ -487,11 +506,9 @@ bool ExtrudeOp::execute(Document& doc) {
                 m_prevFaceIds.clear();
                 if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
                     m_prevFaceIds = *im;
-                BRepAlgoAPI_Cut cut(m_previousTargetShape, extrudedShape);
-                cut.Build();
-                if (!cut.IsDone()) {
-                    return false;
-                }
+                BRepAlgoAPI_Cut cut;
+                if (!timedBooleanBuild(cut, m_previousTargetShape, extrudedShape,
+                                       "cut")) return false;
                 if (!commitGuard(cut.Shape())) {
                     return false;
                 }
@@ -755,24 +772,26 @@ std::string ExtrudeOp::description() const {
 }
 
 void ExtrudeOp::renderProperties() {
-    ImGui::Text("Extrude");
+    ImGui::Text("%s", materializr::tr("Extrude"));
     ImGui::Separator();
 
-    materializr::inputNumber("Distance", &m_distance, 0.1, 1.0, "%g");
+    materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");
 
-    const char* modeItems[] = { "New Body", "Union", "Subtract", "Intersect" };
+    const char* modeItems[] = { materializr::tr("New Body"), materializr::tr("Union"),
+                                materializr::tr("Subtract"), materializr::tr("Intersect") };
     int modeIndex = static_cast<int>(m_mode);
-    if (ImGui::Combo("Mode", &modeIndex, modeItems, 4)) {
+    if (ImGui::Combo(materializr::tr("Mode"), &modeIndex, modeItems, 4)) {
         m_mode = static_cast<ExtrudeMode>(modeIndex);
     }
 
-    const char* dirItems[] = { "Normal", "Symmetric", "Custom" };
+    const char* dirItems[] = { materializr::tr("Normal"), materializr::tr("Symmetric"),
+                               materializr::tr("Custom") };
     int dirIndex = static_cast<int>(m_direction);
-    if (ImGui::Combo("Direction", &dirIndex, dirItems, 3)) {
+    if (ImGui::Combo(materializr::tr("Direction"), &dirIndex, dirItems, 3)) {
         m_direction = static_cast<ExtrudeDirection>(dirIndex);
     }
 
-    materializr::inputNumber("Draft Angle", &m_draftAngle, 0.1, 1.0, "%.1f");
+    materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");
 
     if (m_mode != ExtrudeMode::NewBody) {
         materializr::inputNumberInt("Target Body ID", &m_targetBodyId);

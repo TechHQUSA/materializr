@@ -9,6 +9,7 @@
 #include "../core/Verbose.h"
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <cstdlib>
 #include <cmath>
 #include <BRepFilletAPI_MakeFillet.hxx>
@@ -28,6 +29,8 @@
 #include <cmath>
 #include <imgui.h>
 #include "../ui/NumField.h"
+#include "../i18n.h"
+#include "../i18n.h"
 
 namespace {
 // Representative point on a face (midpoint of its UV bounds). Stable for the
@@ -371,24 +374,57 @@ bool FilletOp::execute(Document& doc) {
         // failure now NULLIFIES the candidate and falls through to the #55
         // swept-arc cut fallback below instead of aborting outright.
         TopoDS_Shape candidate;
+        double usedRadius = m_radius;
+        // The successful builder outlives the retry loop: the lineage ledger and
+        // Generated() below need the very object that produced `candidate`.
+        std::unique_ptr<BRepFilletAPI_MakeFillet> fillet;
         {
-        BRepFilletAPI_MakeFillet fillet(m_previousShape);
-
-        for (const auto& edge : m_edges) {
-            fillet.Add(m_radius, edge);
-        }
-
-        fillet.Build();
-        if (!fillet.IsDone()) {
-            std::fprintf(stderr,
-                "[Fillet] BRepFilletAPI.IsDone() returned false (R=%.2f) "
-                "— OCCT refused to build the fillet at this radius.\n",
-                m_radius);
-        } else {
-            candidate = fillet.Shape();
-            if (candidate.IsNull())
-                std::fprintf(stderr, "[Fillet] result shape is null (R=%.2f).\n",
-                             m_radius);
+        // Nudge past isolated radii OCCT cannot build.
+        //
+        // BRepFilletAPI fails at SINGLE POINTS, not above a ceiling. Measured on
+        // robot dog cover.mzr, body "Extrude", its 114 mm top edge:
+        //
+        //     R = 1.90  ok      R = 2.00  IsDone()==false      R = 2.10  ok
+        //     ...and every radius from 2.1 up to 8.0 builds a valid solid.
+        //
+        // 2.00 is exactly where the blend's topology changes (83 faces below it,
+        // 88 above); on that knife-edge ChFi3d degenerates, while either side is
+        // fine. Users type round numbers, so they land precisely on these points
+        // and conclude the geometry cannot take the radius. The reported symptom
+        // was "I can't fillet beyond about 1.5 mm" on an edge where 2.5, 3, 5
+        // and 8 mm all worked.
+        //
+        // So retry a hair either side before giving up. The offsets are far below
+        // anything a user can see or measure (2 microns at R=2) yet enough to
+        // step off the degenerate point. Smaller is tried first, so a radius near
+        // a GENUINE geometric limit is not nudged past it.
+        const double kNudge[] = {0.0, -1e-3, 1e-3, -5e-3, 5e-3};
+        for (double rel : kNudge) {
+            const double r = m_radius * (1.0 + rel);
+            if (r <= 0.0) continue;
+            auto attempt = std::make_unique<BRepFilletAPI_MakeFillet>(m_previousShape);
+            for (const auto& edge : m_edges) attempt->Add(r, edge);
+            try { attempt->Build(); } catch (...) { continue; }
+            if (!attempt->IsDone()) {
+                std::fprintf(stderr,
+                    "[Fillet] BRepFilletAPI.IsDone() returned false (R=%.4f)%s\n",
+                    r, rel == 0.0 ? " — retrying just off that radius." : "");
+                continue;
+            }
+            const TopoDS_Shape built = attempt->Shape();
+            if (built.IsNull()) {
+                std::fprintf(stderr, "[Fillet] result shape is null (R=%.4f).\n", r);
+                continue;
+            }
+            candidate = built;
+            usedRadius = r;
+            fillet = std::move(attempt);
+            if (rel != 0.0)
+                std::fprintf(stderr,
+                    "[Fillet] R=%.4f failed, R=%.4f built cleanly — using it "
+                    "(OCCT degenerates at isolated radii; difference %.1f micron).\n",
+                    m_radius, r, std::fabs(r - m_radius) * 1000.0);
+            break;
         }
 
         // IsDone() is necessary but NOT sufficient: when fillet radii on
@@ -402,9 +438,9 @@ bool FilletOp::execute(Document& doc) {
         // invalid-but-plausibly-sized results.)
         if (!candidate.IsNull() && !BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
-                "[Fillet] result failed BRepCheck_Analyzer (R=%.2f, %zu edges) "
+                "[Fillet] result failed BRepCheck_Analyzer (R=%.4f, %zu edges) "
                 "— invalid topology, refusing to commit.\n",
-                m_radius, m_edges.size());
+                usedRadius, m_edges.size());
             candidate.Nullify();
         }
 
@@ -468,15 +504,15 @@ bool FilletOp::execute(Document& doc) {
             // edge — the general-kernel path for op-produced faces. Captured
             // on every execute, so a rebuild's ledger reflects the current
             // geometry.
-            m_ledger.capture(fillet, m_previousShape, TopAbs_EDGE);
-            m_ledger.captureAdd(fillet, m_previousShape, TopAbs_FACE);
+            m_ledger.capture(*fillet, m_previousShape, TopAbs_EDGE);
+            m_ledger.captureAdd(*fillet, m_previousShape, TopAbs_FACE);
 
             // Record the blend faces generated from each input edge so a later
             // face click can be traced back to this fillet for re-editing.
             m_generatedFaces.clear();
             for (const auto& edge : m_edges) {
                 try {
-                    const TopTools_ListOfShape& gen = fillet.Generated(edge);
+                    const TopTools_ListOfShape& gen = fillet->Generated(edge);
                     // Range-based loop instead of
                     // TopTools_ListIteratorOfListOfShape, whose header was
                     // removed in OCCT 8.0 (still works on 7.x).
@@ -605,13 +641,13 @@ std::string FilletOp::description() const {
 }
 
 void FilletOp::renderProperties() {
-    ImGui::Text("Fillet");
+    ImGui::Text("%s", materializr::tr("Fillet"));
     ImGui::Separator();
 
-    materializr::inputNumber("Radius", &m_radius, 0.1, 1.0, "%g");
+    materializr::inputNumber(materializr::tr("Radius"), &m_radius, 0.1, 1.0, "%g");
 
-    ImGui::Text("Edges: %d selected", static_cast<int>(m_edges.size()));
-    ImGui::Text("Body ID: %d", m_bodyId);
+    ImGui::Text(materializr::tr("Edges: %d selected"), static_cast<int>(m_edges.size()));
+    ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
 }
 
 OperationDiff FilletOp::captureDiff() const {

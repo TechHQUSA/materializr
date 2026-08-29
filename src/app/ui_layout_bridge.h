@@ -18,13 +18,17 @@ void requestUiLayout(int index);   // switches immediately and persists
 void bindUiLayoutBridge(std::function<int()> get,
                         std::function<void(int)> set);
 
-// Desktop UI scale preference (Linux HiDPI): 1.0 = Normal, 2.0 = High DPI.
-// Exposed so the first-run picker can set it too (in case Settings is unreadably
-// tiny). Persists; takes effect on the next launch (fonts bake at startup).
-float currentUiScalePref();
-void  requestUiScalePref(float scale);
+// Same bridge, for the UI LANGUAGE. Index mirrors materializr::Lang (0 =
+// English). The getter reports -1 when the user has never chosen one, which is
+// what tells the setup wizard to ask. Setting switches live AND persists.
+//
+// Second consumer of this pattern: the tour's language page, which has to come
+// before everything else -- a user who cannot read the current language cannot
+// read the page asking which layout they want either.
+int  currentLanguageIndex();
+void requestLanguage(int index);
 
-void  bindUiScaleBridge(std::function<float()> get,
-                        std::function<void(float)> set);
+void bindLanguageBridge(std::function<int()> get,
+                        std::function<void(int)> set);
 
 } // namespace materializr

@@ -5,6 +5,106 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [1.6.3] — 2026-08-28
+
+### Added
+
+- **The interface speaks five new languages.** Spanish, Portuguese (Brazilian),
+  French, German and Italian, chosen on first run — the Getting Started tour
+  now opens with a language page, each language listed in its own name — or
+  any time in Settings → Appearance. Switching is instant, no restart. Menus,
+  tools, tooltips, panels, dialogs and the settings descriptions are covered;
+  the translations are machine-drafted against a CAD glossary and native-
+  speaker review is welcome. ViewCube labels deliberately stay as they are.
+- **Arcs take typed dimensions.** Like circles and rectangles already did:
+  type the chord after the first click, then one number for the bow — a swept
+  angle (180 = semicircle) or a radius, chosen with a Degrees/Radius toggle in
+  the input dialog. The radius floor (half the chord) is shown and enforced,
+  and which way the arc bows still follows the cursor.
+- **Drawing guides in every sketch tool.** The angle snap, tangent,
+  perpendicular/parallel and alignment guides only worked while drawing lines.
+  Arcs, circles (two-point), polygons and splines now get the same assistance,
+  measured from the point actually being placed — and splines chain
+  perpendicular/parallel off their last control leg like line chains do.
+- **Tangent guides from the curve itself.** Starting a line ON a circle and
+  drawing off tangentially, or continuing tangent from an arc's endpoint, now
+  fires the tangent guide (it previously only worked from a point standing
+  clear of the curve). Splines can be tangent references too, arcs honour
+  their real span, and with several curves in range the guide names the one
+  actually aimed at.
+
+### Fixed
+
+- **Windows starts again.** 1.6.1 and 1.6.2 crashed on launch before showing a
+  window (#82) — a logging setup call that Windows' C runtime rejects outright.
+  The packaging pipeline now smoke-launches the packaged exe so this class of
+  crash cannot ship again. Thanks to the reporter for pinning down 1.6.0 as
+  the last working release.
+- **The sketch grid on round faces lines up with the world.** Sketching on the
+  top of a tube or flange could come out with the grid rotated to a keyway
+  flat or slot side — a couple of short straight edges outvoted a boundary
+  that is circles by any sane reading. Round faces now align to the world
+  axes; genuinely edge-dominated faces still align to their edges.
+- **Sweep angle and radius stay honest in the arc dialog** — a typed sweep is
+  exact and is not pulled onto the 15° snap the way a dragged apex is.
+
+### Changed
+
+- Loft grew tip-split sampling, face sections and body bridging; extrude and
+  booleans are time-boxed so a pathological case cancels instead of hanging;
+  STL export welds and repairs the mesh so slicers stop rejecting prints;
+  Merge Faces gained a linear tolerance and clearer refusal messages; Lay
+  Flat on Plane works from a right-clicked planar face and for sketches; and
+  a union that comes back smaller than its largest input is rejected as the
+  data-loss it is.
+
+## [1.6.2] — 2026-08-22
+
+### Changed
+
+- **The Linux interface scale is detected, not configured.** The manual
+  Low/High setting and its first-run prompt are gone: the scale is measured
+  from the display, so the app comes up the right size on a HiDPI laptop with
+  nothing to set. The mouse cursor and the initial window size follow the same
+  scale, so the pointer is no longer a speck and the toolbars are no longer
+  jammed against the viewport. `--ui-scale` still overrides it.
+- **Interface elements scale with it.** Buttons across the dialogs sized
+  themselves in fixed pixels while their text grew with the scale, so labels
+  ran past their own edges at 2x. The ViewCube, its rotation arrows, the Home
+  button, the axis triad and the snap widget had the opposite problem — they
+  stayed at 1x while everything around them grew. All of them now follow the
+  interface scale. Touch mode is deliberately unchanged.
+- **Materializr lets the screen sleep.** It was holding the display awake for
+  as long as it was open, which on a laptop meant a flat battery rather than a
+  suspended machine. It now idles out like any other application.
+
+### Fixed
+
+- **Union and Intersect could silently do nothing.** On some geometry the
+  cosmetic pass that merges seam faces after a boolean would corrupt the
+  result — changing the part's volume and leaving it invalid — and the
+  operation then discarded a perfectly good result and reported nothing at
+  all, so the button looked dead. That merge is now rejected whenever it
+  changes the part, and a boolean that genuinely fails says so instead of
+  failing in silence. The same protection covers Push/Pull, Extrude, Scale
+  Face, Move Hole, Resize and Merge Faces, where the same pass could reshape a
+  body while telling you nothing had happened.
+- **Sketch dimensions hold the side they were placed on.** A point-to-line
+  dimension records which side of the line it was on and now enforces it, so
+  the sketch no longer mirrors itself and snap back across the line on a later
+  unrelated edit. Arcs no longer lose their radius or oscillate between
+  solves, and an arc's degrees of freedom are counted correctly, so a
+  fully-pinned arc no longer reads as over-constrained.
+- **Shift+drag pans in sketch mode** with trackpad navigation enabled, instead
+  of panning and drawing a sketch element at the same time.
+- **Reference images draw in front of the model** rather than underneath every
+  body, so a photo being traced stays visible.
+- **The Android build compiles again.** A display-scaling change did not build
+  for Android, which would have left the release with no F-Droid build and no
+  APKs.
+
+## [1.6.1] — 2026-08-16
+
 ### Added
 
 - **Move a hole.** Select a hole's rim edge and drag: one rim tilts the bore,
@@ -73,8 +173,49 @@ All notable changes to Materializr are documented here. Format loosely follows
 - Saving no longer pays for compression that bought almost nothing — large
   projects write faster.
 
+- **Subtract can cut every body it passes through.** A checkbox on the Subtract
+  panel ("All bodies" on touch). Off, it cuts one body — the one the sketch sits
+  on when it has a host. On, a profile driven through a stack cuts each body it
+  reaches, one undoable step per body. Off by default: a sketch drawn on a face
+  means that face's body, and carving a neighbour it merely overlaps would be a
+  surprise.
+
 ### Fixed
 
+- **The sketch inference level is reachable on touch.** It was in the tool
+  catalogue all along, but only inside the "More" flyout at the bottom of a dock
+  that scrolls once the sketch tools outgrow the screen — so on a tablet it sat
+  below the fold and read as missing. It now has a permanent Inference button in
+  the top bar during a sketch, beside snap, the way the other two layouts have
+  always had one. Tap to cycle Full → Reduced → Off → Max.
+- **Tool banners are no longer hidden behind the touch layout's chrome.** The
+  "EXTRUDE — drag in viewport…" line sat at a fixed offset inside the viewport,
+  which in the touch layout is underneath the floating logo, menu and project
+  chips: the visible half read "EXT… Escape to cancel", and the half that
+  vanished was the one naming the gesture. Banners and transient messages now
+  start below whatever chrome the layout floats over the viewport.
+- **Subtract from a sketch is no longer a button that does nothing.** It cuts
+  what the profile actually runs into, instead of insisting the sketch still be
+  linked to the body it was drawn on. A sketch on a construction plane, on an
+  origin plane, or one that had been moved off its face used to print a line to
+  the terminal and stop — the button was there, and pressing it did nothing at
+  all. It now works like Extrude followed by a Subtract: sweep the profile, then
+  cut it out of the body it reaches. A sketch that still sits on a face keeps
+  cutting that face's body. The other silent failure is gone too: a cut whose
+  sweep stops short of the body used to land on the History panel as a step that
+  changed nothing, and it now says the profile doesn't reach anything and leaves
+  the distance open so you can push it further or reverse it. And for a sketch
+  with no host body the arrow starts out aimed at the nearest body rather than
+  at whichever way the plane happens to face.
+- **A point placed on a circle or arc stays there.** Landing on a rim already
+  worked, but nothing remembered it, so the first drag threw the relationship
+  away — and with snap-to-grid on, dragging a line rounded BOTH its ends to the
+  nearest grid point, which pulled them off their circles, rotated the line and
+  shortened it, on a drag of essentially no distance. Now the point remembers
+  its rim: move the line and the end slides around the circle; pull it clear and
+  the attachment simply lets go. Sticky, not locked — there is nothing to
+  delete, and no dialog. It survives save and reload, and shows the same "On
+  Circle" marker that On Line has always shown.
 - **The constraint badge no longer reads Over-constrained on a legitimately
   dimensioned circle.** The sketch's degree-of-freedom tally counted only point
   coordinates, but a circle's radius lives on the entity itself and the solver

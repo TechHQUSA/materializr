@@ -37,13 +37,17 @@ REGISTER_PLUGIN(RefImage, [](materializr::PluginContext& ctx) {
     auto action = [](materializr::PluginContext& c) {
         c.requestInteractiveOp(materializr::InteractiveOp::ImportRefImage);
     };
-    ctx.registerToolbarButton({"Reference Image", "Create",
-        materializr::SelectionContext::Always, 55,
-        action, nullptr,
-        "Import a photo as a traceable underlay on a construction plane. "
-        "Photograph the object with a ruler in the shot, calibrate the scale "
-        "off the ruler, then sketch over it — move/rotate the plane like any "
-        "construction plane."});
+    // NO toolbar button. A reference image is a construction plane carrying a
+    // picture (RefImageEntry is keyed by planeId), and it is now reachable
+    // where planes are made: the New Plane dialog has an "Add a reference
+    // image" option that works with EVERY plane type, and any existing plane
+    // can take one from its properties. A separate rail button would be a
+    // third route to a worse version of the same thing -- it could only ever
+    // make a ground plane at the origin.
+    //
+    // The command stays registered so the action is still scriptable and
+    // keyboard-reachable, and so old muscle memory finds it in the command
+    // list rather than hitting nothing.
     ctx.registerCommand({"Import Reference Image", "", action});
 
     // Same three plane events as the plane renderer — pose moves, renames,
@@ -70,8 +74,19 @@ REGISTER_PLUGIN(RefImage, [](materializr::PluginContext& ctx) {
 
     materializr::RenderPassContribution pass;
     pass.name = "ReferenceImages";
-    pass.priority = 490; // just under construction planes (500): photo first,
-                         // so a plain plane's translucent fill can overlay it
+    // 500 = Application::kBodyPassPriority, the threshold that decides whether
+    // a pass runs BEFORE the bodies or after. At 490 the photo ran before them
+    // and every body painted straight over it — the renderer uses
+    // glDepthMask(GL_FALSE), correct for a translucent overlay but it leaves no
+    // depth behind, so a body drawn afterwards passes the depth test and wins.
+    // Construction planes had exactly this bug and were moved across the line;
+    // the photo is the same kind of thing (a tracing aid you look AT the model
+    // through) and belongs on the same side. Depth TEST is still on, so a photo
+    // genuinely behind a body stays correctly hidden.
+    //
+    // Planes (501) and axes (502) moved up one to keep the old relative order:
+    // photo first, so a plane's translucent fill can still overlay it.
+    pass.priority = 500;
     pass.initialize = []() -> bool {
         if (!g_state) g_state = std::make_unique<RefImageState>();
         return g_state->renderer.initialize();

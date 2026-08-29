@@ -73,7 +73,7 @@ REGISTER_PLUGIN(ConstructionAxis, [](materializr::PluginContext& ctx) {
     // Render pass — Application iterates registered passes once per frame.
     materializr::RenderPassContribution pass;
     pass.name = "ConstructionAxes";
-    pass.priority = 501; // just after planes (500) so axes draw on top
+    pass.priority = 502; // just after planes (501) so axes draw on top
     pass.initialize = []() -> bool {
         if (!g_state) g_state = std::make_unique<AxisRenderState>();
         return g_state->renderer.initialize();

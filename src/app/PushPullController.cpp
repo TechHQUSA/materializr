@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include "../i18n.h"
 
 namespace materializr {
 
@@ -458,8 +459,15 @@ void PushPullController::onViewportInput(const IopViewport& vp,
     // the cursor with no button held) — vp.trackpadInput is already false under
     // touch, where a tap would toggle it on and then feed BOTH it and the
     // direct drag above (double distance).
-    if (vp.trackpadInput && vp.clicked && !vp.uiCaptured)
-        m_st.sticky = !m_st.sticky;
+    // Toggle on a click that never became a drag -- the press frame is too
+    // early now that an empty-canvas LEFT-drag orbits in trackpad mode: the
+    // orbit's own press would flip sticky on, and after the orbit ended the
+    // cursor would keep feeding the value.
+    if (vp.trackpadInput && !vp.uiCaptured) {
+        if (vp.clicked) m_st.pressWasDrag = false;
+        if (vp.dragging) m_st.pressWasDrag = true;
+        if (vp.released && !m_st.pressWasDrag) m_st.sticky = !m_st.sticky;
+    }
     if (m_st.sticky && (vp.mouseDelta.x != 0.0f || vp.mouseDelta.y != 0.0f)) {
         applyDrag(vp);
         updatePushPull(ctx);
@@ -551,7 +559,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text("mm");
+        ImGui::Text("%s", materializr::tr("mm"));
     }
 
     // Quick-nudge stepper (replaces the slider). Symmetric sweeps both ways, so
@@ -574,7 +582,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
         bool allFree = !m_st.targets.empty();
         for (const auto& t : m_st.targets)
             if (t.sourceBodyId >= 0) { allFree = false; break; }
-        if (allFree && ImGui::Checkbox("Symmetric (both sides)", &m_st.symmetric)) {
+        if (allFree && ImGui::Checkbox(materializr::tr("Symmetric (both sides)"), &m_st.symmetric)) {
             if (m_st.symmetric && m_st.distance < 0.1f) {
                 m_st.distance = std::abs(m_st.distance);
                 if (m_st.distance < 0.1f) m_st.distance = 0.1f;
@@ -585,7 +593,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             updatePushPull(ctx);
         }
         if (allFree && m_st.symmetric)
-            ImGui::Text("Total width: %.1f mm", m_st.distance * 2.0f);
+            ImGui::Text(materializr::tr("Total width: %.1f mm"), m_st.distance * 2.0f);
     }
 
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead

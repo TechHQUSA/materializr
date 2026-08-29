@@ -8,7 +8,9 @@
 #include <BRepTools_History.hxx>
 #include <GProp_GProps.hxx>
 #include <ShapeBuild_ReShape.hxx>
+#include <ShapeFix_FixSmallFace.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -16,11 +18,14 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_MapOfShape.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <imgui.h>
+#include "../i18n.h"
 
 namespace {
 
@@ -99,7 +104,7 @@ struct Attempt {
 // seams that would otherwise be unmergeable (10 of 41 at 1e-2). The caller
 // still has to accept the result — this only produces a candidate.
 Attempt runUnify(const TopoDS_Shape& body, const TopTools_MapOfShape* keep,
-                 double angularTol) {
+                 double angularTol, double linearTol) {
     Attempt out;
     try {
         // concatBSplines deliberately FALSE. With it on, unify re-fits spline
@@ -110,6 +115,9 @@ Attempt runUnify(const TopoDS_Shape& body, const TopTools_MapOfShape* keep,
         ShapeUpgrade_UnifySameDomain u(body, /*edges=*/true, /*faces=*/true,
                                        /*concatBSplines=*/false);
         u.SetAngularTolerance(angularTol);
+        // Left at OCCT's default (Precision::Confusion, 1e-7 mm) unless asked.
+        // See kFaceScopedRungs for why a looser one is sometimes needed.
+        if (linearTol > 0.0) u.SetLinearTolerance(linearTol);
         if (keep) u.KeepShapes(*keep);
         u.Build();
         TopoDS_Shape r = u.Shape();
@@ -160,7 +168,157 @@ bool acceptable(const TopoDS_Shape& before, const Attempt& a, int facesBefore) {
 // pointed at — and it has to be loose: on the nacelle NONE of the 41 surviving
 // seams were within 1e-6, they sit between 1e-4 and 1e-2 rad. Tightest first, so
 // a genuinely coplanar pair is still merged the conservative way.
-const double kFaceScopedTols[] = {1e-9, 1e-6, 1e-4, 1e-3, 1e-2};
+//
+// ANGULAR IS ONLY HALF OF IT. UnifySameDomain also has a LINEAR tolerance, and
+// it was never set here, so it sat at OCCT's default Precision::Confusion() =
+// 1e-7 mm. That decides whether two PARALLEL planes count as the same plane --
+// a completely different axis from how far their normals may differ.
+//
+// Measured on robot dog cover.mzr, body "Extrude", the two faces of one flat
+// surface a user could not merge:
+//
+//     face 55 plane Y = 85.700003054738048
+//     face 56 plane Y = 85.700000000000003
+//     separation      = 3.054738e-06 mm     -- 30x the default tolerance
+//
+// Their normals agree exactly; they share a 127.76 mm continuous boundary; and
+// unify refused at EVERY angular rung, because the planes are 3 nanometres
+// apart. That gap is the float32 error on 85.7 (see sliverBetween() above): the
+// same single-precision sketch coordinate that leaves the slivers also leaves
+// the two planes a hair apart, and removing the slivers does not move them.
+//
+// So the ladder escalates on both axes, tightest first. A linear rung of 0 means
+// "leave OCCT's default"; the guard in accept() still vets every result, and a
+// merge across a 3 nm step moves ~7.6e-9 of the volume -- four orders inside it.
+struct FaceScopedRung { double angular; double linear; };
+const FaceScopedRung kFaceScopedRungs[] = {
+    {1e-9, 0.0}, {1e-6, 0.0}, {1e-4, 0.0}, {1e-3, 0.0}, {1e-2, 0.0},
+    {1e-9, 1e-5}, {1e-6, 1e-5}, {1e-4, 1e-4}, {1e-2, 1e-3},
+};
+
+MergeFacesOp::Refusal g_lastRefusal = MergeFacesOp::Refusal::None;
+
+// A planar face's outward normal.
+//
+// This MUST come from the surface parameterisation, not from the plane's stored
+// Axis().Direction(): a Geom_Plane may be built with its axis ANTI-PARALLEL to
+// dU x dV, which is legal and which no orientation flag corrects. On the part
+// this was found on, 5 of 51 planar faces were like that, and reading the axis
+// reported them backwards -- so two faces of one flat surface looked 180 deg
+// apart and this very check refused to merge them, telling the user they
+// "point in opposite directions" when they plainly did not.
+//
+// faceNormalPoint() above already does it correctly. Planar faces have a
+// constant normal, so its UV-midpoint sample is exact even for a face whose
+// midpoint falls in a hole.
+bool outwardNormal(const TopoDS_Shape& s, gp_Dir& n) {
+    if (s.IsNull() || s.ShapeType() != TopAbs_FACE) return false;
+    const TopoDS_Face f = TopoDS::Face(s);
+    if (BRepAdaptor_Surface(f).GetType() != GeomAbs_Plane) return false;
+    gp_Pnt p;
+    return faceNormalPoint(f, n, p);
+}
+
+// Is a degenerate sliver face wedged between two of the picked faces?
+//
+// Sketch point coordinates are stored as glm::vec2, i.e. 32-bit floats, while
+// the kernel works in double. 85.7 has no float32 representation: it becomes
+// 85.699996948, which is 3.05e-6 mm out. A sketch snapped to an edge at that
+// coordinate therefore lands 3 NANOMETRES short, and the push/pull built from
+// it leaves a strip face that thin between the two surfaces.
+//
+// Measured on robot dog cover.mzr, body "Extrude": three such faces, 97.00 mm
+// and 15.38 mm long, each exactly 3.0546e-6 mm wide -- the same figure as the
+// float32 error on 85.7. The two faces either side visibly touch and are
+// coplanar, but share no edge, because those strips are between them. Merge
+// then refuses and no tolerance can help: the slivers are real faces.
+bool sliverBetween(const TopoDS_Shape& body,
+                   const std::vector<TopoDS_Shape>& faces, double maxArea) {
+    TopTools_MapOfShape picked;
+    for (const auto& f : faces) picked.Add(f);
+    TopTools_IndexedDataMapOfShapeListOfShape e2f;
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, e2f);
+    // faces adjacent to at least two DIFFERENT picked faces
+    TopTools_IndexedMapOfShape all;
+    TopExp::MapShapes(body, TopAbs_FACE, all);
+    for (int i = 1; i <= all.Extent(); ++i) {
+        const TopoDS_Shape& cand = all(i);
+        if (picked.Contains(cand)) continue;
+        GProp_GProps g;
+        try { BRepGProp::SurfaceProperties(cand, g); } catch (...) { continue; }
+        if (g.Mass() > maxArea) continue;
+        int touches = 0;
+        TopTools_MapOfShape seen;
+        for (TopExp_Explorer ex(cand, TopAbs_EDGE); ex.More(); ex.Next()) {
+            if (!e2f.Contains(ex.Current())) continue;
+            const TopTools_ListOfShape& fl = e2f.FindFromKey(ex.Current());
+            for (TopTools_ListIteratorOfListOfShape it(fl); it.More(); it.Next())
+                if (picked.Contains(it.Value()) && seen.Add(it.Value())) ++touches;
+        }
+        if (touches >= 2) return true;
+    }
+    return false;
+}
+
+// Drop those slivers. Refuses anything that changes the part.
+TopoDS_Shape withoutSlivers(const TopoDS_Shape& body) {
+    try {
+        ShapeFix_FixSmallFace sff;
+        sff.Init(body);
+        sff.SetPrecision(1e-3);
+        sff.Perform();
+        const TopoDS_Shape r = sff.FixShape();
+        if (r.IsNull() || !BRepCheck_Analyzer(r).IsValid()) return TopoDS_Shape();
+        const double v0 = volumeOf(body), v1 = volumeOf(r);
+        if (std::fabs(v0 - v1) > 1e-4 * std::max(1.0, std::fabs(v0))) {
+            std::fprintf(stderr, "[MergeFaces] sliver removal moved volume "
+                                 "%.6f -> %.6f; keeping the original.\n", v0, v1);
+            return TopoDS_Shape();
+        }
+        return r;
+    } catch (...) { return TopoDS_Shape(); }
+}
+
+// Structural reasons a picked set can never merge, whatever the tolerance.
+// Checked BEFORE the ladder so the message names the real cause instead of
+// blaming proximity for something proximity has nothing to do with.
+MergeFacesOp::Refusal diagnosePick(const TopoDS_Shape& body,
+                                   const std::vector<TopoDS_Shape>& faces) {
+    // Antiparallel: the two faces bound material on OPPOSITE sides, so there is
+    // no single face that could replace them -- the solid would have to exist on
+    // both sides of it. Measured on a real part (robot dog cover, body
+    // "Extrude"): two coplanar faces, centres 0.47 mm apart, outward normals
+    // exactly 180 deg apart. Reported as "not close enough", which is the one
+    // thing it was not: they are the same plane to 3e-6 mm.
+    for (std::size_t i = 0; i < faces.size(); ++i) {
+        gp_Dir ni;
+        if (!outwardNormal(faces[i], ni)) continue;
+        for (std::size_t j = i + 1; j < faces.size(); ++j) {
+            gp_Dir nj;
+            if (!outwardNormal(faces[j], nj)) continue;
+            if (ni.Angle(nj) > 170.0 * M_PI / 180.0)
+                return MergeFacesOp::Refusal::OppositeNormals;
+        }
+    }
+    // No shared edge: unify merges by DISSOLVING the edge between two faces, so
+    // with nothing between them there is nothing to dissolve. Two faces a hair
+    // apart with a step wall between them land here, and loosening the
+    // tolerance will never help -- the fix is to move one of them first.
+    TopTools_MapOfShape picked;
+    for (const auto& f : faces) picked.Add(f);
+    TopTools_IndexedDataMapOfShapeListOfShape e2f;
+    TopExp::MapShapesAndAncestors(body, TopAbs_EDGE, TopAbs_FACE, e2f);
+    for (int i = 1; i <= e2f.Extent(); ++i) {
+        const TopTools_ListOfShape& fl = e2f.FindFromIndex(i);
+        if (fl.Extent() != 2) continue;
+        TopTools_ListOfShape::Iterator it(fl);
+        const TopoDS_Shape f1 = it.Value(); it.Next();
+        const TopoDS_Shape f2 = it.Value();
+        if (!f1.IsSame(f2) && picked.Contains(f1) && picked.Contains(f2))
+            return MergeFacesOp::Refusal::None;      // adjacent: tolerance is genuinely in play
+    }
+    return MergeFacesOp::Refusal::NotAdjacent;
+}
 
 } // namespace
 
@@ -220,35 +378,127 @@ bool MergeFacesOp::rebindFaces(const TopoDS_Shape& body) {
     return true;
 }
 
+MergeFacesOp::Refusal MergeFacesOp::lastRefusal() { return g_lastRefusal; }
+void MergeFacesOp::resetLastRefusal() { g_lastRefusal = Refusal::None; }
+
 bool MergeFacesOp::execute(Document& doc) {
+    g_lastRefusal = Refusal::Internal;
     if (m_bodyId < 0) return false;
     try {
         m_previousShape = doc.getBody(m_bodyId);
         if (m_previousShape.IsNull()) return false;
         m_facesBefore = faceCount(m_previousShape);
 
+        // UnifySameDomain edits its input in place when the merge goes wrong
+        // (see UnifyTolerance.h), and runUnify below is handed the LIVE body —
+        // up to five times on the face-scoped ladder. Without a spare, a merge
+        // this op then refuses would leave the body silently reshaped: the user
+        // is told nothing merged, and the part is already wrong. A merge that
+        // succeeds does not touch its input, so this only ever pays off on the
+        // path that was about to corrupt something.
+        TopoDS_Shape spare;
+        try { spare = BRepBuilderAPI_Copy(m_previousShape).Shape(); } catch (...) {}
+
         const bool faceScoped = isFaceScoped();
         if (faceScoped) {
-            if (!rebindFaces(m_previousShape)) return false;
-            if (m_faces.size() < 2) return false;
+            if (!rebindFaces(m_previousShape)) {
+                // Say WHY, because "couldn't find those faces" with no detail is
+                // impossible to act on: it covers both a stale selection and a
+                // failed anchor re-bind, which have nothing to do with each other.
+                int live = 0;
+                for (const auto& f : m_faces)
+                    if (faceInShape(f, m_previousShape)) ++live;
+                std::fprintf(stderr,
+                    "[MergeFaces] re-bind FAILED: body %d has %d faces; %zu picked, "
+                    "%d of them still live; %zu anchor(s) stored.\n",
+                    m_bodyId, faceCount(m_previousShape), m_faces.size(), live,
+                    m_anchors.size());
+                g_lastRefusal = Refusal::FacesNotFound; return false;
+            }
+            if (m_faces.size() < 2) {
+                g_lastRefusal = Refusal::NeedTwoFaces; return false;
+            }
             captureAnchors(m_previousShape);
         }
 
+        // Why this pick cannot work, if it cannot. Worked out before the ladder
+        // runs, because these are properties of the selection rather than of any
+        // tolerance, and the ladder's failure looks identical in every case.
+        Refusal pickIssue =
+            faceScoped ? diagnosePick(m_previousShape, m_faces) : Refusal::None;
+        if (faceScoped) {
+            const char* what = pickIssue == Refusal::None            ? "adjacent, tolerance decides"
+                             : pickIssue == Refusal::OppositeNormals ? "outward normals oppose"
+                             : pickIssue == Refusal::NotAdjacent     ? "no shared edge"
+                                                                     : "other";
+            std::fprintf(stderr, "[MergeFaces] body %d: %zu picked face(s) of %d; pick reads as: %s\n",
+                         m_bodyId, m_faces.size(), m_facesBefore, what);
+        }
+
+        // "They don't touch" is sometimes a 3-nanometre lie: see sliverBetween()
+        // above. If a degenerate strip is wedged between the picked faces, drop
+        // it and look again. The picked faces are re-found on the cleaned body
+        // through the same anchors a replay uses, and if that does not leave
+        // them genuinely adjacent the original body is kept untouched.
+        TopoDS_Shape workShape = m_previousShape;
+        if (faceScoped && pickIssue == Refusal::NotAdjacent &&
+            sliverBetween(m_previousShape, m_faces, 1e-3)) {
+            const TopoDS_Shape cleaned = withoutSlivers(m_previousShape);
+            if (!cleaned.IsNull()) {
+                const std::vector<TopoDS_Shape> saved = m_faces;
+                if (rebindFaces(cleaned) && m_faces.size() >= 2 &&
+                    diagnosePick(cleaned, m_faces) == Refusal::None) {
+                    std::fprintf(stderr, "[MergeFaces] removed degenerate sliver "
+                                         "face(s) between the picked faces.\n");
+                    workShape = cleaned;
+                    pickIssue = Refusal::None;
+                } else {
+                    m_faces = saved;
+                }
+            }
+        }
+        const int facesInWork = faceCount(workShape);
+
+        // A merge the guard threw out is a different story from one that never
+        // happened: the faces ARE one surface, but joining them would have moved
+        // material. Worth saying so rather than implying they were too far apart.
+        bool guardRejected = false;
+
         Attempt best;
         if (faceScoped) {
-            const TopTools_MapOfShape keep = edgesToKeep(m_previousShape, m_faces);
-            for (double tol : kFaceScopedTols) {
-                Attempt a = runUnify(m_previousShape, &keep, tol);
-                if (acceptable(m_previousShape, a, m_facesBefore)) { best = a; break; }
+            const TopTools_MapOfShape keep = edgesToKeep(workShape, m_faces);
+            for (const FaceScopedRung& rung : kFaceScopedRungs) {
+                Attempt a = runUnify(workShape, &keep, rung.angular, rung.linear);
+                if (acceptable(workShape, a, facesInWork)) { best = a; break; }
+                if (!a.shape.IsNull() && faceCount(a.shape) < facesInWork)
+                    guardRejected = true;
             }
+            // The sliver removal alone is a real simplification, so keep it even
+            // when nothing further merged -- the faces now touch, which is what
+            // lets a fillet run across them.
+            if (best.shape.IsNull() && facesInWork < m_facesBefore)
+                best.shape = workShape;
         } else {
-            Attempt a = runUnify(m_previousShape, nullptr, materializr::kUnifyAngularTol);
-            if (acceptable(m_previousShape, a, m_facesBefore)) best = a;
+            // Whole-body stays conservative on BOTH axes: it is not the user
+            // asserting anything about a particular pair.
+            Attempt a = runUnify(workShape, nullptr, materializr::kUnifyAngularTol, 0.0);
+            if (acceptable(workShape, a, facesInWork)) best = a;
         }
         // Nothing merged. Refusing means History::pushOperation declines and no
         // step is added — a merge that did nothing should not litter the
         // timeline, and the caller says so instead.
-        if (best.shape.IsNull()) return false;
+        if (best.shape.IsNull()) {
+            g_lastRefusal = pickIssue != Refusal::None ? pickIssue
+                          : (guardRejected ? Refusal::Unsafe : Refusal::NotSameSurface);
+            std::fprintf(stderr, "[MergeFaces] nothing merged (%d faces in, guard %s).\n",
+                         facesInWork, guardRejected ? "rejected a candidate" : "never fired");
+            if (!spare.IsNull()) {
+                doc.updateBody(m_bodyId, spare);
+                m_previousShape = spare;
+            }
+            return false;
+        }
+        g_lastRefusal = Refusal::None;
 
         m_facesAfter = faceCount(best.shape);
 
@@ -301,11 +551,11 @@ std::string MergeFacesOp::description() const {
 }
 
 void MergeFacesOp::renderProperties() {
-    ImGui::Text("Merge Faces");
+    ImGui::Text("%s", materializr::tr("Merge Faces"));
     ImGui::Separator();
-    ImGui::Text("Scope: %s", isFaceScoped() ? "selected faces" : "whole body");
-    ImGui::Text("Faces: %d -> %d", m_facesBefore, m_facesAfter);
-    ImGui::Text("Body ID: %d", m_bodyId);
+    ImGui::Text(materializr::tr("Scope: %s"), isFaceScoped() ? "selected faces" : "whole body");
+    ImGui::Text(materializr::tr("Faces: %d -> %d"), m_facesBefore, m_facesAfter);
+    ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
 }
 
 std::string MergeFacesOp::serializeParams() const {
