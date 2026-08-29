@@ -348,6 +348,8 @@ Application::Application(bool safeMode, float uiScaleOverride)
         [this](const std::vector<int>& ids) { combineSketches(ids); });
     m_itemsPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
     m_propertiesPanel->setRotatePlaneCallback([this](int planeId) { beginRotatePlaneAboutAxis(planeId); });
+    m_propertiesPanel->setAttachRefImageCallback(
+        [this](int planeId) { attachRefImageToPlane(planeId); });
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
     m_propertiesPanel->setLinkInfoCallback(
         [this](bool isBody, int id) { return linkHintFor(isBody, id); });

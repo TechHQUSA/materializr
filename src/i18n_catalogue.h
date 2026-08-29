@@ -1128,6 +1128,20 @@ inline const TrEntry kEsCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Add a reference image to this plane", "A\xc3""\xb1""adir una imagen de referencia a este plano" },
+    { "Pick a photo or drawing to trace over. It appears on the plane straight away, so you can set the alignment, offset and real-world scale with the image in view.", "Elige una foto o un dibujo para calcar. Aparece en el plano de inmediato, as\xc3""\xad"" puedes fijar la alineaci\xc3""\xb3""n, el desfase y la escala real con la imagen a la vista." },
+    { "%d x %d px", "%d x %d px" },
+    { "Undo every rotation applied so far and return the plane to its chosen alignment and offset.", "Deshace todas las rotaciones aplicadas y devuelve el plano a su alineaci\xc3""\xb3""n y desfase elegidos." },
+    { "Return the plane to its chosen alignment and offset, with no tilt.", "Devuelve el plano a su alineaci\xc3""\xb3""n y desfase elegidos, sin inclinaci\xc3""\xb3""n." },
+    { "Size, opacity and Calibrate are in the Reference Image panel.", "El tama\xc3""\xb1""o, la opacidad y Calibrar est\xc3""\xa1""n en el panel Imagen de referencia." },
+    { "After creating the plane, pick a photo or drawing to trace over. Set its real size with Calibrate.", "Despu\xc3""\xa9""s de crear el plano, elige una foto o un dibujo para calcar. Fija su tama\xc3""\xb1""o real con Calibrar." },
+    { "New Plane with Reference Image...", "Nuevo plano con imagen de referencia..." },
+    { "Creates a ground plane carrying a traceable photo. To put an image on any other plane, create the plane first and use Attach Image in its properties.", "Crea un plano base con una foto para calcar. Para poner una imagen en cualquier otro plano, crea primero el plano y usa Adjuntar imagen en sus propiedades." },
+    { "Attach Image...", "Adjuntar imagen..." },
+    { "Replace Image...", "Reemplazar imagen..." },
+    { "Remove Image", "Quitar imagen" },
+    { "Put a traceable photo or drawing on this plane. Set its real size with Calibrate, then sketch over it.", "Coloca una foto o un dibujo para calcar en este plano. Fija su tama\xc3""\xb1""o real con Calibrar y luego dibuja encima." },
+    { "Detach the image. The construction plane itself stays.", "Desvincula la imagen. El plano de construcci\xc3""\xb3""n se conserva." },
     { "Place at", "Colocar en" },
     { "Leading edge", "Borde de ataque" },
     { "Quarter chord", "Un cuarto de cuerda" },
@@ -1150,7 +1164,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1138;
+inline constexpr int kEsCount = 1152;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -2271,6 +2285,20 @@ inline const TrEntry kPtCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Add a reference image to this plane", "Adicionar uma imagem de refer\xc3""\xaa""ncia a este plano" },
+    { "Pick a photo or drawing to trace over. It appears on the plane straight away, so you can set the alignment, offset and real-world scale with the image in view.", "Escolha uma foto ou desenho para decalcar. Ele aparece no plano imediatamente, para voc\xc3""\xaa"" definir o alinhamento, o deslocamento e a escala real com a imagem \xc3""\xa0"" vista." },
+    { "%d x %d px", "%d x %d px" },
+    { "Undo every rotation applied so far and return the plane to its chosen alignment and offset.", "Desfaz todas as rota\xc3""\xa7""\xc3""\xb5""es aplicadas e devolve o plano ao alinhamento e deslocamento escolhidos." },
+    { "Return the plane to its chosen alignment and offset, with no tilt.", "Devolve o plano ao alinhamento e deslocamento escolhidos, sem inclina\xc3""\xa7""\xc3""\xa3""o." },
+    { "Size, opacity and Calibrate are in the Reference Image panel.", "Tamanho, opacidade e Calibrar est\xc3""\xa3""o no painel Imagem de refer\xc3""\xaa""ncia." },
+    { "After creating the plane, pick a photo or drawing to trace over. Set its real size with Calibrate.", "Depois de criar o plano, escolha uma foto ou desenho para decalcar. Defina o tamanho real com Calibrar." },
+    { "New Plane with Reference Image...", "Novo plano com imagem de refer\xc3""\xaa""ncia..." },
+    { "Creates a ground plane carrying a traceable photo. To put an image on any other plane, create the plane first and use Attach Image in its properties.", "Cria um plano de base com uma foto para decalcar. Para colocar uma imagem em qualquer outro plano, crie o plano primeiro e use Anexar imagem nas propriedades." },
+    { "Attach Image...", "Anexar imagem..." },
+    { "Replace Image...", "Substituir imagem..." },
+    { "Remove Image", "Remover imagem" },
+    { "Put a traceable photo or drawing on this plane. Set its real size with Calibrate, then sketch over it.", "Coloque uma foto ou desenho para decalcar neste plano. Defina o tamanho real com Calibrar e depois desenhe por cima." },
+    { "Detach the image. The construction plane itself stays.", "Desanexa a imagem. O plano de constru\xc3""\xa7""\xc3""\xa3""o permanece." },
     { "Place at", "Posicionar em" },
     { "Leading edge", "Bordo de ataque" },
     { "Quarter chord", "Um quarto da corda" },
@@ -2293,7 +2321,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1138;
+inline constexpr int kPtCount = 1152;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -3414,6 +3442,20 @@ inline const TrEntry kFrCatalogue[] = {
     { "Confirm", "Confirmer" },
     { "Confirm (Enter)", "Confirmer (Enter)" },
     { "Cancel (Esc)", "Annuler (Esc)" },
+    { "Add a reference image to this plane", "Ajouter une image de r\xc3""\xa9""f\xc3""\xa9""rence \xc3""\xa0"" ce plan" },
+    { "Pick a photo or drawing to trace over. It appears on the plane straight away, so you can set the alignment, offset and real-world scale with the image in view.", "Choisissez une photo ou un dessin \xc3""\xa0"" d\xc3""\xa9""calquer. Il appara\xc3""\xae""t aussit\xc3""\xb4""t sur le plan, ce qui permet de r\xc3""\xa9""gler l'alignement, le d\xc3""\xa9""calage et l'\xc3""\xa9""chelle r\xc3""\xa9""elle avec l'image sous les yeux." },
+    { "%d x %d px", "%d x %d px" },
+    { "Undo every rotation applied so far and return the plane to its chosen alignment and offset.", "Annule toutes les rotations appliqu\xc3""\xa9""es et ram\xc3""\xa8""ne le plan \xc3""\xa0"" son alignement et son d\xc3""\xa9""calage choisis." },
+    { "Return the plane to its chosen alignment and offset, with no tilt.", "Ram\xc3""\xa8""ne le plan \xc3""\xa0"" son alignement et son d\xc3""\xa9""calage choisis, sans inclinaison." },
+    { "Size, opacity and Calibrate are in the Reference Image panel.", "La taille, l'opacit\xc3""\xa9"" et Calibrer sont dans le panneau Image de r\xc3""\xa9""f\xc3""\xa9""rence." },
+    { "After creating the plane, pick a photo or drawing to trace over. Set its real size with Calibrate.", "Apr\xc3""\xa8""s la cr\xc3""\xa9""ation du plan, choisissez une photo ou un dessin \xc3""\xa0"" d\xc3""\xa9""calquer. D\xc3""\xa9""finissez sa taille r\xc3""\xa9""elle avec Calibrer." },
+    { "New Plane with Reference Image...", "Nouveau plan avec image de r\xc3""\xa9""f\xc3""\xa9""rence..." },
+    { "Creates a ground plane carrying a traceable photo. To put an image on any other plane, create the plane first and use Attach Image in its properties.", "Cr\xc3""\xa9""e un plan au sol portant une photo \xc3""\xa0"" d\xc3""\xa9""calquer. Pour placer une image sur un autre plan, cr\xc3""\xa9""ez d'abord le plan puis utilisez Joindre une image dans ses propri\xc3""\xa9""t\xc3""\xa9""s." },
+    { "Attach Image...", "Joindre une image..." },
+    { "Replace Image...", "Remplacer l'image..." },
+    { "Remove Image", "Supprimer l'image" },
+    { "Put a traceable photo or drawing on this plane. Set its real size with Calibrate, then sketch over it.", "Placer une photo ou un dessin \xc3""\xa0"" d\xc3""\xa9""calquer sur ce plan. D\xc3""\xa9""finir sa taille r\xc3""\xa9""elle avec Calibrer, puis dessiner par-dessus." },
+    { "Detach the image. The construction plane itself stays.", "D\xc3""\xa9""tacher l'image. Le plan de construction est conserv\xc3""\xa9""." },
     { "Place at", "Placer \xc3""\xa0""" },
     { "Leading edge", "Bord d'attaque" },
     { "Quarter chord", "Quart de corde" },
@@ -3436,7 +3478,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1138;
+inline constexpr int kFrCount = 1152;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -4557,6 +4599,20 @@ inline const TrEntry kDeCatalogue[] = {
     { "Confirm", "Best\xc3""\xa4""tigen" },
     { "Confirm (Enter)", "Best\xc3""\xa4""tigen (Enter)" },
     { "Cancel (Esc)", "Abbrechen (Esc)" },
+    { "Add a reference image to this plane", "Diesem Plan ein Referenzbild hinzuf\xc3""\xbc""gen" },
+    { "Pick a photo or drawing to trace over. It appears on the plane straight away, so you can set the alignment, offset and real-world scale with the image in view.", "Ein Foto oder eine Zeichnung zum Nachzeichnen w\xc3""\xa4""hlen. Es erscheint sofort auf der Ebene, sodass Ausrichtung, Versatz und reale Gr\xc3""\xb6""\xc3""\x9f""e mit sichtbarem Bild eingestellt werden k\xc3""\xb6""nnen." },
+    { "%d x %d px", "%d x %d px" },
+    { "Undo every rotation applied so far and return the plane to its chosen alignment and offset.", "Macht alle bisherigen Drehungen r\xc3""\xbc""ckg\xc3""\xa4""ngig und setzt die Ebene auf die gew\xc3""\xa4""hlte Ausrichtung und den Versatz zur\xc3""\xbc""ck." },
+    { "Return the plane to its chosen alignment and offset, with no tilt.", "Setzt die Ebene auf die gew\xc3""\xa4""hlte Ausrichtung und den Versatz zur\xc3""\xbc""ck, ohne Neigung." },
+    { "Size, opacity and Calibrate are in the Reference Image panel.", "Gr\xc3""\xb6""\xc3""\x9f""e, Deckkraft und Kalibrieren befinden sich im Referenzbild-Panel." },
+    { "After creating the plane, pick a photo or drawing to trace over. Set its real size with Calibrate.", "Nach dem Anlegen der Ebene ein Foto oder eine Zeichnung zum Nachzeichnen w\xc3""\xa4""hlen. Die reale Gr\xc3""\xb6""\xc3""\x9f""e mit Kalibrieren festlegen." },
+    { "New Plane with Reference Image...", "Neue Ebene mit Referenzbild..." },
+    { "Creates a ground plane carrying a traceable photo. To put an image on any other plane, create the plane first and use Attach Image in its properties.", "Erzeugt eine Bodenebene mit einem nachzeichenbaren Foto. F\xc3""\xbc""r ein Bild auf einer anderen Ebene zuerst die Ebene anlegen und dort Bild anh\xc3""\xa4""ngen verwenden." },
+    { "Attach Image...", "Bild anh\xc3""\xa4""ngen..." },
+    { "Replace Image...", "Bild ersetzen..." },
+    { "Remove Image", "Bild entfernen" },
+    { "Put a traceable photo or drawing on this plane. Set its real size with Calibrate, then sketch over it.", "Ein nachzeichenbares Foto oder eine Zeichnung auf diese Ebene legen. Die reale Gr\xc3""\xb6""\xc3""\x9f""e mit Kalibrieren festlegen und dar\xc3""\xbc""ber skizzieren." },
+    { "Detach the image. The construction plane itself stays.", "Das Bild l\xc3""\xb6""sen. Die Konstruktionsebene bleibt bestehen." },
     { "Place at", "Platzieren an" },
     { "Leading edge", "Vorderkante" },
     { "Quarter chord", "Viertelsehne" },
@@ -4579,7 +4635,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1138;
+inline constexpr int kDeCount = 1152;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -5700,6 +5756,20 @@ inline const TrEntry kItCatalogue[] = {
     { "Confirm", "Conferma" },
     { "Confirm (Enter)", "Conferma (Enter)" },
     { "Cancel (Esc)", "Annulla (Esc)" },
+    { "Add a reference image to this plane", "Aggiungi un'immagine di riferimento a questo piano" },
+    { "Pick a photo or drawing to trace over. It appears on the plane straight away, so you can set the alignment, offset and real-world scale with the image in view.", "Scegli una foto o un disegno da ricalcare. Compare subito sul piano, cos\xc3""\xac"" puoi impostare allineamento, offset e scala reale con l'immagine sotto gli occhi." },
+    { "%d x %d px", "%d x %d px" },
+    { "Undo every rotation applied so far and return the plane to its chosen alignment and offset.", "Annulla tutte le rotazioni applicate e riporta il piano all'allineamento e all'offset scelti." },
+    { "Return the plane to its chosen alignment and offset, with no tilt.", "Riporta il piano all'allineamento e all'offset scelti, senza inclinazione." },
+    { "Size, opacity and Calibrate are in the Reference Image panel.", "Dimensione, opacit\xc3""\xa0"" e Calibra sono nel pannello Immagine di riferimento." },
+    { "After creating the plane, pick a photo or drawing to trace over. Set its real size with Calibrate.", "Dopo aver creato il piano, scegli una foto o un disegno da ricalcare. Imposta la dimensione reale con Calibra." },
+    { "New Plane with Reference Image...", "Nuovo piano con immagine di riferimento..." },
+    { "Creates a ground plane carrying a traceable photo. To put an image on any other plane, create the plane first and use Attach Image in its properties.", "Crea un piano di base con una foto da ricalcare. Per mettere un'immagine su un altro piano, crea prima il piano e usa Allega immagine nelle sue propriet\xc3""\xa0""." },
+    { "Attach Image...", "Allega immagine..." },
+    { "Replace Image...", "Sostituisci immagine..." },
+    { "Remove Image", "Rimuovi immagine" },
+    { "Put a traceable photo or drawing on this plane. Set its real size with Calibrate, then sketch over it.", "Metti una foto o un disegno da ricalcare su questo piano. Imposta la dimensione reale con Calibra, poi disegnaci sopra." },
+    { "Detach the image. The construction plane itself stays.", "Stacca l'immagine. Il piano di costruzione resta." },
     { "Place at", "Posiziona su" },
     { "Leading edge", "Bordo d'attacco" },
     { "Quarter chord", "Un quarto di corda" },
@@ -5722,6 +5792,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1138;
+inline constexpr int kItCount = 1152;
 
 } // namespace materializr

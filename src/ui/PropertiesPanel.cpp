@@ -539,6 +539,31 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     if (ImGui::Button(materializr::tr("Rotate About Axis..."))) {
         if (m_rotatePlane) m_rotatePlane(planeId);
     }
+
+    // Reference image. In the document a reference image IS a plane plus a
+    // picture, so every plane can host one -- this is the route to putting a
+    // traceable photo on an offset or face-derived plane instead of only on
+    // the ground plane the import flow builds.
+    if (m_attachRefImage) {
+        const bool has = m_document->getRefImage(planeId) != nullptr;
+        ImGui::Spacing();
+        if (ImGui::Button(materializr::tr(has ? "Replace Image..."
+                                              : "Attach Image...")))
+            m_attachRefImage(planeId);
+        ImGui::SetItemTooltip("%s", materializr::tr(
+            "Put a traceable photo or drawing on this plane. Set its real size "
+            "with Calibrate, then sketch over it."));
+        if (has) {
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::tr("Remove Image"))) {
+                m_document->removeRefImage(planeId);
+                if (m_markDirty) m_markDirty();
+                modified = true;
+            }
+            ImGui::SetItemTooltip("%s", materializr::tr(
+                "Detach the image. The construction plane itself stays."));
+        }
+    }
 }
 
 // Orientation readout + Flip Direction for a selected construction axis.

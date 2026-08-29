@@ -1,4 +1,5 @@
 #include "ui/UiTheme.h"
+#include "ui/StepperRow.h"
 #include "i18n.h"
 #include "app/ui_layout_bridge.h"
 #include "ui/TouchWidgets.h" // im-touch number-pad amount fields
@@ -1857,43 +1858,79 @@ void Application::renderLoftPanel() {
 
 // ─── Reference image (photo underlay on a construction plane) ───────────────
 
+// Read an image file into a RefImageEntry. Shared by the "import a reference
+// image" flow (which makes a plane for it) and by attaching one to a plane the
+// user already has, so both report the same refusals for the same files.
+bool Application::loadRefImageFile(const std::string& path, RefImageEntry& out,
+                                   std::string& baseName) {
+    if (path.empty()) return false;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        showToast("Could not open the image file.");
+        return false;
+    }
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+    int w = 0, h = 0;
+    if (!materializr::probeImageSize(bytes.data(), bytes.size(), w, h)) {
+        showToast("Not a readable image (PNG / JPEG / BMP supported).");
+        return false;
+    }
+    baseName = std::filesystem::path(path).stem().string();
+    if (baseName.empty()) baseName = "Reference";
+    out.fileBytes = std::move(bytes);
+    out.pixW = w;
+    out.pixH = h;
+    out.widthMM = 100.0;   // sane default; calibration refines it
+    out.opacity = 0.6f;
+    return true;
+}
+
+// Attach (or replace) a reference image on a plane the user already built --
+// so a photo can sit on an offset plane, a face-derived plane or a midplane,
+// not only on the ground plane the import flow creates.
+void Application::attachRefImageToPlane(int planeId) {
+    if (planeId < 0 || !m_document) return;
+    materializr::FileDialogs::openFile(
+        "Attach Reference Image",
+        {{"Images", "*.png *.jpg *.jpeg *.bmp *.PNG *.JPG *.JPEG *.BMP"}},
+        [this, planeId](const std::string& path) {
+            if (!m_document || m_document->getPlane(planeId) == nullptr) return;
+            RefImageEntry e;
+            std::string base;
+            if (!loadRefImageFile(path, e, base)) return;
+            const bool replacing = m_document->getRefImage(planeId) != nullptr;
+            m_document->setRefImage(planeId, std::move(e));
+            showToast(replacing
+                          ? "Reference image replaced."
+                          : "Reference image attached \xe2\x80\x94 set its real size with "
+                            "Calibrate, then sketch over it.",
+                      6.0);
+            m_meshesDirty = true;
+            markDirty();   // not a history op; see beginRefImageImport
+        });
+}
+
 void Application::beginRefImageImport() {
     materializr::FileDialogs::openFile(
         "Import Reference Image",
         {{"Images", "*.png *.jpg *.jpeg *.bmp *.PNG *.JPG *.JPEG *.BMP"}},
         [this](const std::string& path) {
-            if (path.empty() || !m_document) return;
-            std::ifstream f(path, std::ios::binary);
-            if (!f) {
-                showToast("Could not open the image file.");
-                return;
-            }
-            std::vector<unsigned char> bytes(
-                (std::istreambuf_iterator<char>(f)),
-                std::istreambuf_iterator<char>());
-            int w = 0, h = 0;
-            if (!materializr::probeImageSize(bytes.data(), bytes.size(), w, h)) {
-                showToast("Not a readable image (PNG / JPEG / BMP supported).");
-                return;
-            }
-            // Name from the filename, so the Items panel reads naturally.
-            std::string base = std::filesystem::path(path).stem().string();
-            if (base.empty()) base = "Reference";
+            if (!m_document) return;
+            RefImageEntry e;
+            std::string base;
+            if (!loadRefImageFile(path, e, base)) return;
             // Host plane: the GROUND plane at the origin — where a top-down
             // "photo with a ruler" naturally lives; move/rotate it with the
             // gizmo like any construction plane afterwards. The world is Y-up
             // internally (the user-facing "XY" sketch plane is normal +Y —
             // same pose as Sketch on XY), so normal (0,0,1) would be a wall.
+            // For any OTHER pose, build the plane first and attach the image
+            // to it from the plane's properties.
             int planeId = m_document->addPlane(
                 gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0),
                               gp_Dir(1, 0, 0))),
                 "Image: " + base);
-            RefImageEntry e;
-            e.fileBytes = std::move(bytes);
-            e.pixW = w;
-            e.pixH = h;
-            e.widthMM = 100.0;      // sane default; calibration refines it
-            e.opacity = 0.6f;
             m_document->setRefImage(planeId, std::move(e));
             if (m_selection) {
                 SelectionEntry se;
@@ -1926,6 +1963,13 @@ void Application::renderRefImagePanel() {
     }
     const RefImageEntry* img =
         planeId >= 0 ? m_document->getRefImage(planeId) : nullptr;
+    // During construction-plane placement the same controls are shown INLINE
+    // in that dialog, so the floating panel would be a duplicate. The
+    // calibration popup still runs -- it is what the inline Calibrate opens.
+    if (m_planeOpActive) {
+        if (planeId >= 0) renderRefImageCalibrationPopup(planeId);
+        return;
+    }
     if (!img) {
         // Selection moved off the image — drop the calibration popup state
         // and the preview texture so we don't hold a stale GL object.
@@ -1954,6 +1998,21 @@ void Application::renderRefImagePanel() {
     ImGui::TextDisabled(materializr::tr("%d x %d px  ·  %.1f x %.1f mm"), img->pixW, img->pixH,
                         img->widthMM, heightMM);
 
+    renderRefImageControls(planeId);
+
+    ImGui::Separator();
+    ImGui::TextWrapped("%s", materializr::tr("Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo."));
+    ImGui::End();
+    renderRefImageCalibrationPopup(planeId);
+}
+
+// Size / opacity / Calibrate for a plane's reference image. Shared so the
+// construction-plane dialog can show them INLINE while the plane is still
+// being placed, instead of the user having to hunt a second floating window.
+void Application::renderRefImageControls(int planeId) {
+    const RefImageEntry* img = m_document ? m_document->getRefImage(planeId) : nullptr;
+    if (!img) return;
+
     float opacity = img->opacity;
     if (ImGui::SliderFloat(materializr::tr("Opacity"), &opacity, 0.05f, 1.0f, "%.2f")) {
         m_document->setRefImageOpacity(planeId, opacity);
@@ -1980,6 +2039,10 @@ void Application::renderRefImagePanel() {
     }
     ImGui::SetItemTooltip("%s", materializr::tr("Click two points a known distance apart in the photo (the ruler you photographed), type that distance, and the image scales to real millimetres."));
     ImGui::SameLine();
+    // While a construction plane is being previewed, Remove would delete the
+    // preview plane out from under its own dialog. Untick the checkbox there
+    // instead; that detaches the image and leaves the plane being placed.
+    ImGui::BeginDisabled(m_planeOpActive);
     if (ImGui::Button(materializr::tr("Remove"), ImVec2(uiSz(90, 0).x, 0))) {
         // Removing the image removes its host plane too — the plane existed
         // only to carry the photo. (No history op: reference scaffolding,
@@ -1988,13 +2051,21 @@ void Application::renderRefImagePanel() {
         if (m_selection) m_selection->clear();
         m_refImgCalibPlane = -1;
         markDirty();
-        ImGui::End();
+        // No ImGui::End() here: this helper does not own the window it draws
+        // into -- the caller does, and ending it from inside would close the
+        // caller's window out from under it.
+        ImGui::EndDisabled();
         return;
     }
+    ImGui::EndDisabled();
+}
 
-    ImGui::Separator();
-    ImGui::TextWrapped("%s", materializr::tr("Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo."));
-    ImGui::End();
+// The two-click ruler calibration. Split out so it still runs when the panel
+// itself is suppressed (during construction-plane placement, where the same
+// controls are shown inline instead).
+void Application::renderRefImageCalibrationPopup(int planeId) {
+    const RefImageEntry* img = m_document ? m_document->getRefImage(planeId) : nullptr;
+    if (!img) return;
 
     // ── Calibration popup ────────────────────────────────────────────────
     if (m_refImgCalibPlane != planeId) return;
@@ -2598,8 +2669,12 @@ void Application::renderConstructionPlanePanel() {
         }
     }
     ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+    // Relative nudges rather than a slider: an offset is a distance you dial
+    // in, and dragging a -100..100 slider cannot land on 12.5 mm. Same row the
+    // push/pull dialog uses, so the gesture is identical across ops.
     float offsetF = static_cast<float>(m_planeOpOffset);
-    if (ImGui::SliderFloat("##planeoffsetslider", &offsetF, -100.0f, 100.0f, "%.2f mm")) {
+    if (materializr::stepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,
+                                -1000.0f, 1000.0f)) {
         m_planeOpOffset = offsetF;
         std::snprintf(m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf), "%.2f", m_planeOpOffset);
         offsetChanged = true;
@@ -2617,56 +2692,104 @@ void Application::renderConstructionPlanePanel() {
     // Axis labels use Z-up convention (user X = world X, user Y = world Z,
     // user Z = world Y), so picking "Z" rotates around the up axis.
     ImGui::Separator();
+    // One ABSOLUTE field per axis: together they describe the plane's total
+    // tilt from its chosen alignment, so the fields keep reading what you set
+    // and pressing Enter twice cannot double it. Rotation is re-applied after
+    // every preview rebuild, so changing the alignment or nudging the offset
+    // no longer throws it away.
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Rotate by"));
-    ImGui::SetNextItemWidth(80);
-    // Enter in the field is equivalent to clicking Apply — same shortcut the
-    // sketch dim popup uses, so the user can dial in 23.5°, press Enter,
-    // and move on without reaching for the mouse.
-    bool rotEnter = ImGui::InputText("##planeRotDeg", m_planeOpRotBuf,
-                                     sizeof(m_planeOpRotBuf),
-                                     ImGuiInputTextFlags_CharsDecimal |
-                                     ImGuiInputTextFlags_EnterReturnsTrue);
-    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("\xC2\xB0 around"));
+    const float rotW = materializr::uiW(64.0f);
+    auto rotField = [&](const char* id, const char* label, char* buf,
+                        std::size_t bufSz) {
+        ImGui::SetNextItemWidth(rotW);
+        const bool entered = ImGui::InputText(id, buf, bufSz,
+                                              ImGuiInputTextFlags_CharsDecimal |
+                                              ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine(0.0f, 4.0f);
+        ImGui::Text("%s", label);
+        return entered;
+    };
+    bool rotEnter = rotField("##planeRotX", "X", m_planeOpRotBufX, sizeof(m_planeOpRotBufX));
     ImGui::SameLine();
-    if (ImGui::RadioButton("X##planeRotX", m_planeOpRotAxisIdx == 0)) m_planeOpRotAxisIdx = 0;
+    rotEnter |= rotField("##planeRotY", "Y", m_planeOpRotBufY, sizeof(m_planeOpRotBufY));
     ImGui::SameLine();
-    if (ImGui::RadioButton("Y##planeRotY", m_planeOpRotAxisIdx == 2)) m_planeOpRotAxisIdx = 2;
+    rotEnter |= rotField("##planeRotZ", "Z", m_planeOpRotBufZ, sizeof(m_planeOpRotBufZ));
     ImGui::SameLine();
-    if (ImGui::RadioButton("Z##planeRotZ", m_planeOpRotAxisIdx == 1)) m_planeOpRotAxisIdx = 1;
+    const bool rotApply = ImGui::SmallButton(materializr::tr("Apply##planeRotApply"));
     ImGui::SameLine();
-    bool rotApply = ImGui::SmallButton(materializr::tr("Apply##planeRotApply"));
-    if (rotApply || rotEnter) {
-        float deg = 0.0f;
-        if (materializr::parseFinite(m_planeOpRotBuf, deg) && std::abs(deg) > 1e-4f) {
-            // Find the most-recently-added plane (auto-selected on push)
-            // and rotate it around its CURRENT origin by `deg`° about the
-            // chosen world axis. Stays additive: typing 10°, Apply, then
-            // 10°, Apply nets 20° total.
-            auto ids = m_document->getAllPlaneIds();
-            if (!ids.empty()) {
-                int pid = ids.back();
-                const auto* entry = m_document->getPlane(pid);
-                if (entry) {
-                    gp_Pln pln = entry->plane;
-                    gp_Pnt o = pln.Position().Location();
-                    gp_Dir ax;
-                    // user X = world X; user Z = world Y (up); user Y = world Z.
-                    if      (m_planeOpRotAxisIdx == 0) ax = gp_Dir(1, 0, 0);
-                    else if (m_planeOpRotAxisIdx == 1) ax = gp_Dir(0, 1, 0);
-                    else                                ax = gp_Dir(0, 0, 1);
-                    gp_Trsf t;
-                    t.SetRotation(gp_Ax1(o, ax), deg * M_PI / 180.0);
-                    pln.Transform(t);
-                    m_document->setPlane(pid, pln);
-                    m_meshesDirty = true;
-                }
-            }
-        }
-        // Reset for the next stacked rotation.
-        m_planeOpRotDeg = 0.0f;
-        std::snprintf(m_planeOpRotBuf, sizeof(m_planeOpRotBuf), "0.0");
+    const bool rotReset = ImGui::SmallButton(materializr::tr("Reset##planeRotReset"));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", materializr::tr(
+            "Return the plane to its chosen alignment and offset, with no tilt."));
+
+    if (rotReset) {
+        m_planeOpRotX = m_planeOpRotY = m_planeOpRotZ = 0.0f;
+        std::snprintf(m_planeOpRotBufX, sizeof(m_planeOpRotBufX), "0.0");
+        std::snprintf(m_planeOpRotBufY, sizeof(m_planeOpRotBufY), "0.0");
+        std::snprintf(m_planeOpRotBufZ, sizeof(m_planeOpRotBufZ), "0.0");
+        updateConstructionPlane();      // rebuild flat, keeping any image
+    } else if (rotApply || rotEnter) {
+        float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+        materializr::parseFinite(m_planeOpRotBufX, dx);
+        materializr::parseFinite(m_planeOpRotBufY, dy);
+        materializr::parseFinite(m_planeOpRotBufZ, dz);
+        m_planeOpRotX = dx;
+        m_planeOpRotY = dy;
+        m_planeOpRotZ = dz;
+        // Rebuild from the alignment + offset, then re-apply the absolute
+        // rotation -- so editing 10 to 15 gives 15 of tilt, not 25.
+        updateConstructionPlane();
     }
 
+    ImGui::Separator();
+    // A reference image is a construction plane carrying a picture, so it is
+    // offered HERE -- which means a traceable photo can sit on any alignment
+    // this dialog builds (XY/XZ/YZ, parallel-to-face, midplane, normal-to-axis,
+    // tangent) at any offset, not only on the ground plane the old standalone
+    // import made. The file is chosen after Apply, when the plane exists.
+    if (ImGui::Checkbox(materializr::tr("Add a reference image to this plane"),
+                        &m_planeOpWantRefImage)) {
+        if (m_planeOpWantRefImage) {
+            pickPlaneOpRefImage();      // choose it NOW, so it renders live
+        } else if (m_planeOpHasPendingImage) {
+            m_planeOpHasPendingImage = false;
+            m_planeOpPendingImage = RefImageEntry{};
+            const auto ids = m_document ? m_document->getAllPlaneIds()
+                                        : std::vector<int>{};
+            if (!ids.empty()) m_document->removeRefImage(ids.back());
+            m_meshesDirty = true;
+        }
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", materializr::tr(
+            "Pick a photo or drawing to trace over. It appears on the plane "
+            "straight away, so you can set the alignment, offset and real-world "
+            "scale with the image in view."));
+    if (m_planeOpHasPendingImage && m_document) {
+        // Inline, not a second window: the image belongs to the plane being
+        // placed, so its size / opacity / calibration live in the same dialog
+        // as the alignment and offset that position it.
+        const auto ids = m_document->getAllPlaneIds();
+        if (!ids.empty()) {
+            const int previewPlane = ids.back();
+            ImGui::Indent(materializr::uiW(8.0f));
+            if (m_planeOpPendingImage.pixW > 0) {
+                const double hMM = m_planeOpPendingImage.widthMM *
+                                   static_cast<double>(m_planeOpPendingImage.pixH) /
+                                   m_planeOpPendingImage.pixW;
+                ImGui::TextDisabled(materializr::tr("%d x %d px  \xc2\xb7  %.1f x %.1f mm"),
+                                    m_planeOpPendingImage.pixW,
+                                    m_planeOpPendingImage.pixH,
+                                    m_planeOpPendingImage.widthMM, hMM);
+            }
+            renderRefImageControls(previewPlane);
+            // Keep the staged copy in step, so the next preview rebuild
+            // re-attaches the CURRENT size/opacity rather than the originals.
+            if (const RefImageEntry* live = m_document->getRefImage(previewPlane))
+                m_planeOpPendingImage = *live;
+            ImGui::Unindent(materializr::uiW(8.0f));
+        }
+    }
     ImGui::Separator();
     bool applyClicked  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(120, 0));
     ImGui::SameLine();
