@@ -186,6 +186,10 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         add(MZ_ICON_SVG,     "SVG",     ToolAction::SketchSvg,    m_activeSketchMode == 10,
             "Import an SVG file as sketch outlines: pick the file, set the "
             "width in the popup, tap to place.");
+        add(MZ_ICON_SPLINE,  "Airfoil", ToolAction::SketchAirfoil, m_activeSketchMode == 13,
+            "Import an aerofoil section (Selig or Lednicer coordinates from "
+            "airfoiltools.com): pick the file, set the chord in the popup, tap "
+            "to place the leading edge.");
         add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
             "Trim a sketch segment at its nearest intersections.");
         add(MZ_ICON_MEASURE, "Dimension", ToolAction::SketchDimension,
@@ -738,6 +742,8 @@ ToolAction Toolbar::renderSketchTools() {
     tip(materializr::tr("Insert text as real outline geometry: set string, font and letter height in the popup, then click to place. Letters become closed regions - extrude them or engrave them onto a face."));
     if (skBtn("Import SVG", 10))   action = ToolAction::SketchSvg;
     tip(materializr::tr("Import an SVG file as sketch outlines: pick the file, set the width in the popup, click to place. Paths become closed regions - extrude a logo or engrave it onto a face."));
+    if (skBtn("Airfoil",   13))    action = ToolAction::SketchAirfoil;
+    tip(materializr::tr("Import an aerofoil section (Selig or Lednicer coordinates, e.g. from airfoiltools.com): pick the file, set the chord in the popup, click to place the leading edge. Stack sections on planes and Loft for a wing."));
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip(materializr::tr("Trim a sketch segment at the nearest intersections."));
     if (skBtn("Dimension", 12))    action = ToolAction::SketchDimension;

@@ -2237,7 +2237,8 @@ void Application::renderViewport() {
                 // so the user sees exactly where it will land before
                 // clicking. Baseline drawn solid for orientation.
                 if ((m_sketchTool->getMode() == SketchToolMode::Text ||
-                     m_sketchTool->getMode() == SketchToolMode::Svg) &&
+                     m_sketchTool->getMode() == SketchToolMode::Svg ||
+                     m_sketchTool->getMode() == SketchToolMode::Airfoil) &&
                     m_sketchTool->hasTextPreviewBox()) {
                     const glm::vec2 anchor = m_sketchTool->getCurrentPos();
                     const glm::vec2 mn = m_sketchTool->getTextPreviewMin();

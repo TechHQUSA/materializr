@@ -104,6 +104,7 @@ inline void resetFpuForOcct() {
 #include "io/DxfExport.h"
 #include "io/FileDialogs.h"
 #include "modeling/SvgImport.h"
+#include "modeling/AirfoilImport.h"
 #include "io/ProjectIO.h"
 #include "io/SketchRecovery.h"
 #include "io/ProjectRecovery.h"
@@ -2248,6 +2249,37 @@ void Application::handleToolAction(int action) {
             }
             break;
 
+        case ToolAction::SketchAirfoil:
+            if (m_inSketchMode) {
+                // Filter by CONTENT, not extension: .dat is one of the most
+                // generic extensions there is, and airfoil files also ship as
+                // .txt or .air. The parser is what decides -- it refuses
+                // anything that is not chord-normalised, with a reason.
+                materializr::FileDialogs::openFile(
+                    "Import Airfoil Section",
+                    {{"Airfoil coordinates", "*.dat *.txt *.air *.DAT *.TXT"}},
+                    [this](const std::string& path) {
+                        if (path.empty() || !m_sketchTool) return;
+                        materializr::AirfoilProfile prof;
+                        std::string err;
+                        if (!materializr::AirfoilImport::load(path, prof, &err)) {
+                            showToast(std::string("Not an airfoil file: ") + err);
+                            return;
+                        }
+                        // A published section is typically 60-200 points per
+                        // surface; that many spline control points is slow to
+                        // solve and to walk for regions, and buys nothing at
+                        // model scale. The panel can raise it.
+                        materializr::AirfoilImport::simplify(prof, 40);
+                        m_airfoilPointBudget = 40;
+                        m_airfoilSource = path;
+                        m_sketchTool->setAirfoil(std::move(prof));
+                        seedUprightPlacementAngle();
+                        m_sketchTool->setMode(SketchToolMode::Airfoil);
+                    });
+            }
+            break;
+
         case ToolAction::SketchSvg:
             if (m_inSketchMode) {
                 materializr::FileDialogs::openFile(
@@ -3037,11 +3069,14 @@ void Application::handleShortcuts() {
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         recordSketchMutation([&] { m_sketchTool->removeLastSplinePoint(); });
     }
-    // Backspace while the Text / SVG tool is active removes the WHOLE last
-    // stamp — re-place a misjudged logo without leaving the tool.
+    // Backspace while the Text / SVG / Airfoil tool is active removes the
+    // WHOLE last stamp — re-place a misjudged logo or section without leaving
+    // the tool. (The panels all advertise Backspace, so every stamp mode has
+    // to honour it.)
     if (m_inSketchMode && m_sketchTool &&
         (m_sketchTool->getMode() == SketchToolMode::Text ||
-         m_sketchTool->getMode() == SketchToolMode::Svg) &&
+         m_sketchTool->getMode() == SketchToolMode::Svg ||
+         m_sketchTool->getMode() == SketchToolMode::Airfoil) &&
         m_sketchTool->hasLastStamp() &&
         !ImGui::GetIO().WantTextInput &&
         ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
@@ -7528,6 +7563,7 @@ void Application::run() {
             renderSectionPanel();
             renderTextToolPanel();
             renderSvgToolPanel();
+            renderAirfoilToolPanel();
             renderMirrorToolPanel();
             renderLoftPanel();
             renderBoundaryFillPanel();

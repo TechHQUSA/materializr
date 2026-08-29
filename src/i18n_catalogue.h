@@ -1128,13 +1128,23 @@ inline const TrEntry kEsCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Airfoil Section", "Perfil alar" },
+    { "(unnamed section)", "(perfil sin nombre)" },
+    { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% de espesor, %.1f%% de curvatura, %d + %d puntos" },
+    { "Airfoil", "Perfil alar" },
+    { "Points per surface", "Puntos por superficie" },
+    { "Done", "Listo" },
+    { "Blunt trailing edge \xe2""\x80""\x94"" closed with a straight segment.", "Borde de salida romo: se cierra con un segmento recto." },
+    { "Click in the sketch to place the leading edge (Backspace undoes the last).", "Haz clic en el boceto para colocar el borde de ataque (Retroceso deshace el \xc3""\xba""ltimo)." },
+    { "Chord length: the straight distance from the leading edge to the trailing edge. The section is scaled to it.", "Longitud de cuerda: la distancia recta del borde de ataque al borde de salida. El perfil se escala a ella." },
+    { "Spline control points per surface. Published sections carry far more than the shape needs; fewer points solve and rebuild faster.", "Puntos de control de spline por superficie. Los perfiles publicados traen muchos m\xc3""\xa1""s de los que la forma necesita; con menos puntos todo resuelve y reconstruye m\xc3""\xa1""s r\xc3""\xa1""pido." },
     { "Language", "Idioma" },
     { "Choose your language", "Elige tu idioma" },
     { "Menus and tool names are translated. Some longer help text is still English.", "Los men\xc3""\xba""s y los nombres de herramientas est\xc3""\xa1""n traducidos. Parte de la ayuda m\xc3""\xa1""s extensa sigue en ingl\xc3""\xa9""s." },
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1122;
+inline constexpr int kEsCount = 1132;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -2255,13 +2265,23 @@ inline const TrEntry kPtCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Airfoil Section", "Perfil aerodin\xc3""\xa2""mico" },
+    { "(unnamed section)", "(perfil sem nome)" },
+    { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% de espessura, %.1f%% de curvatura, %d + %d pontos" },
+    { "Airfoil", "Perfil aerodin\xc3""\xa2""mico" },
+    { "Points per surface", "Pontos por superf\xc3""\xad""cie" },
+    { "Done", "Conclu\xc3""\xad""do" },
+    { "Blunt trailing edge \xe2""\x80""\x94"" closed with a straight segment.", "Bordo de fuga rombudo: fechado com um segmento reto." },
+    { "Click in the sketch to place the leading edge (Backspace undoes the last).", "Clique no esbo\xc3""\xa7""o para posicionar o bordo de ataque (Backspace desfaz o \xc3""\xba""ltimo)." },
+    { "Chord length: the straight distance from the leading edge to the trailing edge. The section is scaled to it.", "Comprimento da corda: a dist\xc3""\xa2""ncia reta do bordo de ataque ao bordo de fuga. O perfil \xc3""\xa9"" escalado por ela." },
+    { "Spline control points per surface. Published sections carry far more than the shape needs; fewer points solve and rebuild faster.", "Pontos de controle da spline por superf\xc3""\xad""cie. Os perfis publicados trazem muito mais do que a forma precisa; com menos pontos tudo resolve e reconstr\xc3""\xb3""i mais r\xc3""\xa1""pido." },
     { "Language", "Idioma" },
     { "Choose your language", "Escolha seu idioma" },
     { "Menus and tool names are translated. Some longer help text is still English.", "Os menus e os nomes das ferramentas est\xc3""\xa3""o traduzidos. Parte da ajuda mais longa ainda est\xc3""\xa1"" em ingl\xc3""\xaa""s." },
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1122;
+inline constexpr int kPtCount = 1132;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -3382,13 +3402,23 @@ inline const TrEntry kFrCatalogue[] = {
     { "Confirm", "Confirmer" },
     { "Confirm (Enter)", "Confirmer (Enter)" },
     { "Cancel (Esc)", "Annuler (Esc)" },
+    { "Airfoil Section", "Profil d'aile" },
+    { "(unnamed section)", "(profil sans nom)" },
+    { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% d'\xc3""\xa9""paisseur, %.1f%% de cambrure, %d + %d points" },
+    { "Airfoil", "Profil d'aile" },
+    { "Points per surface", "Points par surface" },
+    { "Done", "Termin\xc3""\xa9""" },
+    { "Blunt trailing edge \xe2""\x80""\x94"" closed with a straight segment.", "Bord de fuite \xc3""\xa9""pais \xe2""\x80""\x94"" ferm\xc3""\xa9"" par un segment droit." },
+    { "Click in the sketch to place the leading edge (Backspace undoes the last).", "Cliquer dans l'esquisse pour placer le bord d'attaque (Retour arri\xc3""\xa8""re annule le dernier)." },
+    { "Chord length: the straight distance from the leading edge to the trailing edge. The section is scaled to it.", "Longueur de corde : la distance droite du bord d'attaque au bord de fuite. Le profil est mis \xc3""\xa0"" cette \xc3""\xa9""chelle." },
+    { "Spline control points per surface. Published sections carry far more than the shape needs; fewer points solve and rebuild faster.", "Points de contr\xc3""\xb4""le de spline par surface. Les profils publi\xc3""\xa9""s en contiennent bien plus que n\xc3""\xa9""cessaire ; moins de points se r\xc3""\xa9""solvent et se reconstruisent plus vite." },
     { "Language", "Langue" },
     { "Choose your language", "Choisissez votre langue" },
     { "Menus and tool names are translated. Some longer help text is still English.", "Les menus et les noms d'outils sont traduits. Une partie de l'aide d\xc3""\xa9""taill\xc3""\xa9""e reste en anglais." },
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1122;
+inline constexpr int kFrCount = 1132;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -4509,13 +4539,23 @@ inline const TrEntry kDeCatalogue[] = {
     { "Confirm", "Best\xc3""\xa4""tigen" },
     { "Confirm (Enter)", "Best\xc3""\xa4""tigen (Enter)" },
     { "Cancel (Esc)", "Abbrechen (Esc)" },
+    { "Airfoil Section", "Profil" },
+    { "(unnamed section)", "(unbenanntes Profil)" },
+    { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% Dicke, %.1f%% W\xc3""\xb6""lbung, %d + %d Punkte" },
+    { "Airfoil", "Profil" },
+    { "Points per surface", "Punkte pro Fl\xc3""\xa4""che" },
+    { "Done", "Fertig" },
+    { "Blunt trailing edge \xe2""\x80""\x94"" closed with a straight segment.", "Stumpfe Hinterkante \xe2""\x80""\x94"" mit einer geraden Strecke geschlossen." },
+    { "Click in the sketch to place the leading edge (Backspace undoes the last).", "In die Skizze klicken, um die Vorderkante zu setzen (R\xc3""\xbc""cktaste macht die letzte r\xc3""\xbc""ckg\xc3""\xa4""ngig)." },
+    { "Chord length: the straight distance from the leading edge to the trailing edge. The section is scaled to it.", "Sehnenl\xc3""\xa4""nge: der gerade Abstand von der Vorder- zur Hinterkante. Das Profil wird darauf skaliert." },
+    { "Spline control points per surface. Published sections carry far more than the shape needs; fewer points solve and rebuild faster.", "Spline-Kontrollpunkte pro Fl\xc3""\xa4""che. Ver\xc3""\xb6""ffentlichte Profile enthalten weit mehr, als die Form braucht; weniger Punkte l\xc3""\xb6""sen und rechnen schneller." },
     { "Language", "Sprache" },
     { "Choose your language", "W\xc3""\xa4""hlen Sie Ihre Sprache" },
     { "Menus and tool names are translated. Some longer help text is still English.", "Men\xc3""\xbc""s und Werkzeugnamen sind \xc3""\xbc""bersetzt. L\xc3""\xa4""ngere Hilfetexte sind noch auf Englisch." },
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1122;
+inline constexpr int kDeCount = 1132;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -5636,12 +5676,22 @@ inline const TrEntry kItCatalogue[] = {
     { "Confirm", "Conferma" },
     { "Confirm (Enter)", "Conferma (Enter)" },
     { "Cancel (Esc)", "Annulla (Esc)" },
+    { "Airfoil Section", "Profilo alare" },
+    { "(unnamed section)", "(profilo senza nome)" },
+    { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% di spessore, %.1f%% di curvatura, %d + %d punti" },
+    { "Airfoil", "Profilo alare" },
+    { "Points per surface", "Punti per superficie" },
+    { "Done", "Fatto" },
+    { "Blunt trailing edge \xe2""\x80""\x94"" closed with a straight segment.", "Bordo d'uscita smussato \xe2""\x80""\x94"" chiuso con un segmento rettilineo." },
+    { "Click in the sketch to place the leading edge (Backspace undoes the last).", "Fai clic nello schizzo per posizionare il bordo d'attacco (Backspace annulla l'ultimo)." },
+    { "Chord length: the straight distance from the leading edge to the trailing edge. The section is scaled to it.", "Lunghezza della corda: la distanza retta dal bordo d'attacco a quello d'uscita. Il profilo viene scalato su di essa." },
+    { "Spline control points per surface. Published sections carry far more than the shape needs; fewer points solve and rebuild faster.", "Punti di controllo spline per superficie. I profili pubblicati ne contengono molti pi\xc3""\xb9"" del necessario; con meno punti tutto si risolve e ricostruisce pi\xc3""\xb9"" in fretta." },
     { "Language", "Lingua" },
     { "Choose your language", "Scegli la tua lingua" },
     { "Menus and tool names are translated. Some longer help text is still English.", "I menu e i nomi degli strumenti sono tradotti. Parte della guida pi\xc3""\xb9"" estesa \xc3""\xa8"" ancora in inglese." },
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1122;
+inline constexpr int kItCount = 1132;
 
 } // namespace materializr

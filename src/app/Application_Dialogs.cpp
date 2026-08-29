@@ -3924,6 +3924,109 @@ void Application::renderTextToolPanel() {
     if (!open) m_sketchTool->setMode(SketchToolMode::Select);
 }
 
+void Application::renderAirfoilToolPanel() {
+    if (!m_inSketchMode || !m_sketchTool ||
+        m_sketchTool->getMode() != SketchToolMode::Airfoil)
+        return;
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 60.0f),
+        ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    bool open = true;
+    if (ImGui::Begin(materializr::tr("Airfoil Section###AirfoilTool"), &open,
+                     ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings)) {
+        const materializr::AirfoilProfile& prof = m_sketchTool->getAirfoil();
+        // Identify the section by what it IS, not by the filename: thickness
+        // and camber are how aerofoils are named and the quickest check that
+        // the file parsed as the shape the user expected.
+        ImGui::TextColored(materializr::accentText(), "%s",
+                           prof.name.empty() ? "(unnamed section)" : prof.name.c_str());
+        ImGui::TextDisabled(materializr::tr("%.1f%% thick, %.1f%% camber, %d + %d points"),
+                            prof.thickness() * 100.0f, prof.camber() * 100.0f,
+                            static_cast<int>(prof.upper.size()),
+                            static_cast<int>(prof.lower.size()));
+
+        float chord = m_sketchTool->getAirfoilChord();
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderFloat(materializr::tr("Chord (mm)"), &chord, 5.0f, 1000.0f,
+                               "%.1f", ImGuiSliderFlags_Logarithmic))
+            m_sketchTool->setAirfoilChord(chord);
+        ImGui::SetItemTooltip("%s", materializr::tr(
+            "Chord length: the straight distance from the leading edge to the "
+            "trailing edge. The section is scaled to it."));
+
+        // Re-simplifying has to start from the FILE, not from the already
+        // decimated profile -- decimating a decimation compounds the error and
+        // could never add points back when the budget is raised.
+        int budget = m_airfoilPointBudget;
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::SliderInt(materializr::tr("Points per surface"), &budget, 8, 200) &&
+            !m_airfoilSource.empty()) {
+            materializr::AirfoilProfile fresh;
+            if (materializr::AirfoilImport::load(m_airfoilSource, fresh)) {
+                materializr::AirfoilImport::simplify(fresh, budget);
+                m_sketchTool->setAirfoil(std::move(fresh));
+                m_airfoilPointBudget = budget;
+            }
+        }
+        ImGui::SetItemTooltip("%s", materializr::tr(
+            "Spline control points per surface. Published sections carry far "
+            "more than the shape needs; fewer points solve and rebuild faster."));
+
+        if (prof.bluntTrailingEdge) {
+            ImGui::TextDisabled("%s", materializr::tr(
+                "Blunt trailing edge — closed with a straight segment."));
+            ImGui::SetItemTooltip("%s", materializr::tr(
+                "The section's own trailing edge has thickness, which is what "
+                "you want for a printed or machined part; a knife edge cannot "
+                "be manufactured."));
+        }
+
+        int ang = m_sketchTool->getTextAngle();
+        if (ImGui::Button(materializr::tr("Rotate left")))
+            m_sketchTool->setTextAngle(ang + 90);
+        ImGui::SameLine();
+        if (ImGui::Button(materializr::tr("Rotate right")))
+            m_sketchTool->setTextAngle(ang - 90);
+        ImGui::SameLine();
+        ImGui::TextDisabled(materializr::tr("%d deg"), m_sketchTool->getTextAngle());
+
+        // Preview box: chord long, thickness tall, anchored at the LEADING
+        // EDGE rather than centred -- that is where the click lands.
+        {
+            const float c = m_sketchTool->getAirfoilChord();
+            const float t = prof.thickness() * c;
+            const float cam = prof.camber() * c;
+            m_sketchTool->setTextPreviewBox(glm::vec2(0.0f, -t * 0.5f - cam),
+                                            glm::vec2(c, t * 0.5f + cam));
+        }
+
+        if (materializr::touchMode()) {
+            ImGui::TextDisabled("%s", materializr::tr(
+                "Drag in the sketch to position, then Place Here."));
+            if (ImGui::Button(materializr::tr("Place Here")))
+                recordSketchMutation([&]{ m_sketchTool->commitStamp(); });
+        } else {
+            ImGui::TextDisabled("%s", materializr::tr(
+                "Click in the sketch to place the leading edge (Backspace undoes the last)."));
+        }
+
+        ImGui::Separator();
+        if (m_sketchTool->hasLastStamp()) {
+            if (ImGui::Button(materializr::tr("Undo Last Placement")))
+                recordSketchMutation([&]{ m_sketchTool->undoLastStamp(); });
+            ImGui::SameLine();
+        }
+        if (ImGui::Button(materializr::tr("Done")))
+            m_sketchTool->setMode(SketchToolMode::Select);
+    }
+    ImGui::End();
+    if (!open) m_sketchTool->setMode(SketchToolMode::Select);
+}
+
 void Application::renderSvgToolPanel() {
     if (!m_inSketchMode || !m_sketchTool ||
         m_sketchTool->getMode() != SketchToolMode::Svg)
