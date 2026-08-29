@@ -187,6 +187,8 @@ public:
     const AirfoilProfile& getAirfoil() const { return m_airfoil; }
     void  setAirfoilChord(float mm) { m_airfoilChord = (mm < 0.1f) ? 0.1f : mm; }
     float getAirfoilChord() const { return m_airfoilChord; }
+    void setAirfoilAnchor(AirfoilAnchor a) { m_airfoilAnchor = a; }
+    AirfoilAnchor getAirfoilAnchor() const { return m_airfoilAnchor; }
 
     // SVG placement (shares the Text tool's placement frame: same angle,
     // same cursor preview box, same fromText suppression on the result).
@@ -533,6 +535,7 @@ private:
     SvgPaths m_svgPaths;
     AirfoilProfile m_airfoil;
     float m_airfoilChord = 100.0f;  // mm, a typical model-wing root chord
+    AirfoilAnchor m_airfoilAnchor = AirfoilAnchor::LeadingEdge;
     float m_svgWidth = 50.0f; // target artwork width, mm
 
     // One entry per Text/SVG stamp (newest last), each holding that stamp's

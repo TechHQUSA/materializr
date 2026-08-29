@@ -247,3 +247,71 @@ TEST(AirfoilImport, PlacedProfileClosesIntoAnExtrudableWire) {
             << (sharpTE ? "sharp" : "blunt") << " TE: the profile is not closed";
     }
 }
+
+// The anchor decides where the click lands AND what the section rotates about.
+// One function serves the ghost, the preview box and the placed geometry, so a
+// bug here shows up in all three together rather than as a preview that lies.
+TEST(AirfoilImport, AnchorChoicePlacesAndPivotsThere) {
+    AirfoilProfile p;
+    ASSERT_TRUE(AirfoilImport::parse(seligText(naca(0.12, 0.02, 0.4, 60, true), "n"), p));
+    AirfoilImport::simplify(p, 20);
+
+    const glm::vec2 le = AirfoilImport::anchorPoint(p, materializr::AirfoilAnchor::LeadingEdge);
+    const glm::vec2 qc = AirfoilImport::anchorPoint(p, materializr::AirfoilAnchor::QuarterChord);
+    const glm::vec2 ct = AirfoilImport::anchorPoint(p, materializr::AirfoilAnchor::Centre);
+    EXPECT_NEAR(le.x, 0.0f, 1e-3f);
+    EXPECT_NEAR(qc.x, 0.25f, 0.01f) << "quarter chord is a quarter along the chord line";
+    EXPECT_NEAR(ct.x, 0.5f, 0.05f);
+
+    // The quarter chord and the centre are INTERIOR points -- no vertex sits
+    // there -- so "is a vertex on the click" only holds for the leading edge.
+    // Test the transform itself instead: the leading edge, which IS a vertex,
+    // must land exactly where the anchor maths says, at every angle.
+    const glm::vec2 click(7.0f, -3.0f);
+    const float chord = 80.0f;
+    for (auto a : {materializr::AirfoilAnchor::LeadingEdge,
+                   materializr::AirfoilAnchor::QuarterChord,
+                   materializr::AirfoilAnchor::Centre}) {
+        const glm::vec2 a0 = AirfoilImport::anchorPoint(p, a);
+        for (float ang : {0.0f, 12.0f, -30.0f}) {
+            Sketch sk;
+            ASSERT_GT(AirfoilImport::place(&sk, p, click, chord, ang, a), 0);
+            const float r = ang * 3.14159265358979323846f / 180.0f;
+            const float cs = std::cos(r), sn = std::sin(r);
+            const glm::vec2 d = (le - a0) * chord;
+            const glm::vec2 wantLE =
+                click + glm::vec2(d.x * cs - d.y * sn, d.x * sn + d.y * cs);
+            float best = 1e9f;
+            for (const auto& pt : sk.getPoints())
+                best = std::min(best, glm::length(pt.pos - wantLE));
+            EXPECT_LT(best, 0.5f)
+                << "anchor " << (int)a << " at " << ang
+                << " deg: leading edge is not where the anchor maths puts it";
+            // Rotating about the anchor keeps every vertex within a chord of
+            // the click -- it pivots, it does not fly off.
+            float far = 0.0f;
+            for (const auto& pt : sk.getPoints())
+                far = std::max(far, glm::length(pt.pos - click));
+            EXPECT_LT(far, chord * 1.05f) << "anchor " << (int)a;
+        }
+    }
+}
+
+// Chord length is a property of the section, not of where it was anchored.
+TEST(AirfoilImport, ChordSurvivesEveryAnchor) {
+    AirfoilProfile p;
+    ASSERT_TRUE(AirfoilImport::parse(seligText(naca(0.12, 0, 0, 60, true), "n"), p));
+    AirfoilImport::simplify(p, 20);
+    for (auto a : {materializr::AirfoilAnchor::LeadingEdge,
+                   materializr::AirfoilAnchor::QuarterChord,
+                   materializr::AirfoilAnchor::Centre}) {
+        Sketch sk;
+        ASSERT_GT(AirfoilImport::place(&sk, p, glm::vec2(0, 0), 150.0f, 0.0f, a), 0);
+        float xmin = 1e30f, xmax = -1e30f;
+        for (const auto& pt : sk.getPoints()) {
+            xmin = std::min(xmin, pt.pos.x);
+            xmax = std::max(xmax, pt.pos.x);
+        }
+        EXPECT_NEAR(xmax - xmin, 150.0f, 0.8f) << "anchor " << (int)a;
+    }
+}

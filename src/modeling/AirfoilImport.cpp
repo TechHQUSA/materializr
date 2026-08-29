@@ -231,17 +231,49 @@ void AirfoilImport::simplify(AirfoilProfile& prof, int maxPerSurface,
     prof.lower = decimate(prof.lower, maxPerSurface, tolerance);
 }
 
+glm::vec2 AirfoilImport::anchorPoint(const AirfoilProfile& prof,
+                                     AirfoilAnchor a) {
+    if (prof.empty()) return glm::vec2(0.0f, 0.0f);
+    const glm::vec2 le = prof.upper.front();
+    switch (a) {
+    case AirfoilAnchor::LeadingEdge:
+        return le;
+    case AirfoilAnchor::QuarterChord: {
+        // A quarter of the way along the CHORD LINE (leading edge to trailing
+        // edge), not simply x = 0.25: on a cambered section with a blunt tail
+        // the chord line is not the x axis.
+        const glm::vec2 teU = prof.upper.back(), teL = prof.lower.back();
+        const glm::vec2 te = 0.5f * (teU + teL);
+        return le + (te - le) * 0.25f;
+    }
+    case AirfoilAnchor::Centre:
+    default: {
+        glm::vec2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
+        auto acc = [&](const std::vector<glm::vec2>& v) {
+            for (const glm::vec2& p : v) {
+                mn = glm::vec2(std::min(mn.x, p.x), std::min(mn.y, p.y));
+                mx = glm::vec2(std::max(mx.x, p.x), std::max(mx.y, p.y));
+            }
+        };
+        acc(prof.upper);
+        acc(prof.lower);
+        return 0.5f * (mn + mx);
+    }
+    }
+}
+
 int AirfoilImport::place(Sketch* sketch, const AirfoilProfile& prof,
-                         glm::vec2 pos, float chordMm, float angleDeg) {
+                         glm::vec2 pos, float chordMm, float angleDeg,
+                         AirfoilAnchor anchor) {
     if (!sketch || prof.empty() || chordMm <= 0.0f) return 0;
 
     const float rad = angleDeg * 3.14159265358979323846f / 180.0f;
     const float cs = std::cos(rad), sn = std::sin(rad);
-    // Rotation is about the LEADING EDGE, not the bounding-box centre: that is
-    // the reference wing twist (washout) is specified from, so stacking
-    // stations at different incidences keeps the leading edge as the datum.
+    // Rotation happens ABOUT THE ANCHOR, so changing the incidence pivots the
+    // section around the point the user placed rather than sliding it away.
+    const glm::vec2 a0 = anchorPoint(prof, anchor);
     auto toSketch = [&](glm::vec2 n) {
-        const glm::vec2 s(n.x * chordMm, n.y * chordMm);
+        const glm::vec2 s((n.x - a0.x) * chordMm, (n.y - a0.y) * chordMm);
         return pos + glm::vec2(s.x * cs - s.y * sn, s.x * sn + s.y * cs);
     };
 

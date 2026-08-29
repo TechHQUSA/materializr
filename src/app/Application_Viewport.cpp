@@ -2243,9 +2243,16 @@ void Application::renderViewport() {
                     const glm::vec2 anchor = m_sketchTool->getCurrentPos();
                     const glm::vec2 mn = m_sketchTool->getTextPreviewMin();
                     const glm::vec2 mx = m_sketchTool->getTextPreviewMax();
-                    // Anchor at the box CENTER (not baseline-left), matching the
-                    // SVG tool and the stamp in handleTextTool.
-                    const glm::vec2 center = (mn + mx) * 0.5f;
+                    // Anchor the box where the STAMP actually anchors, or the
+                    // preview lies about where the geometry will land. Text and
+                    // SVG stamp about their bounding-box centre; an airfoil
+                    // stamps its LEADING EDGE, which is box-space (0,0) -- the
+                    // box was drawn centred for it and the profile then landed
+                    // half a chord away from where it was shown.
+                    const glm::vec2 center =
+                        (m_sketchTool->getMode() == SketchToolMode::Airfoil)
+                            ? glm::vec2(0.0f, 0.0f)
+                            : (mn + mx) * 0.5f;
                     const float a = glm::radians(
                         static_cast<float>(m_sketchTool->getTextAngle()));
                     const float ca = std::cos(a), sa2 = std::sin(a);

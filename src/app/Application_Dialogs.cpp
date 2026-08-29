@@ -3976,6 +3976,24 @@ void Application::renderAirfoilToolPanel() {
             "Spline control points per surface. Published sections carry far "
             "more than the shape needs; fewer points solve and rebuild faster."));
 
+        // Where the click lands on the section. Leading edge is the default
+        // because chord and twist are quoted from it and stacked wing stations
+        // align on it; quarter chord is the aerodynamic centre and a common
+        // spar position.
+        {
+            int anch = static_cast<int>(m_sketchTool->getAirfoilAnchor());
+            const char* items[] = { materializr::tr("Leading edge"),
+                                    materializr::tr("Quarter chord"),
+                                    materializr::tr("Centre") };
+            ImGui::SetNextItemWidth(220.0f);
+            if (ImGui::Combo(materializr::tr("Place at"), &anch, items, 3))
+                m_sketchTool->setAirfoilAnchor(static_cast<materializr::AirfoilAnchor>(anch));
+            ImGui::SetItemTooltip("%s", materializr::tr(
+                "Which point of the section lands on your click, and what it "
+                "rotates about. Stacked wing stations normally align on the "
+                "leading edge; the quarter chord is the usual spar position."));
+        }
+
         if (prof.bluntTrailingEdge) {
             ImGui::TextDisabled("%s", materializr::tr(
                 "Blunt trailing edge — closed with a straight segment."));
@@ -3998,10 +4016,21 @@ void Application::renderAirfoilToolPanel() {
         // EDGE rather than centred -- that is where the click lands.
         {
             const float c = m_sketchTool->getAirfoilChord();
-            const float t = prof.thickness() * c;
-            const float cam = prof.camber() * c;
-            m_sketchTool->setTextPreviewBox(glm::vec2(0.0f, -t * 0.5f - cam),
-                                            glm::vec2(c, t * 0.5f + cam));
+            const glm::vec2 a0 =
+                materializr::AirfoilImport::anchorPoint(prof, m_sketchTool->getAirfoilAnchor());
+            // Real extents of the section, anchor-relative and in mm, so the
+            // box matches the ghost for every anchor choice.
+            glm::vec2 mn(1e30f, 1e30f), mx(-1e30f, -1e30f);
+            auto acc = [&](const std::vector<glm::vec2>& v) {
+                for (const glm::vec2& q : v) {
+                    mn = glm::vec2(std::min(mn.x, q.x), std::min(mn.y, q.y));
+                    mx = glm::vec2(std::max(mx.x, q.x), std::max(mx.y, q.y));
+                }
+            };
+            acc(prof.upper);
+            acc(prof.lower);
+            if (mx.x > mn.x)
+                m_sketchTool->setTextPreviewBox((mn - a0) * c, (mx - a0) * c);
         }
 
         if (materializr::touchMode()) {

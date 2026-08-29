@@ -506,6 +506,11 @@ void Application::renderModernLayout() {
                         case ToolAction::Move:
                         case ToolAction::Rotate:
                         case ToolAction::Scale:                return 2;
+                        // Both bring OUTSIDE geometry into the sketch, which is
+                        // a different act from drawing it; grouping them keeps
+                        // the rail short and makes the pair discoverable.
+                        case ToolAction::SketchSvg:
+                        case ToolAction::SketchAirfoil:        return 3;
                         default: return 0;
                     }
                 };
@@ -524,7 +529,7 @@ void Application::renderModernLayout() {
                     else handleToolAction(static_cast<int>(t.action));
                 };
 
-                bool done[3] = { false, false, false };
+                bool done[4] = { false, false, false, false };
                 int railIdx = 0;
                 for (const auto& tool : rail) {
                     if (skip(tool)) continue;
@@ -534,15 +539,20 @@ void Application::renderModernLayout() {
                     if (g != 0 && count(g) >= 2) {
                         if (done[g]) continue;
                         done[g] = true;
-                        const char* gIcon  = g == 1 ? MZ_ICON_COPY  : MZ_ICON_MOVE;
-                        const char* gLabel = g == 1 ? "Multiply"    : "Transform";
+                        const char* gIcon  = g == 1 ? MZ_ICON_COPY
+                                           : g == 2 ? MZ_ICON_MOVE : MZ_ICON_SVG;
+                        const char* gLabel = g == 1 ? "Multiply"
+                                           : g == 2 ? "Transform" : "Import";
                         const char* gPopup = g == 1 ? "##railMultiply"
-                                                    : "##railTransform";
+                                           : g == 2 ? "##railTransform"
+                                                    : "##railImport";
                         ImGui::PushID(2000 + g);
                         if (touchui::railButton(gLabel, gIcon, tr(gLabel), false, cell()))
                             ImGui::OpenPopup(gPopup);
                         tip(materializr::tr(
-                            g == 1 ? "Copy, mirror, pattern or split the selection"
+                            g == 3 ? "Bring outside artwork into the sketch: an "
+                                     "SVG outline or an aerofoil section"
+                          : g == 1 ? "Copy, mirror, pattern or split the selection"
                                    : "Move, rotate or scale the selection"));
                         pushPopupPad();
                         if (ImGui::BeginPopup(gPopup)) {

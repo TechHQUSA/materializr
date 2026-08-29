@@ -1128,6 +1128,12 @@ inline const TrEntry kEsCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Place at", "Colocar en" },
+    { "Leading edge", "Borde de ataque" },
+    { "Quarter chord", "Un cuarto de cuerda" },
+    { "Centre", "Centro" },
+    { "Which point of the section lands on your click, and what it rotates about. Stacked wing stations normally align on the leading edge; the quarter chord is the usual spar position.", "Qu\xc3""\xa9"" punto del perfil cae en tu clic, y alrededor de qu\xc3""\xa9"" gira. Las secciones apiladas de un ala se alinean normalmente en el borde de ataque; el cuarto de cuerda es la posici\xc3""\xb3""n habitual del larguero." },
+    { "Bring outside artwork into the sketch: an SVG outline or an aerofoil section", "Trae material externo al boceto: un contorno SVG o un perfil alar" },
     { "Airfoil Section", "Perfil alar" },
     { "(unnamed section)", "(perfil sin nombre)" },
     { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% de espesor, %.1f%% de curvatura, %d + %d puntos" },
@@ -1144,7 +1150,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1132;
+inline constexpr int kEsCount = 1138;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -2265,6 +2271,12 @@ inline const TrEntry kPtCatalogue[] = {
     { "Confirm", "Confirmar" },
     { "Confirm (Enter)", "Confirmar (Enter)" },
     { "Cancel (Esc)", "Cancelar (Esc)" },
+    { "Place at", "Posicionar em" },
+    { "Leading edge", "Bordo de ataque" },
+    { "Quarter chord", "Um quarto da corda" },
+    { "Centre", "Centro" },
+    { "Which point of the section lands on your click, and what it rotates about. Stacked wing stations normally align on the leading edge; the quarter chord is the usual spar position.", "Qual ponto do perfil fica no seu clique, e em torno de que ele gira. As se\xc3""\xa7""\xc3""\xb5""es empilhadas de uma asa normalmente se alinham pelo bordo de ataque; um quarto da corda \xc3""\xa9"" a posi\xc3""\xa7""\xc3""\xa3""o usual da longarina." },
+    { "Bring outside artwork into the sketch: an SVG outline or an aerofoil section", "Traz material externo para o esbo\xc3""\xa7""o: um contorno SVG ou um perfil aerodin\xc3""\xa2""mico" },
     { "Airfoil Section", "Perfil aerodin\xc3""\xa2""mico" },
     { "(unnamed section)", "(perfil sem nome)" },
     { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% de espessura, %.1f%% de curvatura, %d + %d pontos" },
@@ -2281,7 +2293,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1132;
+inline constexpr int kPtCount = 1138;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -3402,6 +3414,12 @@ inline const TrEntry kFrCatalogue[] = {
     { "Confirm", "Confirmer" },
     { "Confirm (Enter)", "Confirmer (Enter)" },
     { "Cancel (Esc)", "Annuler (Esc)" },
+    { "Place at", "Placer \xc3""\xa0""" },
+    { "Leading edge", "Bord d'attaque" },
+    { "Quarter chord", "Quart de corde" },
+    { "Centre", "Centre" },
+    { "Which point of the section lands on your click, and what it rotates about. Stacked wing stations normally align on the leading edge; the quarter chord is the usual spar position.", "Quel point du profil se place sur votre clic, et autour duquel il pivote. Les sections empil\xc3""\xa9""es d'une aile s'alignent normalement sur le bord d'attaque ; le quart de corde est la position habituelle du longeron." },
+    { "Bring outside artwork into the sketch: an SVG outline or an aerofoil section", "Importer un \xc3""\xa9""l\xc3""\xa9""ment externe dans l'esquisse : un contour SVG ou un profil d'aile" },
     { "Airfoil Section", "Profil d'aile" },
     { "(unnamed section)", "(profil sans nom)" },
     { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% d'\xc3""\xa9""paisseur, %.1f%% de cambrure, %d + %d points" },
@@ -3418,7 +3436,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1132;
+inline constexpr int kFrCount = 1138;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -4539,6 +4557,12 @@ inline const TrEntry kDeCatalogue[] = {
     { "Confirm", "Best\xc3""\xa4""tigen" },
     { "Confirm (Enter)", "Best\xc3""\xa4""tigen (Enter)" },
     { "Cancel (Esc)", "Abbrechen (Esc)" },
+    { "Place at", "Platzieren an" },
+    { "Leading edge", "Vorderkante" },
+    { "Quarter chord", "Viertelsehne" },
+    { "Centre", "Mitte" },
+    { "Which point of the section lands on your click, and what it rotates about. Stacked wing stations normally align on the leading edge; the quarter chord is the usual spar position.", "Welcher Punkt des Profils auf dem Klick landet und worum es sich dreht. Gestapelte Fl\xc3""\xbc""gelschnitte richten sich normalerweise an der Vorderkante aus; die Viertelsehne ist die \xc3""\xbc""bliche Holmposition." },
+    { "Bring outside artwork into the sketch: an SVG outline or an aerofoil section", "Externe Vorlagen in die Skizze holen: eine SVG-Kontur oder ein Profil" },
     { "Airfoil Section", "Profil" },
     { "(unnamed section)", "(unbenanntes Profil)" },
     { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% Dicke, %.1f%% W\xc3""\xb6""lbung, %d + %d Punkte" },
@@ -4555,7 +4579,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1132;
+inline constexpr int kDeCount = 1138;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -5676,6 +5700,12 @@ inline const TrEntry kItCatalogue[] = {
     { "Confirm", "Conferma" },
     { "Confirm (Enter)", "Conferma (Enter)" },
     { "Cancel (Esc)", "Annulla (Esc)" },
+    { "Place at", "Posiziona su" },
+    { "Leading edge", "Bordo d'attacco" },
+    { "Quarter chord", "Un quarto di corda" },
+    { "Centre", "Centro" },
+    { "Which point of the section lands on your click, and what it rotates about. Stacked wing stations normally align on the leading edge; the quarter chord is the usual spar position.", "Quale punto del profilo finisce sul clic, e attorno a cosa ruota. Le sezioni impilate di un'ala si allineano di norma sul bordo d'attacco; il quarto di corda \xc3""\xa8"" la posizione abituale del longherone." },
+    { "Bring outside artwork into the sketch: an SVG outline or an aerofoil section", "Porta elementi esterni nello schizzo: un contorno SVG o un profilo alare" },
     { "Airfoil Section", "Profilo alare" },
     { "(unnamed section)", "(profilo senza nome)" },
     { "%.1f%% thick, %.1f%% camber, %d + %d points", "%.1f%% di spessore, %.1f%% di curvatura, %d + %d punti" },
@@ -5692,6 +5722,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1132;
+inline constexpr int kItCount = 1138;
 
 } // namespace materializr

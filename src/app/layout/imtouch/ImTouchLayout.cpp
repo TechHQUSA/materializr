@@ -850,11 +850,17 @@ void Application::renderImTouchLayout() {
                 // the draw tools and the active tool's origin toggle render
                 // in catalogue order, so anything unrecognised (future tools)
                 // also lands flat and can't silently vanish from the rail.
-                std::vector<const Toolbar::RailTool*> modify, aids;
+                std::vector<const Toolbar::RailTool*> modify, aids, importers;
                 int railIdx = 0;
                 for (const auto& t : tools) {
                     if (t.pluginIndex >= 0) { modify.push_back(&t); continue; }
                     switch (t.action) {
+                    // Bringing outside artwork in is its own act, distinct from
+                    // drawing or modifying: SVG outlines and aerofoil sections
+                    // share a group so neither is buried in the flat rail.
+                    case ToolAction::SketchSvg:
+                    case ToolAction::SketchAirfoil:
+                        importers.push_back(&t); break;
                     case ToolAction::Trim:
                     case ToolAction::SketchCopy:
                     case ToolAction::SketchMirror:
@@ -873,6 +879,10 @@ void Application::renderImTouchLayout() {
                       "Modify tools: trim, copy, mirror, linear and circular "
                       "patterns",
                       modify);
+                group("importGroup", "##sketchImport", MZ_ICON_SVG, "Import",
+                      "Bring outside artwork into the sketch: an SVG outline or "
+                      "an aerofoil section",
+                      importers);
                 group("aidsGroup", "##sketchAids", MZ_ICON_MORE, "More",
                       "Drawing guides level, measure, look at the sketch plane",
                       aids);

@@ -38,8 +38,22 @@ struct AirfoilProfile {
     float camber() const;
 };
 
+// Where the placement click lands on the section.
+//   LeadingEdge  the datum chord, twist and washout are all quoted from, and
+//                what stacked wing stations align on.
+//   QuarterChord the aerodynamic centre of a subsonic section, and a very
+//                common spar position -- "put the spar here".
+//   Centre       the bounding-box middle, for eyeballing a lone section.
+enum class AirfoilAnchor { LeadingEdge, QuarterChord, Centre };
+
 class AirfoilImport {
 public:
+    // The anchor's position in NORMALISED chord coordinates. One function so
+    // the ghost, the preview box and the placed geometry cannot disagree --
+    // they did once already, and the preview silently lied about where the
+    // profile would land.
+    static glm::vec2 anchorPoint(const AirfoilProfile& prof, AirfoilAnchor a);
+
     // Parse file contents. `err` (optional) gets a one-line human reason on
     // failure. Both dialects are auto-detected.
     static bool parse(const std::string& text, AirfoilProfile& out,
@@ -54,12 +68,14 @@ public:
     static void simplify(AirfoilProfile& prof, int maxPerSurface,
                          float tolerance = 0.0005f);
 
-    // Insert into the sketch: chord along +X from `pos`, scaled so the chord
-    // is `chordMm`, rotated `angleDeg` CCW about the leading edge (angle of
-    // incidence / washout). Emits two splines plus a trailing-edge line when
-    // the section is blunt. Returns the number of elements added, 0 on failure.
+    // Insert into the sketch: chord along +X, scaled so the chord is
+    // `chordMm`, with `anchor` landing on `pos` and the section rotated
+    // `angleDeg` CCW ABOUT THAT ANCHOR (angle of incidence / washout). Emits
+    // two splines plus a trailing-edge line when the section is blunt.
+    // Returns the number of elements added, 0 on failure.
     static int place(Sketch* sketch, const AirfoilProfile& prof, glm::vec2 pos,
-                     float chordMm, float angleDeg);
+                     float chordMm, float angleDeg,
+                     AirfoilAnchor anchor = AirfoilAnchor::LeadingEdge);
 };
 
 } // namespace materializr

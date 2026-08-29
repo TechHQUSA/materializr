@@ -3375,7 +3375,8 @@ void SketchTool::handleAirfoilTool(glm::vec2 pos) {
     const size_t l0 = m_sketch->getLines().size();
     const size_t s0 = m_sketch->getSplines().size();
     if (AirfoilImport::place(m_sketch, m_airfoil, pos, m_airfoilChord,
-                             static_cast<float>(m_textAngle)) > 0) {
+                             static_cast<float>(m_textAngle),
+                             m_airfoilAnchor) > 0) {
         recordStamp(p0, l0, s0);
     }
 }
