@@ -321,6 +321,7 @@ add_executable(materializr
     src/modeling/Sketch.cpp
     src/modeling/Unfold.cpp
     src/modeling/SketchSolver.cpp
+    src/modeling/AirfoilImport.cpp
     src/modeling/SketchTool.cpp
     src/modeling/SketchEditOp.cpp
     src/viewport/Viewport.cpp
