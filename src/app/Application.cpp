@@ -2236,6 +2236,9 @@ void Application::handleToolAction(int action) {
         case ToolAction::Trim:
             if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Trim);
             break;
+        case ToolAction::SketchOffset:
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Offset);
+            break;
         case ToolAction::SketchDimension:
             if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Dimension);
             break;
@@ -7567,6 +7570,7 @@ void Application::run() {
             renderSvgToolPanel();
             renderAirfoilToolPanel();
             renderMirrorToolPanel();
+            renderOffsetToolPanel();
             renderLoftPanel();
             renderBoundaryFillPanel();
             renderRefImagePanel();

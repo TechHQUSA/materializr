@@ -15,7 +15,7 @@ enum class ToolAction {
     // Sketch tools (still dispatched via ToolAction — tightly coupled to viewport)
     StartSketch, StartSketchXY, StartSketchXZ, StartSketchYZ,
     SketchOnFace, SelectSketch, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, SketchText,
-    SketchSvg, SketchAirfoil, SketchDimension,
+    SketchSvg, SketchAirfoil, SketchDimension, SketchOffset,
     FinishSketch, ExitSketchDiscard, EditSketch, ExtrudeSketch, SubtractSketch, PushPull, MoveFace, LookAtSketch,
     SketchCopy, SketchMirror, SketchLinearPattern, SketchRadialPattern,
     // Cycle the drawing-inference level Full → Reduced → Off.
@@ -135,7 +135,7 @@ public:
 
     // Active SketchToolMode (int — Toolbar avoids depending on SketchTool.h).
     // Matches SketchToolMode enum: 0=None, 1=Select, 2=Line, 3=Circle,
-    // 4=Rectangle, 5=Arc, 6=Spline, 7=Polygon, 8=Trim. Used to draw a
+    // 4=Rectangle, 5=Arc, 6=Spline, 7=Polygon, 8=Trim, 14=Offset. Used to draw a
     // highlight border around the matching button so the active tool is
     // unambiguous at a glance.
     void setActiveSketchMode(int mode) { m_activeSketchMode = mode; }

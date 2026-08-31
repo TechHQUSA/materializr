@@ -152,7 +152,8 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
     };
 
     if (m_sketchMode) {
-        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim, 12=Dimension.
+        // SketchToolMode ints per setActiveSketchMode(): 1=Select … 8=Trim,
+        // 12=Dimension, 14=Offset.
         add(MZ_ICON_SELECT,  "Select",  ToolAction::SelectSketch, m_activeSketchMode == 1,
             "Pick sketch elements (points, lines, regions). Drag a selection to move it.");
         add(MZ_ICON_LINE,    "Line",    ToolAction::Line,         m_activeSketchMode == 2,
@@ -192,6 +193,9 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "to place the leading edge.");
         add(MZ_ICON_TRIM,    "Trim",    ToolAction::Trim,         m_activeSketchMode == 8,
             "Trim a sketch segment at its nearest intersections.");
+        add(MZ_ICON_OFFSET,  "Offset",  ToolAction::SketchOffset, m_activeSketchMode == 14,
+            "Offset a chain: tap an edge to take the whole connected run, then "
+            "drag or type the distance. The side you are on picks the direction.");
         add(MZ_ICON_MEASURE, "Dimension", ToolAction::SketchDimension,
             m_activeSketchMode == 12,
             "Dimension: tap entities, tap to place the label, type the value.");
@@ -746,6 +750,8 @@ ToolAction Toolbar::renderSketchTools() {
     tip(materializr::tr("Import an aerofoil section (Selig or Lednicer coordinates, e.g. from airfoiltools.com): pick the file, set the chord in the popup, click to place the leading edge. Stack sections on planes and Loft for a wing."));
     if (skBtn("Trim",      8))     action = ToolAction::Trim;
     tip(materializr::tr("Trim a sketch segment at the nearest intersections."));
+    if (skBtn("Offset",   14))     action = ToolAction::SketchOffset;
+    tip(materializr::tr("Offset a chain: click an edge to take the whole connected run, then move the cursor or type a distance. Which side you are on picks the direction."));
     if (skBtn("Dimension", 12))    action = ToolAction::SketchDimension;
     tip(materializr::tr("Dimension tool (D): click a line, circle, point pair, or two lines, place the label, then type the value."));
 

@@ -442,6 +442,7 @@ void SketchRenderer::render(const Sketch* sketch, const SketchTool* tool,
     if (tool) {
         drawPreview(sketch, tool, vp);
         drawTrimHover(sketch, tool, vp);
+        drawOffsetPreview(sketch, tool, vp);
         drawSvgGhost(sketch, tool, vp);
         drawAirfoilGhost(sketch, tool, vp);
     }
@@ -628,6 +629,32 @@ void SketchRenderer::drawTrimHover(const Sketch* sketch, const SketchTool* tool,
     }
     glm::vec3 red(1.0f, 0.25f, 0.25f);
     uploadAndDraw(verts, GL_LINES, red, vp, 4.0f);
+}
+
+void SketchRenderer::drawOffsetPreview(const Sketch* sketch, const SketchTool* tool,
+                                       const glm::mat4& vp) {
+    if (!sketch || !tool || tool->getMode() != SketchToolMode::Offset) return;
+
+    auto stream = [&](const std::vector<std::vector<glm::vec2>>& polys,
+                      const glm::vec3& colour, float width) {
+        std::vector<float> verts;
+        for (const auto& poly : polys) {
+            for (size_t i = 0; i + 1 < poly.size(); ++i) {
+                glm::vec3 a = toWorld(sketch, poly[i]);
+                glm::vec3 b = toWorld(sketch, poly[i + 1]);
+                verts.push_back(a.x); verts.push_back(a.y); verts.push_back(a.z);
+                verts.push_back(b.x); verts.push_back(b.y); verts.push_back(b.z);
+            }
+        }
+        if (!verts.empty()) uploadAndDraw(verts, GL_LINES, colour, vp, width);
+    };
+
+    // Pick phase: cyan over the chain the click would capture — the whole
+    // connected run, so it is obvious the tool takes more than one edge.
+    stream(tool->getOffsetChainHover(), glm::vec3(0.35f, 0.85f, 1.0f), 4.0f);
+    // Distance phase: the result ghost, in the same orange the Mirror ghost
+    // uses for "this is what you are about to create".
+    stream(tool->getOffsetPreview(), glm::vec3(1.0f, 0.67f, 0.24f), 3.0f);
 }
 
 void SketchRenderer::drawMidpointDots(const Sketch* sketch, const glm::mat4& vp) {

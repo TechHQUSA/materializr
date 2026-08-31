@@ -123,7 +123,7 @@ void ShortcutsPanel::render() {
     section("In a sketch", "scSketch", kSketch, IM_ARRAYSIZE(kSketch));
     ImGui::Spacing();
     ImGui::TextDisabled("%s", materializr::tr("The drawing tools (Line, Circle, Rectangle, Arc,"));
-    ImGui::TextDisabled("%s", materializr::tr("Spline, Polygon, Trim) are on the toolbar only."));
+    ImGui::TextDisabled("%s", materializr::tr("Spline, Polygon, Trim, Offset) are on the toolbar only."));
 
     section("Mouse", "scMouse", kMouse, IM_ARRAYSIZE(kMouse));
     ImGui::Spacing();

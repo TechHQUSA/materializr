@@ -93,5 +93,9 @@
 #define MZ_ICON_SPLINE     ICON_IC_CURVE_ARRAY
 #define MZ_ICON_POLYGON    ICON_IC_PENTAGON
 #define MZ_ICON_TRIM       ICON_IC_SCISSOR
+// Offset — sentinel (PUA U+E006): two nested rounded rectangles, drawn in
+// drawIconCentered. Iconoir has no glyph that reads as "a parallel copy at a
+// fixed distance"; expand/frame glyphs all read as resize.
+#define MZ_ICON_OFFSET     "\xee\x80\x86"  // U+E006
 #define MZ_ICON_FINISH     ICON_IC_CHECK
 #define MZ_ICON_DISCARD    ICON_IC_XMARK

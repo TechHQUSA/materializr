@@ -126,6 +126,21 @@ void drawIconCentered(ImDrawList* dl, const ImVec2& center, float size,
         }
         return;
     }
+    // MZ_ICON_OFFSET sentinel (U+E006): two nested rounded rectangles — a
+    // shape and its parallel copy. Iconoir's expand/frame glyphs all read as
+    // "resize", which is the one thing an offset is not.
+    if (std::strcmp(icon, "\xee\x80\x86") == 0) {
+        const float th = std::max(1.5f, size * 0.075f);
+        const float ho = size * 0.42f;   // outer half-side
+        const float hi = size * 0.22f;   // inner half-side
+        dl->AddRect(ImVec2(center.x - ho, center.y - ho * 0.78f),
+                    ImVec2(center.x + ho, center.y + ho * 0.78f),
+                    col, size * 0.10f, 0, th);
+        dl->AddRect(ImVec2(center.x - hi, center.y - hi * 0.78f),
+                    ImVec2(center.x + hi, center.y + hi * 0.78f),
+                    col, size * 0.06f, 0, th);
+        return;
+    }
     ImFont* font = ImGui::GetFont();
     const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, icon);
     dl->AddText(font, size, ImVec2(center.x - ts.x * 0.5f, center.y - ts.y * 0.5f),

@@ -4315,6 +4315,107 @@ void Application::renderMirrorToolPanel() {
     }
 }
 
+void Application::renderOffsetToolPanel() {
+    if (!m_inSketchMode || !m_sketchTool ||
+        m_sketchTool->getMode() != SketchToolMode::Offset)
+        return;
+
+    // A Distance-phase click, or a typed value, only ASKS for the commit; it
+    // happens here so it lands inside recordSketchMutation as one undo step.
+    // One commit path for all three triggers (canvas click, typed value, and
+    // the button below), so each lands inside recordSketchMutation as one undo
+    // step and each reports the same way.
+    auto commitOffsetNow = [&]() {
+        std::set<int> newPts, newEls;
+        recordSketchMutation([&]{ m_sketchTool->commitOffset(newPts, newEls); });
+        // Without this the commit is genuinely hard to see: the new geometry
+        // lands right beside the source, in the same colour, and the tool goes
+        // quiet for the next pick. Say what happened.
+        if (newEls.size() == 1) {
+            showToast(materializr::tr("Offset created — 1 new element"), 2.0);
+        } else if (!newEls.empty()) {
+            char msg[128];
+            std::snprintf(msg, sizeof(msg),
+                          materializr::tr("Offset created — %d new elements"),
+                          static_cast<int>(newEls.size()));
+            showToast(msg, 2.0);
+        }
+        markDirty();
+        m_meshesDirty = true;
+    };
+
+    if (m_sketchTool->offsetReadyToCommit()) commitOffsetNow();
+
+    const bool picked =
+        m_sketchTool->getOffsetPhase() == materializr::SketchTool::OffsetPhase::Distance;
+
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 60.0f),
+        ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    bool open = true;
+    if (ImGui::Begin("Offset", &open,
+                     ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoSavedSettings)) {
+        if (!picked) {
+            ImGui::TextDisabled("%s", materializr::tr(
+                "Hover a line, arc or circle — the whole connected chain "
+                "highlights. Click to choose it."));
+        } else {
+            ImGui::TextDisabled("%s", materializr::tr(
+                "Move the cursor to set the distance; the side it is on picks "
+                "the direction. Click or press Enter to place it."));
+
+            // Edited as a magnitude — the sign is a direction, and Flip owns it.
+            float mag = std::abs(m_sketchTool->getOffsetDistance());
+            ImGui::SetNextItemWidth(120.0f);
+            if (materializr::inputNumber("##offsetDist", &mag, 0.5f, 5.0f, "%.3f mm",
+                                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+                if (mag < 0.0f) mag = 0.0f;
+                m_sketchTool->setOffsetDistance(
+                    m_sketchTool->getOffsetDistance() < 0.0f ? -mag : mag);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(materializr::tr("Flip"))) m_sketchTool->flipOffsetSide();
+            ImGui::SetItemTooltip("%s", materializr::tr(
+                "Put the offset on the other side of the chain."));
+
+            int corner = (m_sketchTool->getOffsetCorners() ==
+                          materializr::OffsetCorners::Round) ? 0 : 1;
+            ImGui::SetNextItemWidth(120.0f);
+            const char* items[] = { "Round corners", "Sharp corners" };
+            if (ImGui::Combo("##offsetCorners", &corner, items, 2))
+                m_sketchTool->setOffsetCorners(corner == 0
+                    ? materializr::OffsetCorners::Round
+                    : materializr::OffsetCorners::Sharp);
+            ImGui::SetItemTooltip("%s", materializr::tr(
+                "Round bridges an opening corner with an arc; Sharp extends "
+                "both edges to their intersection."));
+
+            if (const char* why = m_sketchTool->offsetRejection()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f), "%s",
+                                   materializr::tr(why));
+            }
+        }
+
+        ImGui::Separator();
+        ImGui::BeginDisabled(!m_sketchTool->offsetReady());
+        if (ImGui::Button(materializr::tr("Offset"))) commitOffsetNow();
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(materializr::tr("Cancel"))) {
+            if (picked) m_sketchTool->cancelOffset();
+            else m_sketchTool->setMode(SketchToolMode::Select);
+        }
+    }
+    ImGui::End();
+    if (!open) {
+        m_sketchTool->cancelOffset();
+        m_sketchTool->setMode(SketchToolMode::Select);
+    }
+}
+
 // ─── Primitive popup ─────────────────────────────────────────────────────────
 void Application::renderPrimitivePopup() {
     if (!m_primitivePopupActive) return;

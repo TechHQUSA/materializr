@@ -48,8 +48,11 @@ void HelpPanel::render() {
     section("Sketching",
         "Pick Sketch on XY/XZ/YZ from the Tools panel (or Sketch on Face after "
         "selecting one), then choose a tool: Line, Rectangle, Circle, Arc, "
-        "Spline, Polygon, or Trim. Type a numeric dimension while placing to "
-        "lock the size. Press D for the Dimension tool: click a line, circle, "
+        "Spline, Polygon, Trim, or Offset. Type a numeric dimension while "
+        "placing to lock the size. Offset takes a whole connected chain: click "
+        "one edge and the run it belongs to is highlighted, then move the "
+        "cursor (the side you are on picks the direction) or type the "
+        "distance. Press D for the Dimension tool: click a line, circle, "
         "two points, or two lines (parallel = distance, angled = angle), "
         "click to place the label, then type the value. Switch to Select / "
         "Move to drag existing points and lines — double-click empties to "

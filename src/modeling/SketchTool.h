@@ -1,6 +1,7 @@
 #pragma once
 #include "Sketch.h"
 #include "SketchSolver.h"
+#include "SketchOffset.h"
 #include "SvgImport.h"
 #include "AirfoilImport.h"
 #include <glm/glm.hpp>
@@ -16,7 +17,7 @@ namespace materializr {
 // (Application::setActiveSketchMode) and the sketch toolbar hardcodes those
 // indices, so inserting a mode in the middle silently highlights the wrong
 // button -- Dimension would become 13 while the button still tests 12.
-enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text, Svg, Mirror, Dimension, Airfoil };
+enum class SketchToolMode { None, Select, Line, Circle, Rectangle, Arc, Spline, Polygon, Trim, Text, Svg, Mirror, Dimension, Airfoil, Offset };
 
 enum class DimEntityKind { None, Point, Line, Circle, Arc };
 struct DimPick { DimEntityKind kind = DimEntityKind::None; int id = -1; };
@@ -227,6 +228,45 @@ public:
     // Create the reflected elements; returns the new point + line ids so the
     // host can select them. Coincident vertices weld onto existing geometry.
     void commitMirror(std::set<int>& outPoints, std::set<int>& outLines);
+    // --- Offset ------------------------------------------------------------
+    // Two phases. Pick: hovering highlights the whole connected chain under the
+    // cursor, a click captures it. Distance: the cursor drives both the
+    // distance and the SIDE (which side of the chain it is on), previewing
+    // live; a click, Enter or a typed value commits. Escape steps back one
+    // phase, matching the two-step Escape convention on isPlacing().
+    enum class OffsetPhase { Pick, Distance };
+    OffsetPhase getOffsetPhase() const { return m_offsetPhase; }
+    bool  hasOffsetChain() const { return m_offsetChain.valid(); }
+    float getOffsetDistance() const { return m_offsetDistance; }
+    void  setOffsetDistance(float d);
+    void  flipOffsetSide() { setOffsetDistance(-m_offsetDistance); }
+    OffsetCorners getOffsetCorners() const { return m_offsetCorners; }
+    void  setOffsetCorners(OffsetCorners c) { m_offsetCorners = c; recomputeOffsetPreview(); }
+    // True when the current distance yields geometry that can be committed.
+    bool  offsetReady() const { return m_offsetResult.valid; }
+    // Why the current distance produces nothing, or nullptr. Unlike the
+    // Dimension tool's one-shot rejection this is a STANDING state (it
+    // describes the live preview), so reading it does not clear it.
+    const char* offsetRejection() const { return m_offsetResult.rejectReason; }
+    // Chain highlight (Pick phase) and result ghost (Distance phase), as
+    // sketch-space polylines — one per contiguous run, so a pruned offset with
+    // gaps draws correctly.
+    const std::vector<std::vector<glm::vec2>>& getOffsetChainHover() const {
+        return m_offsetChainHover;
+    }
+    const std::vector<std::vector<glm::vec2>>& getOffsetPreview() const {
+        return m_offsetPreview;
+    }
+    // Create the offset geometry; returns the new point + element ids so the
+    // host can report or select them. Leaves the tool in the Pick phase ready
+    // for the next chain (Trim likewise stays active after a click).
+    // Set by a Distance-phase click or a typed value; the app drains it, wraps
+    // commitOffset in recordSketchMutation and gets one undo step. Same
+    // arrangement as the Dimension tool's dimReadyToCommit().
+    bool offsetReadyToCommit() const { return m_offsetCommitRequested; }
+    void commitOffset(std::set<int>& outPoints, std::set<int>& outElements);
+    void cancelOffset();
+
     // Rectangle's typed-value placement is two-stage: first Enter sets the
     // horizontal side, second Enter the vertical (and commits). Stage 0 =
     // expecting H, 1 = expecting V. Read by the UI to swap the popup label.
@@ -586,6 +626,25 @@ private:
     // to its own starting position and the drag would feel sticky-broken).
     // Cleared in onMouseUp.
     std::set<int> m_snapExcludePoints;
+
+    // --- Offset tool state ---
+    OffsetPhase   m_offsetPhase = OffsetPhase::Pick;
+    OffsetChain   m_offsetChain;      // captured on the Pick-phase click
+    OffsetResult  m_offsetResult;     // live, recomputed as the cursor moves
+    OffsetCorners m_offsetCorners = OffsetCorners::Round;
+    float         m_offsetDistance = 0.0f;   // signed: + is right of travel
+    bool          m_offsetCommitRequested = false;
+    // After a commit the cursor still sits on the new geometry; without this
+    // the hover would re-highlight it instantly and the commit would look like
+    // it did nothing. Cleared once the cursor moves clear.
+    bool          m_offsetSuppressHover = false;
+    glm::vec2     m_offsetCommitPos{0.0f};
+    std::vector<std::vector<glm::vec2>> m_offsetChainHover;
+    std::vector<std::vector<glm::vec2>> m_offsetPreview;
+    void handleOffsetTool(glm::vec2 pos);
+    void updateOffsetHover(glm::vec2 pos);     // Pick phase
+    void updateOffsetDistance(glm::vec2 pos);  // Distance phase: sign + magnitude
+    void recomputeOffsetPreview();
 
     // --- Dimension tool state ---
     DimPhase m_dimPhase = DimPhase::PickFirst;

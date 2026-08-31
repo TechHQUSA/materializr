@@ -38,6 +38,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/i18n.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/AirfoilImport.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchTool.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SketchOffset.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchEditOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/DuplicateSketchOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveHoleOp.cpp
@@ -402,6 +403,19 @@ target_link_libraries(probe_anchor_coverage PRIVATE materializr_core)
 # project's bodies against every sketch (experiment/face-anchors)
 add_executable(probe_face_coverage probe_face_coverage.cpp)
 target_link_libraries(probe_face_coverage PRIVATE materializr_core)
+
+# test_sketch_offset — Offset tool geometry core: chain walk, offsetting,
+# corner fix-up and the "every offset point is exactly |d| from the source"
+# validity invariant. Headless: no GL, no window.
+# The state-machine cases pull in SketchTool.h/.cpp, which needs TextSketchOp
+# (handleTextTool) and SvgImport (handleSvgTool) — same extra sources and
+# Font_* libraries test_sketch_dimension links for the same reason.
+add_executable(test_sketch_offset test_sketch_offset.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/TextSketchOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/SvgImport.cpp)
+target_link_libraries(test_sketch_offset PRIVATE materializr_core gtest gtest_main
+    TKV3d TKService)
+add_test(NAME test_sketch_offset COMMAND test_sketch_offset)
 
 # test_sketch_regions — multi-loop interior selection (wire-orientation fix)
 add_executable(test_sketch_regions test_sketch_regions.cpp)

@@ -862,6 +862,7 @@ void Application::renderImTouchLayout() {
                     case ToolAction::SketchAirfoil:
                         importers.push_back(&t); break;
                     case ToolAction::Trim:
+                    case ToolAction::SketchOffset:
                     case ToolAction::SketchCopy:
                     case ToolAction::SketchMirror:
                     case ToolAction::SketchLinearPattern:

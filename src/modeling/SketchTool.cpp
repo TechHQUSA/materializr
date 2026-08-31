@@ -51,6 +51,7 @@ void SketchTool::setMode(SketchToolMode mode) {
     m_rectDimStage = 0;
     m_rectDimH = 0.0f;
     m_mirrorActive = false; // switching tools aborts any in-progress mirror
+    cancelOffset();         // ... and any in-progress offset
     // Entering or leaving Dimension mode always starts a fresh pick sequence.
     clearDimState();
 }
@@ -138,6 +139,11 @@ void SketchTool::onMouseDown(glm::vec2 pos, bool addToSel) {
         case SketchToolMode::Dimension:
             handleDimensionTool(snapped);
             break;
+        case SketchToolMode::Offset:
+            // Raw cursor, like Trim: snapping first would pull the pick toward
+            // an unrelated nearby point and grab the wrong chain.
+            handleOffsetTool(pos);
+            break;
         default:
             break;
     }
@@ -158,6 +164,19 @@ void SketchTool::onMouseMove(glm::vec2 pos) {
     // the snapping logic below (which doesn't apply to picking entities).
     if (m_mode == SketchToolMode::Dimension) {
         m_currentPos = pos;
+        return;
+    }
+    // Offset: the Pick phase hit-tests with the RAW cursor (as Trim does), the
+    // Distance phase measures from the SNAPPED one so grid snap quantises the
+    // distance to whole increments.
+    if (m_mode == SketchToolMode::Offset) {
+        if (m_offsetPhase == OffsetPhase::Pick) {
+            m_currentPos = pos;
+            updateOffsetHover(pos);
+        } else {
+            m_currentPos = snap(pos);
+            updateOffsetDistance(m_currentPos);
+        }
         return;
     }
     // Trim uses the raw cursor for picking; snapping would pull the click toward
@@ -327,6 +346,17 @@ void SketchTool::onCancel() {
         }
         return;
     }
+    // Offset: Escape drops the captured chain first, so a mis-picked chain
+    // costs one keystroke rather than exiting the tool; a second Escape then
+    // falls through to the app's "leave the tool" handling.
+    if (m_mode == SketchToolMode::Offset) {
+        if (m_offsetPhase == OffsetPhase::Distance) {
+            cancelOffset();
+        } else {
+            setMode(SketchToolMode::Select);
+        }
+        return;
+    }
     // If only the first click of a line chain was made and we created its
     // anchor point fresh (no existing point was reused), drop that orphan so
     // a cancelled draw doesn't leave a stray yellow endpoint marker behind.
@@ -397,6 +427,18 @@ bool SketchTool::dropLineChainTail() {
 
 bool SketchTool::applyDimension(float value) {
     if (!m_sketch || !m_isPlacing || value <= 0.0f) return false;
+
+    // Offset takes the typed value as a MAGNITUDE and keeps the side the
+    // cursor already chose — a distance cannot express a direction. It only
+    // requests the commit; see handleOffsetTool.
+    if (m_mode == SketchToolMode::Offset) {
+        if (m_offsetPhase != OffsetPhase::Distance || !m_offsetChain.valid())
+            return false;
+        setOffsetDistance((m_offsetDistance < 0.0f) ? -value : value);
+        if (!m_offsetResult.valid) return false;
+        m_offsetCommitRequested = true;
+        return true;
+    }
 
     // Direction from anchor toward current cursor position. If the cursor is on top
     // of the anchor, default to +X so something happens.
@@ -3599,6 +3641,97 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
             for (int n2 : cps) outPoints.insert(n2);
             break;
         }
+}
+
+// --- Offset tool ----------------------------------------------------------
+
+void SketchTool::updateOffsetHover(glm::vec2 pos) {
+    m_offsetChainHover.clear();
+    if (!m_sketch) return;
+    if (m_offsetSuppressHover) {
+        if (glm::length(pos - m_offsetCommitPos) < std::max(1.0f, m_gridStep * 2.0f))
+            return;
+        m_offsetSuppressHover = false;
+    }
+    // Same catch range Trim picks with, so the two hover the same way.
+    const float threshold = std::max(0.3f, m_gridStep * 0.5f);
+    OffsetChain ch = walkOffsetChain(*m_sketch, pos, threshold);
+    if (ch.valid()) densifyChain(ch, m_offsetChainHover);
+}
+
+void SketchTool::updateOffsetDistance(glm::vec2 pos) {
+    if (!m_offsetChain.valid()) return;
+    m_offsetDistance = signedDistanceToChain(m_offsetChain, pos);
+    recomputeOffsetPreview();
+}
+
+void SketchTool::recomputeOffsetPreview() {
+    m_offsetPreview.clear();
+    m_offsetResult = OffsetResult{};
+    if (!m_offsetChain.valid() || std::abs(m_offsetDistance) < 1e-6f) return;
+    m_offsetResult = offsetChain(m_offsetChain, m_offsetDistance, m_offsetCorners);
+    pruneOffset(m_offsetResult, m_offsetChain, m_offsetDistance);
+    if (m_offsetResult.valid) densifySegs(m_offsetResult.segs, m_offsetPreview);
+}
+
+void SketchTool::setOffsetDistance(float d) {
+    m_offsetDistance = d;
+    recomputeOffsetPreview();
+}
+
+void SketchTool::handleOffsetTool(glm::vec2 pos) {
+    if (!m_sketch) return;
+
+    if (m_offsetPhase == OffsetPhase::Pick) {
+        const float threshold = std::max(0.3f, m_gridStep * 0.5f);
+        OffsetChain ch = walkOffsetChain(*m_sketch, pos, threshold);
+        if (!ch.valid()) return; // missed, or landed on something unofferable
+        m_offsetChain = std::move(ch);
+        m_offsetChainHover.clear();
+        m_offsetPhase = OffsetPhase::Distance;
+        m_offsetDistance = 0.0f;
+        m_offsetResult = OffsetResult{};
+        m_offsetPreview.clear();
+        // Marks a placement in progress so the host's two-step Escape applies.
+        m_isPlacing = true;
+        return;
+    }
+
+    // Distance phase: the click asks for the commit, it does not perform it —
+    // the app wraps commitOffset in recordSketchMutation for one undo step.
+    updateOffsetDistance(snap(pos));
+    if (m_offsetResult.valid) m_offsetCommitRequested = true;
+}
+
+void SketchTool::commitOffset(std::set<int>& outPoints, std::set<int>& outElements) {
+    m_offsetCommitRequested = false;
+    if (!m_sketch || !m_offsetResult.valid) return;
+    applyOffset(*m_sketch, m_offsetResult,
+                [this](glm::vec2 p) { return findCoincidentPoint(p, -1); },
+                outPoints, outElements);
+    // Back to Pick, tool still active: offsetting several chains in a row is
+    // the normal way to use this (Trim likewise stays active after a click).
+    const glm::vec2 where = m_currentPos;
+    cancelOffset();
+    // The cursor is still sitting on the geometry we just made, so the
+    // Pick-phase hover would light it up immediately — the orange ghost turns
+    // cyan ON THE SPOT and the whole commit reads as "nothing happened" (it is
+    // exactly what it looked like in testing). Stay quiet until the cursor
+    // actually moves off what was just created.
+    m_offsetSuppressHover = true;
+    m_offsetCommitPos = where;
+}
+
+void SketchTool::cancelOffset() {
+    m_offsetPhase = OffsetPhase::Pick;
+    m_offsetChain = OffsetChain{};
+    m_offsetResult = OffsetResult{};
+    m_offsetDistance = 0.0f;
+    m_offsetCommitRequested = false;
+    m_offsetChainHover.clear();
+    m_offsetPreview.clear();
+    m_offsetSuppressHover = false;
+    if (m_mode == SketchToolMode::Offset) m_isPlacing = false;
 }
 
 void SketchTool::undoLastStamp() {
