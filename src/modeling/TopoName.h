@@ -60,7 +60,20 @@ struct Ref {
     // scheme this build can't resolve still round-trip untouched.
     std::string serialize() const;
     static Ref parse(const std::string& blob);
+
 };
+
+// Parses a back-to-back run of length-prefixed Ref records ("<n>:<bytes>...")
+// into `out`. Shared by the ops that serialize a ref LIST (fillet/chamfer
+// edgerefs, shell/taper facerefs), which each carried a byte-identical copy of
+// this loop.
+//
+// A malformed record simply ENDS the list and still returns true — that is the
+// pre-existing forward-compatible behaviour, so a file written by a newer build
+// keeps loading. Returns FALSE only on a budget breach (more than
+// kMaxRefsPerList records), which is a refusal: `out` is cleared and the caller
+// must fail the blob rather than import a truncated ref list.
+bool parseRefList(const std::string& blob, std::vector<Ref>& out);
 
 // Everything a strategy needs to mint OR resolve, for BOTH edges and faces.
 // `shape` is the shape to name a sub-shape INTO (at mint) or resolve a name

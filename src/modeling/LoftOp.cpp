@@ -1,4 +1,5 @@
 #include "LoftOp.h"
+#include <cctype>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -37,6 +38,7 @@
 #include <imgui.h>
 #include "../i18n.h"
 #include "../i18n.h"
+#include "ParamParse.h"
 
 namespace {
 
@@ -654,7 +656,7 @@ std::string LoftOp::serializeParams() const {
 bool LoftOp::deserializeParams(const std::string& blob) {
     m_profiles.clear();
     m_holeProfiles.clear();
-    std::vector<int> holeCounts;
+    materializr::HoleCountReader holeReader;
     int np = 0;
     bool any = false;
     size_t pos = 0;
@@ -666,14 +668,19 @@ bool LoftOp::deserializeParams(const std::string& blob) {
             // <len>:<raw ascii brep>, runs to end.
             size_t colon = blob.find(':', eq);
             if (colon == std::string::npos) break;
-            size_t n = static_cast<size_t>(
-                std::atoll(blob.substr(eq + 1, colon - eq - 1).c_str()));
-            if (colon + 1 + n > blob.size()) break;
-            std::istringstream is(blob.substr(colon + 1, n));
+            // Checked length, bounded by subtraction (ParamParse.h):
+            // the old `colon + 1 + n > blob.size()` wrapped on a
+            // negative length and let the guard pass.
+            size_t n = 0, payload = 0;
+            if (!materializr::readLenPrefix(blob, eq + 1, colon, n, payload)) break;
+            std::istringstream is(blob.substr(payload, n));
             TopoDS_Shape comp;
             BRep_Builder bb;
             try { BRepTools::Read(comp, is, bb); } catch (...) { return false; }
             // Unpack: per profile i, one wire + holeCounts[i] hole wires.
+            // Every h<N> key precedes ";brep=", so the counts are complete.
+            if (!holeReader.finish(np)) return false;
+            const std::vector<int>& holeCounts = holeReader.counts();
             TopoDS_Iterator it(comp);
             for (int i = 0; i < np && it.More(); ++i) {
                 if (it.Value().ShapeType() != TopAbs_WIRE) return false;
@@ -682,6 +689,12 @@ bool LoftOp::deserializeParams(const std::string& blob) {
                 std::vector<TopoDS_Wire> holes;
                 int nh = i < static_cast<int>(holeCounts.size()) ? holeCounts[i] : 0;
                 for (int j = 0; j < nh && it.More(); ++j) {
+                    // Check the HOLE children too, as BoundaryFillOp's twin loop
+                    // does. Without this a crafted compound reached TopoDS::Wire()
+                    // on a non-wire and threw Standard_TypeMismatch out of
+                    // deserializeParams — the try/catch above covers only
+                    // BRepTools::Read, so nothing here caught it.
+                    if (it.Value().ShapeType() != TopAbs_WIRE) return false;
                     holes.push_back(TopoDS::Wire(it.Value()));
                     it.Next();
                 }
@@ -697,11 +710,15 @@ bool LoftOp::deserializeParams(const std::string& blob) {
         else if (key == "ruled")   { m_ruled = val == "1"; any = true; }
         else if (key == "created") { m_createdBodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "np")      { np = std::atoi(val.c_str()); any = true; }
-        else if (!key.empty() && key[0] == 'h') {
-            int idx = std::atoi(key.c_str() + 1);
-            if (idx >= static_cast<int>(holeCounts.size()))
-                holeCounts.resize(idx + 1, 0);
-            holeCounts[idx] = std::atoi(val.c_str());
+        // h<N>: N comes from the file and SIZES the vector below, so it is bounded
+        // before the resize. This site was weaker than BoundaryFillOp's twin — it
+        // had no digit guard at all, so any "h*" key reached std::atoi.
+        // isdigit() gates the branch so an unknown future 'h*' key is ignored
+        // rather than failing the whole op. (The original had no digit test at
+        // all here, so every "h*" key reached std::atoi.)
+        else if (!key.empty() && key[0] == 'h' && key.size() > 1 &&
+                 std::isdigit(static_cast<unsigned char>(key[1]))) {
+            if (!holeReader.add(key, val)) return false;
         }
         pos = end + 1;
     }
