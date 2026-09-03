@@ -68,6 +68,7 @@
 #include <gp_Quaternion.hxx>
 #include "modeling/PlaneTransformOp.h"
 #include "modeling/FilletProbe.h"
+#include "ui/LengthField.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/RevolveOp.h"
 #include "modeling/FilletOp.h"

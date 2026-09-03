@@ -237,6 +237,11 @@ add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp
 target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
 
+# test_length_edit - the transactions behind every length widget (no ImGui)
+add_executable(test_length_edit test_length_edit.cpp)
+target_link_libraries(test_length_edit PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_length_edit COMMAND test_length_edit)
+
 # test_units - display units: the one place a length changes unit (mm/cm/m/in/ft)
 add_executable(test_units test_units.cpp)
 target_link_libraries(test_units PRIVATE materializr_core gtest gtest_main)
