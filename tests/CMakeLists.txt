@@ -236,6 +236,11 @@ add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp
 target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
 
+# test_sketch_mirror - mirror as a DERIVED relation (image recomputed from source)
+add_executable(test_sketch_mirror test_sketch_mirror.cpp)
+target_link_libraries(test_sketch_mirror PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_mirror COMMAND test_sketch_mirror)
+
 # test_section_cap - section-view cross-section cap geometry (issue #15)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)

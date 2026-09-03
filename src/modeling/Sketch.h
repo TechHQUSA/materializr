@@ -30,6 +30,10 @@ struct SketchPoint {
     // solver Constraint: constraints in this sketcher are opt-in and binding,
     // and this is a hint the user can walk away from without ceremony.
     int onCurveId = -1;
+    // Output of a SketchMirror, not independent data: recomputeMirrors()
+    // overwrites it from its source. Never trusted from a file — normalised
+    // from validated group membership on load.
+    bool derived = false;
 };
 
 struct SketchLine {
@@ -38,6 +42,10 @@ struct SketchLine {
     int endPointId;
     bool isConstruction = false;
     bool fromText = false; // see SketchPoint::fromText
+    // Output of a SketchMirror, not independent data: recomputeMirrors()
+    // overwrites it from its source. Never trusted from a file — normalised
+    // from validated group membership on load.
+    bool derived = false;
 };
 
 struct SketchCircle {
@@ -45,6 +53,10 @@ struct SketchCircle {
     int centerPointId;
     double radius;
     bool isConstruction = false;
+    // Output of a SketchMirror, not independent data: recomputeMirrors()
+    // overwrites it from its source. Never trusted from a file — normalised
+    // from validated group membership on load.
+    bool derived = false;
 };
 
 struct SketchArc {
@@ -54,12 +66,20 @@ struct SketchArc {
     int endPointId;
     double radius;
     bool isConstruction = false;
+    // Output of a SketchMirror, not independent data: recomputeMirrors()
+    // overwrites it from its source. Never trusted from a file — normalised
+    // from validated group membership on load.
+    bool derived = false;
 };
 
 struct SketchSpline {
     int id;
     std::vector<int> controlPointIds;
     bool isConstruction = false;
+    // Output of a SketchMirror, not independent data: recomputeMirrors()
+    // overwrites it from its source. Never trusted from a file — normalised
+    // from validated group membership on load.
+    bool derived = false;
 };
 
 struct SketchPolygon {
@@ -70,6 +90,21 @@ struct SketchPolygon {
     std::vector<int> vertexPointIds; // generated vertices
     std::vector<int> lineIds;        // generated lines
     bool isConstruction = false;
+};
+
+// A mirror relation. The DERIVED side is not independent data: its geometry is
+// recomputed from the source by Sketch::recomputeMirrors(), so editing the
+// original moves the image. Deliberately NOT a set of solver constraints — see
+// PLAN.md: this solver is undamped Gauss-Seidel with a hand-counted DOF tally,
+// and coupled symmetry rows in it oscillate and corrupt the DOF badge.
+struct SketchMirror {
+    int id = -1;
+    int axisLineId = -1;                        // a REAL construction line in this sketch
+    std::vector<std::pair<int, int>> points;    // (source, derived)
+    std::vector<std::pair<int, int>> lines;     // (source, derived) — element pairs, kept
+    std::vector<std::pair<int, int>> circles;   //   so deletion can cascade element-first
+    std::vector<std::pair<int, int>> arcs;      //   and so radius/flags can be copied
+    std::vector<std::pair<int, int>> splines;
 };
 
 class Sketch {
@@ -147,6 +182,38 @@ public:
     // Call after deleting elements; removeElement deliberately does NOT prune
     // (some callers remove a point by id directly).
     int pruneOrphanPoints();
+
+    // --- Mirror relations --------------------------------------------------
+    // Recompute every derived entity from its source. Cheap and idempotent;
+    // safe to call whenever the sketch may have changed. Builds id->index maps
+    // once per call — getPoint() is a linear scan, so per-pair lookup would be
+    // quadratic on a large mirror.
+    void recomputeMirrors();
+    // Assign from `other`, then re-establish the mirror invariant: drop invalid
+    // groups, normalise `derived` from group membership, recompute. EVERY
+    // whole-sketch restore must go through this — a plain assignment leaves the
+    // image stale (undo/redo, gizmo cancel, pattern preview, load, combine).
+    void restoreFrom(const Sketch& other);
+    int  addMirror(const SketchMirror& m);   // returns its id
+    const std::vector<SketchMirror>& getMirrors() const { return m_mirrors; }
+    void addRawMirror(const SketchMirror& m) { m_mirrors.push_back(m); }
+    void setNextMirrorId(int n) { m_nextMirrorId = n; }
+    int  getNextMirrorId() const { return m_nextMirrorId; }
+    // Convert a group back to plain geometry: clear `derived` on everything it
+    // owns and drop the group. The ONE normalisation every abandonment path
+    // calls — axis deleted, combine remap failed, malformed file — so those
+    // entities never stay locked and DOF-reducing while belonging to nothing.
+    // Returns false when no such group exists.
+    bool breakMirrorLink(int mirrorId);
+    // Drop groups that reference missing entities or a degenerate axis (via
+    // breakMirrorLink), then force every `derived` flag to match surviving
+    // group membership. Returns the number of groups broken.
+    int  validateMirrors();
+    // Is this entity the OUTPUT of a mirror? (Cheap: reads the flag, which
+    // validateMirrors keeps honest.)
+    bool isDerived(int entityId) const;
+    // The group owning `entityId` as a derived output, or -1.
+    int  mirrorOwning(int entityId) const;
     void clear();
 
     // Convert closed profiles to OCCT wires for extrusion
@@ -367,6 +434,8 @@ private:
     std::vector<SketchPolygon> m_polygons;
     std::vector<Constraint> m_constraints;
     int m_nextConstraintId = 1;
+    std::vector<SketchMirror> m_mirrors;
+    int m_nextMirrorId = 1;
     FaceReference m_faceRefs;
 
     // Cached in 3D, deliberately. The centroid belongs to the FACE, so its

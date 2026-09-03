@@ -2064,4 +2064,178 @@ int Sketch::pointCount() const {
     return static_cast<int>(m_points.size());
 }
 
+// ─── Mirror relations ────────────────────────────────────────────────────────
+//
+// A mirror's derived side is an OUTPUT. recomputeMirrors() is the invariant:
+// after any change to a source, an axis, or the whole sketch, calling it makes
+// the image agree again. It never solves and never allocates ids.
+
+namespace {
+
+// Reflect `p` across the infinite line through a->b. Caller guarantees a != b;
+// a degenerate axis is caught by validateMirrors() and breaks the group rather
+// than reaching here and producing NaN.
+inline glm::vec2 reflectAcross(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
+    const glm::vec2 d = b - a;
+    const float len2 = glm::dot(d, d);
+    const glm::vec2 ap = p - a;
+    // Projection of ap onto d, doubled, minus ap — the standard reflection.
+    const glm::vec2 proj = d * (glm::dot(ap, d) / len2);
+    return a + proj * 2.0f - ap;
+}
+
+constexpr float kDegenerateAxisLen2 = 1e-12f;
+
+} // namespace
+
+void Sketch::recomputeMirrors() {
+    if (m_mirrors.empty()) return;
+
+    // Build id->index maps ONCE. getPoint() is a linear scan, so resolving each
+    // pair through it would be quadratic in the group size.
+    std::unordered_map<int, size_t> pointIdx, lineIdx, circleIdx, arcIdx, splineIdx;
+    for (size_t i = 0; i < m_points.size();  ++i) pointIdx[m_points[i].id]  = i;
+    for (size_t i = 0; i < m_lines.size();   ++i) lineIdx[m_lines[i].id]    = i;
+    for (size_t i = 0; i < m_circles.size(); ++i) circleIdx[m_circles[i].id] = i;
+    for (size_t i = 0; i < m_arcs.size();    ++i) arcIdx[m_arcs[i].id]      = i;
+    for (size_t i = 0; i < m_splines.size(); ++i) splineIdx[m_splines[i].id] = i;
+
+    for (const auto& mir : m_mirrors) {
+        auto axisIt = lineIdx.find(mir.axisLineId);
+        if (axisIt == lineIdx.end()) continue;              // validateMirrors will break it
+        const SketchLine& axis = m_lines[axisIt->second];
+        auto aIt = pointIdx.find(axis.startPointId);
+        auto bIt = pointIdx.find(axis.endPointId);
+        if (aIt == pointIdx.end() || bIt == pointIdx.end()) continue;
+        const glm::vec2 a = m_points[aIt->second].pos;
+        const glm::vec2 b = m_points[bIt->second].pos;
+        if (glm::dot(b - a, b - a) < kDegenerateAxisLen2) continue;   // no NaN
+
+        // Points first: elements reference them, so an element's geometry is
+        // already correct once its endpoints are.
+        for (const auto& [srcId, dstId] : mir.points) {
+            auto sIt = pointIdx.find(srcId), dIt = pointIdx.find(dstId);
+            if (sIt == pointIdx.end() || dIt == pointIdx.end()) continue;
+            m_points[dIt->second].pos = reflectAcross(m_points[sIt->second].pos, a, b);
+        }
+        // Elements carry values a point cannot: a radius, and the construction
+        // flag (which today's copy-based mirror silently dropped).
+        for (const auto& [srcId, dstId] : mir.lines) {
+            auto sIt = lineIdx.find(srcId), dIt = lineIdx.find(dstId);
+            if (sIt != lineIdx.end() && dIt != lineIdx.end())
+                m_lines[dIt->second].isConstruction = m_lines[sIt->second].isConstruction;
+        }
+        for (const auto& [srcId, dstId] : mir.circles) {
+            auto sIt = circleIdx.find(srcId), dIt = circleIdx.find(dstId);
+            if (sIt == circleIdx.end() || dIt == circleIdx.end()) continue;
+            m_circles[dIt->second].radius         = m_circles[sIt->second].radius;
+            m_circles[dIt->second].isConstruction = m_circles[sIt->second].isConstruction;
+        }
+        for (const auto& [srcId, dstId] : mir.arcs) {
+            auto sIt = arcIdx.find(srcId), dIt = arcIdx.find(dstId);
+            if (sIt == arcIdx.end() || dIt == arcIdx.end()) continue;
+            // Endpoints are already reflected above; the arc's start/end were
+            // SWAPPED at creation because reflection reverses winding, and that
+            // pairing is what the stored ids encode. Only radius and the flag
+            // are copied here.
+            m_arcs[dIt->second].radius         = m_arcs[sIt->second].radius;
+            m_arcs[dIt->second].isConstruction = m_arcs[sIt->second].isConstruction;
+        }
+        for (const auto& [srcId, dstId] : mir.splines) {
+            auto sIt = splineIdx.find(srcId), dIt = splineIdx.find(dstId);
+            if (sIt != splineIdx.end() && dIt != splineIdx.end())
+                m_splines[dIt->second].isConstruction = m_splines[sIt->second].isConstruction;
+        }
+    }
+}
+
+int Sketch::addMirror(const SketchMirror& m) {
+    SketchMirror copy = m;
+    copy.id = m_nextMirrorId++;
+    m_mirrors.push_back(copy);
+    return copy.id;
+}
+
+int Sketch::mirrorOwning(int entityId) const {
+    for (const auto& mir : m_mirrors) {
+        for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
+            for (const auto& [srcId, dstId] : *v)
+                if (dstId == entityId) return mir.id;
+    }
+    return -1;
+}
+
+bool Sketch::isDerived(int entityId) const {
+    for (const auto& p : m_points)  if (p.id == entityId) return p.derived;
+    for (const auto& l : m_lines)   if (l.id == entityId) return l.derived;
+    for (const auto& c : m_circles) if (c.id == entityId) return c.derived;
+    for (const auto& a : m_arcs)    if (a.id == entityId) return a.derived;
+    for (const auto& sp : m_splines) if (sp.id == entityId) return sp.derived;
+    return false;
+}
+
+bool Sketch::breakMirrorLink(int mirrorId) {
+    auto it = std::find_if(m_mirrors.begin(), m_mirrors.end(),
+                           [mirrorId](const SketchMirror& m) { return m.id == mirrorId; });
+    if (it == m_mirrors.end()) return false;
+    m_mirrors.erase(it);
+    // Re-derive every flag from what SURVIVES: clearing only this group's
+    // entities would be wrong if another group also owned one, and leaving a
+    // flag set would keep geometry locked and DOF-reduced while owned by
+    // nothing. Normalising is both simpler and safer.
+    validateMirrors();
+    return true;
+}
+
+int Sketch::validateMirrors() {
+    // Pass 1: drop groups whose axis or members have vanished, or whose axis
+    // has become degenerate (a zero-length axis would otherwise reflect to NaN
+    // and poison every derived point in the sketch).
+    std::unordered_set<int> live;
+    for (const auto& p : m_points)  live.insert(p.id);
+    for (const auto& l : m_lines)   live.insert(l.id);
+    for (const auto& c : m_circles) live.insert(c.id);
+    for (const auto& a : m_arcs)    live.insert(a.id);
+    for (const auto& sp : m_splines) live.insert(sp.id);
+
+    const size_t before = m_mirrors.size();
+    m_mirrors.erase(std::remove_if(m_mirrors.begin(), m_mirrors.end(),
+        [&](const SketchMirror& mir) {
+            if (!live.count(mir.axisLineId)) return true;
+            const SketchLine* axis = nullptr;
+            for (const auto& l : m_lines) if (l.id == mir.axisLineId) { axis = &l; break; }
+            if (!axis) return true;
+            const SketchPoint* a = getPoint(axis->startPointId);
+            const SketchPoint* b = getPoint(axis->endPointId);
+            if (!a || !b) return true;
+            if (glm::dot(b->pos - a->pos, b->pos - a->pos) < kDegenerateAxisLen2) return true;
+            // A group is only meaningful while BOTH sides of every pair exist.
+            for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
+                for (const auto& [srcId, dstId] : *v)
+                    if (!live.count(srcId) || !live.count(dstId)) return true;
+            return mir.points.empty() && mir.lines.empty() && mir.circles.empty() &&
+                   mir.arcs.empty() && mir.splines.empty();
+        }), m_mirrors.end());
+
+    // Pass 2: the flags follow the surviving groups, never the file.
+    std::unordered_set<int> derivedIds;
+    for (const auto& mir : m_mirrors)
+        for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
+            for (const auto& [srcId, dstId] : *v) derivedIds.insert(dstId);
+    for (auto& p : m_points)   p.derived  = derivedIds.count(p.id)  != 0;
+    for (auto& l : m_lines)    l.derived  = derivedIds.count(l.id)  != 0;
+    for (auto& c : m_circles)  c.derived  = derivedIds.count(c.id)  != 0;
+    for (auto& a : m_arcs)     a.derived  = derivedIds.count(a.id)  != 0;
+    for (auto& sp : m_splines) sp.derived = derivedIds.count(sp.id) != 0;
+
+    return static_cast<int>(before - m_mirrors.size());
+}
+
+void Sketch::restoreFrom(const Sketch& other) {
+    if (this == &other) return;
+    *this = other;          // the one place a whole-sketch assignment is correct
+    validateMirrors();
+    recomputeMirrors();
+}
+
 } // namespace materializr
