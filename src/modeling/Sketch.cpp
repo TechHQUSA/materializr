@@ -750,8 +750,15 @@ void Sketch::clear() {
     m_splines.clear();
     m_polygons.clear();
     m_constraints.clear();
+    // Mirror groups are sketch state and must die with the geometry. Leaving
+    // them was a live corruption bug, not a tidiness issue: clear() also resets
+    // m_nextId to 1, so the NEXT entities created get exactly the ids the stale
+    // groups still reference — a surviving group would claim unrelated new
+    // geometry as derived, and recomputeMirrors() would then overwrite it.
+    m_mirrors.clear();
     m_nextId = 1;
     m_nextConstraintId = 1;
+    m_nextMirrorId = 1;
 }
 
 int Sketch::addConstraint(const Constraint& c) {

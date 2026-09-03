@@ -377,3 +377,33 @@ TEST(SketchMirrorSolver, ReferenceDimensionOnDerivedGeometryReadsThisSolve) {
     EXPECT_NEAR(9.0, valueNow(), 1e-4)
         << "a reference dimension on derived geometry lagged one solve behind";
 }
+
+// clear() must drop mirror groups along with the geometry. This is a corruption
+// bug, not tidiness: clear() resets m_nextId to 1, so entities created after it
+// get exactly the ids a surviving group still references — the group would claim
+// brand-new unrelated geometry as derived, and recomputeMirrors() would then
+// overwrite it with a reflection of something else entirely.
+TEST(SketchMirror, ClearDropsMirrorGroupsSoRecycledIdsAreNotClaimed) {
+    Fixture f = makePointMirror({3.0f, 4.0f});
+    ASSERT_FALSE(f.sk.getMirrors().empty());
+
+    f.sk.clear();
+    EXPECT_TRUE(f.sk.getMirrors().empty()) << "groups must not outlive the geometry";
+
+    // Rebuild from scratch — these ids collide with the cleared sketch's.
+    const int p1 = f.sk.addPoint({7.0f, 7.0f});
+    const int p2 = f.sk.addPoint({8.0f, 8.0f});
+    f.sk.recomputeMirrors();
+    EXPECT_FALSE(f.sk.isDerived(p1));
+    EXPECT_FALSE(f.sk.isDerived(p2));
+    EXPECT_NEAR(7.0f, posOf(f.sk, p1).x, 1e-6) << "new geometry must be untouched";
+    EXPECT_NEAR(8.0f, posOf(f.sk, p2).x, 1e-6);
+
+    // And the id sequence restarts cleanly, so a new group gets id 1.
+    const int a = f.sk.addPoint({0.0f, -5.0f});
+    const int b = f.sk.addPoint({0.0f,  5.0f});
+    materializr::SketchMirror m;
+    m.axisLineId = f.sk.addLine(a, b);
+    m.points = { {p1, p2} };
+    EXPECT_EQ(1, f.sk.addMirror(m)) << "m_nextMirrorId must reset too";
+}
