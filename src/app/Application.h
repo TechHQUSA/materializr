@@ -1044,6 +1044,19 @@ private:
     // Mirrors Settings::filletProbeSeconds; pushed into FilletProbe on apply.
     float m_filletProbeSeconds = 2.5f;
 
+    // Dimension label being dragged to a new spot, -1 when none. A press on a
+    // label starts a drag rather than opening its edit popup; the popup opens
+    // on RELEASE, and only if the pointer never really moved. Without this the
+    // label is unmovable — every attempt to reposition it fires the editor.
+    int       m_dimDragId = -1;
+    // Label position minus cursor position at the moment of the press, in
+    // sketch mm, so the tag keeps its grab point instead of snapping its centre
+    // to the cursor.
+    glm::vec2 m_dimDragGrab{0.0f};
+    // Whether this press has travelled far enough to count as a drag. Below the
+    // threshold it stays a click, so a slightly shaky press still edits.
+    bool      m_dimDragMoved = false;
+
     // Rendering preferences (File > Settings → Rendering). Persisted.
     float m_lightAmbient = 0.40f;   // base illumination; higher = softer shadows
     bool  m_lightHeadlight = false; // key light tracks the camera
