@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "ThreadOp.h"
 #include <Standard_ErrorHandler.hxx>  // OCC_CATCH_SIGNALS (MSVC needs it explicit)
 #include "../core/Verbose.h"
@@ -2098,9 +2099,7 @@ std::string ThreadOp::description() const {
     char starts[24] = "";
     if (m_starts > 1)
         std::snprintf(starts, sizeof(starts), "%d-start ", m_starts);
-    std::snprintf(buf, sizeof(buf), "%s %sthread Ø%.1f, pitch %.2f mm%s",
-                  m_isHole ? "Internal" : "External", starts,
-                  m_radius * 2.0, m_pitch, m_rightHanded ? "" : " (LH)");
+    std::snprintf(buf, sizeof(buf), "%s %sthread Ø%s, pitch %s%s", m_isHole ? "Internal" : "External", starts, materializr::fmtLength(m_radius * 2.0).c_str(), materializr::fmtLength(m_pitch).c_str(), m_rightHanded ? "" : " (LH)");
     return buf;
 }
 
@@ -2139,8 +2138,7 @@ void ThreadOp::renderProperties() {
         if (m_grooveWidth < 0.0) m_grooveWidth = 0.0;
         ImGui::SetItemTooltip("%s", materializr::tr("Width of the cut at the surface. 0 = automatic (a set fraction of the pitch)."));
         if (m_grooveWidth <= 0.0)
-            ImGui::TextDisabled(materializr::tr("automatic: %.2f mm at this pitch"),
-                                profileOpenFraction(m_profile) * m_pitch);
+            ImGui::TextDisabled("%s", materializr::trFormat("automatic: %s at this pitch", materializr::fmtLength(profileOpenFraction(m_profile) * m_pitch)).c_str());
     }
     if (m_profile != ThreadProfile::Standard) {
         materializr::inputNumber(materializr::tr("Fit clearance (mm)"), &m_clearance, 0.05, 0.1, "%.2f");
@@ -2157,9 +2155,8 @@ void ThreadOp::renderProperties() {
     materializr::inputNumberInt("Starts", &starts, 1, 1);
     m_starts = std::min(6, std::max(1, starts));
     if (m_starts > 1)
-        ImGui::TextDisabled(materializr::tr("lead %.2f mm/turn (%d interleaved helixes)"),
-                            m_starts * m_pitch, m_starts);
-    ImGui::Text(materializr::tr("Diameter: %.2f mm   Length: %.2f mm"), m_radius * 2.0, m_length);
+        ImGui::TextDisabled("%s", materializr::trFormat("lead %s/turn (%d interleaved helixes)", materializr::fmtLength(m_starts * m_pitch), m_starts).c_str());
+    ImGui::TextUnformatted(materializr::trFormat("Diameter: %s   Length: %s", materializr::fmtLength(m_radius * 2.0), materializr::fmtLength(m_length)).c_str());
 }
 
 OperationDiff ThreadOp::captureDiff() const {

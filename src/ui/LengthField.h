@@ -40,10 +40,17 @@ namespace detail {
 // The static_assert keeps a stray float-length from reaching a %s.
 inline const char* fmtArg(const std::string& s) { return s.c_str(); }
 inline const char* fmtArg(const char* s)        { return s; }
-inline int         fmtArg(int v)                { return v; }
-inline long        fmtArg(long v)               { return v; }
-inline unsigned    fmtArg(unsigned v)           { return v; }
-inline double      fmtArg(double v)             { return v; }
+inline int                fmtArg(int v)                { return v; }
+inline long               fmtArg(long v)               { return v; }
+inline long long          fmtArg(long long v)          { return v; }
+inline unsigned           fmtArg(unsigned v)           { return v; }
+inline unsigned long      fmtArg(unsigned long v)      { return v; }   // size_t on this platform
+inline unsigned long long fmtArg(unsigned long long v) { return v; }
+inline double             fmtArg(double v)             { return v; }
+// A float here is a NON-length numeric printed by its own spec (a %.0f%%
+// percentage, a count of turns). Lengths never arrive as raw numbers — they
+// come pre-formatted as std::string — so promoting to double is correct.
+inline double             fmtArg(float v)              { return v; }
 template <class T> void fmtArg(const T&) {
     static_assert(sizeof(T) == 0, "trFormat: pass counts as int, quantities pre-formatted as std::string");
 }

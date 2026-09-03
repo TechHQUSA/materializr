@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "PushPullController.h"
 #include "../core/Document.h"
 #include "../core/History.h"
@@ -514,8 +515,8 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     opDialogDragGrip(s);
 
     if (!imTouch) {   // im-touch: just the value well below
-        ImGui::Text(m_st.symmetric ? "Distance per side (mm)"
-                                   : "Distance (mm) - signed");
+        ImGui::TextUnformatted(materializr::trFormat(m_st.symmetric ? "Distance per side (%s)"
+                                   : "Distance (%s) - signed", materializr::unitSuffix()).c_str());
         ImGui::Separator();
     }
 
@@ -559,7 +560,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
     }
 
     // Quick-nudge stepper (replaces the slider). Symmetric sweeps both ways, so
@@ -593,7 +594,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             updatePushPull(ctx);
         }
         if (allFree && m_st.symmetric)
-            ImGui::Text(materializr::tr("Total width: %.1f mm"), m_st.distance * 2.0f);
+            ImGui::TextUnformatted(materializr::trFormat("Total width: %s", materializr::fmtLength(m_st.distance * 2.0f)).c_str());
     }
 
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead

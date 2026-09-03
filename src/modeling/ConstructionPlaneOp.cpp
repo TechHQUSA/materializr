@@ -1,3 +1,4 @@
+#include "core/Units.h"
 #include "ConstructionPlaneOp.h"
 #include <cstdio>
 #include <cstdlib>
@@ -207,7 +208,7 @@ std::string ConstructionPlaneOp::description() const {
         case PlaneCreationType::XY:               typeStr = "XY"; break;
         case PlaneCreationType::XZ:               typeStr = "XZ"; break;
         case PlaneCreationType::YZ:               typeStr = "YZ"; break;
-        case PlaneCreationType::OffsetFromPlane:   typeStr = "Offset (" + std::to_string(m_offset) + " mm)"; break;
+        case PlaneCreationType::OffsetFromPlane:   typeStr = "Offset (" + materializr::fmtLength(m_offset) + ")"; break;
         case PlaneCreationType::ThroughThreePoints: typeStr = "3 Points"; break;
         case PlaneCreationType::ParallelToFace:    typeStr = "Parallel to Face"; break;
         case PlaneCreationType::Midplane:           typeStr = "Midplane"; break;

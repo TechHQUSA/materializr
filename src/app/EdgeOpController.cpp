@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "EdgeOpController.h"
 #include "../core/Document.h"
 #include "../core/History.h"
@@ -747,7 +748,7 @@ void EdgeOpController::drawOverlay(const IopOverlay& ov) const {
             glm::vec2 sp;
             if (!ov.toScreen(tipW, sp)) return;
             char b[40];
-            std::snprintf(b, sizeof(b), "%s %.1f mm", tag, val);
+            std::snprintf(b, sizeof(b), "%s %s", tag, materializr::fmtLength(val).c_str());
             plate(sp, b, col, grabbed ? 2.5f : 1.5f);
         };
         twoArrow(m_faceDirA, m_value,  "A", kAmber, m_grab == 0);
@@ -759,7 +760,7 @@ void EdgeOpController::drawOverlay(const IopOverlay& ov) const {
     // clicked BEFORE any value is set.
     arrow(m_mid, m_mid + m_outDir * std::max(m_value, 1.0f), kAmber, false);
     char dbuf[40];
-    std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_value);
+    std::snprintf(dbuf, sizeof(dbuf), "%s", materializr::fmtLength(m_value).c_str());
     // The single-arrow readout follows the CURSOR, not the tip.
     plate(glm::vec2(ov.mouse.x + 4.0f, ov.mouse.y), dbuf, kAmber, 1.5f);
 }
@@ -772,7 +773,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     const bool imTouch = ctx.panel.imTouch;
     const bool isFillet = m_kind == EdgeOpKind::Fillet;
     const char* opName = isFillet ? "FILLET" : "CHAMFER";
-    const char* label  = isFillet ? "Radius (mm)" : "Distance (mm)";
+    const char* label  = isFillet ? "Radius (%s)" : "Distance (%s)";
 
     materializr::viewportBanner(
         ImVec4(0.2f, 1.0f, 0.5f, 1.0f),
@@ -849,7 +850,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
     }
 
     // Quick-nudge stepper (replaces the slider). Positive-only for a radius /
@@ -901,7 +902,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
                     }
                 }
                 ImGui::SameLine();
-                ImGui::Text("%s", materializr::tr("mm"));
+                ImGui::Text("%s", materializr::unitSuffix());
             }
             if (!imTouch &&
                 materializr::stepperRow("edgeStep2", &m_value2,

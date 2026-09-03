@@ -950,7 +950,7 @@ void Application::renderScalePanel() {
 
     const bool mm = (m_scaleUnitMode == ScaleUnitMode::Millimeter);
     ImGui::TextColored(materializr::accentText(),
-                       mm ? "Scale (target mm)" : "Scale (%% of current)");
+                       mm ? "Scale (target %s)" : "Scale (%% of current)");
     ImGui::Separator();
 
     // Unit toggle. mm disabled when multi-body so we don't mislead — there's
@@ -958,7 +958,7 @@ void Application::renderScalePanel() {
     ImGui::BeginDisabled(!singleBody);
     if (ImGui::RadioButton("%", !mm))  m_scaleUnitMode = ScaleUnitMode::Percent;
     ImGui::SameLine();
-    if (ImGui::RadioButton(materializr::tr("mm"), mm))  m_scaleUnitMode = ScaleUnitMode::Millimeter;
+    if (ImGui::RadioButton(materializr::unitSuffix(), mm))  m_scaleUnitMode = ScaleUnitMode::Millimeter;
     ImGui::EndDisabled();
 
     ImGui::SameLine(0.0f, 20.0f);
@@ -1014,7 +1014,7 @@ void Application::renderScalePanel() {
                 edit.initialExtent = userExtents[i];
             }
             if (ImGui::IsItemDeactivatedAfterEdit()) edit.focused = false;
-            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
             ImGui::PopID();
         }
     }
@@ -1229,7 +1229,7 @@ void Application::renderSketchPatternPopup() {
         ImGui::InputText("##spdist", m_sketchPatternDistanceBuf,
                          sizeof(m_sketchPatternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
         float newDist = m_sketchPatternDistance;
         if (materializr::parseFinite(m_sketchPatternDistanceBuf, newDist) &&
             std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
@@ -1403,7 +1403,7 @@ void Application::renderPatternPanel() {
         ImGui::InputText("##patdist", m_patternDistanceBuf,
                          sizeof(m_patternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
-        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
         float parsed = m_patternDistance;
         if (materializr::parseFinite(m_patternDistanceBuf, parsed) &&
             std::abs(parsed - m_patternDistance) > 1e-4f) {
@@ -1595,8 +1595,7 @@ void Application::renderThreadPanel() {
 
     ImGui::TextColored(materializr::accentText(), materializr::tr("%s thread"),
                        m_threadIsHole ? "Internal" : "External");
-    ImGui::Text(materializr::tr("Diameter %.2f mm, length %.2f mm"),
-                m_threadRadius * 2.0, m_threadLength);
+    ImGui::TextUnformatted(materializr::trFormat("Diameter %s, length %s", materializr::fmtLength(m_threadRadius * 2.0), materializr::fmtLength(m_threadLength)).c_str());
     ImGui::Separator();
 
     if (imTouchLayout()) {
@@ -1614,7 +1613,7 @@ void Application::renderThreadPanel() {
         if (materializr::parseFinite(m_threadPitchBuf, v) && v >= 0.1f)
             m_threadPitch = v;
     }
-    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
     }
 
     if (imTouchLayout()) {
@@ -1631,7 +1630,7 @@ void Application::renderThreadPanel() {
         if (materializr::parseFinite(m_threadDepthBuf, v) && v >= 0.05f)
             m_threadDepth = v;
     }
-    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
     }
     // Depth beyond ~0.65·pitch merges grooves into floating helical fins;
     // beyond ~45% of the radius it eats the core. Multi-start Rounded cuts
@@ -1668,7 +1667,7 @@ void Application::renderThreadPanel() {
             ImGui::SetNextItemWidth(90);
             materializr::inputNumber("##thrClr", &m_threadClearance, 0.05f, 0.1f, "%.2f");
             if (m_threadClearance < 0.0f) m_threadClearance = 0.0f;
-            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
             ImGui::SetItemTooltip("%s", materializr::tr("Radial gap so a PRINTED thread fits its mate (0.2\xE2\x80\x93""0.4mm typical). 0 = exact."));
         }
         // Groove width: normally a fixed fraction of the pitch, so a coarse
@@ -1683,17 +1682,16 @@ void Application::renderThreadPanel() {
             materializr::inputNumber("##thrGWidth", &m_threadGrooveWidth, 0.1f, 0.5f,
                               "%.2f");
             if (m_threadGrooveWidth < 0.0f) m_threadGrooveWidth = 0.0f;
-            ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+            ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
             ImGui::SetItemTooltip("%s", materializr::tr("Width of the cut at the surface. 0 = automatic (a set fraction of the pitch, which is how threads are normally proportioned)."));
             const float autoW = static_cast<float>(
                 ThreadOp::profileOpenFraction(
                     static_cast<ThreadProfile>(m_threadProfile))) *
                 std::max(0.1f, m_threadPitch);
             if (m_threadGrooveWidth <= 0.0f)
-                ImGui::TextDisabled(materializr::tr("automatic: %.2f mm at this pitch"), autoW);
+                ImGui::TextDisabled("%s", materializr::trFormat("automatic: %s at this pitch", materializr::fmtLength(autoW)).c_str());
             else if (m_threadGrooveWidth > 0.9f * m_threadPitch)
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
-                                   materializr::tr("Capped at %.2f mm — a crest must survive between turns."), 0.9f * m_threadPitch);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", materializr::trFormat("Capped at %s — a crest must survive between turns.", materializr::fmtLength(0.9f * m_threadPitch)).c_str());
         }
     }
 
@@ -1720,8 +1718,8 @@ void Application::renderThreadPanel() {
                                   m_threadStarts, m_threadStarts);
     }
     if (m_threadStarts > 1) {
-        ImGui::TextDisabled(materializr::tr("lead %.2f mm/turn"), m_threadStarts *
-                            std::max(0.1f, m_threadPitch));
+        ImGui::TextDisabled("%s", materializr::trFormat("lead %s/turn", materializr::fmtLength(m_threadStarts *
+                            std::max(0.1f, m_threadPitch))).c_str());
         // The single-start sweep shortcuts don't apply to interleaved
         // helixes — every multi-start thread is a boolean cut.
         if (m_threadProfile == 0 || m_threadProfile == 4)
@@ -2046,8 +2044,7 @@ void Application::renderRefImagePanel() {
     double heightMM = img->pixW > 0
         ? img->widthMM * static_cast<double>(img->pixH) / img->pixW
         : img->widthMM;
-    ImGui::TextDisabled(materializr::tr("%d x %d px  ·  %.1f x %.1f mm"), img->pixW, img->pixH,
-                        img->widthMM, heightMM);
+    ImGui::TextDisabled("%s", materializr::trFormat("%d x %d px  ·  %s x %s", img->pixW, img->pixH, materializr::fmtLength(img->widthMM), materializr::fmtLength(heightMM)).c_str());
 
     renderRefImageControls(planeId);
 
@@ -2420,7 +2417,7 @@ void Application::renderSketchMovePanel() {
                          ImGuiInputTextFlags_CharsDecimal |
                          ImGuiInputTextFlags_CharsNoBlank |
                          ImGuiInputTextFlags_AutoSelectAll);
-        ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
         { float mv = m_sketchMove[i];
           if (materializr::parseFinite(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv; }
         ImGui::SameLine();
@@ -2542,8 +2539,7 @@ void Application::renderSnapWidget() {
     bool rightClicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
     if (hovered) {
         ImGui::BeginTooltip();
-        ImGui::Text(materializr::tr("Snap step: %.3g mm   |   %s"), m_sketchGridStep,
-                    m_snapToGrid ? "Snap ON" : "Snap off");
+        ImGui::TextUnformatted(materializr::trFormat("Snap step: %s   |   %s", materializr::fmtLength(m_sketchGridStep), m_snapToGrid ? "Snap ON" : "Snap off").c_str());
         ImGui::TextDisabled("%s", materializr::tr("Click: open snap settings"));
         ImGui::TextDisabled("%s", materializr::tr("Right-click: toggle snap"));
         ImGui::EndTooltip();
@@ -2599,7 +2595,7 @@ void Application::renderSnapSettingsPopup() {
             saveAppSettings();
         }
         ImGui::Spacing();
-        ImGui::Text("%s", materializr::tr("Step (mm)"));
+        ImGui::Text("%s", materializr::trFormat("Step (%s)", materializr::unitSuffix()).c_str());
         const float steps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
         const char* labels[] = { "0.1", "0.5", "1", "10" };
         for (int i = 0; i < 4; ++i) {
@@ -2719,7 +2715,7 @@ void Application::renderConstructionPlanePanel() {
             offsetChanged = true;
         }
     }
-    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
     // Relative nudges rather than a slider: an offset is a distance you dial
     // in, and dragging a -100..100 slider cannot land on 12.5 mm. Same row the
     // push/pull dialog uses, so the gesture is identical across ops.
@@ -2828,10 +2824,7 @@ void Application::renderConstructionPlanePanel() {
                 const double hMM = m_planeOpPendingImage.widthMM *
                                    static_cast<double>(m_planeOpPendingImage.pixH) /
                                    m_planeOpPendingImage.pixW;
-                ImGui::TextDisabled(materializr::tr("%d x %d px  \xc2\xb7  %.1f x %.1f mm"),
-                                    m_planeOpPendingImage.pixW,
-                                    m_planeOpPendingImage.pixH,
-                                    m_planeOpPendingImage.widthMM, hMM);
+                ImGui::TextDisabled("%s", materializr::trFormat("%d x %d px  \xc2\xb7  %s x %s", m_planeOpPendingImage.pixW, m_planeOpPendingImage.pixH, materializr::fmtLength(m_planeOpPendingImage.widthMM), materializr::fmtLength(hMM)).c_str());
             }
             renderRefImageControls(previewPlane);
             // Keep the staged copy in step, so the next preview rebuild
@@ -3308,7 +3301,7 @@ void Application::renderAlignFacePopup() {
         if (materializr::parseFinite(m_alignOffsetBuf, a)) m_alignOffset = a;
         changed = true;
     }
-    ImGui::SameLine(); ImGui::Text("%s", materializr::tr("mm"));
+    ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
 
     ImGui::Separator();
     if (ImGui::Checkbox(materializr::tr("Set position on plane"), &m_alignSetPos)) {
@@ -3799,7 +3792,7 @@ void Application::renderConstructionAxisPanel() {
     ImGui::TextDisabled("%s", materializr::tr("Labels are user-Z-up: Z is the floor-up axis."));
 
     ImGui::Separator();
-    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Origin (mm)"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::trFormat("Origin (%s)", materializr::unitSuffix()).c_str());
     bool originChanged = false;
     const char* axisLetters[3] = {"X", "Y", "Z"};
     for (int i = 0; i < 3; ++i) {
@@ -4523,7 +4516,7 @@ void Application::renderPrimitivePopup() {
     }
 
     ImGui::Spacing();
-    ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Origin (mm)"));
+    ImGui::TextColored(materializr::accentText(), "%s", materializr::trFormat("Origin (%s)", materializr::unitSuffix()).c_str());
     materializr::inputNumber("X", &m_primitivePopupOrigin[0], 0.1, 1.0, "%.3f");
     materializr::inputNumber("Y", &m_primitivePopupOrigin[1], 0.1, 1.0, "%.3f");
     materializr::inputNumber("Z", &m_primitivePopupOrigin[2], 0.1, 1.0, "%.3f");

@@ -1,3 +1,4 @@
+#include "core/Units.h"
 #include "../core/NumFormat.h"
 #include "../core/UiKeepAlive.h"
 #include "ExtrudeOp.h"
@@ -788,7 +789,7 @@ bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
 }
 
 std::string ExtrudeOp::description() const {
-    std::string desc = "Extrude " + materializr::numStr(m_distance) + "mm";
+    std::string desc = "Extrude " + materializr::fmtLength(m_distance);
     switch (m_mode) {
         case ExtrudeMode::NewBody:   desc += " (New Body)"; break;
         case ExtrudeMode::Union:     desc += " (Union)"; break;

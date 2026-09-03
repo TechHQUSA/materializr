@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "ui/StepperRow.h"
 #include "FaceOpControllers.h"
 #include "../ui/UiTheme.h"      // viewportBanner
@@ -146,7 +147,7 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         }
     }
     ImGui::SameLine();
-    ImGui::Text("%s", materializr::tr("mm"));
+    ImGui::Text("%s", materializr::unitSuffix());
     }
 
     if (materializr::stepperRow("shellStep", &m_thickness,
@@ -577,7 +578,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     ImGui::SameLine();
     if (ImGui::RadioButton(materializr::tr("Emboss"), &m_mode, 1)) changed = true;
 
-    ImGui::TextDisabled(materializr::tr("Depth: %.2f mm"), m_depth);
+    ImGui::TextDisabled("%s", materializr::trFormat("Depth: %s", materializr::fmtLength(m_depth)).c_str());
     if (materializr::stepperRow("projDepthStep", &m_depth,
                                 /*allowNegative=*/false, 0.1f, 10.0f)) {
         changed = true;
@@ -805,9 +806,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::Separator();
 
     if (previewOk()) {
-        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f),
-                           materializr::tr("Previewing %.0f%% x %.0f%% over %.1f mm"),
-                           m_pctU, m_pctV, m_len);
+        ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "%s", materializr::trFormat("Previewing %.0f%% x %.0f%% over %s", m_pctU, m_pctV, materializr::fmtLength(m_len)).c_str());
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "%s", materializr::tr("No preview: needs a FLAT end face (and 100%% is a no-op). Try another face or tweak values."));
@@ -861,7 +860,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
             changed = true;
     }
     ImGui::TextDisabled("%s", materializr::tr("Or drag the two arrows on the face."));
-    ImGui::TextDisabled(materializr::tr("Length: %.1f mm"), m_len);
+    ImGui::TextDisabled("%s", materializr::trFormat("Length: %s", materializr::fmtLength(m_len)).c_str());
     if (materializr::stepperRow("lenStep", &m_len,
                                 /*allowNegative=*/false, 0.5f,
                                 std::max(m_lenMax, 1.0f)))
@@ -936,15 +935,13 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
                         m_pick.isHole ? "hole" : "outer face");
 
     if (bothEnds) {
-        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.topR * 2.0);
+        ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
     } else if (m_pick.editBottom) {
-        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.bottomR * 2.0);
-        ImGui::TextDisabled(materializr::tr("Top stays at %.2f mm — drag this end to make a cone."),
-                            m_pick.topR * 2.0);
+        ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.bottomR * 2.0)).c_str());
+        ImGui::TextDisabled("%s", materializr::trFormat("Top stays at %s — drag this end to make a cone.", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
     } else {
-        ImGui::Text(materializr::tr("Original: %.2f mm"), m_pick.topR * 2.0);
-        ImGui::TextDisabled(materializr::tr("Bottom stays at %.2f mm — drag this end to make a cone."),
-                            m_pick.bottomR * 2.0);
+        ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
+        ImGui::TextDisabled("%s", materializr::trFormat("Bottom stays at %s — drag this end to make a cone.", materializr::fmtLength(m_pick.bottomR * 2.0)).c_str());
     }
 
     if (m_inputFocus) {
@@ -978,7 +975,7 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
         edited = materializr::parseFinite(buf, parsed) &&
                  std::abs(parsed - *val) > 0.001;
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
     }
     if (edited) {
         *val = parsed;
@@ -2095,7 +2092,7 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         }
         if (ch) updateMoveFace(ctx);
     } else {
-        ImGui::Text("%s", materializr::tr("Slide (mm)")); ImGui::Separator();
+        ImGui::Text("%s", materializr::trFormat("Slide (%s)", materializr::unitSuffix()).c_str()); ImGui::Separator();
         ImGui::Text("(%.1f, %.1f, %.1f)  |%.1f|",
                     m_st.moveFaceVec.x, m_st.moveFaceVec.y, m_st.moveFaceVec.z,
                     glm::length(m_st.moveFaceVec));

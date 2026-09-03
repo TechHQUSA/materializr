@@ -1631,7 +1631,7 @@ void Application::renderViewport() {
                         };
                         head(b,  1.0f);
                         head(a, -1.0f);
-                        const char* hint = "0 mm — drag";
+                        const std::string hintS = materializr::fmtLength(0.0) + " — drag"; const char* hint = hintS.c_str();
                         ImVec2 ts = ImGui::CalcTextSize(hint);
                         ImVec2 tp(so.x + perp.x * 18.0f * s3 - ts.x * 0.5f,
                                   so.y + perp.y * 18.0f * s3 - ts.y * 0.5f);
@@ -4526,8 +4526,7 @@ void Application::renderViewport() {
                                 if (gm == GizmoMode::Translate) {
                                     label = "Move (" + std::to_string(nBodies) + " bodies)";
                                     char buf[96];
-                                    std::snprintf(buf, sizeof(buf), "Move %d bodies by (%.2f, %.2f, %.2f) mm",
-                                                  (int)nBodies, d.x, d.y, d.z);
+                                    std::snprintf(buf, sizeof(buf), "Move %d bodies by %s", (int)nBodies, materializr::fmtVec3(d.x, d.y, d.z).c_str());
                                     desc = buf;
                                 } else if (gm == GizmoMode::Rotate) {
                                     label = "Rotate (" + std::to_string(nBodies) + " bodies)";
@@ -7245,8 +7244,7 @@ void Application::renderViewport() {
                 if (!sweep) {
                     // The chord's half-length is a hard floor; say so rather
                     // than let a too-small radius be silently refused.
-                    ImGui::TextDisabled(materializr::tr("min %.2f mm (half the chord)"),
-                                        m_sketchTool->arcMinRadius());
+                    ImGui::TextDisabled("%s", materializr::trFormat("min %s (half the chord)", materializr::fmtLength(m_sketchTool->arcMinRadius())).c_str());
                 }
                 ImGui::Spacing();
             }

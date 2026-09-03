@@ -1,3 +1,4 @@
+#include "core/Units.h"
 #include "ProjectSketchOp.h"
 #include "Sketch.h"
 #include "SubShapeIndex.h"
@@ -523,8 +524,7 @@ bool ProjectSketchOp::undo(Document& doc) {
 
 std::string ProjectSketchOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "%s sketch %.2f mm",
-                  m_mode == Mode::Engrave ? "Engrave" : "Emboss", m_depth);
+    std::snprintf(buf, sizeof(buf), "%s sketch %s", m_mode == Mode::Engrave ? "Engrave" : "Emboss", materializr::fmtLength(m_depth).c_str());
     return buf;
 }
 

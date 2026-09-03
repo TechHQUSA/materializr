@@ -1,3 +1,4 @@
+#include "core/Units.h"
 #include "ScaleFaceOp.h"
 #include "SubShapeIndex.h"
 #include <cstdio>
@@ -312,10 +313,7 @@ bool ScaleFaceOp::undo(Document& doc) {
 
 std::string ScaleFaceOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf),
-                  "Scale face to %.0f%%/%.0f%% over %.1f mm (%s)",
-                  m_scaleU, m_scaleV, m_length,
-                  m_mode == Mode::Extend ? "extend" : "pinch");
+    std::snprintf(buf, sizeof(buf), "Scale face to %.0f%%/%.0f%% over %s (%s)", m_scaleU, m_scaleV, materializr::fmtLength(m_length).c_str(), m_mode == Mode::Extend ? "extend" : "pinch");
     return buf;
 }
 

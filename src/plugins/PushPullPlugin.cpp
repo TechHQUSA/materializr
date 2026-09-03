@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "ui/StepperRow.h"
 #include "ui/UiTheme.h"
 #include "ui_scale.h"
@@ -121,7 +122,7 @@ public:
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_AlwaysAutoResize);
 
-        ImGui::Text("%s", materializr::tr("Distance (mm)"));
+        ImGui::Text("%s", materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str());
         ImGui::Separator();
 
         if (m_inputFocus) {
@@ -146,7 +147,7 @@ public:
         }
 
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
 
         if (materializr::stepperRow("ppStep", &m_distance,
                                     /*allowNegative=*/true, -50.0f, 50.0f)) {

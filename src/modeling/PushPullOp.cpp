@@ -1,3 +1,4 @@
+#include "core/Units.h"
 #include "PushPullOp.h"
 #include "SubShapeIndex.h"
 #include "Sketch.h"
@@ -627,8 +628,7 @@ bool PushPullOp::undo(Document& doc) {
 
 std::string PushPullOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "Push/Pull %.2f mm (%zu region%s)",
-                  m_distance, m_targets.size(), m_targets.size() == 1 ? "" : "s");
+    std::snprintf(buf, sizeof(buf), "Push/Pull %s (%zu region%s)", materializr::fmtLength(m_distance).c_str(), m_targets.size(), m_targets.size() == 1 ? "" : "s");
     return buf;
 }
 

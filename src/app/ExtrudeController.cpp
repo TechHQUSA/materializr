@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "ExtrudeController.h"
 #include "../core/Document.h"
 #include "../core/History.h"
@@ -377,7 +378,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     opDialogDragGrip(s);
 
     if (!imTouch) {   // im-touch: just the value well below
-        ImGui::Text("%s", materializr::tr("Extrude Distance (mm)"));
+        ImGui::Text("%s", materializr::trFormat("Extrude Distance (%s)", materializr::unitSuffix()).c_str());
         ImGui::Separator();
     }
 
@@ -420,7 +421,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
             }
         }
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
     }
 
     // Quick-nudge stepper (replaces the slider): ±10/1/0.1, and 0 to clear

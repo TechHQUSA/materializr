@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "UiTheme.h"
 #include "PropertiesPanel.h"
 #include <BRepAdaptor_Surface.hxx>
@@ -79,8 +80,8 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     default: break;
                 }
                 ImGui::TextColored(materializr::accentText(), "%s", kind);
-                ImGui::Text(materializr::tr("Area: %.2f mm^2"), g.Mass());
-                ImGui::Text(materializr::tr("Centre: %.2f, %.2f, %.2f mm"), c.X(), c.Z(), c.Y());
+                ImGui::TextUnformatted(materializr::trFormat("Area: %s", materializr::fmtArea(g.Mass())).c_str());
+                ImGui::TextUnformatted(materializr::trFormat("Centre: %s", materializr::fmtVec3(c.X(), c.Z(), c.Y())).c_str());
                 if (surf.GetType() == GeomAbs_Plane) {
                     // From the SURFACE, not the plane's stored axis.
                     //
@@ -103,18 +104,14 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     } catch (...) {}
                     ImGui::Text(materializr::tr("Normal: %.3f, %.3f, %.3f"), n.X(), n.Z(), n.Y());
                 } else if (surf.GetType() == GeomAbs_Cylinder) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm  (dia %.3f)"),
-                                surf.Cylinder().Radius(),
-                                2.0 * surf.Cylinder().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s  (dia %s)", materializr::fmtLength(surf.Cylinder().Radius()), materializr::fmtLength(2.0 * surf.Cylinder().Radius())).c_str());
                 } else if (surf.GetType() == GeomAbs_Sphere) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm"), surf.Sphere().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s", materializr::fmtLength(surf.Sphere().Radius())).c_str());
                 } else if (surf.GetType() == GeomAbs_Cone) {
                     ImGui::Text(materializr::tr("Half-angle: %.1f deg"),
                                 surf.Cone().SemiAngle() * 180.0 / M_PI);
                 } else if (surf.GetType() == GeomAbs_Torus) {
-                    ImGui::Text(materializr::tr("Radii: %.3f / %.3f mm"),
-                                surf.Torus().MajorRadius(),
-                                surf.Torus().MinorRadius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radii: %s / %s", materializr::fmtLength(surf.Torus().MajorRadius()), materializr::fmtLength(surf.Torus().MinorRadius())).c_str());
                 }
                 ImGui::Spacing();
             } else if (e.type == SelectionType::Edge &&
@@ -134,11 +131,9 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     default: break;
                 }
                 ImGui::TextColored(materializr::accentText(), "%s", kind);
-                ImGui::Text(materializr::tr("Length: %.3f mm"), g.Mass());
+                ImGui::TextUnformatted(materializr::trFormat("Length: %s", materializr::fmtLength(g.Mass())).c_str());
                 if (cu.GetType() == GeomAbs_Circle) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm  (dia %.3f)"),
-                                cu.Circle().Radius(),
-                                2.0 * cu.Circle().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s  (dia %s)", materializr::fmtLength(cu.Circle().Radius()), materializr::fmtLength(2.0 * cu.Circle().Radius())).c_str());
                     double sweep = (cu.LastParameter() - cu.FirstParameter())
                                    * 180.0 / M_PI;
                     if (sweep < 359.9)
@@ -146,15 +141,14 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                 }
                 gp_Pnt m = cu.Value(0.5 * (cu.FirstParameter() +
                                            cu.LastParameter()));
-                ImGui::Text(materializr::tr("Midpoint: %.2f, %.2f, %.2f mm"),
-                            m.X(), m.Z(), m.Y());
+                ImGui::TextUnformatted(materializr::trFormat("Midpoint: %s", materializr::fmtVec3(m.X(), m.Z(), m.Y())).c_str());
                 ImGui::Spacing();
             } else if (e.type == SelectionType::Vertex &&
                        e.shape.ShapeType() == TopAbs_VERTEX) {
                 ++nVerts;
                 gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(e.shape));
                 ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Vertex"));
-                ImGui::Text(materializr::tr("At: %.3f, %.3f, %.3f mm"), p.X(), p.Z(), p.Y());
+                ImGui::TextUnformatted(materializr::trFormat("At: %s", materializr::fmtVec3(p.X(), p.Z(), p.Y())).c_str());
                 ImGui::Spacing();
             }
         } catch (...) {}
@@ -162,11 +156,11 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
     // Multi-select totals = a quick measure tool.
     if (nFaces > 1) {
         ImGui::Separator();
-        ImGui::Text(materializr::tr("Total area (%d faces): %.2f mm^2"), nFaces, totalArea);
+        ImGui::TextUnformatted(materializr::trFormat("Total area (%d faces): %s", nFaces, materializr::fmtArea(totalArea)).c_str());
     }
     if (nEdges > 1) {
         ImGui::Separator();
-        ImGui::Text(materializr::tr("Total length (%d edges): %.3f mm"), nEdges, totalLen);
+        ImGui::TextUnformatted(materializr::trFormat("Total length (%d edges): %s", nEdges, materializr::fmtLength(totalLen)).c_str());
     }
     if (nFaces + nEdges + nVerts == 0)
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No measurable sub-shapes selected."));
@@ -380,8 +374,7 @@ bool PropertiesPanel::renderContent() {
                 }
             }
             if (haveExtents) {
-                ImGui::Text(materializr::tr("Size: %.2f x %.2f x %.2f mm"),
-                            extents[0], extents[1], extents[2]);
+                ImGui::TextUnformatted(materializr::trFormat("Size: %s x %s x %s", materializr::fmtLength(extents[0]), materializr::fmtLength(extents[1]), materializr::fmtLength(extents[2])).c_str());
                 ImGui::TextDisabled("%s", materializr::tr("Edit dimensions via the Scale gizmo (R)."));
             } else {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Empty shape"));
@@ -519,7 +512,7 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     gp_Dir u = ax.XDirection();
 
     // World→user display swap (Y/Z) so "up" reads as the user's Z.
-    ImGui::Text(materializr::tr("Origin:  %.2f, %.2f, %.2f mm"), o.X(), o.Z(), o.Y());
+    ImGui::TextUnformatted(materializr::trFormat("Origin:  %s", materializr::fmtVec3(o.X(), o.Z(), o.Y())).c_str());
     ImGui::Text(materializr::tr("Normal:  %.3f, %.3f, %.3f"),     n.X(), n.Z(), n.Y());
     ImGui::Text(materializr::tr("In-plane X: %.3f, %.3f, %.3f"),  u.X(), u.Z(), u.Y());
 
@@ -574,9 +567,9 @@ void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
 
     const gp_Pnt& o = ae->origin;
     const gp_Dir& d = ae->direction;
-    ImGui::Text(materializr::tr("Origin:    %.2f, %.2f, %.2f mm"), o.X(), o.Z(), o.Y());
+    ImGui::TextUnformatted(materializr::trFormat("Origin:    %s", materializr::fmtVec3(o.X(), o.Z(), o.Y())).c_str());
     ImGui::Text(materializr::tr("Direction: %.3f, %.3f, %.3f"),     d.X(), d.Z(), d.Y());
-    ImGui::Text(materializr::tr("Length:    %.1f mm"), ae->halfLength * 2.0);
+    ImGui::TextUnformatted(materializr::trFormat("Length:    %s", materializr::fmtLength(ae->halfLength * 2.0)).c_str());
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -867,7 +860,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             // field, so external changes (solver runs, undo/redo) propagate
             // into the visible text. While focused we leave the buffer alone
             // so we don't trample the user's keystrokes.
-            const char* unit = (c.type == ConstraintType::Angle) ? "\xC2\xB0" : "mm";
+            const char* unit = (c.type == ConstraintType::Angle) ? "\xC2\xB0" : materializr::unitSuffix();
             const char* label =
                 c.type == ConstraintType::Distance ? "Distance"
               : c.type == ConstraintType::Radius   ? "\xC3\x98 (diameter)"

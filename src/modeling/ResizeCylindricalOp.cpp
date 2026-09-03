@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "ResizeCylindricalOp.h"
 #include "../core/Verbose.h"
 
@@ -693,7 +694,7 @@ void ResizeCylindricalOp::renderProperties() {
             if (dt > 0.01) m_newTopR = dt * 0.5;
         }
     }
-    ImGui::Text(materializr::tr("Length: %.2f mm"), m_height);
+    ImGui::TextUnformatted(materializr::trFormat("Length: %s", materializr::fmtLength(m_height)).c_str());
     // WRAPPED: inline history-panel editor — see ThreadOp for the same note.
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
     ImGui::TextWrapped("%s", materializr::tr("Clicking the circular edge / face in the viewport also re-edits."));
@@ -703,15 +704,9 @@ void ResizeCylindricalOp::renderProperties() {
 std::string ResizeCylindricalOp::description() const {
     char buf[160];
     if (std::abs(m_newTopR - m_newBottomR) < 1e-5)
-        std::snprintf(buf, sizeof(buf),
-                      "Resize %s D %.2f → %.2f mm",
-                      m_isHole ? "hole" : "outer",
-                      m_oldTopR * 2.0, m_newTopR * 2.0);
+        std::snprintf(buf, sizeof(buf), "Resize %s D %s → %s", m_isHole ? "hole" : "outer", materializr::fmtLength(m_oldTopR * 2.0).c_str(), materializr::fmtLength(m_newTopR * 2.0).c_str());
     else
-        std::snprintf(buf, sizeof(buf),
-                      "Shape %s: %.2f / %.2f mm (bottom / top)",
-                      m_isHole ? "hole" : "outer",
-                      m_newBottomR * 2.0, m_newTopR * 2.0);
+        std::snprintf(buf, sizeof(buf), "Shape %s: %s / %s (bottom / top)", m_isHole ? "hole" : "outer", materializr::fmtLength(m_newBottomR * 2.0).c_str(), materializr::fmtLength(m_newTopR * 2.0).c_str());
     return buf;
 }
 
