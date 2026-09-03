@@ -19,6 +19,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Metres", "Metros" },
     { "Inches", "Pulgadas" },
     { "Feet", "Pies" },
+    { "A bare number is in the display unit; add a unit to override it, e.g. 2in or 50mm.", "Un n\xc3""\xba""mero sin unidad est\xc3""\xa1"" en la unidad de visualizaci\xc3""\xb3""n; a\xc3""\xb1""ade una unidad para anularla, p. ej. 2in o 50mm." },
     { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unidad para cada longitud que ves y escribes. La geometr\xc3""\xad""a se guarda en mil\xc3""\xad""metros de todos modos; un valor escrito tambi\xc3""\xa9""n puede llevar su propia unidad, p. ej. 2in o 50mm." },
     { "Sketch", "Boceto" },
     { "Sketch on Face", "Boceto en cara" },
@@ -128,13 +129,13 @@ inline const TrEntry kEsCatalogue[] = {
     { "Hexagon (6)", "Hex\xc3""\xa1""gono (6)" },
     { "Heptagon (7)", "Hept\xc3""\xa1""gono (7)" },
     { "Octagon (8)", "Oct\xc3""\xa1""gono (8)" },
-    { "Length (mm)", "Longitud (mm)" },
-    { "Diameter (mm)", "Di\xc3""\xa1""metro (mm)" },
-    { "Radius (mm)", "Radio (mm)" },
-    { "Width (mm)", "Ancho (mm)" },
-    { "Height (mm)", "Alto (mm)" },
-    { "Rectangle (mm)", "Rect\xc3""\xa1""ngulo (mm)" },
-    { "Chord (mm)", "Cuerda (mm)" },
+    { "Length (%s)", "Longitud (%s)" },
+    { "Diameter (%s)", "Di\xc3""\xa1""metro (%s)" },
+    { "Radius (%s)", "Radio (%s)" },
+    { "Width (%s)", "Ancho (%s)" },
+    { "Height (%s)", "Alto (%s)" },
+    { "Rectangle (%s)", "Rect\xc3""\xa1""ngulo (%s)" },
+    { "Chord (%s)", "Cuerda (%s)" },
     { "Sweep (deg)", "Barrido (grados)" },
     { "Degrees", "Grados" },
     { "Endpoint", "Punto final" },
@@ -1172,7 +1173,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1160;
+inline constexpr int kEsCount = 1161;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -1184,6 +1185,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Metres", "Metros" },
     { "Inches", "Polegadas" },
     { "Feet", "P\xc3""\xa9""s" },
+    { "A bare number is in the display unit; add a unit to override it, e.g. 2in or 50mm.", "Um n\xc3""\xba""mero sem unidade est\xc3""\xa1"" na unidade de exibi\xc3""\xa7""\xc3""\xa3""o; adicione uma unidade para substitu\xc3""\xad""-la, p. ex. 2in ou 50mm." },
     { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unidade para cada comprimento que voc\xc3""\xaa"" v\xc3""\xaa"" e digita. A geometria \xc3""\xa9"" armazenada em mil\xc3""\xad""metros de qualquer forma; um valor digitado tamb\xc3""\xa9""m pode trazer sua pr\xc3""\xb3""pria unidade, p. ex. 2in ou 50mm." },
     { "Sketch", "Esbo\xc3""\xa7""o" },
     { "Sketch on Face", "Esbo\xc3""\xa7""o na face" },
@@ -1293,13 +1295,13 @@ inline const TrEntry kPtCatalogue[] = {
     { "Hexagon (6)", "Hex\xc3""\xa1""gono (6)" },
     { "Heptagon (7)", "Hept\xc3""\xa1""gono (7)" },
     { "Octagon (8)", "Oct\xc3""\xb3""gono (8)" },
-    { "Length (mm)", "Comprimento (mm)" },
-    { "Diameter (mm)", "Di\xc3""\xa2""metro (mm)" },
-    { "Radius (mm)", "Raio (mm)" },
-    { "Width (mm)", "Largura (mm)" },
-    { "Height (mm)", "Altura (mm)" },
-    { "Rectangle (mm)", "Ret\xc3""\xa2""ngulo (mm)" },
-    { "Chord (mm)", "Corda (mm)" },
+    { "Length (%s)", "Comprimento (%s)" },
+    { "Diameter (%s)", "Di\xc3""\xa2""metro (%s)" },
+    { "Radius (%s)", "Raio (%s)" },
+    { "Width (%s)", "Largura (%s)" },
+    { "Height (%s)", "Altura (%s)" },
+    { "Rectangle (%s)", "Ret\xc3""\xa2""ngulo (%s)" },
+    { "Chord (%s)", "Corda (%s)" },
     { "Sweep (deg)", "Varredura (graus)" },
     { "Degrees", "Graus" },
     { "Endpoint", "Extremidade" },
@@ -2337,7 +2339,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1160;
+inline constexpr int kPtCount = 1161;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -2349,6 +2351,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Metres", "M\xc3""\xa8""tres" },
     { "Inches", "Pouces" },
     { "Feet", "Pieds" },
+    { "A bare number is in the display unit; add a unit to override it, e.g. 2in or 50mm.", "Un nombre sans unit\xc3""\xa9"" est dans l'unit\xc3""\xa9"" d'affichage ; ajoutez une unit\xc3""\xa9"" pour la remplacer, p. ex. 2in ou 50mm." },
     { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unit\xc3""\xa9"" de chaque longueur affich\xc3""\xa9""e et saisie. La g\xc3""\xa9""om\xc3""\xa9""trie reste stock\xc3""\xa9""e en millim\xc3""\xa8""tres ; une valeur saisie peut aussi porter sa propre unit\xc3""\xa9"", p. ex. 2in ou 50mm." },
     { "Sketch", "Esquisse" },
     { "Sketch on Face", "Esquisse sur face" },
@@ -2458,13 +2461,13 @@ inline const TrEntry kFrCatalogue[] = {
     { "Hexagon (6)", "Hexagone (6)" },
     { "Heptagon (7)", "Heptagone (7)" },
     { "Octagon (8)", "Octogone (8)" },
-    { "Length (mm)", "Longueur (mm)" },
-    { "Diameter (mm)", "Diam\xc3""\xa8""tre (mm)" },
-    { "Radius (mm)", "Rayon (mm)" },
-    { "Width (mm)", "Largeur (mm)" },
-    { "Height (mm)", "Hauteur (mm)" },
-    { "Rectangle (mm)", "Rectangle (mm)" },
-    { "Chord (mm)", "Corde (mm)" },
+    { "Length (%s)", "Longueur (%s)" },
+    { "Diameter (%s)", "Diam\xc3""\xa8""tre (%s)" },
+    { "Radius (%s)", "Rayon (%s)" },
+    { "Width (%s)", "Largeur (%s)" },
+    { "Height (%s)", "Hauteur (%s)" },
+    { "Rectangle (%s)", "Rectangle (%s)" },
+    { "Chord (%s)", "Corde (%s)" },
     { "Sweep (deg)", "Balayage (deg)" },
     { "Degrees", "Degr\xc3""\xa9""s" },
     { "Endpoint", "Extr\xc3""\xa9""mit\xc3""\xa9""" },
@@ -3502,7 +3505,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1160;
+inline constexpr int kFrCount = 1161;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -3514,6 +3517,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Metres", "Meter" },
     { "Inches", "Zoll" },
     { "Feet", "Fu\xc3""\x9f""" },
+    { "A bare number is in the display unit; add a unit to override it, e.g. 2in or 50mm.", "Eine Zahl ohne Einheit gilt in der Anzeigeeinheit; eine Einheit anh\xc3""\xa4""ngen, um sie zu \xc3""\xbc""berschreiben, z. B. 2in oder 50mm." },
     { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Einheit f\xc3""\xbc""r jede angezeigte und eingegebene L\xc3""\xa4""nge. Die Geometrie wird unabh\xc3""\xa4""ngig davon in Millimetern gespeichert; ein eingegebener Wert kann auch seine eigene Einheit tragen, z. B. 2in oder 50mm." },
     { "Sketch", "Skizze" },
     { "Sketch on Face", "Skizze auf Fl\xc3""\xa4""che" },
@@ -3623,13 +3627,13 @@ inline const TrEntry kDeCatalogue[] = {
     { "Hexagon (6)", "Sechseck (6)" },
     { "Heptagon (7)", "Siebeneck (7)" },
     { "Octagon (8)", "Achteck (8)" },
-    { "Length (mm)", "L\xc3""\xa4""nge (mm)" },
-    { "Diameter (mm)", "Durchmesser (mm)" },
-    { "Radius (mm)", "Radius (mm)" },
-    { "Width (mm)", "Breite (mm)" },
-    { "Height (mm)", "H\xc3""\xb6""he (mm)" },
-    { "Rectangle (mm)", "Rechteck (mm)" },
-    { "Chord (mm)", "Sehne (mm)" },
+    { "Length (%s)", "L\xc3""\xa4""nge (%s)" },
+    { "Diameter (%s)", "Durchmesser (%s)" },
+    { "Radius (%s)", "Radius (%s)" },
+    { "Width (%s)", "Breite (%s)" },
+    { "Height (%s)", "H\xc3""\xb6""he (%s)" },
+    { "Rectangle (%s)", "Rechteck (%s)" },
+    { "Chord (%s)", "Sehne (%s)" },
     { "Sweep (deg)", "Winkel (Grad)" },
     { "Degrees", "Grad" },
     { "Endpoint", "Endpunkt" },
@@ -4667,7 +4671,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1160;
+inline constexpr int kDeCount = 1161;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -4679,6 +4683,7 @@ inline const TrEntry kItCatalogue[] = {
     { "Metres", "Metri" },
     { "Inches", "Pollici" },
     { "Feet", "Piedi" },
+    { "A bare number is in the display unit; add a unit to override it, e.g. 2in or 50mm.", "Un numero senza unit\xc3""\xa0"" \xc3""\xa8"" nell'unit\xc3""\xa0"" di visualizzazione; aggiungi un'unit\xc3""\xa0"" per sostituirla, ad es. 2in o 50mm." },
     { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unit\xc3""\xa0"" per ogni lunghezza visualizzata e digitata. La geometria \xc3""\xa8"" comunque salvata in millimetri; un valore digitato pu\xc3""\xb2"" anche indicare la propria unit\xc3""\xa0"", ad es. 2in o 50mm." },
     { "Sketch", "Schizzo" },
     { "Sketch on Face", "Schizzo su faccia" },
@@ -4788,13 +4793,13 @@ inline const TrEntry kItCatalogue[] = {
     { "Hexagon (6)", "Esagono (6)" },
     { "Heptagon (7)", "Ettagono (7)" },
     { "Octagon (8)", "Ottagono (8)" },
-    { "Length (mm)", "Lunghezza (mm)" },
-    { "Diameter (mm)", "Diametro (mm)" },
-    { "Radius (mm)", "Raggio (mm)" },
-    { "Width (mm)", "Larghezza (mm)" },
-    { "Height (mm)", "Altezza (mm)" },
-    { "Rectangle (mm)", "Rettangolo (mm)" },
-    { "Chord (mm)", "Corda (mm)" },
+    { "Length (%s)", "Lunghezza (%s)" },
+    { "Diameter (%s)", "Diametro (%s)" },
+    { "Radius (%s)", "Raggio (%s)" },
+    { "Width (%s)", "Larghezza (%s)" },
+    { "Height (%s)", "Altezza (%s)" },
+    { "Rectangle (%s)", "Rettangolo (%s)" },
+    { "Chord (%s)", "Corda (%s)" },
     { "Sweep (deg)", "Angolo (gradi)" },
     { "Degrees", "Gradi" },
     { "Endpoint", "Estremo" },
@@ -5832,6 +5837,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1160;
+inline constexpr int kItCount = 1161;
 
 } // namespace materializr
