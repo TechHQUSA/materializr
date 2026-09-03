@@ -1,6 +1,7 @@
 #include "../core/NumFormat.h"
 #include "FilletOp.h"
 #include "BlendCut.h"
+#include "FilletProbe.h"
 #include "SubShapeIndex.h"
 #include "EdgeAnchor.h"
 #include "FaceSurfSig.h"
@@ -403,6 +404,14 @@ bool FilletOp::execute(Document& doc) {
         for (double rel : kNudge) {
             const double r = m_radius * (1.0 + rel);
             if (r <= 0.0) continue;
+            // Never enter Build() blind. OCCT's blend cannot be interrupted
+            // (ChFi3d_Builder::Compute takes no ProgressRange), so a radius it
+            // cannot resolve hangs this thread forever — and this runs from the
+            // render loop during an interactive preview, which is precisely how
+            // FOB.mzr froze the app. probe() runs the same build on a detached
+            // worker against a copy and gives up after a budget; reaching the
+            // line below means this radius is known to converge.
+            if (!materializr::fillet::probe(m_previousShape, m_edges, r)) continue;
             auto attempt = std::make_unique<BRepFilletAPI_MakeFillet>(m_previousShape);
             for (const auto& edge : m_edges) attempt->Add(r, edge);
             try { attempt->Build(); } catch (...) { continue; }
