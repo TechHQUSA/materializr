@@ -67,6 +67,7 @@
 #include "modeling/SketchTransformOp.h"
 #include <gp_Quaternion.hxx>
 #include "modeling/PlaneTransformOp.h"
+#include "modeling/FilletProbe.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/RevolveOp.h"
 #include "modeling/FilletOp.h"
@@ -285,6 +286,29 @@ void Application::renderSettings() {
                         changed = true;
                     }
                     ImGui::TextWrapped("%s", materializr::tr("Show a small frames-per-second readout at the top of the screen (im-touch layout). Turn off to hide it entirely."));
+
+                    ImGui::Spacing();
+                    ImGui::SeparatorText(materializr::tr("Modelling"));
+                    // Fillet probe budget. OCCT's blend cannot be interrupted
+                    // once entered, so every fillet is first proven to
+                    // terminate on a worker within this window; exceeding it is
+                    // the only way a bad radius can be refused instead of
+                    // hanging the app.
+                    if (ImGui::SliderFloat(materializr::tr("Fillet time limit"),
+                                           &m_filletProbeSeconds, 0.25f, 30.0f,
+                                           "%.2f s")) {
+                        // setProbeBudget clamps authoritatively; no second
+                        // copy of the range to drift out of sync with it.
+                        materializr::fillet::setProbeBudget(m_filletProbeSeconds);
+                        changed = true;
+                    }
+                    ImGui::SetItemTooltip("%s", materializr::tr(
+                        "How long a fillet may take before it is refused. OCCT's "
+                        "blend cannot be cancelled once started, so a fillet is "
+                        "first run on a background copy and abandoned if it "
+                        "exceeds this. Raise it for large or heavy bodies where "
+                        "fillets legitimately take longer; lower it if a fillet "
+                        "that cannot be built keeps you waiting."));
 
                     ImGui::Spacing();
                     ImGui::SeparatorText(materializr::tr("Selection"));

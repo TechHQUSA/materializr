@@ -98,22 +98,137 @@ TEST(FilletProbe, ZeroBudgetGivesUpImmediately) {
 // An interactive preview re-asks the identical question every frame. Without
 // memoisation the guard would double every fillet's cost forever — the probe
 // must answer a repeat query from cache, not by rebuilding.
+//
+// Asserted by RUN COUNT. Timing cannot tell a cache hit from a fast build: a
+// mutation removing edge identity from the key sailed through a timing-based
+// version of this test.
 TEST(FilletProbe, RepeatQueryIsMemoised) {
     materializr::fillet::clearProbeCache();
     const TopoDS_Shape s = box(20, 20, 20);
     const auto edges = firstEdge(s);
     ASSERT_FALSE(edges.empty());
-    const double cold = secondsOf([&] {
-        EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
-    });
-    const double warm = secondsOf([&] {
-        EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
-    });
-    // A cache hit does no OCCT work at all, so it is orders of magnitude
-    // faster. Asserting only "not slower" keeps this robust on a loaded CI box
-    // while still failing outright if the cache stops working.
-    EXPECT_LT(warm, cold + 0.05);
-    EXPECT_LT(warm, 0.05);
+
+    const auto before = materializr::fillet::probeRunCount();
+    EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
+    EXPECT_EQ(before + 1, materializr::fillet::probeRunCount()) << "cold miss";
+
+    EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
+    EXPECT_EQ(before + 1, materializr::fillet::probeRunCount())
+        << "repeat query ran a second build instead of using the cache";
+}
+
+// The budget is a user setting, so it must actually take effect — and be
+// clamped, since a zero or negative value would turn every fillet into an
+// instant refusal and a huge one would restore the freeze it exists to stop.
+TEST(FilletProbe, BudgetIsConfigurableAndClamped) {
+    const double original = materializr::fillet::probeBudget();
+
+    materializr::fillet::setProbeBudget(10.0);
+    EXPECT_DOUBLE_EQ(10.0, materializr::fillet::probeBudget());
+
+    // Below the floor clamps up, not down to zero.
+    materializr::fillet::setProbeBudget(0.01);
+    EXPECT_DOUBLE_EQ(0.25, materializr::fillet::probeBudget());
+
+    // Above the ceiling clamps down — 10 minutes is indistinguishable from the
+    // hang this guards against.
+    materializr::fillet::setProbeBudget(600.0);
+    EXPECT_DOUBLE_EQ(30.0, materializr::fillet::probeBudget());
+
+    // Nonsense falls back to the default rather than to zero.
+    materializr::fillet::setProbeBudget(0.0);
+    EXPECT_DOUBLE_EQ(materializr::fillet::kDefaultProbeSeconds,
+                     materializr::fillet::probeBudget());
+    materializr::fillet::setProbeBudget(-5.0);
+    EXPECT_DOUBLE_EQ(materializr::fillet::kDefaultProbeSeconds,
+                     materializr::fillet::probeBudget());
+
+    materializr::fillet::setProbeBudget(original);
+}
+
+// Changing the budget must drop cached verdicts. A refusal reached under a
+// tight budget means only "not in that long" — if it survived a budget increase
+// the setting would look inert on exactly the fillets it was raised for.
+TEST(FilletProbe, ChangingBudgetInvalidatesCache) {
+    const double original = materializr::fillet::probeBudget();
+    materializr::fillet::clearProbeCache();
+
+    const TopoDS_Shape s = box(20, 20, 20);
+    const auto edges = firstEdge(s);
+    ASSERT_FALSE(edges.empty());
+
+    // Refuse it with a budget nothing can meet, so a "false" is now cached.
+    EXPECT_FALSE(materializr::fillet::probe(s, edges, 2.0, 0.0));
+
+    // With room to work, the SAME fillet must come back buildable. A stale
+    // cache — or a key that ignored the budget — would return false here.
+    materializr::fillet::setProbeBudget(5.0);
+    EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
+
+    materializr::fillet::setProbeBudget(original);
+}
+
+// Two DIFFERENT edges of the same body, same count, same radius, are different
+// questions. Answering one with the other's cached verdict would hand an
+// unprobed input straight to the uninterruptible Build() this guards.
+//
+// Asserted by OUTCOME, not timing: a cache hit still takes a nonzero number of
+// seconds, so "was it fast?" proves nothing. Instead this finds two edges of one
+// body that genuinely DISAGREE at a single radius, and checks the second is not
+// served the first's answer.
+TEST(FilletProbe, DistinctEdgesAreDistinctCacheEntries) {
+    // A thin plate: a radius larger than the thickness cannot be blended onto a
+    // face edge, but the upright corner edges have material to spare.
+    const TopoDS_Shape s = box(20, 20, 1);
+    const double r = 1.5;
+
+    std::vector<TopoDS_Edge> all;
+    for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next())
+        all.push_back(TopoDS::Edge(ex.Current()));
+    ASSERT_GE(all.size(), 2u);
+
+    // Classify each edge on its own, with a clean cache each time.
+    TopoDS_Edge yes, no;
+    bool haveYes = false, haveNo = false;
+    for (const auto& e : all) {
+        materializr::fillet::clearProbeCache();
+        const std::vector<TopoDS_Edge> one{ e };
+        if (materializr::fillet::probe(s, one, r)) {
+            if (!haveYes) { yes = e; haveYes = true; }
+        } else {
+            if (!haveNo) { no = e; haveNo = true; }
+        }
+        if (haveYes && haveNo) break;
+    }
+    ASSERT_TRUE(haveYes && haveNo)
+        << "need one buildable and one unbuildable edge at R=" << r
+        << " to tell the cache entries apart";
+
+    // Cache the positive verdict, then ask the negative question. A key that
+    // only counted edges would hand back the cached true.
+    materializr::fillet::clearProbeCache();
+    EXPECT_TRUE(materializr::fillet::probe(s, { yes }, r));
+    EXPECT_FALSE(materializr::fillet::probe(s, { no }, r))
+        << "an unbuildable edge was served a different edge's cached verdict";
+}
+
+// The cache pins the TShape each verdict was keyed on. Without that pin a freed
+// shape's address could be reused by unrelated geometry and serve a stale
+// "converges" for it — waving through exactly the build this guard exists to
+// refuse. Probing many short-lived shapes must stay correct, and must not grow
+// without bound.
+TEST(FilletProbe, ManyShortLivedShapesStayCorrectAndBounded) {
+    materializr::fillet::clearProbeCache();
+    // Far more distinct shapes than the internal cap, each destroyed before the
+    // next is built, which is what makes address reuse likely.
+    for (int i = 0; i < 600; ++i) {
+        const TopoDS_Shape s = box(10 + i * 0.01, 10, 10);
+        const auto edges = firstEdge(s);
+        ASSERT_FALSE(edges.empty());
+        // Every one of these is genuinely filletable; a stale verdict from a
+        // recycled address would show up as a wrong answer here.
+        EXPECT_TRUE(materializr::fillet::probe(s, edges, 1.0)) << "i=" << i;
+    }
 }
 
 // Clearing must actually clear, or a stale verdict outlives the body it
@@ -123,11 +238,12 @@ TEST(FilletProbe, ClearDropsCachedVerdicts) {
     const TopoDS_Shape s = box(20, 20, 20);
     const auto edges = firstEdge(s);
     ASSERT_FALSE(edges.empty());
+
     EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
+    const auto afterFirst = materializr::fillet::probeRunCount();
+
     materializr::fillet::clearProbeCache();
-    const double cold = secondsOf([&] {
-        EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
-    });
-    // Post-clear the answer must be recomputed, not served instantly.
-    EXPECT_GT(cold, 0.0);
+    EXPECT_TRUE(materializr::fillet::probe(s, edges, 2.0));
+    EXPECT_EQ(afterFirst + 1, materializr::fillet::probeRunCount())
+        << "verdict survived clearProbeCache()";
 }

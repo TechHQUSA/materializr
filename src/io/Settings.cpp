@@ -112,6 +112,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readIntClamped(kv, "autosaveIntervalSec", s.autosaveIntervalSec, 5, 86400);
     readBool(kv, "invertCubeDrag",       s.invertCubeDrag);
     readFloat(kv, "doubleClickTimeSec",  s.doubleClickTimeSec);
+    readFloat(kv, "filletProbeSeconds",  s.filletProbeSeconds);
     readFloat(kv, "lightAmbient",        s.lightAmbient);
     readBool(kv, "lightHeadlight",       s.lightHeadlight);
     readBool(kv, "lightFill",            s.lightFill);
@@ -364,6 +365,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "autosaveIntervalSec = " << s.autosaveIntervalSec << "\n";
     ofs << "invertCubeDrag = "      << (s.invertCubeDrag ? "true" : "false") << "\n";
     ofs << "doubleClickTimeSec = "  << s.doubleClickTimeSec  << "\n";
+    ofs << "filletProbeSeconds = "  << s.filletProbeSeconds  << "\n";
     ofs << "lightAmbient = "        << s.lightAmbient        << "\n";
     ofs << "lightHeadlight = "      << (s.lightHeadlight ? "true" : "false") << "\n";
     ofs << "lightFill = "           << (s.lightFill ? "true" : "false") << "\n";
@@ -474,6 +476,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"autosaveIntervalSec\": "     << s.autosaveIntervalSec   << ",\n";
     ofs << "  \"invertCubeDrag\": "          << b(s.invertCubeDrag)     << ",\n";
     ofs << "  \"doubleClickTimeSec\": "      << s.doubleClickTimeSec    << ",\n";
+    ofs << "  \"filletProbeSeconds\": "      << s.filletProbeSeconds    << ",\n";
     ofs << "  \"lightAmbient\": "            << s.lightAmbient          << ",\n";
     ofs << "  \"lightHeadlight\": "          << b(s.lightHeadlight)     << ",\n";
     ofs << "  \"lightFill\": "               << b(s.lightFill)          << ",\n";
