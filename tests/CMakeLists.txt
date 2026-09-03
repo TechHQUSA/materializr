@@ -27,6 +27,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/core/MeshGuard.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ExtrudeOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/FilletOp.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/FilletProbe.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ChamferOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/BlendCut.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/BooleanOp.cpp
@@ -235,6 +236,11 @@ add_test(NAME test_sketch_edit_cascade COMMAND test_sketch_edit_cascade)
 add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp)
 target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
+
+# test_fillet_probe - deadline guard for OCCT's uninterruptible fillet builder
+add_executable(test_fillet_probe test_fillet_probe.cpp)
+target_link_libraries(test_fillet_probe PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_fillet_probe COMMAND test_fillet_probe)
 
 # test_section_cap - section-view cross-section cap geometry (issue #15)
 add_executable(test_section_cap test_section_cap.cpp)
