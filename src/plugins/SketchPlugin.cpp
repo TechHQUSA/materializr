@@ -127,7 +127,7 @@ public:
             if (ImGui::InputText(materializr::unitSuffix(), m_dimBuf, sizeof(m_dimBuf),
                                  ImGuiInputTextFlags_EnterReturnsTrue)) {
                 float v = 0.0f;
-                if (materializr::parseFinite(m_dimBuf, v) && v > 0.0f) {
+                if (materializr::parseLength(m_dimBuf, v) && v > 0.0f) {
                     recordMutation(ctx, [&]{ m_sketchTool->applyDimension(v); });
                 }
                 m_dimBuf[0] = '\0';

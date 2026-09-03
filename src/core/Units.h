@@ -146,4 +146,11 @@ inline bool parseLength(const char* buf, double& mm) {
     return true;
 }
 
+inline bool parseLength(const char* buf, float& mm) {
+    double d = 0.0;
+    if (!parseLength(buf, d)) return false;
+    mm = static_cast<float>(d);
+    return true;
+}
+
 } // namespace materializr

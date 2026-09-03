@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "core/Units.h"
 #include "PushPullOp.h"
 #include "SubShapeIndex.h"
@@ -635,7 +636,7 @@ std::string PushPullOp::description() const {
 void PushPullOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Push/Pull"));
     ImGui::Separator();
-    materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");
+    materializr::lengthField(materializr::tr("Distance"), &m_distance);
     ImGui::Text(materializr::tr("Regions: %zu"), m_targets.size());
 }
 

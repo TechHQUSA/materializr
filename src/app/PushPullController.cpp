@@ -230,7 +230,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
 
     m_st.distance = 0.0f; // start at no change; drag the arrow or type a value
     m_st.distanceRaw = 0.0f;
-    std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f", m_st.distance);
+    materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
     m_st.inputFocus = true;
 
     // Dense bodies (a threaded rod has hundreds of helical faces) cannot
@@ -354,7 +354,7 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
     // immediately frees the distance to fine values on the next frame.
     if (applySnap && ctx.snapToGrid && ctx.gridStep > 0.0f) {
         m_st.distance = std::round(m_st.distance / ctx.gridStep) * ctx.gridStep;
-        std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f", m_st.distance);
+        materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
     }
 
     if (m_st.heavyPreview) {
@@ -436,7 +436,7 @@ void PushPullController::onCleanup() {
 void PushPullController::applyDrag(const IopViewport& vp) {
     m_st.distanceRaw += vp.dragAlongAxis(m_st.origin, m_st.normal, vp.mouseDelta);
     m_st.distance = m_st.distanceRaw;   // snapped in updatePushPull
-    std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f", m_st.distance);
+    materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
 }
 
 // Drag the arrow: a one-finger drag in the viewport (touch — orbit is
@@ -530,13 +530,9 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     if (imTouch) {
         // im-touch: the panel is the value well (+ the Symmetric toggle below
         // when it applies) — no header, hint or steppers.
-        if (touchui::amountField("ppAmt",
-                                 m_st.symmetric ? "Per side" : "Distance",
-                                 &m_st.distance, "mm", 1,
-                                 /*allowSign=*/!m_st.symmetric)) {
+        if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowSign=*/!m_st.symmetric)) {
             m_st.distanceRaw = m_st.distance;
-            std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f",
-                          m_st.distance);
+            materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
             updatePushPull(ctx, /*applySnap=*/false);
         }
         // touch: raise the keyboard on TAP, not on open (see the Extrude
@@ -546,13 +542,13 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     } else {
         if (ImGui::InputText("##ppdist", m_st.inputBuf, sizeof(m_st.inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            (void)materializr::parseFinite(m_st.inputBuf, m_st.distance);
+            (void)materializr::parseLength(m_st.inputBuf, m_st.distance);
             m_st.distanceRaw = m_st.distance;
             updatePushPull(ctx);
             doCommit = true;
         } else {
             float parsed = m_st.distance;
-            if (materializr::parseFinite(m_st.inputBuf, parsed) &&
+            if (materializr::parseLength(m_st.inputBuf, parsed) &&
                 std::abs(parsed - m_st.distance) > 0.01f) {
                 m_st.distance = parsed;
                 m_st.distanceRaw = parsed;
@@ -572,7 +568,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
                                 /*allowNegative=*/!m_st.symmetric,
                                 m_st.symmetric ? 0.1f : -50.0f, 50.0f)) {
         m_st.distanceRaw = m_st.distance;
-        std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f", m_st.distance);
+        materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
         updatePushPull(ctx, /*applySnap=*/false);   // steppers override the grid
     }
 
@@ -587,8 +583,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             if (m_st.symmetric && m_st.distance < 0.1f) {
                 m_st.distance = std::abs(m_st.distance);
                 if (m_st.distance < 0.1f) m_st.distance = 0.1f;
-                std::snprintf(m_st.inputBuf, sizeof(m_st.inputBuf), "%.1f",
-                              m_st.distance);
+                materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
             }
             m_st.distanceRaw = m_st.distance;
             updatePushPull(ctx);
@@ -615,7 +610,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
 
 void PushPullController::confirmFromKey(const IopContext& ctx) {
     if (!active()) return;
-    (void)materializr::parseFinite(m_st.inputBuf, m_st.distance);
+    (void)materializr::parseLength(m_st.inputBuf, m_st.distance);
     m_st.distanceRaw = m_st.distance;
     updatePushPull(ctx);
     commit(ctx);

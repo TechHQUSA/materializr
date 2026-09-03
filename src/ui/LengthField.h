@@ -87,7 +87,11 @@ inline void lengthText(const char* fmt, double mm) {
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 
-struct LengthEdit { bool changed; bool active; };
+struct LengthEdit {
+    bool changed; bool active;
+    // So a converted `if (inputNumber(...))` keeps reading naturally.
+    explicit operator bool() const { return changed; }
+};
 
 // Numeric length input. The display value is recomputed from mm EVERY frame and
 // written back only when the widget reports a change — so an untouched value

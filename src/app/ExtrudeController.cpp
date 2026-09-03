@@ -126,7 +126,7 @@ bool ExtrudeController::beginExtrude(const IopContext& ctx,
 
 int ExtrudeController::onBegin(const IopContext& ctx) {
     m_distance = 5.0f;
-    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+    materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
     m_inputFocus = true;
 
     // Face normal and centre. A compound profile (multi-region extrude —
@@ -300,7 +300,7 @@ void ExtrudeController::updateExtrude(const IopContext& ctx, bool applySnap) {
     // applySnap=false so a typed value stays exact.
     if (applySnap && ctx.snapToGrid && ctx.gridStep > 0.0f) {
         m_distance = std::round(m_distance / ctx.gridStep) * ctx.gridStep;
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
     }
     update(ctx);
 }
@@ -319,7 +319,7 @@ void ExtrudeController::onViewportInput(const IopViewport& vp,
     if (!active()) return;
     if (vp.dragging) {
         m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
         updateExtrude(ctx);
     }
     // Trackpad-mode click-move-click, same model as Push/Pull: with Left
@@ -333,7 +333,7 @@ void ExtrudeController::onViewportInput(const IopViewport& vp,
     }
     if (m_sticky && (vp.mouseDelta.x != 0.0f || vp.mouseDelta.y != 0.0f)) {
         m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
         updateExtrude(ctx);
     }
 }
@@ -393,9 +393,8 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         // im-touch: the WHOLE panel is this one tappable value well — no
         // header, hint or steppers (Steve: the full "distance dialog" kept
         // showing up; drag for coarse, pad for exact).
-        if (touchui::amountField("extAmt", materializr::tr("Distance"), &m_distance,
-                                 "mm", 1, /*allowSign=*/true)) {
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
             updateExtrude(ctx, /*applySnap=*/false);  // typed = exact
         }
         // touch: raise the soft keyboard only when the field is TAPPED (not
@@ -408,13 +407,13 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         if (ImGui::InputText("##dist", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             // Enter pressed — commit (parseFinite: keep last on garbage)
-            (void)materializr::parseFinite(m_inputBuf, m_distance);
+            (void)materializr::parseLength(m_inputBuf, m_distance);
             updateExtrude(ctx);
             doCommit = true;
         } else {
             // Update distance from text as user types
             float parsed = m_distance;
-            if (materializr::parseFinite(m_inputBuf, parsed) &&
+            if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_distance) > 0.01f && std::abs(parsed) > 0.01f) {
                 m_distance = parsed;
                 updateExtrude(ctx, /*applySnap=*/false);  // live typing = exact
@@ -429,7 +428,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     if (!imTouch &&
         materializr::stepperRow("extrudeStep", &m_distance,
                                 /*allowNegative=*/true, -50.0f, 50.0f)) {
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
         updateExtrude(ctx, /*applySnap=*/false);  // steppers override the grid
     }
 
@@ -473,7 +472,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
 
 void ExtrudeController::confirmFromKey(const IopContext& ctx) {
     if (!active()) return;
-    (void)materializr::parseFinite(m_inputBuf, m_distance);
+    (void)materializr::parseLength(m_inputBuf, m_distance);
     updateExtrude(ctx);
     commit(ctx);
 }

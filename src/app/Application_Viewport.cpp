@@ -2029,12 +2029,10 @@ void Application::renderViewport() {
                                                 ImVec2(uiW(10.0f), uiW(10.0f)));
                             ImGui::TextDisabled("%s", materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str());
                             ImGui::SetNextItemWidth(fieldW);
-                            materializr::inputNumber("##bubbleW", &m_sketchShapeDimW,
-                                              0.0f, 0.0f, "%.2f");
+                            materializr::lengthField("##bubbleW", &m_sketchShapeDimW);
                             ImGui::TextDisabled("%s", materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str());
                             ImGui::SetNextItemWidth(fieldW);
-                            materializr::inputNumber("##bubbleH", &m_sketchShapeDimH,
-                                              0.0f, 0.0f, "%.2f");
+                            materializr::lengthField("##bubbleH", &m_sketchShapeDimH);
                             ImGui::PopStyleVar();
                             if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                             if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;
@@ -7269,10 +7267,10 @@ void Application::renderViewport() {
                                         ImVec2(uiW(10.0f), uiW(10.0f)));
                     ImGui::TextDisabled("%s", materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str());
                     ImGui::SetNextItemWidth(-1.0f);
-                    materializr::inputNumber("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
+                    materializr::lengthField("##dimW", &m_sketchShapeDimW);
                     ImGui::TextDisabled("%s", materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str());
                     ImGui::SetNextItemWidth(-1.0f);
-                    materializr::inputNumber("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
+                    materializr::lengthField("##dimH", &m_sketchShapeDimH);
                     ImGui::PopStyleVar();
                     if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                     if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;

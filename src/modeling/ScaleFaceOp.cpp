@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "core/Units.h"
 #include "ScaleFaceOp.h"
 #include "SubShapeIndex.h"
@@ -320,9 +321,9 @@ std::string ScaleFaceOp::description() const {
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
-    materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");
-    materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");
-    materializr::inputNumber(materializr::tr("Length (mm)"), &m_length, 0.5, 5.0, "%.2f");
+    materializr::lengthField(materializr::tr("Scale U (%)"), &m_scaleU);
+    materializr::lengthField(materializr::tr("Scale V (%)"), &m_scaleV);
+    materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);
     ImGui::Text(materializr::tr("Mode: %s"), m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
 }

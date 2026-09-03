@@ -16,16 +16,27 @@ LITERALS = r'\bmm\b'
 SKIP_CTRL = ("src/ui/NumField.h", "src/ui/LengthField.h", "src/core/NumParse.h", "src/ui/TouchWidgets", "src/core/Units.h")
 SKIP_LIT  = ("src/core/Units.h", "src/core/LengthEdit.h", "src/ui/LengthField.h", "i18n_catalogue.h")
 
-# (file, line) -> dimension, for rows the line alone does not reveal.
-OVERRIDE = {
-    ("src/ui/MaterialPanel.cpp", 100): "ratio",
-    ("src/ui/MaterialPanel.cpp", 101): "ratio",
-    ("src/app/Application_Dialogs.cpp", 362): "px/ui",     # grid line thickness
-    ("src/app/Application_Dialogs.cpp", 1274): "angle",    # sketch pattern angle (touch)
-    ("src/app/Application_Dialogs.cpp", 2784): "angle",    # plane rotation X/Y/Z
-    ("src/app/Application_Dialogs.cpp", 2785): "angle",
-    ("src/app/Application_Dialogs.cpp", 2786): "angle",
-}
+# (file, fragment-of-line) -> dimension, for rows the line alone does not reveal.
+OVERRIDE = [
+    ("src/ui/MaterialPanel.cpp", "Roughness", "ratio"), ("src/ui/MaterialPanel.cpp", "Metallic", "ratio"),
+    ("src/app/Application_Dialogs.cpp", "touchSens", "ratio"), ("src/app/Application_Dialogs.cpp", "Ambient", "ratio"),
+    ("src/app/Application_Dialogs.cpp", "STL accuracy", "ratio"), ("src/app/Application_Dialogs.cpp", "m_stlDialogAccuracy", "ratio"),
+    ("src/app/Application_Dialogs.cpp", "##pct", "percent"), ("src/app/Application_Dialogs.cpp", "Grid thickness", "px/ui"),
+    ("src/app/Application_Dialogs.cpp", "spAngAmt", "angle"), ("src/app/Application_Dialogs.cpp", "m_planeOpRotBuf", "angle"),
+    ("src/app/FaceOpControllers.cpp", '"%"', "percent"), ("src/app/FaceOpControllers.cpp", "scaleAmt", "percent"),
+    ("src/app/FaceOpControllers.cpp", "scaleUAmt", "percent"), ("src/app/FaceOpControllers.cpp", "scaleVAmt", "percent"),
+    ("src/app/FaceOpControllers.cpp", '"% A"', "percent"), ("src/app/FaceOpControllers.cpp", '"% B"', "percent"),
+    ("src/app/Application_Viewport.cpp", "sketchRotAng", "angle"), ("src/app/Application_Viewport.cpp", "m_sketchGizmoRotateBuf", "angle"),
+    ("src/app/Application_Viewport.cpp", "dimPadV", "CONVERTED"),
+    ("src/app/Application_Viewport.cpp", "m_sketchShapeDimBuf,", "CONVERTED"), ("src/app/Application_Viewport.cpp", "diaPadV", "CONVERTED"),
+    ("src/app/Application_Viewport.cpp", "m_sketchDimValue", "CONVERTED"),
+    ("src/modeling/PatternOp.cpp", "Axis ", "unitless"), ("src/modeling/RevolveOp.cpp", "Dir ", "unitless"),
+    ("src/modeling/TransformOp.cpp", "Axis ", "unitless"), ("src/modeling/TransformOp.cpp", "Scale Factor", "ratio"),
+    ("src/ui/PropertiesPanel.cpp", "padVal", "CONVERTED"),
+    ("src/app/Application_Viewport.cpp", "typedEnter = materializr::inputNumber", "angle"),
+    ("src/app/Application_Viewport.cpp", "entered = materializr::inputNumber", "CONVERTED"),
+    ("src/modeling/ConstructionPlaneOp.cpp", "disp, 3, nullptr", "CONVERTED"), ("src/ui/PropertiesPanel.cpp", "edit.buf, typed", "CONVERTED"),
+]
 
 def grep(pattern):
     out = subprocess.run(["grep", "-rnE", pattern, "src/", "--include=*.cpp", "--include=*.h"],
@@ -66,14 +77,15 @@ def classify_literal(f, code, ln=None):
     return "identifier/other"
 
 def classify_control(f, ln, code):
-    if (f, ln) in OVERRIDE: return OVERRIDE[(f, ln)]
+    for af, frag, dim in OVERRIDE:
+        if f == af and frag in code: return dim
     c = code.lower()
     if any(k in c for k in ("angle", "deg", "taper", "rotate", "sweep", "tilt", "draft", "rot")): return "angle"
     if "%%" in code or any(k in c for k in ("percent", "opacity", "alpha", "scale u", "scale v")): return "percent"
     if any(k in c for k in ("px", "pixel", "linewidth", "line width", "sensitivity", "uiscale")): return "px/ui"
     if any(k in c for k in ("sec", "seconds", "time", "interval", "probe")): return "seconds"
     if any(k in c for k in ("count", "copies", "sides", "segments", "instances", "turns", "starts", "inputnumberint")): return "count"
-    if any(k in c for k in ("lengthfield", "lengthslider", "amountlengthfield", "parselength", "lengthtextfield")): return "CONVERTED"
+    if any(k in c for k in ("lengthfield", "lengthslider", "amountlengthfield", "parselength", "lengthtextfield", "formatlengthdigits", "todisplay(")): return "CONVERTED"
     return "LENGTH?"
 
 def main():
@@ -92,7 +104,7 @@ def main():
         for r in sorted(lit, key=lambda r: (r[0] != "READOUT-LITERAL", r[1], r[2])): o.write(row(*r))
     with open(os.path.join(ROOT, "docs/units-audit-allow.txt"), "w") as a:
         for d, f, ln, _ in lit:
-            if d in ("comment", "export/import-format", "diagnostic", "platform-string", "identifier/other", "allowed-by-hand"):
+            if d in ("comment", "export/import-format", "diagnostic", "platform-string", "identifier/other", "allowed-by-hand", "CONVERTED"):
                 a.write("%s:%d:\n" % (f, ln))
     print("controls:", dict(cc)); print("literals:", dict(lc))
     return 0

@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "../core/NumFormat.h"
 #include "FilletOp.h"
 #include "BlendCut.h"
@@ -671,7 +672,7 @@ void FilletOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Fillet"));
     ImGui::Separator();
 
-    materializr::inputNumber(materializr::tr("Radius"), &m_radius, 0.1, 1.0, "%g");
+    materializr::lengthField(materializr::tr("Radius"), &m_radius);
 
     ImGui::Text(materializr::tr("Edges: %d selected"), static_cast<int>(m_edges.size()));
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);

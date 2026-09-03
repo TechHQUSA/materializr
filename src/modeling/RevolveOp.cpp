@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "RevolveOp.h"
 #include "Sketch.h"
 #include <Bnd_Box.hxx>
@@ -274,15 +275,15 @@ void RevolveOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Lathe"));
     ImGui::Separator();
 
-    materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");
+    materializr::lengthField(materializr::tr("Angle (deg)"), &m_angle);
     if (m_angle < 0.0) m_angle = 0.0;
     if (m_angle > 360.0) m_angle = 360.0;
 
     ImGui::Separator();
     ImGui::Text("%s", materializr::tr("Axis Origin"));
-    materializr::inputNumber(materializr::tr("Origin X"), &m_axisOriginX, 0.1, 1.0, "%g");
-    materializr::inputNumber(materializr::tr("Origin Y"), &m_axisOriginY, 0.1, 1.0, "%g");
-    materializr::inputNumber(materializr::tr("Origin Z"), &m_axisOriginZ, 0.1, 1.0, "%g");
+    materializr::lengthField(materializr::tr("Origin X"), &m_axisOriginX);
+    materializr::lengthField(materializr::tr("Origin Y"), &m_axisOriginY);
+    materializr::lengthField(materializr::tr("Origin Z"), &m_axisOriginZ);
 
     ImGui::Separator();
     ImGui::Text("%s", materializr::tr("Axis Direction"));

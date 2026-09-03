@@ -323,8 +323,8 @@ int EdgeOpController::onBegin(const IopContext& ctx) {
         m_twoDist = false;
         m_value2 = 0.0f;
     }
-    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
-    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+    materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
+    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
 
     // Install the pre-state BEFORE computing the handle frame, which reads it.
     // CREATE: the current body (the base re-installs the same shape after
@@ -669,10 +669,10 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
                 val = std::round(val * 10.0f) / 10.0f;
                 if (m_grab == 0) {
                     m_value = val;
-                    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", val);
+                    materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), val);
                 } else {
                     m_value2 = val;
-                    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", val);
+                    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), val);
                 }
             } else {
                 // Signed distance along the outward arrow: dragging away from
@@ -684,8 +684,8 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
                 // readout shows %.1f, so committing the raw float stored
                 // "1.9948" behind an on-screen "2.0" — visible later in the
                 // Properties editor after a reload.
-                m_value = std::round(m_value * 10.0f) / 10.0f;
-                std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+                m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm
+                materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
             }
             update(ctx);
         }
@@ -825,10 +825,8 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     if (imTouch) {
         // im-touch: the panel is the value well (+ the chamfer's two-distance
         // controls below) — no header, hint or steppers.
-        if (touchui::amountField("edgeAmt", isFillet ? "Radius" : "Distance",
-                                 &m_value, "mm", 1, /*allowSign=*/false,
-                                 0.1f, 20.0f)) {
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+        if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false, 0.1f, 20.0f)) {
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
             update(ctx);
         }
         // touch: raise the keyboard on TAP, not on open (see the Extrude field,
@@ -838,12 +836,12 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     } else {
         if (ImGui::InputText("##val", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            (void)materializr::parseFinite(m_inputBuf, m_value);
+            (void)materializr::parseLength(m_inputBuf, m_value);
             update(ctx);
             doCommit = true;
         } else {
             float parsed = m_value;
-            if (materializr::parseFinite(m_inputBuf, parsed) &&
+            if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_value) > 0.01f && parsed > 0.01f) {
                 m_value = parsed;
                 update(ctx);
@@ -859,7 +857,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     if (!imTouch &&
         materializr::stepperRow("edgeStep", &m_value,
                                 /*allowNegative=*/false, 0.1f, 20.0f)) {
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
         update(ctx);
     }
 
@@ -871,7 +869,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         if (ImGui::Checkbox(materializr::tr("Two distances (A / B)"), &m_twoDist)) {
             if (m_twoDist && m_value2 < 0.1f) {
                 m_value2 = std::max(0.1f, m_value);   // seed B from A
-                std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+                materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
             }
             m_grab = -1;
             update(ctx);
@@ -880,22 +878,19 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             if (!imTouch)
                 ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Distance B (other face)"));
             if (imTouch) {
-                if (touchui::amountField("edgeAmt2", materializr::tr("Distance B"), &m_value2,
-                                         "mm", 1, /*allowSign=*/false,
-                                         0.1f, 20.0f)) {
-                    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f",
-                                  m_value2);
+                if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, 0.1f, 20.0f)) {
+                    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                     update(ctx);
                 }
             } else {
                 if (ImGui::InputText("##val2", m_inputBuf2, sizeof(m_inputBuf2),
                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
-                    (void)materializr::parseFinite(m_inputBuf2, m_value2);
+                    (void)materializr::parseLength(m_inputBuf2, m_value2);
                     update(ctx);
                     doCommit = true;
                 } else {
                     float p2 = m_value2;
-                    if (materializr::parseFinite(m_inputBuf2, p2) &&
+                    if (materializr::parseLength(m_inputBuf2, p2) &&
                         std::abs(p2 - m_value2) > 0.01f && p2 > 0.01f) {
                         m_value2 = p2;
                         update(ctx);
@@ -907,7 +902,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             if (!imTouch &&
                 materializr::stepperRow("edgeStep2", &m_value2,
                                         /*allowNegative=*/false, 0.1f, 20.0f)) {
-                std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+                materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                 update(ctx);
             }
         }
@@ -929,7 +924,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
 
 void EdgeOpController::confirmFromKey(const IopContext& ctx) {
     if (!active()) return;
-    (void)materializr::parseFinite(m_inputBuf, m_value);
+    (void)materializr::parseLength(m_inputBuf, m_value);
     update(ctx);
     commit(ctx);
 }

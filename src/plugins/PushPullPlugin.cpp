@@ -71,7 +71,7 @@ public:
         if (m_targets.empty()) { m_done = true; return; }
 
         m_distance = 5.0f;
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
         m_inputFocus = true;
 
         updatePreview(ctx);
@@ -134,12 +134,12 @@ public:
         // used to flow straight into the extrude) — the previous value stays.
         if (ImGui::InputText("##dist", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            (void)materializr::parseFinite(m_inputBuf, m_distance);
+            (void)materializr::parseLength(m_inputBuf, m_distance);
             updatePreview(ctx);
             commit(ctx);
         } else {
             float parsed = m_distance;
-            if (materializr::parseFinite(m_inputBuf, parsed) &&
+            if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_distance) > 0.01f) {
                 m_distance = parsed;
                 updatePreview(ctx);
@@ -151,7 +151,7 @@ public:
 
         if (materializr::stepperRow("ppStep", &m_distance,
                                     /*allowNegative=*/true, -50.0f, 50.0f)) {
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_distance);
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
             updatePreview(ctx);
         }
 

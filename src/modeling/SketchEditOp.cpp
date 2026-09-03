@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "core/Units.h"
 #include "SketchEditOp.h"
 #include "SketchSolver.h"
@@ -392,7 +393,7 @@ void SketchEditOp::renderProperties() {
             case ConstraintType::Distance: {
                 anyDim = true;
                 double v = c.value;
-                if (materializr::inputNumber(materializr::tr("Distance (mm)"), &v, 0.0, 0.0, "%g",
+                if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,
                                        ImGuiInputTextFlags_EnterReturnsTrue)) {
                     c.value = v;
                     resolveAfter();
@@ -404,7 +405,7 @@ void SketchEditOp::renderProperties() {
                 // Stored as radius; show as diameter to match the in-sketch
                 // popup ("Ø ..." in descriptions and dimensions).
                 double dia = c.value * 2.0;
-                if (materializr::inputNumber(materializr::tr("\xC3\x98 (mm)"), &dia, 0.0, 0.0, "%g",
+                if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,
                                        ImGuiInputTextFlags_EnterReturnsTrue)) {
                     c.value = std::max(dia, 1e-6) * 0.5;
                     resolveAfter();
@@ -458,7 +459,7 @@ void SketchEditOp::renderProperties() {
                 if (c.id == cid) { r = c.radius; break; }
             double dia = r * 2.0;
             ImGui::PushID(cid + 1000000);   // keep clear of the constraint-row ids
-            if (materializr::inputNumber(materializr::tr("Diameter (mm)"), &dia, 0.0, 0.0, "%g",
+            if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia,
                                    ImGuiInputTextFlags_EnterReturnsTrue)) {
                 // Writes the after-snapshot AND records the edit so Apply can
                 // carry the new radius into later snapshots — otherwise the next

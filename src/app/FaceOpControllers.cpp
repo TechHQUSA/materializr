@@ -96,8 +96,7 @@ int ShellController::onBegin(const IopContext& ctx) {
             !e.shape.IsNull()) {
             m_face = TopoDS::Face(e.shape);
             m_thickness = 1.0f;
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.2f",
-                          m_thickness);
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_thickness);
             m_inputFocus = true;
             return e.bodyId;
         }
@@ -120,9 +119,8 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     if (ctx.cornerCommitUi) {
         // im-touch: number-pad amount field — no InputText, no native
         // keyboard (which froze the app on iOS).
-        if (touchui::amountField("shellAmt", nullptr, &m_thickness, "mm", 2,
-                                 /*allowSign=*/false, 0.1f, 20.0f)) {
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.2f", m_thickness);
+        if (materializr::amountLengthField("shellAmt", nullptr, &m_thickness, /*allowSign=*/false, 0.1f, 20.0f)) {
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_thickness);
             changed = true;
         }
     } else {
@@ -136,11 +134,11 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     if (ImGui::InputText("##shellThickness", m_inputBuf, sizeof(m_inputBuf),
                          ImGuiInputTextFlags_EnterReturnsTrue |
                          ImGuiInputTextFlags_CharsDecimal)) {
-        (void)materializr::parseFinite(m_inputBuf, m_thickness);
+        (void)materializr::parseLength(m_inputBuf, m_thickness);
         requestCommit();
     } else {
         float parsed = m_thickness;
-        if (materializr::parseFinite(m_inputBuf, parsed) &&
+        if (materializr::parseLength(m_inputBuf, parsed) &&
             std::abs(parsed - m_thickness) > 0.001f) {
             m_thickness = parsed;
             changed = true;
@@ -155,7 +153,7 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         // Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a
         // free-floating 3.47 mm slider value is just noise.
         m_thickness = std::round(m_thickness * 10.0f) / 10.0f;
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.2f", m_thickness);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_thickness);
         changed = true;
     }
 
@@ -584,8 +582,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
         changed = true;
     }
     if (ctx.cornerCommitUi &&
-        touchui::amountField("projAmt", nullptr, &m_depth, "mm", 2,
-                             /*allowSign=*/false, 0.1f, 10.0f))
+        materializr::amountLengthField("projAmt", nullptr, &m_depth, /*allowSign=*/false, 0.1f, 10.0f))
         changed = true;
 
     if (!previewOk()) {
@@ -866,8 +863,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
                                 std::max(m_lenMax, 1.0f)))
         changed = true;
     if (ctx.cornerCommitUi &&
-        touchui::amountField("lenAmt", nullptr, &m_len, "mm", 1,
-                             /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f)))
+        materializr::amountLengthField("lenAmt", nullptr, &m_len, /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f)))
         changed = true;
 }
 
@@ -891,8 +887,8 @@ int ResizeCylindricalController::onBegin(const IopContext& ctx) {
     m_deferred = ctx.history.isBodyThreaded(m_pick.bodyId);
     m_newBottomDiameter = m_pick.bottomR * 2.0;
     m_newTopDiameter    = m_pick.topR    * 2.0;
-    std::snprintf(m_botBuf, sizeof(m_botBuf), "%.2f", m_newBottomDiameter);
-    std::snprintf(m_topBuf, sizeof(m_topBuf), "%.2f", m_newTopDiameter);
+    materializr::formatLengthDigits(m_botBuf, sizeof(m_botBuf), m_newBottomDiameter);
+    materializr::formatLengthDigits(m_topBuf, sizeof(m_topBuf), m_newTopDiameter);
     m_inputFocus = true;
     return m_pick.bodyId;
 }
@@ -959,8 +955,7 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
         // im-touch: number-pad amount field — no InputText, no native keyboard
         // (which froze the app on iOS).
         double v = *val;
-        if (touchui::amountField("rcylAmt", nullptr, &v, "mm", 2,
-                                 /*allowSign=*/false)) {
+        if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {
             parsed = v;
             edited = std::abs(parsed - *val) > 0.001;
             std::snprintf(buf, 32, "%.2f", v);
@@ -972,7 +967,7 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
                              ImGuiInputTextFlags_CharsDecimal))
             requestCommit();   // Enter in the field = Confirm
         // parseFinite: garbage/inf keeps the previous value.
-        edited = materializr::parseFinite(buf, parsed) &&
+        edited = materializr::parseLength(buf, parsed) &&
                  std::abs(parsed - *val) > 0.001;
         ImGui::SameLine();
         ImGui::Text("%s", materializr::unitSuffix());
@@ -982,8 +977,7 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
         if (bothEnds) {
             m_newBottomDiameter = parsed;
             m_newTopDiameter    = parsed;
-            std::snprintf(m_pick.editBottom ? m_topBuf : m_botBuf, 32, "%.2f",
-                          parsed);
+            materializr::formatLengthDigits(m_pick.editBottom ? m_topBuf : m_botBuf, 32, parsed);
         }
         changed = true;
     }

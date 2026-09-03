@@ -679,18 +679,18 @@ void ResizeCylindricalOp::renderProperties() {
     if (std::abs(m_newTopR - m_newBottomR) < 1e-5) {
         double dia = m_newTopR * 2.0;
         ImGui::SetNextItemWidth(diaW);
-        if (materializr::inputNumber(materializr::tr("Diameter (mm)"), &dia, 0.1, 1.0, "%.2f")) {
+        if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia)) {
             if (dia > 0.01) { m_newTopR = dia * 0.5; m_newBottomR = dia * 0.5; }
         }
     } else {
         double db = m_newBottomR * 2.0;
         double dt = m_newTopR * 2.0;
         ImGui::SetNextItemWidth(diaW);
-        if (materializr::inputNumber(materializr::tr("Bottom Ø (mm)"), &db, 0.1, 1.0, "%.2f")) {
+        if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) {
             if (db > 0.01) m_newBottomR = db * 0.5;
         }
         ImGui::SetNextItemWidth(diaW);
-        if (materializr::inputNumber(materializr::tr("Top Ø (mm)"), &dt, 0.1, 1.0, "%.2f")) {
+        if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {
             if (dt > 0.01) m_newTopR = dt * 0.5;
         }
     }

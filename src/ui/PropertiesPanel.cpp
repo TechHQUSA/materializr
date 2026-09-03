@@ -635,8 +635,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         ImGui::Text("%s", materializr::tr("Circle"));
         double dia = c->radius * 2.0;
         ImGui::SetNextItemWidth(140);
-        if (materializr::inputNumber(materializr::tr("Diameter (mm)"), &dia, 0.0, 0.0, "%.3f",
-                               ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(dia, 1e-6) * 0.5;
             apply([sk, circleId, r]() { sk->setCircleRadius(circleId, r); });
         }
@@ -649,8 +648,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         // Radius: centre fixed, endpoints slide radially (sweep preserved).
         double rad = a->radius;
         ImGui::SetNextItemWidth(140);
-        if (materializr::inputNumber(materializr::tr("Radius (mm)"), &rad, 0.0, 0.0, "%.3f",
-                               ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(rad, 1e-6);
             apply([sk, arcId, r]() { sk->resizeArc(arcId, r); });
         }
@@ -664,8 +662,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             double chord = std::sqrt((e->pos.x - s->pos.x) * (e->pos.x - s->pos.x) +
                                      (e->pos.y - s->pos.y) * (e->pos.y - s->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (materializr::inputNumber(materializr::tr("Chord (mm)"), &chord, 0.0, 0.0, "%.3f",
-                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double ch = std::max(chord, 1e-6);
                 apply([sk, arcId, ch]() { sk->setArcChord(arcId, ch); });
             }
@@ -697,11 +694,9 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             ImGui::Text("%s", materializr::tr("Rectangle"));
             double w = rect.width, h = rect.height;
             ImGui::SetNextItemWidth(140);
-            bool w_ed = materializr::inputNumber(materializr::tr("Width (mm)"), &w, 0.0, 0.0, "%.3f",
-                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &w, ImGuiInputTextFlags_EnterReturnsTrue).changed;
             ImGui::SetNextItemWidth(140);
-            bool h_ed = materializr::inputNumber(materializr::tr("Height (mm)"), &h, 0.0, 0.0, "%.3f",
-                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), &h, ImGuiInputTextFlags_EnterReturnsTrue).changed;
             if (w_ed || h_ed) {
                 double nw = std::max(w, 1e-6), nh = std::max(h, 1e-6);
                 apply([sk, lid, nw, nh]() { sk->setRectangleSize(lid, nw, nh); });
@@ -716,8 +711,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
                 len = std::sqrt((p2->pos.x - p1->pos.x) * (p2->pos.x - p1->pos.x) +
                                 (p2->pos.y - p1->pos.y) * (p2->pos.y - p1->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (materializr::inputNumber(materializr::tr("Length (mm)"), &len, 0.0, 0.0, "%.3f",
-                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double nl = std::max(len, 1e-6);
                 apply([sk, lid, nl]() { sk->setLineLength(lid, nl); });
             }
@@ -851,10 +845,10 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             auto& edit = m_constraintEdits[c.id];
 
             // Display value: Radius shown as diameter (matches sketch popup).
-            double shown = (c.type == ConstraintType::Radius) ? (c.value * 2.0)
+            double shown = (c.type == ConstraintType::Radius) ? (materializr::toDisplay(c.value * 2.0))
                           : (c.type == ConstraintType::Angle)
                                 ? (c.value * 180.0 / M_PI)
-                                : c.value;
+                                : materializr::toDisplay(c.value);
 
             // Refill the buffer when the user is NOT actively editing this
             // field, so external changes (solver runs, undo/redo) propagate
@@ -903,11 +897,13 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
                 // solver; garbage entry commits nothing (typed stays == value).
                 double typed = c.value;
                 (void)materializr::parseFinite(edit.buf, typed);
+                // Lengths: display unit -> mm FIRST, then halve a circle's
+                // diameter; angles never see the unit.
                 double newRaw = (c.type == ConstraintType::Radius)
-                                    ? typed * 0.5
+                                    ? materializr::toMm(typed) * 0.5
                               : (c.type == ConstraintType::Angle)
                                     ? typed * M_PI / 180.0
-                                    : typed;
+                                    : materializr::toMm(typed);
                 if (std::abs(newRaw - c.value) > 1e-6) {
                     commitEdit(c, newRaw, edit);
                 } else {

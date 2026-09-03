@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "core/Units.h"
 #include "../core/NumFormat.h"
 #include "../core/UiKeepAlive.h"
@@ -803,7 +804,7 @@ void ExtrudeOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Extrude"));
     ImGui::Separator();
 
-    materializr::inputNumber(materializr::tr("Distance"), &m_distance, 0.1, 1.0, "%g");
+    materializr::lengthField(materializr::tr("Distance"), &m_distance);
 
     const char* modeItems[] = { materializr::tr("New Body"), materializr::tr("Union"),
                                 materializr::tr("Subtract"), materializr::tr("Intersect") };
@@ -819,7 +820,7 @@ void ExtrudeOp::renderProperties() {
         m_direction = static_cast<ExtrudeDirection>(dirIndex);
     }
 
-    materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");
+    materializr::lengthField(materializr::tr("Draft Angle"), &m_draftAngle);
 
     if (m_mode != ExtrudeMode::NewBody) {
         materializr::inputNumberInt("Target Body ID", &m_targetBodyId);

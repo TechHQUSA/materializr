@@ -168,8 +168,7 @@ void SplitController::panelBody(const IopContext& ctx, bool& changed) {
                                 -lim, lim))
         changed = true;
     if (ctx.cornerCommitUi &&
-        touchui::amountField("splitOffsetAmt", nullptr, &m_offset, "mm", 2,
-                             /*allowSign=*/true, -lim, lim))
+        materializr::amountLengthField("splitOffsetAmt", nullptr, &m_offset, /*allowSign=*/true, -lim, lim))
         changed = true;
     m_offset = std::min(lim, std::max(-lim, m_offset));
 
