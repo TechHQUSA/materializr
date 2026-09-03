@@ -15,6 +15,33 @@
 
 #include <cmath>
 
+// A press that has not moved is NOT a drag, and the caller must therefore store
+// no offset for it. This is the guard against a click silently converting an
+// automatically positioned label into a fixed one: the stored offset doubles as
+// the "user placed this" flag, so writing the auto offset on a plain click
+// gives the label a leader line and freezes it out of automatic placement.
+TEST(DimDragThreshold, AStationaryPressIsNotADrag) {
+    EXPECT_FALSE(materializr::dimDragExceedsThreshold(0.0f, 0.0f));
+}
+
+// A shaky hand is still a click. Anything inside the threshold circle, in any
+// direction, must stay a click so tapping a tag reliably edits it.
+TEST(DimDragThreshold, SmallJitterStaysAClick) {
+    EXPECT_FALSE(materializr::dimDragExceedsThreshold(1.0f, 0.0f));
+    EXPECT_FALSE(materializr::dimDragExceedsThreshold(0.0f, -2.0f));
+    EXPECT_FALSE(materializr::dimDragExceedsThreshold(-2.0f, 2.0f));
+    // Exactly on the boundary is still a click — the test is strictly greater.
+    EXPECT_FALSE(materializr::dimDragExceedsThreshold(
+        materializr::kDimDragThresholdPx, 0.0f));
+}
+
+// Deliberate movement past the threshold is a drag, in any direction.
+TEST(DimDragThreshold, DeliberateMovementIsADrag) {
+    EXPECT_TRUE(materializr::dimDragExceedsThreshold(4.0f, 0.0f));
+    EXPECT_TRUE(materializr::dimDragExceedsThreshold(0.0f, -10.0f));
+    EXPECT_TRUE(materializr::dimDragExceedsThreshold(-3.0f, -3.0f));
+}
+
 TEST(DimLabelOffset, IsRelativeToTheAnchor) {
     double x = 0, y = 0;
     // Anchor at (10,5), dropped at (13,9) -> the tag sits +3,+4 from its

@@ -2609,24 +2609,32 @@ void Application::renderViewport() {
                     // the solver later moves the geometry under it.
                     if (m_dimDragId == c.id &&
                         ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                        const glm::vec2 want = dimCursor + m_dimDragGrab;
-                        double offX = 0.0, offY = 0.0;
-                        materializr::dimLabelOffset(want.x, want.y,
-                                                    anchor.x, anchor.y,
-                                                    offX, offY);
-                        for (auto& mc : m_activeSketch->getMutableConstraints()) {
-                            if (mc.id != c.id) continue;
-                            mc.labelOffX = offX;
-                            mc.labelOffY = offY;
-                            break;
-                        }
-                        // A press that travels barely at all is still a click.
-                        // Threshold in sketch mm scaled by zoom would be nicer;
-                        // pixels are what the user actually feels.
-                        if (ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x != 0.0f ||
-                            ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y != 0.0f) {
-                            const ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
-                            if (d.x * d.x + d.y * d.y > 9.0f) m_dimDragMoved = true;
+                        // Threshold FIRST, and write nothing until it is
+                        // crossed. IsMouseDown is already true on the press
+                        // frame, so writing unconditionally would store an
+                        // offset for a plain click — and since `want` equals
+                        // the label's current position, that offset is the
+                        // AUTO one. The label would silently become
+                        // user-placed: it grows a leader line and stops
+                        // tracking automatic positioning (Distance's auto
+                        // offset scales with segment length, so a frozen one
+                        // no longer rescales). Clicking to edit must leave the
+                        // stored offset exactly as it found it.
+                        const ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+                        if (materializr::dimDragExceedsThreshold(d.x, d.y))
+                            m_dimDragMoved = true;
+                        if (m_dimDragMoved) {
+                            const glm::vec2 want = dimCursor + m_dimDragGrab;
+                            double offX = 0.0, offY = 0.0;
+                            materializr::dimLabelOffset(want.x, want.y,
+                                                        anchor.x, anchor.y,
+                                                        offX, offY);
+                            for (auto& mc : m_activeSketch->getMutableConstraints()) {
+                                if (mc.id != c.id) continue;
+                                mc.labelOffX = offX;
+                                mc.labelOffY = offY;
+                                break;
+                            }
                         }
                         m_dimEditingClickedThisFrame = true;  // don't also pick
                     }
