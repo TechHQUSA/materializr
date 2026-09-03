@@ -237,6 +237,11 @@ add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp
 target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
 
+# test_units - display units: the one place a length changes unit (mm/cm/m/in/ft)
+add_executable(test_units test_units.cpp)
+target_link_libraries(test_units PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_units COMMAND test_units)
+
 # test_dim_label_offset - dimension tag placement offsets (drag to reposition)
 add_executable(test_dim_label_offset test_dim_label_offset.cpp)
 target_link_libraries(test_dim_label_offset PRIVATE materializr_core gtest gtest_main)
