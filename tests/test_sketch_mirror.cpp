@@ -11,6 +11,7 @@
 // corrupt the constrained-state badge. See PLAN.md.
 
 #include "modeling/Sketch.h"
+#include "modeling/SketchSolver.h"
 
 #include <gtest/gtest.h>
 
@@ -254,4 +255,125 @@ TEST(SketchMirror, AssignRawCopiesWithoutReestablishingTheInvariant) {
     Sketch fixed;
     fixed.restoreFrom(stale);
     EXPECT_NEAR(-3.0f, fixed.getPoint(f.dst)->pos.x, 1e-5) << "restoreFrom must";
+}
+
+// ─── Solver integration ──────────────────────────────────────────────────────
+
+// The image must be current by the time solve() returns — including when the
+// solve does NOT converge. Deriving from an unconverged source is correct;
+// showing a stale image is not.
+TEST(SketchMirrorSolver, SolveLeavesTheImageCurrent) {
+    Fixture f = makePointMirror({3.0f, 4.0f});
+    materializr::SketchSolver solver;
+
+    f.sk.movePoint(f.src, {7.0f, 1.0f});      // source moved, image now stale
+    ASSERT_NEAR(-3.0f, posOf(f.sk, f.dst).x, 1e-5) << "precondition: still stale";
+    solver.solve(f.sk);
+    EXPECT_NEAR(-7.0f, posOf(f.sk, f.dst).x, 1e-5) << "solve must leave it current";
+    EXPECT_NEAR( 1.0f, posOf(f.sk, f.dst).y, 1e-5);
+}
+
+// A derived point is not a free variable — it is computed. Counting it as free
+// reports a fully mirrored sketch as permanently Under-constrained, which is the
+// badge lying to the user.
+TEST(SketchMirrorSolver, DerivedPointsDoNotCountTowardsDegreesOfFreedom) {
+    materializr::SketchSolver solver;
+
+    // Baseline: axis (2 pts) + one free point = 3 points = 6 DOF.
+    Sketch plain;
+    const int a = plain.addPoint({0.0f, -10.0f});
+    const int b = plain.addPoint({0.0f,  10.0f});
+    plain.addLine(a, b);
+    plain.addPoint({3.0f, 4.0f});
+    solver.solve(plain);
+    const int baseline = solver.degreesOfFreedom();
+    EXPECT_EQ(6, baseline);
+
+    // Same sketch plus a mirrored image of that point: the image adds 2 stored
+    // coordinates and subtracts them again, so the total is unchanged.
+    Fixture f = makePointMirror({3.0f, 4.0f});
+    solver.solve(f.sk);
+    EXPECT_EQ(baseline, solver.degreesOfFreedom())
+        << "a derived point adds no freedom";
+}
+
+// The oracle the review corrected: mirroring is NOT DOF-neutral overall,
+// because materialising a free construction axis adds two points. Stating the
+// wrong expectation here would have hidden a real off-by-four.
+TEST(SketchMirrorSolver, MaterialisingAFreeAxisAddsFourDegreesOfFreedom) {
+    materializr::SketchSolver solver;
+
+    Sketch before;
+    before.addPoint({3.0f, 4.0f});
+    solver.solve(before);
+    const int dofBefore = solver.degreesOfFreedom();
+    EXPECT_EQ(2, dofBefore);
+
+    Fixture f = makePointMirror({3.0f, 4.0f});   // adds axis (2 pts) + image
+    solver.solve(f.sk);
+    EXPECT_EQ(dofBefore + 4, solver.degreesOfFreedom())
+        << "the axis's two endpoints are free; the image is not";
+}
+
+// A derived circle's radius is derived too, so it must not be counted.
+TEST(SketchMirrorSolver, DerivedCircleRadiusDoesNotCountEither) {
+    materializr::SketchSolver solver;
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f});
+    const int b = sk.addPoint({0.0f,  10.0f});
+    const int axis = sk.addLine(a, b);
+    const int srcC = sk.addPoint({4.0f, 0.0f});
+    const int srcCirc = sk.addCircle(srcC, 2.5);
+    solver.solve(sk);
+    const int baseline = solver.degreesOfFreedom();
+
+    const int dstC = sk.addPoint({0.0f, 0.0f});
+    const int dstCirc = sk.addCircle(dstC, 0.1);
+    materializr::SketchMirror m;
+    m.axisLineId = axis;
+    m.points  = { {srcC, dstC} };
+    m.circles = { {srcCirc, dstCirc} };
+    sk.addMirror(m);
+    sk.validateMirrors();
+    solver.solve(sk);
+    EXPECT_EQ(baseline, solver.degreesOfFreedom())
+        << "derived centre (2) and derived radius (1) are all outputs";
+}
+
+// Ordering: recomputeMirrors() must run BEFORE refreshReferenceValues().
+//
+// A reference dimension re-measures itself from the geometry at the end of each
+// solve. If the image is recomputed after that, a dimension attached to derived
+// geometry reports the PREVIOUS solve's position — a label that silently lags
+// reality by one edit. This test exists because a mutation swapping the two
+// calls passed every other test in this file.
+TEST(SketchMirrorSolver, ReferenceDimensionOnDerivedGeometryReadsThisSolve) {
+    materializr::SketchSolver solver;
+    Fixture f = makePointMirror({3.0f, 4.0f});
+    ASSERT_NEAR(-3.0f, posOf(f.sk, f.dst).x, 1e-5);
+
+    // A fixed anchor directly below the image, and a REFERENCE (measuring, not
+    // driving) distance from it to the derived point.
+    const int anchor = f.sk.addPoint({-3.0f, 0.0f});
+    materializr::Constraint c{};
+    c.type = materializr::ConstraintType::Distance;
+    c.entityA = anchor;
+    c.entityB = f.dst;
+    c.isDriving = false;          // annotation only: the solver never enforces it
+    c.value = 0.0;
+    f.sk.addConstraint(c);
+
+    solver.solve(f.sk);
+    const auto valueNow = [&] {
+        for (const auto& k : f.sk.getConstraints()) if (k.entityB == f.dst) return k.value;
+        return 0.0;
+    };
+    EXPECT_NEAR(4.0, valueNow(), 1e-4) << "measures the image where it is now";
+
+    // Move the SOURCE up by 5. The image follows to (-3, 9), so the reference
+    // dimension must read 9 — not the 4 it would read from the stale image.
+    f.sk.movePoint(f.src, {3.0f, 9.0f});
+    solver.solve(f.sk);
+    EXPECT_NEAR(9.0, valueNow(), 1e-4)
+        << "a reference dimension on derived geometry lagged one solve behind";
 }

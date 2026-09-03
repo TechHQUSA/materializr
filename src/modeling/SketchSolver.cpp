@@ -116,11 +116,31 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
         (driven ? arcsWithDrivenRadius : arcsWithout) += 1;
     }
 
+    // Derived entities are OUTPUTS of a mirror, not free variables: their values
+    // are recomputed from a source, so counting them as free reports a fully
+    // mirrored sketch as permanently Under-constrained. Subtract exactly what
+    // the tally above counted for them — 2 per point (its coordinates) and 1
+    // per circle/arc (its radius); lines and splines contribute no independent
+    // stored value of their own beyond their points.
+    //
+    // The arc case is subtle. A derived arc has no driving Radius (constraints
+    // on derived geometry are rejected), so it already landed in `arcsWithout`
+    // as +1; subtracting its radius here cancels that and is correct. A
+    // MALFORMED derived arc carrying a driving Radius would have landed in
+    // `arcsWithDrivenRadius` as -1, and subtracting again would put the tally
+    // two too low — which is why such constraints are refused at creation and
+    // at load, before this runs.
+    int derivedPoints = 0, derivedRadii = 0;
+    for (const auto& p : sketch.getPoints())  if (p.derived) ++derivedPoints;
+    for (const auto& c : sketch.getCircles()) if (c.derived) ++derivedRadii;
+    for (const auto& a : sketch.getArcs())    if (a.derived) ++derivedRadii;
+
     // +1 radius per circle. Per arc: +1 for the radius, and -2 for the
     // intrinsic relations only where a driving Radius keeps them true.
     m_dof = 2 * numPoints + numCircles
             + arcsWithout - arcsWithDrivenRadius
-            - numEquations;
+            - numEquations
+            - 2 * derivedPoints - derivedRadii;
 
     if (m_dof < 0) {
         m_state = SketchState::OverConstrained;
@@ -220,11 +240,18 @@ bool SketchSolver::solve(Sketch& sketch, int maxIterations, double tolerance) {
             for (auto& c : constraints) {
                 c.isSatisfied = true;
             }
+            // Mirrors BEFORE reference values: a reference dimension measuring
+            // derived geometry must read this solve, not the previous one.
+            sketch.recomputeMirrors();
             refreshReferenceValues();
             return true;
         }
     }
 
+    // Iteration limit — explicitly NOT converged. The image still reflects the
+    // solver's FINAL source state, whatever it settled on; a stale image would
+    // be worse than one derived from an unconverged source.
+    sketch.recomputeMirrors();
     refreshReferenceValues();
     return false;
 }
