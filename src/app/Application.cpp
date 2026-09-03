@@ -6685,7 +6685,9 @@ void Application::restoreSketchDraftNow() {
     // here we just restore the drawing on its plane so no work is lost.)
     enterSketchOnPlane(draft.getPlane());
     recordSketchMutation([&]{
-        *m_activeSketch = draft;             // copy geometry + ids + constraints
+        // restoreFrom: a recovered draft's derived coordinates are whatever was
+        // last written, which may predate the source edit that crashed us.
+        m_activeSketch->restoreFrom(draft);  // geometry + ids + constraints + mirrors
         m_activeSketch->setSourceBody(meta.sourceBodyId);
     });
     m_sketchSolver->setSketch(m_activeSketch.get());

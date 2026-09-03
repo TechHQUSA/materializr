@@ -112,6 +112,22 @@ public:
     Sketch();
     ~Sketch() = default;
 
+    // Copy CONSTRUCTION is fine — a snapshot is a new object and owns a
+    // consistent copy of whatever it was taken from.
+    Sketch(const Sketch&) = default;
+    // Copy ASSIGNMENT onto a LIVE sketch is deleted on purpose. Assigning
+    // wholesale is how a mirror image goes stale: the paths that do it —
+    // undo/redo, gizmo cancel, pattern preview, load, combine, rollback, draft
+    // recovery — never solve, so nothing recomputes the derived side. Use
+    // restoreFrom() (assign + validate + recompute), or assignRaw() when you
+    // genuinely want the bytes and nothing else. A bypass is now a compile
+    // error rather than something review has to catch: three separate review
+    // rounds each found another restore path that enumeration had missed.
+    Sketch& operator=(const Sketch&) = delete;
+    // Plain copy with NO invariant re-established. For storing a snapshot into
+    // a member, where the destination is not a live sketch anyone is editing.
+    void assignRaw(const Sketch& other);
+
     // Plane this sketch is on
     void setPlane(const gp_Pln& plane);
     const gp_Pln& getPlane() const;

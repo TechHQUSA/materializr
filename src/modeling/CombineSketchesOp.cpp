@@ -82,7 +82,7 @@ bool CombineSketchesOp::execute(Document& doc) {
 bool CombineSketchesOp::undo(Document& doc) {
     if (m_targetId < 0) return false;
     auto target = doc.getSketch(m_targetId);
-    if (target) *target = m_targetBefore;
+    if (target) target->restoreFrom(m_targetBefore);
     // Re-create the absorbed sketches; track their (new) ids so a redo removes
     // the right ones.
     m_otherIds.clear();

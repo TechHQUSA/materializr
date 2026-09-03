@@ -2231,9 +2231,36 @@ int Sketch::validateMirrors() {
     return static_cast<int>(before - m_mirrors.size());
 }
 
+void Sketch::assignRaw(const Sketch& other) {
+    if (this == &other) return;
+    // The one place the member-wise copy lives, now that operator= is deleted.
+    // Deliberately does NOT re-establish the mirror invariant — callers storing
+    // a snapshot want the bytes exactly as they are.
+    Sketch tmp(other);
+    m_name = std::move(tmp.m_name);
+    m_plane = tmp.m_plane;
+    m_sourceBodyId = tmp.m_sourceBodyId;
+    m_detached = tmp.m_detached;
+    m_sourceFace = tmp.m_sourceFace;
+    m_centerPoint = tmp.m_centerPoint;
+    m_hasCenterPoint = tmp.m_hasCenterPoint;
+    m_points = std::move(tmp.m_points);
+    m_lines = std::move(tmp.m_lines);
+    m_circles = std::move(tmp.m_circles);
+    m_arcs = std::move(tmp.m_arcs);
+    m_splines = std::move(tmp.m_splines);
+    m_polygons = std::move(tmp.m_polygons);
+    m_constraints = std::move(tmp.m_constraints);
+    m_nextConstraintId = tmp.m_nextConstraintId;
+    m_mirrors = std::move(tmp.m_mirrors);
+    m_nextMirrorId = tmp.m_nextMirrorId;
+    m_faceRefs = std::move(tmp.m_faceRefs);
+    m_nextId = tmp.m_nextId;
+}
+
 void Sketch::restoreFrom(const Sketch& other) {
     if (this == &other) return;
-    *this = other;          // the one place a whole-sketch assignment is correct
+    assignRaw(other);
     validateMirrors();
     recomputeMirrors();
 }

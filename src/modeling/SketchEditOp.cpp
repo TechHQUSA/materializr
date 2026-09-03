@@ -23,13 +23,16 @@ SketchEditOp::SketchEditOp(std::shared_ptr<Sketch> liveSketch,
 
 bool SketchEditOp::execute(Document& /*doc*/) {
     if (!m_target || !m_after) return false;
-    *m_target = *m_after;
+    // restoreFrom, not assignment: this path restores a snapshot and NEVER
+    // solves, so a plain copy would leave every mirror image showing whatever
+    // the snapshot happened to hold — stale after any undo or redo.
+    m_target->restoreFrom(*m_after);
     return true;
 }
 
 bool SketchEditOp::undo(Document& /*doc*/) {
     if (!m_target || !m_before) return false;
-    *m_target = *m_before;
+    m_target->restoreFrom(*m_before);
     return true;
 }
 

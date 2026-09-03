@@ -259,7 +259,9 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         for (const auto& [id, shp] : bodySnap) { doc.putBody(id, shp); want.insert(id); }
         for (int id : doc.getAllBodyIds()) if (!want.count(id)) doc.removeBody(id);
         for (const auto& [sid, sk] : sketchSnap)
-            if (auto live = doc.getSketch(sid)) *live = sk;
+            // restoreFrom, not assignment: a rolled-back sketch must have its
+            // mirror images recomputed — this path never solves.
+            if (auto live = doc.getSketch(sid)) live->restoreFrom(sk);
         for (auto& op : m_operations) op->restoreEditState();
         m_currentIndex = savedIndex;
     };

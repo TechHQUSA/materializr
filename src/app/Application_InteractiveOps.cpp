@@ -2148,7 +2148,7 @@ void Application::updateSketchPattern() {
     // Restore the pre-preview state, then re-apply the transform from
     // current parameters. This is how every preview frame stays clean —
     // no leftover copies from earlier preview iterations.
-    *m_activeSketch = *m_sketchPatternBefore;
+    m_activeSketch->restoreFrom(*m_sketchPatternBefore);
     if (m_sketchPatternCount < 2 || m_sketchPatternPts.empty()) return;
 
     for (int step = 1; step < m_sketchPatternCount; ++step) {
@@ -2220,7 +2220,7 @@ void Application::commitSketchPattern() {
 
 void Application::cancelSketchPattern() {
     if (m_sketchPatternBefore && m_activeSketch) {
-        *m_activeSketch = *m_sketchPatternBefore;
+        m_activeSketch->restoreFrom(*m_sketchPatternBefore);
     }
     m_sketchPatternActive = false;
     m_sketchPatternPickingOrigin = false;

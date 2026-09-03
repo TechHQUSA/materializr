@@ -21,7 +21,7 @@ public:
     // snapshots, so removing the live `other` sketches afterward is safe).
     void setTarget(int id, const materializr::Sketch& before) {
         m_targetId = id;
-        m_targetBefore = before;
+        m_targetBefore.assignRaw(before);   // snapshot: bytes, no invariant
     }
     void addOther(int id, const materializr::Sketch& snap,
                   const std::string& name, bool visible) {

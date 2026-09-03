@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <type_traits>
 
 using materializr::Sketch;
 using materializr::SketchMirror;
@@ -221,4 +222,36 @@ TEST(SketchMirror, NoMirrorsIsANoOp) {
     EXPECT_NEAR(1.0f, posOf(sk, p).x, 1e-6);
     EXPECT_EQ(0, sk.validateMirrors());
     EXPECT_FALSE(sk.isDerived(p));
+}
+
+// The invariant is only as good as its adoption. These pin the two things that
+// make adoption mechanical rather than remembered: a live sketch cannot be
+// copy-assigned at all (it is a compile error, so the static_assert below is
+// really documentation), and restoreFrom is what the production restore paths
+// call — undo/redo, gizmo cancel, pattern preview/cancel, load, combine,
+// combine undo, transactional rollback and draft recovery.
+static_assert(!std::is_copy_assignable<materializr::Sketch>::value,
+              "Sketch copy-assignment must stay deleted: assigning a live sketch "
+              "wholesale is how a mirror image goes stale, and three review rounds "
+              "each found another restore path that enumeration had missed.");
+static_assert(std::is_copy_constructible<materializr::Sketch>::value,
+              "Copy CONSTRUCTION stays available — a snapshot is a new object.");
+
+// assignRaw is the deliberate escape hatch: bytes, no invariant. It exists for
+// storing a snapshot into a member, and must NOT recompute (that is precisely
+// what distinguishes it from restoreFrom).
+TEST(SketchMirror, AssignRawCopiesWithoutReestablishingTheInvariant) {
+    Fixture f = makePointMirror({3.0f, 4.0f});
+    Sketch stale = f.sk;                    // copy construction: consistent
+    stale.movePoint(f.dst, {0.0f, 0.0f});   // now deliberately inconsistent
+
+    Sketch snap;
+    snap.assignRaw(stale);
+    const auto* p = snap.getPoint(f.dst);
+    ASSERT_NE(nullptr, p);
+    EXPECT_NEAR(0.0f, p->pos.x, 1e-6) << "assignRaw must NOT recompute";
+
+    Sketch fixed;
+    fixed.restoreFrom(stale);
+    EXPECT_NEAR(-3.0f, fixed.getPoint(f.dst)->pos.x, 1e-5) << "restoreFrom must";
 }

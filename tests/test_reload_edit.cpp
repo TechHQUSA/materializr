@@ -559,7 +559,7 @@ TEST(SketchHistory, CircleDiameterEditableFromHistory) {
     int ctr = after->addPoint({3, 4});
     int cid = after->addCircle(ctr, 10.0);     // Ø20
     auto live = std::make_shared<Sketch>();
-    *live = *after;                             // edit already applied to live
+    live->restoreFrom(*after);                  // edit already applied to live
 
     SketchEditOp op(live, before, after);
     // Panel edit → writes the new radius into the after-snapshot.
@@ -601,9 +601,9 @@ TEST(SketchHistory, CircleDiameterEditPropagatesThroughLaterSnapshots) {
     after1->addLine(a, b);
 
     History H;
-    *live = *after0;
+    live->restoreFrom(*after0);
     H.pushExecuted(std::make_unique<SketchEditOp>(live, before0, after0));
-    *live = *after1;
+    live->restoreFrom(*after1);
     H.pushExecuted(std::make_unique<SketchEditOp>(live, before1, after1));
 
     // Edit the diameter at the introducing step (Ø20 -> Ø15).
