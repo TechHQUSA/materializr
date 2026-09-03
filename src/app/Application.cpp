@@ -114,6 +114,7 @@ inline void resetFpuForOcct() {
 #include "core/EventBus.h"
 #include "core/Events.h"
 #include "core/Verbose.h"
+#include "core/UiKeepAlive.h"
 #include "core/ThrowTrace.h"
 #include "core/NumParse.h"
 #include "plugin/PluginContext.h"
@@ -1314,6 +1315,16 @@ void Application::endFrame() {
         m_window->updateTextInput(want,
                                   kio.MouseClicked[0] && kio.WantTextInput);
     }
+}
+
+// Fold the stretch since the previous pump into the heavy task's worst gap.
+void Application::noteHeavyPumpGap() {
+    const auto now = std::chrono::steady_clock::now();
+    const int gap = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_lastHeavyPump).count());
+    if (gap > m_heavyWorstGapMs) m_heavyWorstGapMs = gap;
+    m_lastHeavyPump = now;
 }
 
 void Application::renderSplashFrame(const char* status) {
@@ -3826,7 +3837,28 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         return v;
     };
 
+    // Replaying a step RE-RUNS its geometry: on a slower machine four extrude
+    // booleans in one real project cost ~6 s each, 24 s of the 24.4 s load, all
+    // inside a single main-loop iteration. Offer the keep-alive a step count
+    // so the load shows honest progress instead of a frozen window; it decides
+    // how often that is actually worth drawing. Within a step, the ops' own
+    // OCCT progress callbacks keep it fed — see core/UiKeepAlive.h.
+    const size_t totalSteps = hist.steps.size();
+    size_t stepNo = 0;
     for (const auto& st : hist.steps) {
+        ++stepNo;
+        if (totalSteps > 1) {
+            char lbl[96];
+            std::snprintf(lbl, sizeof(lbl), "Rebuilding history \xE2\x80\x94 step %d of %d",
+                          static_cast<int>(stepNo), static_cast<int>(totalSteps));
+            m_heavyProgressLabel = lbl;
+            m_heavyProgressFrac =
+                static_cast<float>(stepNo - 1) / static_cast<float>(totalSteps);
+            // Through the keep-alive, NOT straight to renderProgressFrame: it
+            // is what rate-limits the drawing. A frame per step is 52 frames
+            // whether or not the machine can afford them.
+            materializr::uiKeepAlive();
+        }
         ReplayOp::BodyState before = toVec(running);
 
         // While `running` still holds the pre-step state, derive what this
@@ -4223,7 +4255,10 @@ void Application::loadProjectWithProgress(const std::string& path) {
     auto ms = [](clock::duration d) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
     };
-    // Show something immediately so the window isn't a frozen blank.
+    // Show something immediately so the window isn't a frozen blank. Start the
+    // latch clear: a Cancel/Escape left over from an earlier op would otherwise
+    // make every progress frame below return without drawing OR pumping.
+    m_progressCancelled = false;
     renderProgressFrame(-1.0f, "Loading project\xE2\x80\xA6");
 
     auto t0 = clock::now();
@@ -6886,9 +6921,22 @@ void Application::run() {
         {
             static uint32_t lastIterMs = 0;
             const uint32_t nowMs = SDL_GetTicks();
-            if (lastIterMs != 0 && nowMs - lastIterMs > 1000)
-                std::fprintf(stderr, "[Perf] main loop stalled %.2fs\n",
-                             (nowMs - lastIterMs) / 1000.0);
+            if (lastIterMs != 0 && nowMs - lastIterMs > 1000) {
+                // A heavy task deliberately owns the loop for as long as it
+                // takes; that is not the freeze this watchdog hunts for, as
+                // long as it kept answering the compositor. Say which one it
+                // was, or the loading of a big project reads as the bug.
+                if (m_heavyRanThisIter)
+                    std::fprintf(stderr, "[Perf] heavy task held the loop %.2fs "
+                                 "(%d UI pumps, %d frames, worst gap %.2fs)\n",
+                                 (nowMs - lastIterMs) / 1000.0,
+                                 m_heavyPumps, m_heavyDraws,
+                                 m_heavyWorstGapMs / 1000.0);
+                else
+                    std::fprintf(stderr, "[Perf] main loop stalled %.2fs\n",
+                                 (nowMs - lastIterMs) / 1000.0);
+            }
+            m_heavyRanThisIter = false;
             lastIterMs = nowMs;
         }
         // Apply/discard any landed async thread re-cuts before this frame.
@@ -7061,7 +7109,45 @@ void Application::run() {
         if (m_deferredHeavyTask) {
             auto task = std::move(m_deferredHeavyTask);
             m_deferredHeavyTask = nullptr;
+            // Arm the UI keep-alive for the duration of the task, and ONLY for
+            // that duration. Between frames is the one place where repainting
+            // from deep inside an op is safe (no ImGui frame is in flight), and
+            // scoping it here is what lets the same ops call uiKeepAlive() from
+            // an OCCT callback during a live drag preview and get a harmless
+            // no-op. See core/UiKeepAlive.h.
+            m_heavyProgressFrac = -1.0f;
+            m_heavyProgressLabel.clear();
+            m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;
+            m_nextHeavyDraw = m_lastHeavyPump = std::chrono::steady_clock::now();
+            materializr::setUiKeepAlive([this]() {
+                using clock = std::chrono::steady_clock;
+                ++m_heavyPumps;
+                noteHeavyPumpGap();
+                // Pump FIRST and unconditionally. This is the part that keeps
+                // the compositor's ping answered, it touches no GL, and it must
+                // not be hostage to the draw below -- which is throttled, and
+                // which renderProgressFrame skips entirely once the cancel
+                // latch is set.
+                if (m_window) m_window->pollEvents();
+
+                const auto now = clock::now();
+                if (now < m_nextHeavyDraw) return;
+                renderProgressFrame(m_heavyProgressFrac,
+                                    m_heavyProgressLabel.c_str());
+                ++m_heavyDraws;
+                // Back off from the draw's OWN cost, so a cheap frame animates
+                // smoothly and an expensive one (see m_nextHeavyDraw) can never
+                // eat more than a fifth of the wall clock.
+                const auto after = clock::now();
+                const auto cost = after - now;
+                m_nextHeavyDraw = after + std::max(
+                    std::chrono::duration_cast<clock::duration>(
+                        std::chrono::milliseconds(200)), cost * 4);
+            });
             task();
+            materializr::setUiKeepAlive(nullptr);
+            noteHeavyPumpGap();   // close the books on the tail of the task
+            m_heavyRanThisIter = true;   // the watchdog reads this next time round
             m_wakeFrames = 5; // task finished — repaint the result
         }
 

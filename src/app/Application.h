@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <atomic>
+#include <chrono>
 #include <future>
 #include <mutex>
 #include <vector>
@@ -134,6 +135,7 @@ private:
     void beginFrame();
     void endFrame();
     void renderSplashFrame(const char* status);
+    void noteHeavyPumpGap();
     // Self-contained progress frame for long operations, rendered between main
     // frames (via m_deferredHeavyTask). Returns true if the user hit Cancel.
     // fraction<0 = indeterminate; fraction<=0 also resets the cancel latch.
@@ -149,6 +151,34 @@ private:
     // A heavy op deferred from a controller commit to run between frames, where
     // renderProgressFrame can pump its own frames without nesting ImGui frames.
     std::function<void()> m_deferredHeavyTask;
+    // What the UI keep-alive should redraw while a heavy task blocks the main
+    // thread (see core/UiKeepAlive.h). The task updates these as it advances —
+    // the history replay sets a real step fraction — and the keep-alive repaints
+    // from wherever the block happens to be, including from inside OCCT.
+    float m_heavyProgressFrac = -1.0f;      // <0 = indeterminate
+    std::string m_heavyProgressLabel;
+    // Diagnostics for the main-loop stall watchdog: how many times the
+    // keep-alive pumped and redrew during the last heavy task, and whether the
+    // iteration it is about to judge ran one at all.
+    int  m_heavyPumps = 0;
+    int  m_heavyDraws = 0;
+    bool m_heavyRanThisIter = false;
+    // Longest stretch of the last heavy task with NO event pump — the single
+    // number that says whether the window could have been flagged unresponsive
+    // (desktops give up at around 5 s). Reported by the stall watchdog so a
+    // slow machine's log answers that question directly instead of inviting
+    // another round of guessing.
+    std::chrono::steady_clock::time_point m_lastHeavyPump{};
+    int  m_heavyWorstGapMs = 0;
+    // Earliest time the keep-alive may draw another progress frame. Pumping the
+    // event queue is nearly free and happens every time; DRAWING one is not,
+    // and its cost is not ours to predict: with the window unmapped or occluded
+    // the compositor sends no frame callback and Mesa's swap sits out its ~1 s
+    // fallback timeout. A frame per history step cost a full second each that
+    // way -- a 16 s project load stretched past 70 s. So the draw rate backs
+    // off from its own measured cost, and answering the compositor never
+    // depends on it.
+    std::chrono::steady_clock::time_point m_nextHeavyDraw{};
     // Idle-render throttle: counts down frames to render after the last event
     // or active-work wakeup. Zero = skip the frame and sleep for the next event.
     int m_wakeFrames = 0;

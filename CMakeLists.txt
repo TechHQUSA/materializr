@@ -268,6 +268,7 @@ add_executable(materializr
     src/core/VariableManager.cpp
     src/core/Material.cpp
     src/core/Verbose.cpp
+    src/core/UiKeepAlive.cpp
     src/core/ThrowTrace.cpp
     src/core/VersionManager.cpp
     src/modeling/ExtrudeOp.cpp

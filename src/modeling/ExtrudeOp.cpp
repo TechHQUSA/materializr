@@ -1,4 +1,5 @@
 #include "../core/NumFormat.h"
+#include "../core/UiKeepAlive.h"
 #include "ExtrudeOp.h"
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
@@ -283,9 +284,17 @@ struct ExtrudeTimeBox : public Message_ProgressIndicator {
     std::clock_t start; double limit;
     explicit ExtrudeTimeBox(double seconds) : start(std::clock()), limit(seconds) {}
     Standard_Boolean UserBreak() override {
+        // These two overrides are the ONLY points where control comes back to
+        // us during a multi-second Build(). Pump the UI here or the window
+        // cannot answer the compositor's ping and gets flagged unresponsive --
+        // four of these booleans re-run back to back on every project load.
+        // uiKeepAlive() self-throttles and no-ops off the main thread.
+        materializr::uiKeepAlive();
         return double(std::clock() - start) / CLOCKS_PER_SEC > limit;
     }
-    void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+    void Show(const Message_ProgressScope&, const Standard_Boolean) override {
+        materializr::uiKeepAlive();
+    }
 };
 template <class OP>
 bool timedBooleanBuild(OP& op, const TopoDS_Shape& a, const TopoDS_Shape& b,
@@ -728,10 +737,27 @@ bool ExtrudeOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
             auto sk = doc.getSketch(m_sketchId);
             if (sk && !after.IsNull()) {
                 try {
-                    TopoDS_Shape delta =
-                        (m_mode == ExtrudeMode::Union)
-                            ? BRepAlgoAPI_Cut(after, m_previousTargetShape).Shape()
-                            : BRepAlgoAPI_Cut(m_previousTargetShape, after).Shape();
+                    // This delta cut is pure RECOVERY -- it derives a fallback
+                    // footprint, it does not build the model -- but it is a
+                    // full boolean between two whole body snapshots and it runs
+                    // for EVERY boolean-mode extrude on EVERY load. Measured on
+                    // a 4-core i7-6650U: ~6 s each, four of them, 24 s of a
+                    // 24.4 s project open, single-threaded and with no way for
+                    // the UI to draw breath -- the compositor spent most of the
+                    // load offering to force-quit us. It is the one boolean in
+                    // this file that was never given the treatment the others
+                    // have, so give it the same one: parallel, time-boxed, and
+                    // pumping the UI from its progress callback. A cut that
+                    // cannot finish inside the budget leaves `delta` null and
+                    // costs us only the fallback profile.
+                    const bool isUnion = (m_mode == ExtrudeMode::Union);
+                    BRepAlgoAPI_Cut deltaCut;
+                    TopoDS_Shape delta;
+                    if (timedBooleanBuild(deltaCut,
+                                          isUnion ? after : m_previousTargetShape,
+                                          isUnion ? m_previousTargetShape : after,
+                                          "footprint-recovery cut"))
+                        delta = deltaCut.Shape();
                     const gp_Pln pln = sk->getPlane();
                     auto faces = footprintFacesOnPlane(delta, pln);
                     if (!faces.empty() && m_recoveredProfile.IsNull()) {

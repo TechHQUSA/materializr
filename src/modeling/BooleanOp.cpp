@@ -1,4 +1,5 @@
 #include "BooleanOp.h"
+#include "../core/UiKeepAlive.h"
 #include <Message_ProgressIndicator.hxx>
 #include <Message_ProgressScope.hxx>
 #include <TopTools_ListOfShape.hxx>
@@ -67,9 +68,14 @@ bool BooleanOp::execute(Document& doc) {
             explicit TimeBox(double seconds)
                 : start(std::clock()), limit(seconds) {}
             Standard_Boolean UserBreak() override {
+                // Also the UI's only breathing room during a long Build() --
+                // see the matching note in ExtrudeOp's ExtrudeTimeBox.
+                materializr::uiKeepAlive();
                 return double(std::clock() - start) / CLOCKS_PER_SEC > limit;
             }
-            void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+            void Show(const Message_ProgressScope&, const Standard_Boolean) override {
+                materializr::uiKeepAlive();
+            }
         };
         constexpr double kAttemptSeconds = 45.0;
 
