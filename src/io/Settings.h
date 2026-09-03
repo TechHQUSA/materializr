@@ -194,6 +194,11 @@ struct AppSettings {
     // not depend on i18n.h. -1 means "never chosen", which is what makes the
     // setup wizard ask on first run.
     int  language = -1;
+    // Display unit for every length readout and input: materializr::LengthUnit
+    // (0 mm, 1 cm, 2 m, 3 in, 4 ft). An int for the same reason language is —
+    // this header stays free of core/Units.h. The model is always mm; this only
+    // changes what the user sees and types.
+    int  displayUnit = 0;
 
     // --- STL import ---
     // Default fidelity for STL import, 0..1 (coarse/fast .. faithful/slow). Pre-

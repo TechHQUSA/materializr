@@ -25,6 +25,20 @@ def E(en, es, pt, fr, de, it):
 CAT = [
     # ---- Tools (the rail catalogue: "identifying things in the app") -------
     E("Select",             "Seleccionar","Selecionar","Sélectionner","Auswählen","Seleziona"),
+    # ---- Display units (Settings > Units) ----------------------------------
+    E("Units",              "Unidades","Unidades","Unités","Einheiten","Unità"),
+    E("Display unit",       "Unidad de visualización","Unidade de exibição","Unité d'affichage","Anzeigeeinheit","Unità di visualizzazione"),
+    E("Millimetres",        "Milímetros","Milímetros","Millimètres","Millimeter","Millimetri"),
+    E("Centimetres",        "Centímetros","Centímetros","Centimètres","Zentimeter","Centimetri"),
+    E("Metres",             "Metros","Metros","Mètres","Meter","Metri"),
+    E("Inches",             "Pulgadas","Polegadas","Pouces","Zoll","Pollici"),
+    E("Feet",               "Pies","Pés","Pieds","Fuß","Piedi"),
+    E("Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.",
+      "Unidad para cada longitud que ves y escribes. La geometría se guarda en milímetros de todos modos; un valor escrito también puede llevar su propia unidad, p. ej. 2in o 50mm.",
+      "Unidade para cada comprimento que você vê e digita. A geometria é armazenada em milímetros de qualquer forma; um valor digitado também pode trazer sua própria unidade, p. ex. 2in ou 50mm.",
+      "Unité de chaque longueur affichée et saisie. La géométrie reste stockée en millimètres ; une valeur saisie peut aussi porter sa propre unité, p. ex. 2in ou 50mm.",
+      "Einheit für jede angezeigte und eingegebene Länge. Die Geometrie wird unabhängig davon in Millimetern gespeichert; ein eingegebener Wert kann auch seine eigene Einheit tragen, z. B. 2in oder 50mm.",
+      "Unità per ogni lunghezza visualizzata e digitata. La geometria è comunque salvata in millimetri; un valore digitato può anche indicare la propria unità, ad es. 2in o 50mm."),
     E("Sketch",             "Boceto","Esboço","Esquisse","Skizze","Schizzo"),
     E("Sketch on Face",     "Boceto en cara","Esboço na face","Esquisse sur face","Skizze auf Fläche","Schizzo su faccia"),
     E("Line",               "Línea","Linha","Ligne","Linie","Linea"),

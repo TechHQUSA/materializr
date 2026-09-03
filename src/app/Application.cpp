@@ -89,6 +89,7 @@ inline void resetFpuForOcct() {
 #include "modeling/CombineSketchesOp.h"
 #include "modeling/DuplicateSketchOp.h"
 #include "modeling/TransformOp.h"
+#include "core/Units.h"
 #include "modeling/FilletProbe.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
@@ -1818,6 +1819,7 @@ AppSettings Application::currentSettings() const {
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
     s.language = m_language;
+    s.displayUnit = m_displayUnit;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
     s.touchRightTab = m_touchRightTab;
@@ -1903,6 +1905,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     setLanguage((s.language > 0 && s.language < languageCount())
                     ? static_cast<Lang>(s.language)
                     : Lang::English);
+    applyDisplayUnitChange(s.displayUnit);
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
     m_showFps = s.showFps;
@@ -4474,6 +4477,18 @@ void Application::doCloseProject() {
 bool Application::isDirty() const {
     return (m_history && m_history->currentStep() != m_savedAtHistoryStep)
         || m_unsavedNonHistoryChanges;
+}
+
+void Application::applyDisplayUnitChange(int unit) {
+    // Clamp here too: Settings clamps on load, but the combo and any future
+    // caller should not be able to hand the table an index it cannot serve.
+    if (unit < 0 || unit >= materializr::kLengthUnitCount) unit = 0;
+    // A text field mid-edit was showing the OLD unit; letting it commit after
+    // the switch would interpret those digits in the NEW one. Drop the edit.
+    // Guarded: settings are applied before the ImGui context exists.
+    if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
+    m_displayUnit = unit;
+    materializr::setCurrentUnit(static_cast<materializr::LengthUnit>(unit));
 }
 
 void Application::markDirty() {

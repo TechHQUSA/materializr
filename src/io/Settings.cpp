@@ -146,6 +146,10 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readIntClamped(kv, "inferenceLevel", s.inferenceLevel, 0, 3);
     // -1 is meaningful here ("never chosen"), so the floor is -1, not 0.
     readIntClamped(kv, "language", s.language, -1, 5);
+    // Not readIntClamped: clamping a corrupt "9" to the range edge would silently
+    // select Feet. An invalid unit means "back to millimetres", the same rule
+    // Application::applyDisplayUnitChange enforces at the other end.
+    { int v = s.displayUnit; readInt(kv, "displayUnit", v); s.displayUnit = (v >= 0 && v < 5) ? v : 0; }
     readBool(kv, "showInferenceToolbarToggle", s.showInferenceToolbarToggle);
     readIntClamped(kv, "angleSnapDeg",   s.angleSnapDeg, 1, 90);
     readFloat(kv, "stlImportAccuracy",   s.stlImportAccuracy);
@@ -405,6 +409,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "sketchGridStep = "          << s.sketchGridStep      << "\n";
     ofs << "inferenceLevel = "          << s.inferenceLevel      << "\n";
     ofs << "language = "                << s.language            << "\n";
+    ofs << "displayUnit = "             << s.displayUnit         << "\n";
     ofs << "showInferenceToolbarToggle = "
         << (s.showInferenceToolbarToggle ? "true" : "false") << "\n";
     ofs << "angleSnapDeg = "             << s.angleSnapDeg        << "\n";
@@ -507,6 +512,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"sketchGridStep\": "          << s.sketchGridStep        << ",\n";
     ofs << "  \"inferenceLevel\": "          << s.inferenceLevel        << ",\n";
     ofs << "  \"language\": "                << s.language              << ",\n";
+    ofs << "  \"displayUnit\": "             << s.displayUnit           << ",\n";
     ofs << "  \"showInferenceToolbarToggle\": "
         << b(s.showInferenceToolbarToggle) << ",\n";
     ofs << "  \"angleSnapDeg\": "             << s.angleSnapDeg          << ",\n";

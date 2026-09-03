@@ -494,6 +494,10 @@ private:
     // Dirty tracking + unsaved-changes prompt
     bool isDirty() const;
     void markDirty();           // for changes that don't go through History
+    // The single caller of materializr::setCurrentUnit. Guards the ImGui side
+    // effect so it is safe during settings-apply, which runs before a context
+    // exists.
+    void applyDisplayUnitChange(int unit);
     void markSaved();
     void renderSavePrompt();
     void requestClose();        // called when the user clicks the window X
@@ -967,6 +971,10 @@ private:
     // UI language index, mirroring materializr::Lang. -1 = never chosen, which
     // is what makes the setup wizard open with the language question.
     int m_language = -1;
+    // Mirrors Settings::displayUnit. Change it ONLY through
+    // applyDisplayUnitChange, which also drops any active text edit so a field
+    // cannot commit in a different unit from the one it was showing.
+    int m_displayUnit = 0;
     bool classicLayout() const { return m_uiLayout == UiLayout::Classic; }
     bool modernLayout()  const { return m_uiLayout == UiLayout::Modern;  }
     bool imTouchLayout() const { return m_uiLayout == UiLayout::ImTouch; }

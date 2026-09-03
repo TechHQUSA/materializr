@@ -228,6 +228,28 @@ void Application::renderSettings() {
                     }
                     ImGui::Spacing();
 
+                    ImGui::SeparatorText(materializr::tr("Units"));
+                    // ONE mutually-exclusive choice, so a dropdown; order
+                    // matches materializr::LengthUnit and the Settings int.
+                    // The model stays millimetres — this changes what every
+                    // length readout shows and what typed lengths mean.
+                    {
+                        int unit = m_displayUnit;
+                        const char* unitNames[] = {
+                            materializr::tr("Millimetres"), materializr::tr("Centimetres"),
+                            materializr::tr("Metres"),      materializr::tr("Inches"),
+                            materializr::tr("Feet") };
+                        if (ImGui::Combo(materializr::tr("Display unit"), &unit, unitNames, 5)) {
+                            applyDisplayUnitChange(unit);
+                            changed = true;
+                        }
+                        ImGui::SetItemTooltip("%s", materializr::tr(
+                            "Unit for every length you see and type. Geometry is "
+                            "stored in millimetres regardless; a typed value may "
+                            "also carry its own unit, e.g. 2in or 50mm."));
+                    }
+                    ImGui::Spacing();
+
                     ImGui::SeparatorText(materializr::tr("Layout"));
                     // Interface layout is ONE mutually-exclusive choice
                     // (UiLayout in io/Settings.h) — a dropdown so the modes

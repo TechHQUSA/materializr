@@ -28,6 +28,25 @@ std::string readAll(const std::string& p) {
 }
 } // namespace
 
+// Display unit persists, and an out-of-range value from a hand-edited file
+// clamps to mm rather than indexing past the unit table.
+TEST(SettingsSessions, DisplayUnitRoundTripsAndClamps) {
+    const std::string p = tmpCfg("displayunit");
+    AppSettings s;
+    s.displayUnit = 3;   // inches
+    ASSERT_TRUE(SettingsIO::save(p, s));
+    EXPECT_EQ(3, SettingsIO::load(p).displayUnit);
+
+    // Corrupt it on disk the way a user with a text editor would.
+    std::string txt = readAll(p);
+    const auto at = txt.find("displayUnit = 3");
+    ASSERT_NE(std::string::npos, at);
+    txt.replace(at, std::string("displayUnit = 3").size(), "displayUnit = 9");
+    { std::ofstream f(p); f << txt; }
+    EXPECT_EQ(0, SettingsIO::load(p).displayUnit) << "out-of-range must clamp to mm";
+    fs::remove(p);
+}
+
 TEST(SettingsSessions, RoundTripsOpenTabsAndActiveIndex) {
     const std::string p = tmpCfg("roundtrip");
     AppSettings s;

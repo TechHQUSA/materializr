@@ -12,6 +12,14 @@ struct TrEntry { const char* en; const char* tr; };
 // --- Spanish ---
 inline const TrEntry kEsCatalogue[] = {
     { "Select", "Seleccionar" },
+    { "Units", "Unidades" },
+    { "Display unit", "Unidad de visualizaci\xc3""\xb3""n" },
+    { "Millimetres", "Mil\xc3""\xad""metros" },
+    { "Centimetres", "Cent\xc3""\xad""metros" },
+    { "Metres", "Metros" },
+    { "Inches", "Pulgadas" },
+    { "Feet", "Pies" },
+    { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unidad para cada longitud que ves y escribes. La geometr\xc3""\xad""a se guarda en mil\xc3""\xad""metros de todos modos; un valor escrito tambi\xc3""\xa9""n puede llevar su propia unidad, p. ej. 2in o 50mm." },
     { "Sketch", "Boceto" },
     { "Sketch on Face", "Boceto en cara" },
     { "Line", "L\xc3""\xad""nea" },
@@ -1164,11 +1172,19 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1152;
+inline constexpr int kEsCount = 1160;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
     { "Select", "Selecionar" },
+    { "Units", "Unidades" },
+    { "Display unit", "Unidade de exibi\xc3""\xa7""\xc3""\xa3""o" },
+    { "Millimetres", "Mil\xc3""\xad""metros" },
+    { "Centimetres", "Cent\xc3""\xad""metros" },
+    { "Metres", "Metros" },
+    { "Inches", "Polegadas" },
+    { "Feet", "P\xc3""\xa9""s" },
+    { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unidade para cada comprimento que voc\xc3""\xaa"" v\xc3""\xaa"" e digita. A geometria \xc3""\xa9"" armazenada em mil\xc3""\xad""metros de qualquer forma; um valor digitado tamb\xc3""\xa9""m pode trazer sua pr\xc3""\xb3""pria unidade, p. ex. 2in ou 50mm." },
     { "Sketch", "Esbo\xc3""\xa7""o" },
     { "Sketch on Face", "Esbo\xc3""\xa7""o na face" },
     { "Line", "Linha" },
@@ -2321,11 +2337,19 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1152;
+inline constexpr int kPtCount = 1160;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
     { "Select", "S\xc3""\xa9""lectionner" },
+    { "Units", "Unit\xc3""\xa9""s" },
+    { "Display unit", "Unit\xc3""\xa9"" d'affichage" },
+    { "Millimetres", "Millim\xc3""\xa8""tres" },
+    { "Centimetres", "Centim\xc3""\xa8""tres" },
+    { "Metres", "M\xc3""\xa8""tres" },
+    { "Inches", "Pouces" },
+    { "Feet", "Pieds" },
+    { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unit\xc3""\xa9"" de chaque longueur affich\xc3""\xa9""e et saisie. La g\xc3""\xa9""om\xc3""\xa9""trie reste stock\xc3""\xa9""e en millim\xc3""\xa8""tres ; une valeur saisie peut aussi porter sa propre unit\xc3""\xa9"", p. ex. 2in ou 50mm." },
     { "Sketch", "Esquisse" },
     { "Sketch on Face", "Esquisse sur face" },
     { "Line", "Ligne" },
@@ -3478,11 +3502,19 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1152;
+inline constexpr int kFrCount = 1160;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
     { "Select", "Ausw\xc3""\xa4""hlen" },
+    { "Units", "Einheiten" },
+    { "Display unit", "Anzeigeeinheit" },
+    { "Millimetres", "Millimeter" },
+    { "Centimetres", "Zentimeter" },
+    { "Metres", "Meter" },
+    { "Inches", "Zoll" },
+    { "Feet", "Fu\xc3""\x9f""" },
+    { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Einheit f\xc3""\xbc""r jede angezeigte und eingegebene L\xc3""\xa4""nge. Die Geometrie wird unabh\xc3""\xa4""ngig davon in Millimetern gespeichert; ein eingegebener Wert kann auch seine eigene Einheit tragen, z. B. 2in oder 50mm." },
     { "Sketch", "Skizze" },
     { "Sketch on Face", "Skizze auf Fl\xc3""\xa4""che" },
     { "Line", "Linie" },
@@ -4635,11 +4667,19 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1152;
+inline constexpr int kDeCount = 1160;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
     { "Select", "Seleziona" },
+    { "Units", "Unit\xc3""\xa0""" },
+    { "Display unit", "Unit\xc3""\xa0"" di visualizzazione" },
+    { "Millimetres", "Millimetri" },
+    { "Centimetres", "Centimetri" },
+    { "Metres", "Metri" },
+    { "Inches", "Pollici" },
+    { "Feet", "Piedi" },
+    { "Unit for every length you see and type. Geometry is stored in millimetres regardless; a typed value may also carry its own unit, e.g. 2in or 50mm.", "Unit\xc3""\xa0"" per ogni lunghezza visualizzata e digitata. La geometria \xc3""\xa8"" comunque salvata in millimetri; un valore digitato pu\xc3""\xb2"" anche indicare la propria unit\xc3""\xa0"", ad es. 2in o 50mm." },
     { "Sketch", "Schizzo" },
     { "Sketch on Face", "Schizzo su faccia" },
     { "Line", "Linea" },
@@ -5792,6 +5832,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1152;
+inline constexpr int kItCount = 1160;
 
 } // namespace materializr
