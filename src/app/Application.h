@@ -1040,6 +1040,9 @@ private:
     // Double-click window (s), applied to ImGuiIO::MouseDoubleClickTime. Higher
     // suits trackpads (slower double-taps). Persisted; default = ImGui's 0.30.
     float m_doubleClickTime = 0.30f;
+    // Seconds a fillet may spend proving it terminates before being refused.
+    // Mirrors Settings::filletProbeSeconds; pushed into FilletProbe on apply.
+    float m_filletProbeSeconds = 2.5f;
 
     // Rendering preferences (File > Settings → Rendering). Persisted.
     float m_lightAmbient = 0.40f;   // base illumination; higher = softer shadows

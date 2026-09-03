@@ -89,6 +89,7 @@ inline void resetFpuForOcct() {
 #include "modeling/CombineSketchesOp.h"
 #include "modeling/DuplicateSketchOp.h"
 #include "modeling/TransformOp.h"
+#include "modeling/FilletProbe.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
@@ -1830,6 +1831,7 @@ AppSettings Application::currentSettings() const {
     s.autosaveIntervalSec = static_cast<int>(m_autosaveIntervalSec);
     s.invertCubeDrag = m_invertCubeDrag;
     s.doubleClickTimeSec = m_doubleClickTime;
+    s.filletProbeSeconds = m_filletProbeSeconds;
     s.lightAmbient = m_lightAmbient;
     s.lightHeadlight = m_lightHeadlight;
     s.lightFill = m_lightFill;
@@ -1928,6 +1930,10 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_doubleClickTime = s.doubleClickTimeSec;
     if (ImGui::GetCurrentContext())
         ImGui::GetIO().MouseDoubleClickTime = m_doubleClickTime;
+    m_filletProbeSeconds = s.filletProbeSeconds;
+    // The only bound on an uninterruptible OCCT blend, so it must reach the
+    // probe on every apply — not just at construction.
+    materializr::fillet::setProbeBudget(m_filletProbeSeconds);
     m_lightAmbient = s.lightAmbient;
     m_lightHeadlight = s.lightHeadlight;
     m_lightFill = s.lightFill;

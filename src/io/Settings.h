@@ -86,6 +86,10 @@ struct AppSettings {
     // two single clicks (which would cycle-select past the body to the sketch
     // behind it).
     float doubleClickTimeSec = 0.30f;
+    // Seconds a fillet may spend proving it terminates before it is refused.
+    // OCCT's blend cannot be interrupted, so this is the only bound on it —
+    // raise it for heavy bodies, lower it if a stalled fillet feels sluggish.
+    float filletProbeSeconds = 2.5f;
 
     // --- Rendering ---
     float lightAmbient   = 0.40f; // 0..1 base illumination; higher = softer shadows
