@@ -80,4 +80,20 @@ inline bool constraintSupportsReference(ConstraintType t) {
            t == ConstraintType::CircleGap;
 }
 
+// Label offset for a dimension tag dropped at `want`, measured from its
+// geometric anchor.
+//
+// (0,0) is overloaded: it is also the sentinel for "never placed", which the
+// renderer reads as "use the automatic position". A tag dropped exactly on its
+// anchor would therefore snap back to auto placement and look like the drag was
+// ignored. Nudging by a tenth of a micron is invisible at any usable zoom and
+// keeps the placement.
+inline void dimLabelOffset(double wantX, double wantY,
+                           double anchorX, double anchorY,
+                           double& outX, double& outY) {
+    outX = wantX - anchorX;
+    outY = wantY - anchorY;
+    if (outX == 0.0 && outY == 0.0) outX = 1e-4;
+}
+
 } // namespace materializr

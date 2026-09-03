@@ -237,6 +237,11 @@ add_executable(test_extrude_recovered_profile test_extrude_recovered_profile.cpp
 target_link_libraries(test_extrude_recovered_profile PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_extrude_recovered_profile COMMAND test_extrude_recovered_profile)
 
+# test_dim_label_offset - dimension tag placement offsets (drag to reposition)
+add_executable(test_dim_label_offset test_dim_label_offset.cpp)
+target_link_libraries(test_dim_label_offset PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_dim_label_offset COMMAND test_dim_label_offset)
+
 # test_fillet_probe - deadline guard for OCCT's uninterruptible fillet builder
 add_executable(test_fillet_probe test_fillet_probe.cpp)
 target_link_libraries(test_fillet_probe PRIVATE materializr_core gtest gtest_main)

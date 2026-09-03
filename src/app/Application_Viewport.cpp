@@ -2547,8 +2547,35 @@ void Application::renderViewport() {
                     ImGui::OpenPopup("##DimEdit");
                     m_dimOpenEditRequested = false;
                 }
+                // Cursor in sketch mm — the space labelOffX/Y lives in, so a
+                // drag can be expressed as an offset directly.
+                const ImVec2 dimMp = ImGui::GetMousePos();
+                const glm::vec2 dimCursor = screenToSketch(
+                    dimMp.x - imgMin.x, dimMp.y - imgMin.y, imgSize.x, imgSize.y);
+                // Opens the value editor for a constraint. Called on RELEASE
+                // of a press that did not turn into a drag — see the label
+                // press/drag handling below.
+                auto openDimEdit = [&](const Constraint& c) {
+                    m_dimEditingId = c.id;
+                    if (c.type == ConstraintType::Angle) {
+                        std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
+                                      "%.2f", c.value * 180.0 / M_PI);
+                    } else if (c.type == ConstraintType::Radius) {
+                        // Edited in whatever unit the label shows: radius for
+                        // an arc (R), diameter for a circle (Ø).
+                        std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
+                                      constraintIsArcRadiusIn(*m_activeSketch, c)
+                                          ? c.value : c.value * 2.0);
+                    } else {
+                        std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
+                                      "%.2f", c.value);
+                    }
+                    m_dimEditingFocus = true;
+                    m_dimEditingClickedThisFrame = true;
+                    ImGui::OpenPopup("##DimEdit");
+                };
                 auto drawLabel = [&](glm::vec2 pos, const char* text,
-                                     const Constraint& c) {
+                                     const Constraint& c, glm::vec2 anchor) {
                     ImVec2 sp;
                     if (!toImg(dim2world(pos), sp)) return;
                     ImVec2 ts = ImGui::CalcTextSize(text);
@@ -2565,28 +2592,43 @@ void Application::renderViewport() {
                     // the shape" from "this number just reports it".
                     dl->AddText(tp, c.isDriving ? IM_COL32(255, 235, 120, 255)
                                                 : IM_COL32(170, 178, 190, 255), text);
-                    // Click → open edit popup. Skipped if we're already
-                    // editing this same constraint to avoid re-triggering
-                    // the open every frame the popup is up.
+                    // A press LATCHES the label for dragging. The edit popup
+                    // is deferred to release (below, after the loop) and only
+                    // fires if the pointer stayed put — otherwise the tag can
+                    // never be repositioned, because every attempt to move it
+                    // opens the value editor instead.
                     if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                        m_dimEditingId != c.id) {
-                        m_dimEditingId = c.id;
-                        if (c.type == ConstraintType::Angle) {
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
-                                          "%.2f", c.value * 180.0 / M_PI);
-                        } else if (c.type == ConstraintType::Radius) {
-                            // Edited in whatever unit the label shows: radius
-                            // for an arc (R), diameter for a circle (Ø).
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                                          constraintIsArcRadiusIn(*m_activeSketch, c)
-                                              ? c.value : c.value * 2.0);
-                        } else {
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
-                                          "%.2f", c.value);
+                        m_dimDragId < 0 && m_dimEditingId != c.id) {
+                        m_dimDragId    = c.id;
+                        m_dimDragMoved = false;
+                        m_dimDragGrab  = pos - dimCursor;
+                    }
+                    // Live drag: rewrite this constraint's stored offset so the
+                    // label tracks the cursor. Offsets are relative to the
+                    // type's geometric anchor, so the tag keeps its place when
+                    // the solver later moves the geometry under it.
+                    if (m_dimDragId == c.id &&
+                        ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        const glm::vec2 want = dimCursor + m_dimDragGrab;
+                        double offX = 0.0, offY = 0.0;
+                        materializr::dimLabelOffset(want.x, want.y,
+                                                    anchor.x, anchor.y,
+                                                    offX, offY);
+                        for (auto& mc : m_activeSketch->getMutableConstraints()) {
+                            if (mc.id != c.id) continue;
+                            mc.labelOffX = offX;
+                            mc.labelOffY = offY;
+                            break;
                         }
-                        m_dimEditingFocus = true;
-                        m_dimEditingClickedThisFrame = true;
-                        ImGui::OpenPopup("##DimEdit");
+                        // A press that travels barely at all is still a click.
+                        // Threshold in sketch mm scaled by zoom would be nicer;
+                        // pixels are what the user actually feels.
+                        if (ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x != 0.0f ||
+                            ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y != 0.0f) {
+                            const ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+                            if (d.x * d.x + d.y * d.y > 9.0f) m_dimDragMoved = true;
+                        }
+                        m_dimEditingClickedThisFrame = true;  // don't also pick
                     }
                 };
                 // Resolves a constraint's label position from its stored
@@ -2622,9 +2664,9 @@ void Application::renderViewport() {
                     if (!c.isDriving) {
                         char ref[48];
                         std::snprintf(ref, sizeof(ref), "[%s]", text);
-                        drawLabel(lpos, ref, c);
+                        drawLabel(lpos, ref, c, anchor);
                     } else {
-                        drawLabel(lpos, text, c);
+                        drawLabel(lpos, text, c, anchor);
                     }
                 };
                 char lbl[40];
@@ -2870,6 +2912,24 @@ void Application::renderViewport() {
                         std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
                         placeLabel(anchor, glm::vec2(0.0f), lbl, c, &anchor);
                     }
+                }
+
+                // Release ends a label drag. A press that never really moved is
+                // a click, and opens the editor — so tapping a tag still edits
+                // it, while dragging one repositions it.
+                if (m_dimDragId >= 0 &&
+                    ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                    if (!m_dimDragMoved) {
+                        for (const auto& c : m_activeSketch->getConstraints())
+                            if (c.id == m_dimDragId) { openDimEdit(c); break; }
+                    } else {
+                        // The offset was written live during the drag, so the
+                        // sketch already holds the new position; just mark the
+                        // project dirty so it is saved.
+                        markDirty();
+                    }
+                    m_dimDragId    = -1;
+                    m_dimDragMoved = false;
                 }
 
                 // Dimension tool feedback: highlight the hovered pickable
