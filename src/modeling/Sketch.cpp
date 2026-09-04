@@ -668,6 +668,35 @@ const std::vector<SketchPolygon>& Sketch::getPolygons() const {
 // Element removal
 
 void Sketch::removeElement(int id) {
+    // An image is an OUTPUT: recomputeMirrors would rebuild it on the next
+    // solve, so deleting it directly is a lie the model cannot keep. Break link
+    // and Delete mirror are the routes to the same intent.
+    if (isDerived(id)) return;
+
+    // Deleting a SOURCE takes its image with it, and only its image. The old
+    // behaviour broke the whole group, so removing one line of a ten-line mirror
+    // silently unlinked the other nine.
+    //
+    // Two phases. PLAN the full cascade with no mutation, then erase raw:
+    // cascading through this same function would re-enter the relationship logic
+    // and mutate the group being walked.
+    std::unordered_set<int> alsoErase;
+    if (!m_mirrors.empty()) {
+        for (auto& mir : m_mirrors) {
+            for (auto* v : { &mir.lines, &mir.circles, &mir.arcs, &mir.splines }) {
+                for (auto it = v->begin(); it != v->end(); ) {
+                    if (it->first == id) { alsoErase.insert(it->second); it = v->erase(it); }
+                    else ++it;
+                }
+            }
+            // A point pair whose source is this element's vertex is NOT swept
+            // here: a mirrored standalone point is used by no element from the
+            // moment it is created, and "any pair no element uses" would delete
+            // it on sight. A point pair dies with its own source point, or with
+            // the group.
+        }
+    }
+
     m_lines.erase(
         std::remove_if(m_lines.begin(), m_lines.end(),
             [id](const SketchLine& l) { return l.id == id; }),
@@ -698,16 +727,53 @@ void Sketch::removeElement(int id) {
             [id](const SketchPoint& p) { return p.id == id; }),
         m_points.end());
 
-    // Deleting half of a mirror pair would otherwise strand the other half:
-    // still flagged derived, so undraggable and still discounted from the DOF
-    // tally, with nothing left to recompute it from. Breaking the group
-    // releases the survivor as ordinary geometry — the same degradation Break
-    // link performs, which is the honest outcome until removeElement learns the
-    // full deletion cascade.
+    // Phase 2: erase the planned images RAW, without re-entering this function.
+    if (!alsoErase.empty()) {
+        auto drop = [&](auto& vec) {
+            vec.erase(std::remove_if(vec.begin(), vec.end(),
+                [&](const auto& e) { return alsoErase.count(e.id) != 0; }), vec.end());
+        };
+        drop(m_lines); drop(m_circles); drop(m_arcs); drop(m_splines);
+        m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
+            [&](const Constraint& k) {
+                return alsoErase.count(k.entityA) || alsoErase.count(k.entityB);
+            }), m_constraints.end());
+        // A group emptied by the cascade reflects nothing; validateMirrors drops
+        // it and releases whatever it still held.
+        m_mirrors.erase(std::remove_if(m_mirrors.begin(), m_mirrors.end(),
+            [](const SketchMirror& m) {
+                return m.points.empty() && m.lines.empty() && m.circles.empty() &&
+                       m.arcs.empty() && m.splines.empty();
+            }), m_mirrors.end());
+    }
+
+    // Whatever the cascade could not repair — a pair whose source point went, a
+    // group left referencing a deleted id — is settled here: the group is
+    // dropped and its geometry released as ordinary, rather than left flagged
+    // derived, undraggable and discounted from the DOF tally.
     if (!m_mirrors.empty()) validateMirrors();
 }
 
 int Sketch::pruneOrphanPoints() {
+    // Validate FIRST. Protecting points on the strength of groups that have not
+    // been checked would let a malformed group preserve arbitrary orphans; the
+    // second validation after the sweep catches groups whose members this pass
+    // removed. Pruning between two validations is the whole of P2b.
+    if (!m_mirrors.empty()) validateMirrors();
+
+    // A point in a surviving mirror pair is NOT an orphan, however little
+    // geometry refers to it. A mirrored standalone point is referenced by no
+    // element by design — precisely what the sweep below deletes — so without
+    // this the mirror tool silently destroys its own output, from 8 call sites.
+    std::unordered_set<int> mirrored;
+    for (const auto& mir : m_mirrors) {
+        for (const auto& [srcId, dstId] : mir.points) {
+            mirrored.insert(srcId);
+            mirrored.insert(dstId);
+        }
+        for (int pid : mir.sharedPoints) mirrored.insert(pid);
+    }
+
     // Every point id still referenced by some geometry element.
     std::unordered_set<int> used;
     for (const auto& l : m_lines) { used.insert(l.startPointId); used.insert(l.endPointId); }
@@ -726,7 +792,9 @@ int Sketch::pruneOrphanPoints() {
     size_t before = m_points.size();
     m_points.erase(
         std::remove_if(m_points.begin(), m_points.end(),
-            [&](const SketchPoint& p) { return used.find(p.id) == used.end(); }),
+            [&](const SketchPoint& p) {
+                return used.find(p.id) == used.end() && mirrored.find(p.id) == mirrored.end();
+            }),
         m_points.end());
     int pruned = static_cast<int>(before - m_points.size());
 
@@ -746,6 +814,11 @@ int Sketch::pruneOrphanPoints() {
                        (k.entityB >= 0 && valid.find(k.entityB) == valid.end());
             }),
         m_constraints.end());
+
+    // And validate again: this sweep may have removed a point or a constraint a
+    // group depended on, and a group left referencing a deleted id must release
+    // its geometry rather than keep it flagged and locked.
+    if (!m_mirrors.empty()) validateMirrors();
 
     return pruned;
 }
@@ -2233,11 +2306,120 @@ bool Sketch::setConstruction(int entityId, bool on) {
     return false;
 }
 
+// Every inbound reference to a point, by TYPE. "Is this id mentioned anywhere"
+// over a bag of untyped ids is the ambiguity the validation rewrite removed; the
+// axis cleanup below must not reintroduce it.
+bool Sketch::pointIsReferenced(int pointId, int ignoreLineId, bool constraintsCount) const {
+    for (const auto& l : m_lines) {
+        if (l.id == ignoreLineId) continue;
+        if (l.startPointId == pointId || l.endPointId == pointId) return true;
+    }
+    for (const auto& c : m_circles) if (c.centerPointId == pointId) return true;
+    for (const auto& a : m_arcs)
+        if (a.centerPointId == pointId || a.startPointId == pointId ||
+            a.endPointId == pointId) return true;
+    for (const auto& sp : m_splines)
+        for (int cp : sp.controlPointIds) if (cp == pointId) return true;
+    for (const auto& g : m_polygons) {
+        if (g.centerPointId == pointId) return true;
+        for (int vp : g.vertexPointIds) if (vp == pointId) return true;
+    }
+    if (constraintsCount)
+        for (const auto& k : m_constraints)
+            if (k.entityA == pointId || k.entityB == pointId) return true;
+    for (const auto& mir : m_mirrors) {
+        for (const auto& [srcId, dstId] : mir.points)
+            if (srcId == pointId || dstId == pointId) return true;
+        for (int pid : mir.sharedPoints) if (pid == pointId) return true;
+    }
+    return false;
+}
+
+bool Sketch::deleteMirror(int mirrorId) {
+    auto it = std::find_if(m_mirrors.begin(), m_mirrors.end(),
+                           [mirrorId](const SketchMirror& m) { return m.id == mirrorId; });
+    if (it == m_mirrors.end()) return false;
+    const SketchMirror mir = *it;          // by value: the vector is edited below
+    m_mirrors.erase(it);
+
+    // The images, and the pins that served them. Sources are never touched —
+    // Delete mirror removes what the mirror MADE, not what it was made from.
+    std::unordered_set<int> killElems, killPoints;
+    for (const auto* v : { &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
+        for (const auto& [srcId, dstId] : *v) killElems.insert(dstId);
+    for (const auto& [srcId, dstId] : mir.points) killPoints.insert(dstId);
+
+    // Only an axis this group is PROVEN to own. A claim that could not be
+    // substantiated left axisGenerated false at validation, and the axis is then
+    // retained forever — the safe direction.
+    int killAxis = -1, axisA = -1, axisB = -1;
+    if (mir.axisGenerated) {
+        for (const auto& l : m_lines)
+            if (l.id == mir.axisLineId) { killAxis = l.id; axisA = l.startPointId; axisB = l.endPointId; }
+    }
+
+    const std::unordered_set<int> killPins(mir.pinConstraints.begin(), mir.pinConstraints.end());
+    m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
+        [&](const Constraint& k) { return killPins.count(k.id) != 0; }), m_constraints.end());
+
+    auto dropElems = [&](auto& vec) {
+        vec.erase(std::remove_if(vec.begin(), vec.end(),
+            [&](const auto& e) { return killElems.count(e.id) || e.id == killAxis; }), vec.end());
+    };
+    dropElems(m_lines); dropElems(m_circles); dropElems(m_arcs); dropElems(m_splines);
+
+    // The axis endpoints go only if nothing else wants them, checked AFTER the
+    // axis line itself is gone so it does not count as its own reference.
+    for (int ep : { axisA, axisB })
+        if (ep >= 0 && !pointIsReferenced(ep, killAxis, /*constraintsCount=*/false))
+            killPoints.insert(ep);
+
+    // An image point the USER has since built on is no longer only ours. Users
+    // may draw to derived geometry, and deleting the point under a live line
+    // leaves that line with an endpoint that does not exist. Delete mirror
+    // removes what the mirror made; it never breaks what the user made.
+    //
+    // This runs BEFORE the constraint sweep below, not after: a dimension on a
+    // point that turns out to be RETAINED must be retained with it, and a sweep
+    // using the pre-retention set would delete the user's dimension while its
+    // geometry survived.
+    for (auto it2 = killPoints.begin(); it2 != killPoints.end(); ) {
+        if (pointIsReferenced(*it2, killAxis, /*constraintsCount=*/false))
+            it2 = killPoints.erase(it2);
+        else ++it2;
+    }
+
+    // Constraints that measured what actually vanished go with it. A reference
+    // dimension on an image is legal, so these exist; left behind they would
+    // name an id that no longer resolves.
+    m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
+        [&](const Constraint& k) {
+            return killElems.count(k.entityA) || killElems.count(k.entityB) ||
+                   killPoints.count(k.entityA) || killPoints.count(k.entityB) ||
+                   k.entityA == killAxis || k.entityB == killAxis;
+        }), m_constraints.end());
+
+    m_points.erase(std::remove_if(m_points.begin(), m_points.end(),
+        [&](const SketchPoint& p) { return killPoints.count(p.id) != 0; }), m_points.end());
+
+    validateMirrors();
+    return true;
+}
+
 bool Sketch::breakMirrorLink(int mirrorId) {
     auto it = std::find_if(m_mirrors.begin(), m_mirrors.end(),
                            [mirrorId](const SketchMirror& m) { return m.id == mirrorId; });
     if (it == m_mirrors.end()) return false;
+    // The pins go with the relation. They exist only to hold a shared vertex on
+    // the axis, so one left behind is a driving constraint the user never
+    // created, welding a point to a line that no longer means anything — and
+    // Break link would fail its one job, which is to hand back ordinary
+    // independent geometry. Geometry itself, axis included, is untouched.
+    const std::unordered_set<int> pins(it->pinConstraints.begin(), it->pinConstraints.end());
     m_mirrors.erase(it);
+    if (!pins.empty())
+        m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
+            [&](const Constraint& k) { return pins.count(k.id) != 0; }), m_constraints.end());
     // Re-derive every flag from what SURVIVES: clearing only this group's
     // entities would be wrong if another group also owned one, and leaving a
     // flag set would keep geometry locked and DOF-reduced while owned by

@@ -243,7 +243,17 @@ public:
     // calls — axis deleted, combine remap failed, malformed file — so those
     // entities never stay locked and DOF-reducing while belonging to nothing.
     // Returns false when no such group exists.
+    // Break link: the relation ends, ALL geometry stays. The pins go with it —
+    // they exist only to serve the relation, and a pin left behind is a driving
+    // constraint the user never created, welding a vertex to a line that no
+    // longer means anything.
     bool breakMirrorLink(int mirrorId);
+
+    // Delete mirror: the only route that removes geometry. Deletes the derived
+    // outputs, the pins, and the axis with its endpoints — but ONLY what the
+    // group is proven to own (`axisGenerated`), and only when nothing else
+    // refers to it. A source is never deleted. Returns false if no such group.
+    bool deleteMirror(int mirrorId);
     // Drop groups that reference missing entities or a degenerate axis (via
     // breakMirrorLink), then force every `derived` flag to match surviving
     // group membership. Returns the number of groups broken.
@@ -268,6 +278,16 @@ public:
     // a real line in the sketch and must NOT be part of a profile, so it is
     // created and then marked here; nothing else had needed a setter yet.
     bool setConstruction(int entityId, bool on);
+
+    // Typed inbound-reference test for a POINT. `ignoreLineId` excludes a line
+    // being deleted in the same transaction. `constraintsCount` decides whether
+    // a constraint counts as a reason to keep the point alive: for a RETENTION
+    // decision it must not, or a reference dimension on an image keeps that
+    // image alive and the image keeps the dimension alive — each justifying the
+    // other while the thing they describe is gone. Constraints follow geometry;
+    // they do not anchor it.
+    bool pointIsReferenced(int pointId, int ignoreLineId = -1,
+                           bool constraintsCount = true) const;
     // The group owning `entityId` as a derived output, or -1.
     int  mirrorOwning(int entityId) const;
     void clear();

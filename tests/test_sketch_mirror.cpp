@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <functional>
+#include <unordered_set>
 #include <memory>
 #include <sstream>
 #include <set>
@@ -1242,4 +1243,285 @@ TEST(SketchMirrorIO, ATruncatedOwnershipBlockKeepsNoDeletionRights) {
     for (const auto& mir : loaded.getMirrors())
         EXPECT_FALSE(mir.axisGenerated)
             << "an unfinished ownership block may not carry a deletion right";
+}
+
+// --- deletion algebra ------------------------------------------------------
+// Every fixture up to here mirrors LINES, whose endpoints are always referenced,
+// so pruneOrphanPoints never touches them and a cascade test built on that
+// helper passes green with the bug fully present. A mirrored STANDALONE point is
+// referenced by no element BY DESIGN — which is exactly what the orphan sweep
+// deletes. It runs from 8 call sites including the generic delete path.
+TEST(SketchMirrorDelete, PruningDoesNotEatAMirroredStandalonePoint) {
+    Sketch sk;
+    materializr::SketchTool tool;
+    tool.setSketch(&sk);
+    const int src = sk.addPoint({5.0f, 3.0f});
+    ASSERT_TRUE(tool.beginMirror());
+    tool.setMirrorAnchor({0.0f, 0.0f});
+    tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    std::set<int> pts, lines;
+    tool.commitMirror(pts, lines);
+
+    ASSERT_EQ(1u, sk.getMirrors().size());
+    ASSERT_FALSE(sk.getMirrors()[0].points.empty()) << "VACUOUS otherwise";
+    const int image = sk.getMirrors()[0].points.front().second;
+
+    sk.pruneOrphanPoints();
+
+    EXPECT_NE(nullptr, sk.getPoint(src))   << "the source point must survive pruning";
+    EXPECT_NE(nullptr, sk.getPoint(image)) << "and so must its image";
+    EXPECT_EQ(1u, sk.getMirrors().size())  << "the relation must survive too";
+}
+
+// The teardown table: only explicit Delete mirror removes geometry.
+TEST(SketchMirrorDelete, BreakLinkKeepsEveryPieceOfGeometryAndDropsThePins) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    ASSERT_FALSE(mir.pinConstraints.empty()) << "VACUOUS otherwise";
+    const int mirrorId = mir.id;
+    const int axisId = mir.axisLineId;
+    const std::size_t pts = h->sk.getPoints().size(), lns = h->sk.getLines().size();
+    const int sharedPt = mir.sharedPoints.front();
+
+    ASSERT_TRUE(h->sk.breakMirrorLink(mirrorId));
+
+    EXPECT_EQ(pts, h->sk.getPoints().size()) << "Break link deletes no geometry";
+    EXPECT_EQ(lns, h->sk.getLines().size()) << "the axis stays too";
+    for (const auto& l : h->sk.getLines()) if (l.id == axisId) SUCCEED();
+    for (const auto& c : h->sk.getConstraints())
+        EXPECT_NE(materializr::ConstraintType::DistancePointLine, c.type)
+            << "a pin left behind would weld the vertex to a meaningless line";
+    // Released geometry must be free: still pinned, the vertex could not move.
+    h->sk.movePoint(sharedPt, {3.0f, 3.0f});
+    materializr::SketchSolver solver;
+    solver.solve(h->sk);
+    EXPECT_NEAR(3.0f, posOf(h->sk, sharedPt).x, 1e-3) << "the vertex must be free now";
+}
+
+TEST(SketchMirrorDelete, DeleteMirrorRemovesTheImageAndItsOwnAxisButNoSource) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    ASSERT_TRUE(mir.axisGenerated) << "VACUOUS otherwise";
+    const int mirrorId = mir.id, axisId = mir.axisLineId;
+    const int imageLine = mir.lines.front().second;
+    const int sourceLine = mir.lines.front().first;
+    const int imagePoint = mir.points.front().second;
+    const int sourcePoint = mir.points.front().first;
+
+    ASSERT_TRUE(h->sk.deleteMirror(mirrorId));
+
+    EXPECT_TRUE(h->sk.getMirrors().empty());
+    for (const auto& l : h->sk.getLines()) {
+        EXPECT_NE(imageLine, l.id) << "the image must go";
+        EXPECT_NE(axisId, l.id)    << "and the axis it made";
+    }
+    EXPECT_EQ(nullptr, h->sk.getPoint(imagePoint)) << "and the image's points";
+    EXPECT_NE(nullptr, h->sk.getPoint(sourcePoint)) << "but never a source point";
+    bool srcAlive = false;
+    for (const auto& l : h->sk.getLines()) if (l.id == sourceLine) srcAlive = true;
+    EXPECT_TRUE(srcAlive) << "nor a source element";
+    for (const auto& c : h->sk.getConstraints())
+        EXPECT_NE(materializr::ConstraintType::DistancePointLine, c.type) << "pins go too";
+}
+
+// An unproven claim retains. Delete mirror must not remove a line the user drew.
+TEST(SketchMirrorDelete, DeleteMirrorKeepsAnAxisItCannotProveItOwns) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int axisId = h->sk.getMirrors()[0].axisLineId;
+    int axisStart = -1;
+    for (const auto& l : h->sk.getLines()) if (l.id == axisId) axisStart = l.startPointId;
+    ASSERT_NE(-1, axisStart);
+    h->sk.addLine(axisStart, h->sk.addPoint({40.0f, 40.0f}));   // provenance now unprovable
+    h->sk.validateMirrors();
+    ASSERT_FALSE(h->sk.getMirrors().empty());
+    ASSERT_FALSE(h->sk.getMirrors()[0].axisGenerated) << "VACUOUS otherwise";
+
+    ASSERT_TRUE(h->sk.deleteMirror(h->sk.getMirrors()[0].id));
+    bool axisAlive = false;
+    for (const auto& l : h->sk.getLines()) if (l.id == axisId) axisAlive = true;
+    EXPECT_TRUE(axisAlive) << "an axis it cannot prove it owns must be retained";
+}
+
+// The endpoint guard is not redundant with validation. validateMirrors proves
+// the axis is exclusively the group's AT THAT MOMENT; deleteMirror can be
+// reached later with a stale claim, after geometry has attached to an endpoint.
+// Re-checking at deletion time is what stops it taking a user's line with it.
+TEST(SketchMirrorDelete, AxisEndpointsSurviveIfSomethingElseGrewOntoThem) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    ASSERT_TRUE(mir.axisGenerated) << "VACUOUS otherwise";
+    const int mirrorId = mir.id, axisId = mir.axisLineId;
+    int axisStart = -1;
+    for (const auto& l : h->sk.getLines()) if (l.id == axisId) axisStart = l.startPointId;
+    ASSERT_NE(-1, axisStart);
+
+    // Attach a user line to the endpoint and DO NOT re-validate: the claim is
+    // now stale, exactly as it would be mid-edit.
+    const int far = h->sk.addPoint({40.0f, 40.0f});
+    const int userLine = h->sk.addLine(axisStart, far);
+
+    ASSERT_TRUE(h->sk.deleteMirror(mirrorId));
+
+    EXPECT_NE(nullptr, h->sk.getPoint(axisStart))
+        << "an endpoint another element uses must not be deleted";
+    bool userLineAlive = false;
+    for (const auto& l : h->sk.getLines()) if (l.id == userLine) userLineAlive = true;
+    EXPECT_TRUE(userLineAlive) << "and the user's line must still be whole";
+    EXPECT_NE(nullptr, h->sk.getPoint(far));
+}
+
+// Deleting the image must not strand geometry the USER built on top of it. A
+// line drawn to an image point, or a reference dimension measuring it, are both
+// legal — reference dimensions on derived geometry are explicitly permitted —
+// and neither may be left pointing at an id that no longer exists.
+TEST(SketchMirrorDelete, DeleteMirrorLeavesNoDanglingUserGeometry) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    const int mirrorId = mir.id;
+    const int imagePoint = mir.points.front().second;
+
+    // The user attaches their own line to the image, and measures it.
+    const int far = h->sk.addPoint({40.0f, 40.0f});
+    const int userLine = h->sk.addLine(imagePoint, far);
+    materializr::Constraint ref{};
+    ref.type = materializr::ConstraintType::Distance;
+    ref.entityA = imagePoint;
+    ref.entityB = far;
+    ref.isDriving = false;                       // reference only: allowed on an image
+    const int refId = h->sk.addConstraint(ref);
+    ASSERT_NE(-1, refId) << "VACUOUS otherwise: a reference dimension must be accepted";
+
+    ASSERT_TRUE(h->sk.deleteMirror(mirrorId));
+
+    // The user's line is still whole, so its endpoint must still exist.
+    bool userLineAlive = false;
+    for (const auto& l : h->sk.getLines()) if (l.id == userLine) userLineAlive = true;
+    ASSERT_TRUE(userLineAlive) << "the user's line must survive";
+    EXPECT_NE(nullptr, h->sk.getPoint(imagePoint))
+        << "a point the user's geometry still uses must not be deleted under it";
+
+    // And nothing may reference an id that is gone.
+    std::unordered_set<int> live;
+    for (const auto& p : h->sk.getPoints())  live.insert(p.id);
+    for (const auto& l : h->sk.getLines())   live.insert(l.id);
+    for (const auto& c : h->sk.getCircles()) live.insert(c.id);
+    for (const auto& a : h->sk.getArcs())    live.insert(a.id);
+    for (const auto& s : h->sk.getSplines()) live.insert(s.id);
+    for (const auto& c : h->sk.getConstraints()) {
+        if (c.entityA >= 0) EXPECT_TRUE(live.count(c.entityA)) << "dangling entityA";
+        if (c.entityB >= 0) EXPECT_TRUE(live.count(c.entityB)) << "dangling entityB";
+    }
+    for (const auto& l : h->sk.getLines()) {
+        EXPECT_NE(nullptr, h->sk.getPoint(l.startPointId)) << "line with a missing start";
+        EXPECT_NE(nullptr, h->sk.getPoint(l.endPointId))   << "line with a missing end";
+    }
+}
+
+// The constraint sweep, exercised for real: a dimension between two image
+// points that nothing else uses. Both points go, so the dimension must go with
+// them. The previous fixture measured points the user's own line kept alive, so
+// the sweep never ran and the rule was unpinned.
+TEST(SketchMirrorDelete, ADimensionOnDeletedImageGeometryIsRemovedNotStranded) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    ASSERT_GE(mir.points.size(), 2u) << "VACUOUS otherwise";
+    const int mirrorId = mir.id;
+    const int imgA = mir.points[0].second, imgB = mir.points[1].second;
+
+    materializr::Constraint ref{};
+    ref.type = materializr::ConstraintType::Distance;
+    ref.entityA = imgA;
+    ref.entityB = imgB;
+    ref.isDriving = false;
+    const int refId = h->sk.addConstraint(ref);
+    ASSERT_NE(-1, refId) << "VACUOUS otherwise";
+
+    ASSERT_TRUE(h->sk.deleteMirror(mirrorId));
+
+    EXPECT_EQ(nullptr, h->sk.getPoint(imgA)) << "nothing else used it, so it goes";
+    for (const auto& c : h->sk.getConstraints())
+        EXPECT_NE(refId, c.id) << "its dimension must not outlive the geometry";
+}
+
+// And the converse: a dimension whose geometry was RETAINED must be retained.
+// Sweeping with the pre-retention set would delete the user's dimension while
+// the point it measures is still on screen.
+TEST(SketchMirrorDelete, ADimensionOnARetainedImagePointSurvives) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    const int mirrorId = mir.id;
+    const int imagePoint = mir.points.front().second;
+
+    const int far = h->sk.addPoint({40.0f, 40.0f});
+    h->sk.addLine(imagePoint, far);              // keeps the image point alive
+    materializr::Constraint ref{};
+    ref.type = materializr::ConstraintType::Distance;
+    ref.entityA = imagePoint;
+    ref.entityB = far;
+    ref.isDriving = false;
+    const int refId = h->sk.addConstraint(ref);
+    ASSERT_NE(-1, refId);
+
+    ASSERT_TRUE(h->sk.deleteMirror(mirrorId));
+
+    ASSERT_NE(nullptr, h->sk.getPoint(imagePoint)) << "VACUOUS otherwise";
+    bool kept = false;
+    for (const auto& c : h->sk.getConstraints()) if (c.id == refId) kept = true;
+    EXPECT_TRUE(kept) << "a dimension whose geometry survived must survive too";
+}
+
+// --- the per-pair cascade --------------------------------------------------
+// removeElement currently breaks the WHOLE group when either half of any pair
+// goes: safe, but it means deleting one line of a ten-line mirror silently
+// unlinks the other nine. Deleting a source should take its image with it and
+// leave the rest of the relation standing.
+TEST(SketchMirrorDelete, DeletingOneSourceElementRemovesOnlyItsImage) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    ASSERT_EQ(3u, mir.lines.size()) << "VACUOUS otherwise: need survivors to check";
+    const int srcLine = mir.lines[0].first, imgLine = mir.lines[0].second;
+    const int otherSrc = mir.lines[1].first, otherImg = mir.lines[1].second;
+
+    h->sk.removeElement(srcLine);
+
+    ASSERT_EQ(1u, h->sk.getMirrors().size()) << "the group must survive the loss of one pair";
+    for (const auto& l : h->sk.getLines()) {
+        EXPECT_NE(srcLine, l.id);
+        EXPECT_NE(imgLine, l.id) << "the image must follow its source";
+    }
+    bool otherSrcAlive = false, otherImgAlive = false;
+    for (const auto& l : h->sk.getLines()) {
+        if (l.id == otherSrc) otherSrcAlive = true;
+        if (l.id == otherImg) otherImgAlive = true;
+    }
+    EXPECT_TRUE(otherSrcAlive) << "the rest of the relation stands";
+    EXPECT_TRUE(otherImgAlive);
+    EXPECT_TRUE(h->sk.isDerived(otherImg)) << "and its survivors stay derived";
+    for (const auto& [s, d] : h->sk.getMirrors()[0].lines)
+        EXPECT_NE(srcLine, s) << "the dead pair must be gone from the group";
+}
+
+// Deleting an image directly is refused: the recompute would recreate it on the
+// next solve, so allowing it is a lie. Break link and Delete mirror are the ways
+// to get rid of one.
+TEST(SketchMirrorDelete, DeletingADerivedElementDirectlyIsRefused) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int imgLine = h->sk.getMirrors()[0].lines[0].second;
+    ASSERT_TRUE(h->sk.isDerived(imgLine)) << "VACUOUS otherwise";
+
+    h->sk.removeElement(imgLine);
+
+    bool stillThere = false;
+    for (const auto& l : h->sk.getLines()) if (l.id == imgLine) stillThere = true;
+    EXPECT_TRUE(stillThere) << "an image may not be deleted out from under its relation";
+    EXPECT_EQ(1u, h->sk.getMirrors().size()) << "and the group is untouched";
 }
