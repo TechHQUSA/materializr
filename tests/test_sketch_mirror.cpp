@@ -927,7 +927,11 @@ TEST(SketchMirrorValidate, LegacyGroupsWithoutSharedPointsAreMigrated) {
     auto& mir = groupOf(*h);
     ASSERT_FALSE(mir.sharedPoints.empty()) << "the fixture must have shared vertices";
     const std::size_t had = mir.sharedPoints.size();
-    mir.sharedPoints.clear();                        // exactly what an old file loads as
+    // Exactly what an old file loads as: no shared rows AND no ownership
+    // columns. Clearing only the first would simulate a v2 record that misstated
+    // itself, which is a corrupt file, not a legacy one — and must NOT migrate.
+    mir.sharedPoints.clear();
+    mir.ownershipDeclared = false;
     h->sk.validateMirrors();
     ASSERT_EQ(1u, h->sk.getMirrors().size()) << "a legacy group must survive, not be dropped";
     EXPECT_EQ(had, h->sk.getMirrors()[0].sharedPoints.size()) << "and its shared set restored";
@@ -1130,4 +1134,27 @@ TEST(SketchMirrorIO, ARecordAfterTheMirrorBlockIsNotSwallowed) {
     EXPECT_EQ(2u, loaded.getConstraints().size())
         << "the record after the mirror block must still be parsed, not swallowed";
     EXPECT_EQ(1u, loaded.getMirrors().size()) << "and the group itself must survive";
+}
+
+// A DECLARED record whose MS rows disagree with its count. The question is not
+// whether the group survives — it is whether anything the record failed to
+// state correctly can still authorise a deletion.
+TEST(SketchMirrorIO, AWrongSharedCountRestoresNoOwnership) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    ASSERT_FALSE(h->sk.getMirrors()[0].pinConstraints.empty());
+    const std::size_t constraintsBefore = h->sk.getConstraints().size();
+
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        return dropRows(std::move(t), "MS ");   // rows gone, count still declares them
+    });
+
+    EXPECT_TRUE(loaded.getMirrors().empty() ||
+                loaded.getMirrors()[0].pinConstraints.empty())
+        << "a record that misstated its ownership must own nothing";
+    EXPECT_EQ(constraintsBefore, loaded.getConstraints().size())
+        << "and nothing may be deleted on this path";
+    for (const auto& mir : loaded.getMirrors())
+        EXPECT_FALSE(mir.axisGenerated)
+            << "nor may it keep the right to delete the axis";
 }

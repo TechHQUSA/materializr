@@ -2302,7 +2302,15 @@ int Sketch::validateMirrors() {
         // mappings — so infer the set instead, and let the same checks vet it.
         // Only when the group declares none: a file that says "no shared
         // vertices" is believed.
-        if (mir.sharedPoints.empty()) {
+        // Gated on the same flag as the pin inference, and for the same reason.
+        // A record that DECLARED its ownership columns but whose MS rows did not
+        // back the count up is corrupt, and reconstructing its shared set
+        // re-validates the pins it loaded from MC rows — restoring, in full, the
+        // deletion rights it just failed to state. Verified: without this gate a
+        // dropped-MS file keeps its pin claims AND axisGenerated. With it, the
+        // group has no legitimate identity mappings, so topology validation
+        // rejects it and the geometry is released untouched.
+        if (mir.sharedPoints.empty() && !mir.ownershipDeclared) {
             std::unordered_set<int> pairedSrc;
             for (const auto& [srcId, dstId] : mir.points) pairedSrc.insert(srcId);
             std::unordered_set<int> seen;
