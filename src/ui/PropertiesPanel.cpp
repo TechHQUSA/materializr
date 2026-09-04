@@ -618,7 +618,9 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
 
     // Apply a size edit through the host so it's snapshot/undoable + cascades.
     auto apply = [&](const std::function<void()>& mut) {
-        if (m_sketchMutate) { m_sketchMutate(mut); modified = true; }
+        // -1: this panel only renders while a sketch is OPEN for editing, so the
+        // host already has an active sketch and needs no adoption.
+        if (m_sketchMutate) { m_sketchMutate(-1, mut); modified = true; }
     };
 
     // Resolve what was clicked to an editable element. Clicking a circle near
@@ -822,11 +824,11 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         // visible to that transaction, and then this bypassed it entirely.
         if (pendingBreak >= 0 && m_sketchMutate) {
             const int id = pendingBreak;
-            m_sketchMutate([&]{ sk->breakMirrorLink(id); });
+            m_sketchMutate(sketchId, [&]{ sk->breakMirrorLink(id); });
             modified = true;
         } else if (pendingDelete >= 0 && m_sketchMutate) {
             const int id = pendingDelete;
-            m_sketchMutate([&]{ sk->deleteMirror(id); });
+            m_sketchMutate(sketchId, [&]{ sk->deleteMirror(id); });
             modified = true;
         }
         ImGui::Spacing();

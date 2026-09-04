@@ -39,7 +39,12 @@ public:
     // Routes an element-size edit through Application::recordSketchMutation
     // (snapshot before/after → SketchEditOp) + re-solve + cascade. The panel
     // passes the raw mutation (e.g. setCircleRadius); the host wraps it.
-    void setSketchMutateCallback(std::function<void(const std::function<void()>&)> cb) {
+    // The int is the DOCUMENT id of the sketch being mutated. The panel can act
+    // on a sketch that is not in edit mode (picked in Items), and
+    // recordSketchMutation returns early when no sketch is active — running the
+    // mutation with NO history step. Passing the id lets the host adopt that
+    // sketch for the transaction, so panel edits are undoable either way.
+    void setSketchMutateCallback(std::function<void(int, const std::function<void()>&)> cb) {
         m_sketchMutate = std::move(cb);
     }
     // Routes the plane panel's "Rotate About Axis…" button to Application,
@@ -110,7 +115,7 @@ private:
     materializr::Sketch* m_activeSketch = nullptr;
     int m_activeSketchId = -1;
     materializr::SketchTool* m_sketchTool = nullptr;
-    std::function<void(const std::function<void()>&)> m_sketchMutate;
+    std::function<void(int, const std::function<void()>&)> m_sketchMutate;
     std::function<std::string(bool, int)> m_linkInfo;
     std::function<void(bool, int)> m_relink;
 

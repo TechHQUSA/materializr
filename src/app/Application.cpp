@@ -360,7 +360,20 @@ Application::Application(bool safeMode, float uiScaleOverride)
     // re-solve inside recordSketchMutation (so it's one undoable SketchEditOp),
     // then cascade to any body built from the sketch.
     m_propertiesPanel->setSketchMutateCallback(
-        [this](const std::function<void()>& mut) {
+        [this](int sketchId, const std::function<void()>& mut) {
+            // The panel can act on a sketch that is NOT in edit mode — picked in
+            // Items rather than open for editing. recordSketchMutation returns
+            // early when m_activeSketch is null and runs the mutation with no
+            // history step, so Break link and Delete mirror were not undoable
+            // outside sketch-edit mode: the relation ended and Ctrl-Z did
+            // nothing. Adopt the panel's sketch for the duration so the
+            // transaction has a target, then put the previous one back.
+            const bool adopt = !m_activeSketch && sketchId >= 0;
+            const int prevId = m_activeSketchId;
+            if (adopt) {
+                m_activeSketch = m_document ? m_document->getSketch(sketchId) : nullptr;
+                m_activeSketchId = sketchId;
+            }
             recordSketchMutation([&]() {
                 mut();
                 if (m_activeSketch) {
@@ -370,6 +383,9 @@ Application::Application(bool safeMode, float uiScaleOverride)
             });
             if (m_eventBus && m_activeSketchId >= 0)
                 m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
+            // adopt implies m_activeSketch was null, so putting it back is a
+            // reset — nothing was displaced.
+            if (adopt) { m_activeSketch.reset(); m_activeSketchId = prevId; }
             m_meshesDirty = true;
             markDirty();
         });
