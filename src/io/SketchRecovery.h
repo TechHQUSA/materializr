@@ -22,20 +22,47 @@ struct SketchDraftMeta {
     std::string projectPath;         // owning project ("" = unsaved/new document)
 };
 
-// Absolute path of the draft sidecar (~/.config/materializr/recovery/...).
+// Absolute path of THIS instance's draft sidecar.
+//
+// MULTI-INSTANCE SAFETY, same scheme as the project snapshots next door: the
+// file name is keyed off this process's claimed recovery slot (slot 0 keeps
+// the legacy "draft.mzsketch", later slots get "draft-<N>.mzsketch"), so two
+// running instances can never overwrite each other's unfinished sketch. The
+// old single shared path let whichever instance wrote last win, and then
+// offered that sketch back to whichever instance asked first — including the
+// one it did not come from.
+//
+// Only ONE draft per instance is needed, and that is not an approximation:
+// switchToSession refuses to leave a tab while it is mid-sketch, so a single
+// instance can never have two unfinished sketches at once.
 std::string sketchDraftPath();
+
+// The draft file that would belong to `slot`. Exposed so the slot-claiming
+// code can see that a slot holding nothing but a draft is still occupied.
+std::string sketchDraftPathForSlot(int slot);
+
+// The ORPHANED draft chosen for this launch — one left behind by an instance
+// that is provably dead. This is what a restore loads, NOT sketchDraftPath(),
+// which is our own live file. "" when the scan found nothing.
+std::string sketchDraftRestorePath();
+
+// Delete a specific draft — used to consume the orphan once it has been
+// restored or declined, so it is not offered again on every later launch.
+void clearSketchDraftAt(const std::string& path);
 
 // Serialize `sk` + context to the draft file. Best-effort; returns success.
 bool writeSketchDraft(const Sketch& sk, int sourceBodyId,
                       const std::string& projectPath);
 
-// True if a draft file currently exists on disk.
+// Scan for an orphaned draft and remember the newest as this launch's
+// candidate (see sketchDraftRestorePath). True if there is one to offer. A
+// live instance's draft is never a candidate — its slot lock cannot be taken.
 bool hasSketchDraft();
 
-// Load the draft into `sk` and `meta`. Returns false if absent/unreadable.
+// Load this launch's candidate into `sk` and `meta`. False if none/unreadable.
 bool readSketchDraft(Sketch& sk, SketchDraftMeta& meta);
 
-// Delete the draft file (clean finish/discard). No-op if none exists.
+// Delete OUR OWN draft (clean finish/discard). No-op if none exists.
 void clearSketchDraft();
 
 // Which open tab a restored draft belongs in.

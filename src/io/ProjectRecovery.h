@@ -47,6 +47,16 @@ std::string projectRecoveryPath(int sessionIndex = 0);
 // file no scan ever looks at.
 constexpr int kMaxSessionsPerSlot = 16;
 
+// This instance's claimed slot. Every per-instance recovery sidecar keys its
+// own file names off this one number, so a single lock governs everything the
+// process owns and no second locking scheme can disagree with this one.
+int recoverySlot();
+
+// Slots whose owning instance is provably dead — their lock can be taken, so
+// whatever they still hold is an orphan safe to offer back. Never includes our
+// own slot: the claim is made first, so our lock is already held.
+std::vector<int> orphanedRecoverySlots();
+
 // Snapshot the document (+ optional history) to the recovery sidecar, written to
 // a temp file then atomically renamed so a crash mid-write never leaves a
 // truncated snapshot. `projectPath` is the project's own save path ("" if

@@ -1,11 +1,14 @@
 #include "SketchRecovery.h"
 #include "ProjectIO.h"
+#include "ProjectRecovery.h"   // recoverySlot / orphanedRecoverySlots
 #include "../modeling/Sketch.h"
 
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace materializr {
 
@@ -25,11 +28,25 @@ std::string configBaseDir() {
     return ".materializr";
 #endif
 }
+// The orphaned draft this launch may offer back, chosen by hasSketchDraft().
+// Empty until that scan runs, and empty when it found nothing.
+std::string s_candidatePath;
 } // namespace
 
-std::string sketchDraftPath() {
-    return configBaseDir() + "/recovery/draft.mzsketch";
+std::string sketchDraftPathForSlot(int slot) {
+    // Slot 0 keeps the legacy name so a draft written by an older build is
+    // still found by the scan below; later slots are suffixed. Mirrors
+    // ProjectRecovery's snapshot naming exactly.
+    const std::string dir = configBaseDir() + "/recovery/";
+    if (slot == 0) return dir + "draft.mzsketch";
+    return dir + "draft-" + std::to_string(slot) + ".mzsketch";
 }
+
+std::string sketchDraftPath() {
+    return sketchDraftPathForSlot(recoverySlot());
+}
+
+std::string sketchDraftRestorePath() { return s_candidatePath; }
 
 bool writeSketchDraft(const Sketch& sk, int sourceBodyId,
                       const std::string& projectPath) {
@@ -59,13 +76,30 @@ bool writeSketchDraft(const Sketch& sk, int sourceBodyId,
 }
 
 bool hasSketchDraft() {
+    // Only a DEAD instance's draft may be offered. Our own slot is claimed
+    // before the scan (orphanedRecoverySlots does that), so our live draft can
+    // never be a candidate — which is what stopped two instances from being
+    // handed each other's unfinished sketch.
+    s_candidatePath.clear();
     std::error_code ec;
-    return std::filesystem::exists(sketchDraftPath(), ec);
+    std::filesystem::file_time_type best{};
+    for (int slot : orphanedRecoverySlots()) {
+        const std::string p = sketchDraftPathForSlot(slot);
+        if (!std::filesystem::exists(p, ec)) continue;
+        auto mt = std::filesystem::last_write_time(p, ec);
+        if (ec) mt = std::filesystem::file_time_type{};
+        if (s_candidatePath.empty() || mt > best) {
+            s_candidatePath = p;
+            best = mt;
+        }
+    }
+    return !s_candidatePath.empty();
 }
 
 bool readSketchDraft(Sketch& sk, SketchDraftMeta& meta) {
     meta = SketchDraftMeta{};
-    std::ifstream is(sketchDraftPath());
+    if (s_candidatePath.empty()) return false;   // nothing was offered
+    std::ifstream is(s_candidatePath);
     if (!is.is_open()) return false;
 
     std::string magic;
@@ -106,9 +140,16 @@ bool readSketchDraft(Sketch& sk, SketchDraftMeta& meta) {
 }
 
 void clearSketchDraft() {
+    clearSketchDraftAt(sketchDraftPath());
+}
+
+void clearSketchDraftAt(const std::string& path) {
+    if (path.empty()) return;
     std::error_code ec;
-    std::filesystem::remove(sketchDraftPath(), ec);
-    std::filesystem::remove(sketchDraftPath() + ".tmp", ec);
+    std::filesystem::remove(path, ec);
+    std::filesystem::remove(path + ".tmp", ec);
+    // Consumed: never offer it again, however the caller got here.
+    if (s_candidatePath == path) s_candidatePath.clear();
 }
 
 } // namespace materializr

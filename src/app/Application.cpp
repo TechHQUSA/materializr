@@ -6631,7 +6631,7 @@ void Application::renderSketchRecoveryPrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
-            materializr::clearSketchDraft();
+            materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
         }
@@ -6643,7 +6643,10 @@ void Application::restoreSketchDraftNow() {
     Sketch draft;
     materializr::SketchDraftMeta meta;
     if (!materializr::readSketchDraft(draft, meta) || !meta.valid) {
-        materializr::clearSketchDraft();
+        // Unreadable: drop the ORPHAN we were offered (not our own live draft
+        // path, which after the per-instance split is a different file), so a
+        // corrupt leftover isn't re-offered at every launch.
+        materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
         return;
     }
     // Put it back in the TAB it came from before restoring anything. Without
@@ -6690,6 +6693,10 @@ void Application::restoreSketchDraftNow() {
     alignCameraToActiveSketch();
     m_meshesDirty = true;
     m_lastDraftElemCount = -1; // force a fresh draft write going forward
+    // Consumed. The orphan lives in the DEAD instance's slot; from here we
+    // autosave into our own, so leaving it would re-offer this sketch at every
+    // future launch.
+    materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
     std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)"
                          " into tab %zu%s\n",
                  m_activeSketch->elementCount(), m_activeSession,

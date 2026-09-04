@@ -90,6 +90,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/io/StlIO.cpp
     ${CMAKE_SOURCE_DIR}/src/io/MeshDecimate.cpp
     ${CMAKE_SOURCE_DIR}/src/io/ProjectRecovery.cpp
+    ${CMAKE_SOURCE_DIR}/src/io/SketchRecovery.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Verbose.cpp
     ${CMAKE_SOURCE_DIR}/src/core/UiKeepAlive.cpp
     ${CMAKE_SOURCE_DIR}/src/core/ThrowTrace.cpp
@@ -710,6 +711,12 @@ add_test(NAME test_cut_target_pick COMMAND test_cut_target_pick)
 add_executable(test_tangent_inference test_tangent_inference.cpp)
 target_link_libraries(test_tangent_inference PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_tangent_inference COMMAND test_tangent_inference)
+
+# test_sketch_draft_slot — the in-progress sketch draft is per-instance, so two
+# running copies can't overwrite (or be offered) each other's unfinished sketch
+add_executable(test_sketch_draft_slot test_sketch_draft_slot.cpp)
+target_link_libraries(test_sketch_draft_slot PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_draft_slot COMMAND test_sketch_draft_slot)
 
 # test_sketch_draft_tab — a restored in-progress sketch comes back in the tab
 # it was drawn in, not grafted onto whatever project tab 0 happens to hold

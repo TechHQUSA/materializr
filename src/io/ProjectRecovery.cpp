@@ -1,4 +1,5 @@
 #include "ProjectRecovery.h"
+#include "SketchRecovery.h"   // sketchDraftPathForSlot: drafts share this slot
 #include "ProjectIO.h"
 #include "../core/Document.h"
 
@@ -115,6 +116,11 @@ bool slotHasAnySnapshot(int slot) {
     for (int t = 0; t < kMaxSessionsPerSlot; ++t)
         if (std::filesystem::exists(sessionSnapshotPath(slot, t), ec))
             return true;
+    // The in-progress SKETCH draft is per-instance too, and keys off this same
+    // slot. A slot holding nothing but a leftover draft is still occupied:
+    // claiming it would make our own lock hide that draft from the orphan scan
+    // and then overwrite it on the first autosave — the only copy of that work.
+    if (std::filesystem::exists(sketchDraftPathForSlot(slot), ec)) return true;
     return false;
 }
 
@@ -247,6 +253,20 @@ bool hasProjectRecovery() {
         }
     }
     return !s_candidatePath.empty();
+}
+
+int recoverySlot() { return claimedSlot(); }
+
+std::vector<int> orphanedRecoverySlots() {
+    (void)claimedSlot();          // ours first, so it can never be listed
+    std::vector<int> out;
+    for (int n = 0; n < kMaxSlots; ++n) {
+        LockHandle h = tryLock(slotLockPath(n));
+        if (h == kBadLock) continue;   // owner alive (possibly us)
+        releaseLock(h);
+        out.push_back(n);
+    }
+    return out;
 }
 
 int projectRecoveryOrphanCount() { return s_orphanCount; }
