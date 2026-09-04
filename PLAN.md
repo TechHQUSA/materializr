@@ -666,3 +666,30 @@ The rule, in three parts:
 
 Deletion rights are forfeited by any inconsistency anywhere in the ownership block.
 Relation inputs are forfeited only by their own.
+
+
+---
+
+# Revisions after implementation — P9g: absence is not agreement
+
+Four consecutive review findings landed on the same function, and each fix was
+correct for the case it reproduced and blind to the adjacent one:
+
+1. a cleared claim decayed into a legacy gap;
+2. gating the pins left the hole open through `sharedPoints`;
+3. `axisGenerated` names no rows, so no count could ever clear it;
+4. a record that stops mid-block declares no counts at all — both default to
+   zero, both "match" the zero rows present, and nothing is ever cleared.
+
+The through-line: I kept validating **the values a record states** and kept
+forgetting that a record can decline to state them. Default-to-zero on a missing
+field is a silent grant.
+
+**The rule, which generalises past this parser:** for anything that authorises a
+destructive operation, ABSENCE must be as suspect as DISAGREEMENT. A field that
+authorises deletion is only honoured when the record demonstrably said so — a
+complete block, not a begun one. The safe default is not zero; it is "no rights".
+
+This applies directly to the deletion algebra still to be written: `deleteMirror()`
+takes its authority from exactly these fields, so every path into it must treat a
+missing claim as no claim rather than as an empty one.

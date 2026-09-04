@@ -1205,3 +1205,41 @@ TEST(SketchMirrorIO, AnMSMismatchNeverKeepsTheAxisClaim) {
     EXPECT_EQ(constraintsBefore, loaded.getConstraints().size())
         << "and nothing may be deleted";
 }
+
+// Codex: a TRUNCATED ownership block can still retain axis-deletion rights.
+// The counts only catch a disagreement between a number and its rows. A record
+// that stops after axisGenerated declares no counts at all, so both default to
+// zero, both "match" the zero rows present, and nothing is ever cleared.
+TEST(SketchMirrorIO, ATruncatedOwnershipBlockKeepsNoDeletionRights) {
+    auto h = makeHalfProfile();
+    ASSERT_TRUE(h->tool.beginMirror());
+    h->tool.setMirrorAnchor({-40.0f, 5.0f});          // no vertex lands on the axis
+    h->tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    h->tool.commitMirror(h->outPts, h->outLines);
+    ASSERT_EQ(1u, h->sk.getMirrors().size());
+    ASSERT_TRUE(h->sk.getMirrors()[0].axisGenerated);
+
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        t = dropRows(std::move(t), "MC ");
+        t = dropRows(std::move(t), "MS ");
+        std::istringstream in(t); std::ostringstream out; std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("M ", 0) == 0) {
+                std::istringstream ms(line); std::string tok;
+                int id, axis, nPts, nElems, gen;
+                ms >> tok >> id >> axis >> nPts >> nElems >> gen;
+                // Stops after axisGenerated: the ownership block is begun and
+                // never finished.
+                out << "M " << id << " " << axis << " " << nPts << " "
+                    << nElems << " " << gen << "\n";
+            } else out << line << "\n";
+        }
+        return out.str();
+    });
+
+    ASSERT_FALSE(loaded.getMirrors().empty())
+        << "VACUOUS otherwise: this group must survive for ownership to matter";
+    for (const auto& mir : loaded.getMirrors())
+        EXPECT_FALSE(mir.axisGenerated)
+            << "an unfinished ownership block may not carry a deletion right";
+}

@@ -808,8 +808,15 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 // and the inference gives the rights straight back.
                 m.ownershipDeclared = static_cast<bool>(s >> axisGen);
                 if (!m.ownershipDeclared) axisGen = 0;
-                if (!(s >> nPins))    nPins = 0;
-                if (!(s >> nShared))  nShared = 0;
+                // The block must be COMPLETE, not merely begun. Counts catch a
+                // number disagreeing with its rows; they cannot catch a record
+                // that declares no counts at all, because then both default to
+                // zero and "match" the zero rows present. A record truncated
+                // after axisGenerated used to keep its axis-deletion right on
+                // exactly that technicality.
+                bool ownershipComplete = m.ownershipDeclared;
+                if (!(s >> nPins))   { nPins = 0;   ownershipComplete = false; }
+                if (!(s >> nShared)) { nShared = 0; ownershipComplete = false; }
                 m.axisGenerated = (axisGen != 0);
 
                 // TOKEN-DRIVEN, not counted. A count is data in the file and may
@@ -876,7 +883,10 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 // for a bad MC count would take the whole mirror down with an
                 // ownership problem — geometry retained, but the relation lost
                 // for a reason that has nothing to do with it.
-                const bool ownershipBroken = (gotPins != nPins) || (gotShared != nShared);
+                // A legacy record declares nothing and is not "broken" — it is
+                // simply old, owns nothing, and may be migrated by inference.
+                const bool ownershipBroken = (m.ownershipDeclared && !ownershipComplete) ||
+                                             (gotPins != nPins) || (gotShared != nShared);
                 if (gotShared != nShared) m.sharedPoints.clear();
                 if (ownershipBroken) {
                     m.pinConstraints.clear();
