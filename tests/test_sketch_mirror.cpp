@@ -494,6 +494,13 @@ TEST(SketchMirrorCommit, MirroredHalfProfileClosesIntoOneWire) {
     EXPECT_FALSE(h->sk.isDerived(h->tr));
     const auto wires = h->sk.buildWires();
     ASSERT_EQ(1u, wires.size()) << "the mirrored halves must close into ONE wire";
+
+    // buildWires is NOT the path face picking and extrude use. Asserting only on
+    // it passed while the app still showed two regions and would have extruded
+    // two solids: buildRegionsUncached used the construction axis as a DIVIDER
+    // and cut the face in half. Found by driving the real app, not by this file.
+    const auto regions = h->sk.buildRegions();
+    ASSERT_EQ(1u, regions.size()) << "the axis must not divide the face it mirrors about";
 }
 
 // The bug the user reported, through the real path: edit the source, solve,

@@ -1892,6 +1892,13 @@ std::vector<Sketch::Region> Sketch::buildRegionsUncached() const {
             return insideAny(mid + nrm * divEps) && insideAny(mid - nrm * divEps);
         };
         for (const auto& line : m_lines) {
+            // Construction lines are scaffolding, not profile — the same rule
+            // buildWires follows. A construction line spanning a face was being
+            // used as a divider and CUT THE FACE IN TWO: a mirrored half-profile
+            // came out as two regions, so it extruded as two solids instead of
+            // one. buildWires alone was not enough; face picking and extrude
+            // come through here.
+            if (line.isConstruction) continue;
             const SketchPoint* a = getPoint(line.startPointId);
             const SketchPoint* b = getPoint(line.endPointId);
             if (!a || !b) continue;
