@@ -105,6 +105,21 @@ struct SketchMirror {
     std::vector<std::pair<int, int>> circles;   //   so deletion can cascade element-first
     std::vector<std::pair<int, int>> arcs;      //   and so radius/flags can be copied
     std::vector<std::pair<int, int>> splines;
+
+    // A source point ON the axis is its own image. It is SHARED, not paired:
+    // buildWires and buildRegions join by point id, so a second point at the
+    // same coordinate leaves a mirrored half-profile an open chain. Recorded
+    // explicitly rather than inferred, because topology validation has to know
+    // which identity mappings are legitimate, and a file written before this
+    // field existed has none to infer from.
+    std::vector<int> sharedPoints;
+
+    // What this group OWNS and may therefore delete. Both are loaded from an
+    // untrusted file, so both are validated before they are honoured and
+    // CLEARED when they are not — a cleared claim retains geometry, which is
+    // the safe direction. Anything not claimed here survives Delete mirror.
+    bool axisGenerated = false;        // commitMirror created the axis line
+    std::vector<int> pinConstraints;   // the zero DistancePointLine rows it added
 };
 
 class Sketch {

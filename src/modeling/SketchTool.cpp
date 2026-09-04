@@ -3785,6 +3785,10 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
             // permanently asymmetric with nothing able to repair it.
             m_sketch->movePoint(oldId, (p->pos + np) * 0.5f);
             onAxis.push_back(oldId);
+            // Recorded on the group: topology validation permits an identity
+            // mapping ONLY for a point named here, and it cannot infer the set
+            // from geometry alone once the sketch has been edited.
+            mir.sharedPoints.push_back(oldId);
         }
         remap[oldId] = nid;
         return nid;
@@ -3802,7 +3806,11 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     // a relation that reflects nothing.
     auto moved = [&](int oldId) { auto it = remap.find(oldId); return it != remap.end() && it->second != oldId; };
 
-    for (int id : m_mirrorPoints) remapPt(id);
+    // Derived points are filtered out of `sources` above but were still PAIRED
+    // here, so mirroring "everything" after a first mirror recorded an image as
+    // a source. Topology validation rejects that outright, which took the whole
+    // second group down with it.
+    for (int id : m_mirrorPoints) if (!m_sketch->isDerived(id)) remapPt(id);
     for (const auto& l : srcLines) {
         if (!m_mirrorLines.count(l.id) || m_sketch->isDerived(l.id)) continue;
         const int s = remapPt(l.startPointId), e = remapPt(l.endPointId);
@@ -3864,6 +3872,7 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     m_sketch->setConstruction(axisA, true);
     m_sketch->setConstruction(axisB, true);
     m_sketch->setConstruction(mir.axisLineId, true);
+    mir.axisGenerated = true;   // this group made the axis, so it may delete it
 
     // A shared vertex is the only thing holding the two halves together, and
     // nothing otherwise keeps it on the axis: drag it off and the derived half
@@ -3876,7 +3885,8 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
         pin.entityA = pid;
         pin.entityB = mir.axisLineId;
         pin.value = 0.0;
-        m_sketch->addConstraint(pin);
+        const int pinId = m_sketch->addConstraint(pin);
+        if (pinId >= 0) mir.pinConstraints.push_back(pinId);
     }
 
     m_sketch->addMirror(mir);

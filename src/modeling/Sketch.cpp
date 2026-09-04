@@ -2120,6 +2120,11 @@ inline glm::vec2 reflectAcross(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
 }
 
 constexpr float kDegenerateAxisLen2 = 1e-12f;
+// How far off the axis a SHARED vertex may sit and still be believed. The pin
+// drives it to zero but converges iteratively, so an exact test would reject
+// valid groups mid-solve; 1e-3 mm is far below anything a user can see and far
+// above the solver's residual.
+constexpr float kOnAxisTol2 = 1e-6f;
 
 } // namespace
 
@@ -2242,36 +2247,274 @@ bool Sketch::breakMirrorLink(int mirrorId) {
 }
 
 int Sketch::validateMirrors() {
-    // Pass 1: drop groups whose axis or members have vanished, or whose axis
-    // has become degenerate (a zero-length axis would otherwise reflect to NaN
-    // and poison every derived point in the sketch).
-    std::unordered_set<int> live;
-    for (const auto& p : m_points)  live.insert(p.id);
-    for (const auto& l : m_lines)   live.insert(l.id);
-    for (const auto& c : m_circles) live.insert(c.id);
-    for (const auto& a : m_arcs)    live.insert(a.id);
-    for (const auto& sp : m_splines) live.insert(sp.id);
+    // A group authorises two dangerous things: it marks geometry `derived`
+    // (locking it and removing it from the DOF tally), and it claims geometry
+    // as OWNED (letting Delete mirror remove it). Both come from a file that
+    // may be corrupt or hand-edited, so nothing here is taken on trust.
+    //
+    // Typed id sets. The old union-of-all-ids check let an `ME line` pair full
+    // of POINT ids pass, which then flagged those points derived.
+    std::unordered_map<int, const SketchPoint*>  pointById;
+    std::unordered_map<int, const SketchLine*>   lineById;
+    std::unordered_map<int, const SketchCircle*> circleById;
+    std::unordered_map<int, const SketchArc*>    arcById;
+    std::unordered_map<int, const SketchSpline*> splineById;
+    for (const auto& p : m_points)   pointById[p.id]  = &p;
+    for (const auto& l : m_lines)    lineById[l.id]   = &l;
+    for (const auto& c : m_circles)  circleById[c.id] = &c;
+    for (const auto& a : m_arcs)     arcById[a.id]    = &a;
+    for (const auto& sp : m_splines) splineById[sp.id] = &sp;
+
+    // An entity may be the image of at most ONE group, and a pin may be claimed
+    // by at most one. Tracked across groups, in order: the first claim wins.
+    std::unordered_set<int> claimedDerived;
+    std::unordered_set<int> claimedPins;
+
+    // Every id any surviving group claims as an OUTPUT. Recomputed each round
+    // of the fixed point below. Sources are checked against this rather than
+    // against the `derived` flag, because that flag is written by pass 2 — i.e.
+    // AFTER this one — so on a fresh load it is stale (or simply false) and a
+    // chain "group B mirrors group A's image" passed unnoticed. Since no source
+    // may be any group's output, chains cannot form, and neither can cycles.
+    std::unordered_set<int> allOutputs;
+    auto isOutput = [&](int id) { return allOutputs.count(id) != 0; };
 
     const size_t before = m_mirrors.size();
-    m_mirrors.erase(std::remove_if(m_mirrors.begin(), m_mirrors.end(),
-        [&](const SketchMirror& mir) {
-            if (!live.count(mir.axisLineId)) return true;
-            const SketchLine* axis = nullptr;
-            for (const auto& l : m_lines) if (l.id == mir.axisLineId) { axis = &l; break; }
-            if (!axis) return true;
-            const SketchPoint* a = getPoint(axis->startPointId);
-            const SketchPoint* b = getPoint(axis->endPointId);
-            if (!a || !b) return true;
-            if (glm::dot(b->pos - a->pos, b->pos - a->pos) < kDegenerateAxisLen2) return true;
-            // A group is only meaningful while BOTH sides of every pair exist.
-            for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
-                for (const auto& [srcId, dstId] : *v)
-                    if (!live.count(srcId) || !live.count(dstId)) return true;
-            return mir.points.empty() && mir.lines.empty() && mir.circles.empty() &&
-                   mir.arcs.empty() && mir.splines.empty();
-        }), m_mirrors.end());
 
-    // Pass 2: the flags follow the surviving groups, never the file.
+    auto groupIsValid = [&](SketchMirror& mir) -> bool {
+        // --- the axis ---
+        auto axIt = lineById.find(mir.axisLineId);
+        if (axIt == lineById.end()) return false;          // must be a LINE, not any entity
+        const SketchLine* axis = axIt->second;
+        if (isOutput(mir.axisLineId)) return false;         // an image cannot be an axis
+        const SketchPoint* a = getPoint(axis->startPointId);
+        const SketchPoint* b = getPoint(axis->endPointId);
+        if (!a || !b) return false;
+        const glm::vec2 axisDir = b->pos - a->pos;
+        const float axisLen2 = glm::dot(axisDir, axisDir);
+        if (axisLen2 < kDegenerateAxisLen2) return false;  // reflecting about it yields NaN
+
+        // --- legacy migration (P8a) ---
+        // Groups written before `sharedPoints` existed still CONTAIN shared
+        // vertices: commitMirror has created them since 5d56b20 and the writer
+        // in 0f2fe0a persisted no field for them. Defaulting to empty would make
+        // topology validation below reject those files as corrupt identity
+        // mappings — so infer the set instead, and let the same checks vet it.
+        // Only when the group declares none: a file that says "no shared
+        // vertices" is believed.
+        if (mir.sharedPoints.empty()) {
+            std::unordered_set<int> pairedSrc;
+            for (const auto& [srcId, dstId] : mir.points) pairedSrc.insert(srcId);
+            std::unordered_set<int> seen;
+            auto inferFrom = [&](int srcPt, int dstPt) {
+                if (srcPt != dstPt) return;               // not an identity mapping
+                if (pairedSrc.count(srcPt)) return;       // it is paired, not shared
+                if (!seen.insert(srcPt).second) return;
+                mir.sharedPoints.push_back(srcPt);
+            };
+            for (const auto& [sid, did] : mir.lines) {
+                auto si = lineById.find(sid), di = lineById.find(did);
+                if (si == lineById.end() || di == lineById.end()) continue;
+                inferFrom(si->second->startPointId, di->second->startPointId);
+                inferFrom(si->second->endPointId,   di->second->endPointId);
+            }
+            for (const auto& [sid, did] : mir.circles) {
+                auto si = circleById.find(sid), di = circleById.find(did);
+                if (si != circleById.end() && di != circleById.end())
+                    inferFrom(si->second->centerPointId, di->second->centerPointId);
+            }
+            for (const auto& [sid, did] : mir.arcs) {
+                auto si = arcById.find(sid), di = arcById.find(did);
+                if (si == arcById.end() || di == arcById.end()) continue;
+                inferFrom(si->second->centerPointId, di->second->centerPointId);
+                inferFrom(si->second->endPointId,    di->second->startPointId);
+                inferFrom(si->second->startPointId,  di->second->endPointId);
+            }
+            for (const auto& [sid, did] : mir.splines) {
+                auto si = splineById.find(sid), di = splineById.find(did);
+                if (si == splineById.end() || di == splineById.end()) continue;
+                const auto& sc = si->second->controlPointIds;
+                const auto& dc = di->second->controlPointIds;
+                if (sc.size() != dc.size()) continue;
+                for (size_t i = 0; i < sc.size(); ++i) inferFrom(sc[i], dc[i]);
+            }
+        }
+
+        // --- shared vertices: the only legitimate identity mappings ---
+        // Each must exist, sit ON the axis, and be nobody's image. Without this
+        // check the field is simply a licence to declare any identity mapping
+        // valid, which is what topology validation below relies on it to mean.
+        std::unordered_set<int> shared;
+        for (int pid : mir.sharedPoints) {
+            auto it = pointById.find(pid);
+            if (it == pointById.end()) return false;
+            if (isOutput(pid)) return false;
+            const glm::vec2 rel = it->second->pos - a->pos;
+            const float t = glm::dot(rel, axisDir) / axisLen2;
+            const glm::vec2 foot = a->pos + axisDir * t;
+            if (glm::dot(it->second->pos - foot, it->second->pos - foot) > kOnAxisTol2)
+                return false;
+            if (!shared.insert(pid).second) return false;  // duplicate MS row
+        }
+
+        // --- point pairs, and the mapping every element pair is checked against ---
+        std::unordered_map<int, int> pmap;                 // source point -> image point
+        for (const auto& [srcId, dstId] : mir.points) {
+            if (srcId == dstId) return false;              // aliasing: use sharedPoints
+            if (!pointById.count(srcId) || !pointById.count(dstId)) return false;
+            if (isOutput(srcId)) return false;              // a source cannot be an image
+            if (shared.count(srcId) || shared.count(dstId)) return false;
+            if (!claimedDerived.insert(dstId).second) return false;  // two owners
+            if (!pmap.emplace(srcId, dstId).second) return false;    // duplicate MP row
+        }
+        // A source point maps to its image; a shared vertex maps to itself.
+        auto mapPt = [&](int srcId, int& out) {
+            auto it = pmap.find(srcId);
+            if (it != pmap.end()) { out = it->second; return true; }
+            if (shared.count(srcId)) { out = srcId; return true; }
+            return false;
+        };
+
+        // --- element pairs: typed, and their POINT TOPOLOGY must match pmap ---
+        // A pair naming two real lines whose endpoints do not correspond is not
+        // a reflection of anything, and would lock geometry that never moves.
+        int m1 = -1, m2 = -1, m3 = -1;
+        for (const auto& [srcId, dstId] : mir.lines) {
+            if (srcId == dstId) return false;
+            auto si = lineById.find(srcId), di = lineById.find(dstId);
+            if (si == lineById.end() || di == lineById.end()) return false;
+            if (isOutput(srcId)) return false;
+            if (!claimedDerived.insert(dstId).second) return false;
+            if (!mapPt(si->second->startPointId, m1)) return false;
+            if (!mapPt(si->second->endPointId,   m2)) return false;
+            if (di->second->startPointId != m1 || di->second->endPointId != m2) return false;
+        }
+        for (const auto& [srcId, dstId] : mir.circles) {
+            if (srcId == dstId) return false;
+            auto si = circleById.find(srcId), di = circleById.find(dstId);
+            if (si == circleById.end() || di == circleById.end()) return false;
+            if (isOutput(srcId)) return false;
+            if (!claimedDerived.insert(dstId).second) return false;
+            if (!mapPt(si->second->centerPointId, m1)) return false;
+            if (di->second->centerPointId != m1) return false;
+        }
+        for (const auto& [srcId, dstId] : mir.arcs) {
+            if (srcId == dstId) return false;
+            auto si = arcById.find(srcId), di = arcById.find(dstId);
+            if (si == arcById.end() || di == arcById.end()) return false;
+            if (isOutput(srcId)) return false;
+            if (!claimedDerived.insert(dstId).second) return false;
+            // Reflection reverses winding, so the image's start is the mapped
+            // source END. Checking without the swap would reject every valid arc.
+            if (!mapPt(si->second->centerPointId, m1)) return false;
+            if (!mapPt(si->second->endPointId,    m2)) return false;
+            if (!mapPt(si->second->startPointId,  m3)) return false;
+            if (di->second->centerPointId != m1) return false;
+            if (di->second->startPointId  != m2) return false;
+            if (di->second->endPointId    != m3) return false;
+        }
+        for (const auto& [srcId, dstId] : mir.splines) {
+            if (srcId == dstId) return false;
+            auto si = splineById.find(srcId), di = splineById.find(dstId);
+            if (si == splineById.end() || di == splineById.end()) return false;
+            if (isOutput(srcId)) return false;
+            if (!claimedDerived.insert(dstId).second) return false;
+            const auto& sc = si->second->controlPointIds;
+            const auto& dc = di->second->controlPointIds;
+            if (sc.size() != dc.size()) return false;
+            for (size_t i = 0; i < sc.size(); ++i) {
+                if (!mapPt(sc[i], m1)) return false;
+                if (dc[i] != m1) return false;
+            }
+        }
+
+        // A group owning nothing reflects nothing.
+        if (mir.points.empty() && mir.lines.empty() && mir.circles.empty() &&
+            mir.arcs.empty() && mir.splines.empty())
+            return false;
+
+        // --- ownership claims: validated separately, and CLEARED not rejected ---
+        // These authorise DELETION, so a bad claim must never be honoured — but
+        // it must not destroy an otherwise sound relation either. Clearing means
+        // the group keeps working and Delete mirror simply retains more.
+        std::vector<int> keptPins;
+        for (int cid : mir.pinConstraints) {
+            const Constraint* c = nullptr;
+            for (const auto& k : m_constraints) if (k.id == cid) { c = &k; break; }
+            if (!c) continue;
+            if (c->type != ConstraintType::DistancePointLine) continue;
+            if (c->value != 0.0) continue;
+            if (c->entityB != mir.axisLineId) continue;
+            if (!shared.count(c->entityA)) continue;
+            if (!claimedPins.insert(cid).second) continue;   // another group claims it
+            keptPins.push_back(cid);
+        }
+        mir.pinConstraints = std::move(keptPins);
+
+        // `isConstruction` alone does not prove the mirror MADE this axis — a
+        // file could mark a line the user drew and have Delete mirror destroy
+        // it. Demand the whole generated-axis shape, and retain forever if any
+        // part of it fails.
+        if (mir.axisGenerated) {
+            bool ok = axis->isConstruction;
+            const int ep[2] = { axis->startPointId, axis->endPointId };
+            for (int i = 0; i < 2 && ok; ++i) {
+                const SketchPoint* p = getPoint(ep[i]);
+                if (!p || !p->isConstruction) { ok = false; break; }
+            }
+            for (const auto& l : m_lines)
+                if (ok && l.id != mir.axisLineId &&
+                    (l.startPointId == ep[0] || l.endPointId == ep[0] ||
+                     l.startPointId == ep[1] || l.endPointId == ep[1])) ok = false;
+            for (const auto& c : m_circles)
+                if (ok && (c.centerPointId == ep[0] || c.centerPointId == ep[1])) ok = false;
+            for (const auto& arc : m_arcs)
+                if (ok && (arc.centerPointId == ep[0] || arc.startPointId == ep[0] ||
+                           arc.endPointId == ep[0] || arc.centerPointId == ep[1] ||
+                           arc.startPointId == ep[1] || arc.endPointId == ep[1])) ok = false;
+            for (const auto& sp : m_splines)
+                for (int cp : sp.controlPointIds)
+                    if (ok && (cp == ep[0] || cp == ep[1])) ok = false;
+            for (const auto& k : m_constraints)
+                if (ok && (k.entityA == ep[0] || k.entityB == ep[0] ||
+                           k.entityA == ep[1] || k.entityB == ep[1])) ok = false;
+            if (!ok) mir.axisGenerated = false;
+        }
+        return true;
+    };
+
+    // Pass 1: drop the groups that do not survive the rules above. Not
+    // remove_if: a rejected group must release the ids it had claimed, or a
+    // later valid group inherits its "already owned" verdict.
+    // Iterated to a fixed point. One pass is not enough: `allOutputs` is built
+    // from the groups that currently survive, so dropping a group frees the ids
+    // it claimed, and a group rejected only because it appeared to depend on
+    // that one must get another chance. Each round drops at least one group, so
+    // this terminates in at most m_mirrors.size() rounds.
+    bool droppedAny = true;
+    while (droppedAny) {
+        droppedAny = false;
+        allOutputs.clear();
+        for (const auto& mir : m_mirrors)
+            for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })
+                for (const auto& [srcId, dstId] : *v) allOutputs.insert(dstId);
+
+        claimedDerived.clear();
+        claimedPins.clear();
+        std::vector<SketchMirror> kept;
+        kept.reserve(m_mirrors.size());
+        for (auto& mir : m_mirrors) {
+            const auto derivedMark = claimedDerived;
+            const auto pinMark     = claimedPins;
+            if (groupIsValid(mir)) { kept.push_back(std::move(mir)); }
+            else { claimedDerived = derivedMark; claimedPins = pinMark; droppedAny = true; }
+        }
+        m_mirrors = std::move(kept);
+    }
+
+    // Pass 2: the flags follow the surviving groups, never the file. A shared
+    // vertex is deliberately absent here — it is nobody's image, so it stays
+    // draggable and keeps its degrees of freedom.
     std::unordered_set<int> derivedIds;
     for (const auto& mir : m_mirrors)
         for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines })

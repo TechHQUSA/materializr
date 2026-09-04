@@ -775,3 +775,198 @@ TEST(SketchMirrorIO, AFileWithoutMirrorsLoadsAsPlainGeometry) {
     for (const auto& p : loaded.getPoints())
         EXPECT_FALSE(p.derived) << "no group means nothing is derived";
 }
+
+// --- validation hardening: a group authorises locking and DELETING geometry,
+// and it arrives from a file that may be corrupt. None of it is taken on trust.
+
+namespace {
+// A committed, valid mirror whose group can then be corrupted field by field.
+std::unique_ptr<HalfProfile> committedMirror() {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    return h;
+}
+materializr::SketchMirror& groupOf(HalfProfile& h) {
+    // The only mutable route is a rebuild: getMirrors() is const by design.
+    return const_cast<materializr::SketchMirror&>(h.sk.getMirrors()[0]);
+}
+} // namespace
+
+// The old check tested pair ids against ONE union of every entity id, so a
+// line pair full of POINT ids passed and flagged those points derived.
+TEST(SketchMirrorValidate, AnElementPairMustNameItsOwnEntityKind) {
+    auto h = committedMirror();
+    const int pA = h->tl, pB = h->bl;
+    groupOf(*h).lines.push_back({pA, pB});          // two POINTS in the LINE pairs
+    h->sk.validateMirrors();
+    EXPECT_TRUE(h->sk.getMirrors().empty()) << "a mistyped pair must break the group";
+    EXPECT_FALSE(h->sk.isDerived(pB)) << "and must not leave a point flagged derived";
+}
+
+// Two real lines whose endpoints do not correspond to the point mapping are not
+// a reflection of anything; the group would lock geometry that never moves.
+TEST(SketchMirrorValidate, ElementTopologyMustMatchThePointMapping) {
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f}), b = sk.addPoint({0.0f, 10.0f});
+    const int axis = sk.addLine(a, b);
+    const int p1 = sk.addPoint({ 4.0f, 1.0f}), p2 = sk.addPoint({ 6.0f, 8.0f});
+    const int q1 = sk.addPoint({-4.0f, 1.0f}), q2 = sk.addPoint({-6.0f, 8.0f});
+    const int src = sk.addLine(p1, p2);
+    // The image's endpoints are REVERSED against the mapping. Geometrically the
+    // same segment, so a laxer check waves it through — but recomputeMirrors
+    // writes reflect(p1) into whichever point the pair says is p1's image, and
+    // here that is q2. The mirror would tear itself apart on the next solve.
+    const int bad = sk.addLine(q2, q1);
+    materializr::SketchMirror m;
+    m.axisLineId = axis;
+    m.points = { {p1, q1}, {p2, q2} };     // every id distinct: no duplicate-owner shortcut
+    m.lines  = { {src, bad} };
+    sk.addMirror(m);
+    sk.validateMirrors();
+    EXPECT_TRUE(sk.getMirrors().empty()) << "mismatched topology must break the group";
+}
+
+// The arc swap is real: reflection reverses winding, so the image's start is
+// the mapped source END. Validating without the swap rejects every valid arc.
+TEST(SketchMirrorValidate, ArcTopologyIsCheckedWithTheWindingSwap) {
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f}), b = sk.addPoint({0.0f, 10.0f});
+    const int axis = sk.addLine(a, b);
+    const int ctr = sk.addPoint({5.0f, 0.0f});
+    const int s0 = sk.addPoint({8.0f, 0.0f}), e0 = sk.addPoint({5.0f, 3.0f});
+    const int arc0 = sk.addArc(ctr, s0, e0, 3.0);
+    const int ctr1 = sk.addPoint({-5.0f, 0.0f});
+    const int s1 = sk.addPoint({-8.0f, 0.0f}), e1 = sk.addPoint({-5.0f, 3.0f});
+    const int arc1 = sk.addArc(ctr1, e1, s1, 3.0);     // start/end SWAPPED, as commitMirror does
+    materializr::SketchMirror m;
+    m.axisLineId = axis;
+    m.points = { {ctr, ctr1}, {s0, s1}, {e0, e1} };
+    m.arcs = { {arc0, arc1} };
+    sk.addMirror(m);
+    sk.validateMirrors();
+    EXPECT_EQ(1u, sk.getMirrors().size()) << "a correctly swapped arc pair must survive";
+}
+
+// ...and the negative half, without which the check above is unpinned: an arc
+// pair built WITHOUT the swap is not a reflection and must be rejected.
+TEST(SketchMirrorValidate, AnArcPairBuiltWithoutTheSwapIsRejected) {
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f}), b = sk.addPoint({0.0f, 10.0f});
+    const int axis = sk.addLine(a, b);
+    const int ctr = sk.addPoint({5.0f, 0.0f});
+    const int s0 = sk.addPoint({8.0f, 0.0f}), e0 = sk.addPoint({5.0f, 3.0f});
+    const int arc0 = sk.addArc(ctr, s0, e0, 3.0);
+    const int ctr1 = sk.addPoint({-5.0f, 0.0f});
+    const int s1 = sk.addPoint({-8.0f, 0.0f}), e1 = sk.addPoint({-5.0f, 3.0f});
+    const int arc1 = sk.addArc(ctr1, s1, e1, 3.0);    // NOT swapped
+    materializr::SketchMirror m;
+    m.axisLineId = axis;
+    m.points = { {ctr, ctr1}, {s0, s1}, {e0, e1} };
+    m.arcs = { {arc0, arc1} };
+    sk.addMirror(m);
+    sk.validateMirrors();
+    EXPECT_TRUE(sk.getMirrors().empty()) << "an unswapped arc pair is not a reflection";
+}
+
+// sharedPoints authorises the identity mappings topology validation otherwise
+// forbids, so an unvalidated list is a way to smuggle a corrupt group past it.
+TEST(SketchMirrorValidate, ASharedPointMustActuallyLieOnTheAxis) {
+    auto h = committedMirror();
+    // A FRESH point, referenced by nothing and paired with nothing: the only
+    // rule it can break is the on-axis one. Naming an existing paired source
+    // here trips "a shared vertex may not also be paired" and leaves the
+    // geometric check untested.
+    const int stray = h->sk.addPoint({40.0f, 40.0f});
+    groupOf(*h).sharedPoints.push_back(stray);
+    h->sk.validateMirrors();
+    EXPECT_TRUE(h->sk.getMirrors().empty()) << "an off-axis shared vertex must break the group";
+}
+
+// Ownership authorises DELETION. A bad claim is cleared, never honoured — but
+// it must not destroy an otherwise sound relation either.
+TEST(SketchMirrorValidate, AnUnprovableAxisClaimIsClearedNotObeyed) {
+    auto h = committedMirror();
+    auto& mir = groupOf(*h);
+    ASSERT_TRUE(mir.axisGenerated);
+    // Attach unrelated geometry to an axis endpoint: the axis is no longer
+    // exclusively this group's, so the claim cannot be proven.
+    const auto& lines = h->sk.getLines();
+    int axisStart = -1;
+    for (const auto& l : lines) if (l.id == mir.axisLineId) axisStart = l.startPointId;
+    ASSERT_NE(-1, axisStart);
+    h->sk.addLine(axisStart, h->sk.addPoint({40.0f, 40.0f}));
+    h->sk.validateMirrors();
+    ASSERT_EQ(1u, h->sk.getMirrors().size()) << "the relation itself is still sound";
+    EXPECT_FALSE(h->sk.getMirrors()[0].axisGenerated) << "but it no longer owns the axis";
+}
+
+TEST(SketchMirrorValidate, APinClaimOnSomeoneElsesConstraintIsCleared) {
+    auto h = committedMirror();
+    // Shaped EXACTLY like a real pin — right type, zero value, right axis — and
+    // differing only in naming a point that is not shared. Anything cruder is
+    // caught by the type check and leaves entityA untested.
+    materializr::Constraint c{};
+    c.type = materializr::ConstraintType::DistancePointLine;
+    c.entityA = h->tl;                                // a real point, but not on the axis
+    c.entityB = h->sk.getMirrors()[0].axisLineId;
+    c.value = 0.0;
+    const int cid = h->sk.addConstraint(c);
+    ASSERT_NE(-1, cid);
+    groupOf(*h).pinConstraints.push_back(cid);
+    h->sk.validateMirrors();
+    ASSERT_EQ(1u, h->sk.getMirrors().size());
+    for (int pid : h->sk.getMirrors()[0].pinConstraints)
+        EXPECT_NE(cid, pid) << "a group must not claim a constraint it did not create";
+}
+
+// Files written by 5d56b20/0f2fe0a contain shared vertices and no field naming
+// them. Without inference this plan would reject sketches the shipped build saves.
+TEST(SketchMirrorValidate, LegacyGroupsWithoutSharedPointsAreMigrated) {
+    auto h = committedMirror();
+    auto& mir = groupOf(*h);
+    ASSERT_FALSE(mir.sharedPoints.empty()) << "the fixture must have shared vertices";
+    const std::size_t had = mir.sharedPoints.size();
+    mir.sharedPoints.clear();                        // exactly what an old file loads as
+    h->sk.validateMirrors();
+    ASSERT_EQ(1u, h->sk.getMirrors().size()) << "a legacy group must survive, not be dropped";
+    EXPECT_EQ(had, h->sk.getMirrors()[0].sharedPoints.size()) << "and its shared set restored";
+}
+
+// A source is checked against what the groups CLAIM, not against the `derived`
+// flag — pass 2 writes that flag, so during validation it is stale, and on a
+// fresh load it is simply false. These two shapes slipped through unnoticed.
+TEST(SketchMirrorValidate, AChainOfGroupsIsRefused) {
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f}), b = sk.addPoint({0.0f, 10.0f});
+    const int axis = sk.addLine(a, b);
+    const int p = sk.addPoint({3.0f, 4.0f});
+    const int q = sk.addPoint({-3.0f, 4.0f});     // image of p
+    const int r = sk.addPoint({7.0f, 4.0f});      // would be the image OF THE IMAGE
+    materializr::SketchMirror g1; g1.axisLineId = axis; g1.points = { {p, q} };
+    sk.addMirror(g1);
+    materializr::SketchMirror g2; g2.axisLineId = axis; g2.points = { {q, r} };
+    sk.addMirror(g2);
+    sk.validateMirrors();
+    ASSERT_EQ(1u, sk.getMirrors().size()) << "the chained group must be dropped";
+    EXPECT_EQ(p, sk.getMirrors()[0].points[0].first) << "and the sound one kept";
+    EXPECT_FALSE(sk.isDerived(r)) << "the chained image must not stay flagged";
+}
+
+TEST(SketchMirrorValidate, ACycleBetweenGroupsIsRefused) {
+    Sketch sk;
+    const int a = sk.addPoint({0.0f, -10.0f}), b = sk.addPoint({0.0f, 10.0f});
+    const int axis = sk.addLine(a, b);
+    const int p = sk.addPoint({3.0f, 4.0f});
+    const int q = sk.addPoint({-3.0f, 4.0f});
+    // p is q's image and q is p's image: each group's source is the other's
+    // output, so the recompute would have no ordering that converges.
+    materializr::SketchMirror g1; g1.axisLineId = axis; g1.points = { {p, q} };
+    sk.addMirror(g1);
+    materializr::SketchMirror g2; g2.axisLineId = axis; g2.points = { {q, p} };
+    sk.addMirror(g2);
+    sk.validateMirrors();
+    EXPECT_LE(sk.getMirrors().size(), 1u) << "a cycle must not survive intact";
+    for (const auto& mir : sk.getMirrors())
+        for (const auto& [src, dst] : mir.points)
+            EXPECT_FALSE(sk.isDerived(src)) << "no surviving source may also be an image";
+}
