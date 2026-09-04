@@ -2437,6 +2437,26 @@ int Sketch::validateMirrors() {
         // These authorise DELETION, so a bad claim must never be honoured — but
         // it must not destroy an otherwise sound relation either. Clearing means
         // the group keeps working and Delete mirror simply retains more.
+        // Legacy pin migration (P9a). Groups written by 5d56b20/0f2fe0a HAVE
+        // pins — commitMirror created them — but no field recorded which. Left
+        // unclaimed, Break link on such a file would retain the pin, so the
+        // formerly shared vertex stays welded to the axis and Break link fails
+        // its one job. Claim exactly the one constraint shaped like this
+        // group's own pin; zero or several is ambiguity, and ambiguity RETAINS.
+        if (mir.pinConstraints.empty()) {
+            for (int pid : mir.sharedPoints) {
+                int found = -1, matches = 0;
+                for (const auto& k : m_constraints) {
+                    if (k.type != ConstraintType::DistancePointLine) continue;
+                    if (k.value != 0.0) continue;
+                    if (k.entityA != pid || k.entityB != mir.axisLineId) continue;
+                    if (claimedPins.count(k.id)) continue;
+                    found = k.id; ++matches;
+                }
+                if (matches == 1) mir.pinConstraints.push_back(found);
+            }
+        }
+
         std::vector<int> keptPins;
         for (int cid : mir.pinConstraints) {
             const Constraint* c = nullptr;

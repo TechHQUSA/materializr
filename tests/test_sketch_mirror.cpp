@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <set>
@@ -969,4 +970,160 @@ TEST(SketchMirrorValidate, ACycleBetweenGroupsIsRefused) {
     for (const auto& mir : sk.getMirrors())
         for (const auto& [src, dst] : mir.points)
             EXPECT_FALSE(sk.isDerived(src)) << "no surviving source may also be an image";
+}
+
+// --- serialisation v2: compatibility in BOTH directions, and recovery from a
+// corrupt file. The grammar has changed twice; assertions replace assumption.
+
+namespace {
+// Round-trips a sketch through the writer, optionally mangling the text first.
+materializr::Sketch reloadWith(const Sketch& src,
+                               const std::function<std::string(std::string)>& mangle) {
+    std::ostringstream os;
+    materializr::ProjectIO::writeSketchBody(os, src);
+    std::istringstream is(mangle ? mangle(os.str()) : os.str());
+    materializr::Sketch out;
+    materializr::ProjectIO::parseSketchBody(is, out);
+    return out;
+}
+std::string dropRows(std::string text, const char* token) {
+    std::istringstream in(text);
+    std::ostringstream out;
+    std::string line;
+    while (std::getline(in, line))
+        if (line.rfind(token, 0) != 0) out << line << "\n";
+    return out.str();
+}
+} // namespace
+
+TEST(SketchMirrorIO, OwnershipAndSharedVerticesRoundTrip) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& before = h->sk.getMirrors()[0];
+    ASSERT_TRUE(before.axisGenerated);
+    ASSERT_FALSE(before.sharedPoints.empty());
+    ASSERT_FALSE(before.pinConstraints.empty());
+
+    materializr::Sketch loaded = reloadWith(h->sk, nullptr);
+    ASSERT_EQ(1u, loaded.getMirrors().size());
+    const auto& after = loaded.getMirrors()[0];
+    EXPECT_TRUE(after.axisGenerated) << "the axis claim must survive the file";
+    EXPECT_EQ(before.sharedPoints.size(), after.sharedPoints.size());
+    EXPECT_EQ(before.pinConstraints.size(), after.pinConstraints.size());
+}
+
+// An OLD file: no MS rows, no MC rows, no trailing M fields. It must still load
+// as a working mirror, with the shared set and the pins inferred back.
+TEST(SketchMirrorIO, AFileFromBeforeTheOwnershipFieldsStillLoads) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const std::size_t sharedHad = h->sk.getMirrors()[0].sharedPoints.size();
+
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        t = dropRows(std::move(t), "MC ");
+        t = dropRows(std::move(t), "MS ");
+        // Rewrite the M row back to its 4-field form, counts included.
+        std::istringstream in(t); std::ostringstream out; std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("M ", 0) == 0) {
+                std::istringstream ms(line); std::string tok;
+                int id, axis, nPts, nElems;
+                ms >> tok >> id >> axis >> nPts >> nElems;
+                out << "M " << id << " " << axis << " " << nPts << " " << nElems << "\n";
+            } else out << line << "\n";
+        }
+        return out.str();
+    });
+
+    ASSERT_EQ(1u, loaded.getMirrors().size()) << "a legacy file must not lose its relation";
+    EXPECT_EQ(sharedHad, loaded.getMirrors()[0].sharedPoints.size())
+        << "the shared set must be inferred back";
+    EXPECT_FALSE(loaded.getMirrors()[0].pinConstraints.empty())
+        << "and the pins reclaimed, or Break link would leave the vertex welded";
+}
+
+// The desync P8d names: an inflated count must not eat the record that follows.
+// Driven by a count, the parser consumes the next line as a failed child row and
+// that record is then never parsed — silent geometry loss from a corrupt file.
+TEST(SketchMirrorIO, AnInflatedCountDoesNotSwallowTheNextRecord) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const std::size_t pointsBefore = h->sk.getPoints().size();
+
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        std::istringstream in(t); std::ostringstream out; std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("M ", 0) == 0) {
+                std::istringstream ms(line); std::string tok;
+                int id, axis, nPts, nElems, gen, nPins, nShared;
+                ms >> tok >> id >> axis >> nPts >> nElems >> gen >> nPins >> nShared;
+                out << "M " << id << " " << axis << " " << (nPts + 5) << " "
+                    << nElems << " " << gen << " " << nPins << " " << nShared << "\n";
+            } else out << line << "\n";
+        }
+        return out.str();
+    });
+
+    EXPECT_EQ(pointsBefore, loaded.getPoints().size())
+        << "every point must still load — the corrupt mirror must not eat geometry";
+    EXPECT_TRUE(loaded.getMirrors().empty())
+        << "and the truncated relation itself must be dropped";
+}
+
+// A wrong OWNERSHIP count is not a broken relation: clear the claim, keep the
+// group. Nothing is deleted on either path.
+TEST(SketchMirrorIO, AWrongPinCountClearsTheClaimButKeepsTheGroup) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        return dropRows(std::move(t), "MC ");   // rows gone, count still says otherwise
+    });
+    ASSERT_EQ(1u, loaded.getMirrors().size()) << "the relation is intact, so it survives";
+    // Pins are re-inferred by the legacy path; what matters is that the group
+    // lived and nothing was deleted.
+    EXPECT_FALSE(loaded.getPoints().empty());
+}
+
+// The desync only bites when a REAL record follows the mirror block, and the
+// writer emits mirrors last — so a round-trip alone can never catch it. This
+// fixture puts a point record after the group, which is exactly the shape a
+// hand-edited or future-format file has.
+TEST(SketchMirrorIO, ARecordAfterTheMirrorBlockIsNotSwallowed) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    ASSERT_EQ(2u, h->sk.getConstraints().size()) << "the pins are the payload we move";
+
+    // The writer emits mirrors LAST, so a plain round-trip can never expose the
+    // desync — the only line after the group is SKETCH_END, and losing that
+    // changes nothing. Move the constraint block to AFTER the mirror block, so
+    // a swallowed line costs something observable. That is the shape a
+    // hand-edited or reordered file has.
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        std::istringstream in(t); std::vector<std::string> rows; std::string line;
+        while (std::getline(in, line)) rows.push_back(line);
+        std::vector<std::string> block, rest;
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (rows[i].rfind("CONSTRAINT_COUNT", 0) == 0) {
+                block.push_back(rows[i]);
+                while (i + 1 < rows.size() && rows[i + 1].rfind("K ", 0) == 0)
+                    block.push_back(rows[++i]);
+            } else rest.push_back(rows[i]);
+        }
+        std::size_t lastChild = 0;
+        for (std::size_t i = 0; i < rest.size(); ++i) {
+            const std::string& r = rest[i];
+            if (r.rfind("MP ", 0) == 0 || r.rfind("ME ", 0) == 0 ||
+                r.rfind("MC ", 0) == 0 || r.rfind("MS ", 0) == 0) lastChild = i;
+        }
+        std::ostringstream out;
+        for (std::size_t i = 0; i < rest.size(); ++i) {
+            out << rest[i] << "\n";
+            if (i == lastChild) for (const auto& b : block) out << b << "\n";
+        }
+        return out.str();
+    });
+
+    EXPECT_EQ(2u, loaded.getConstraints().size())
+        << "the record after the mirror block must still be parsed, not swallowed";
+    EXPECT_EQ(1u, loaded.getMirrors().size()) << "and the group itself must survive";
 }

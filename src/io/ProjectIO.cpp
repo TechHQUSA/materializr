@@ -665,7 +665,16 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
     auto bump = [&](int id) { maxId = std::max(maxId, id); };
 
     std::string line;
-    while (std::getline(ifs, line)) {
+    // A line the mirror parser read, found was not its own, and handed back.
+    // Counted child loops cannot be trusted to stop in the right place on a
+    // corrupt file, so that parser reads until it sees a token it does not own
+    // and returns that line here rather than swallowing it.
+    std::string pending;
+    auto nextLine = [&](std::string& out) {
+        if (!pending.empty()) { out = std::move(pending); pending.clear(); return true; }
+        return static_cast<bool>(std::getline(ifs, out));
+    };
+    while (nextLine(line)) {
         std::istringstream iss(line);
         std::string tok; iss >> tok;
         if (tok == endTok || tok.empty()) break;
@@ -784,28 +793,63 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
             }
         } else if (tok == "MIRROR_COUNT") {
             int n = 0; iss >> n;
-            for (int i = 0; i < n && std::getline(ifs, line); ++i) {
+            for (int i = 0; i < n && nextLine(line); ++i) {
                 std::istringstream s(line); std::string t;
-                materializr::SketchMirror m; int nPts = 0, nElems = 0;
+                materializr::SketchMirror m;
+                int nPts = 0, nElems = 0, axisGen = 0, nPins = 0, nShared = 0;
                 s >> t >> m.id >> m.axisLineId >> nPts >> nElems;
-                if (t != "M") break;                       // malformed: stop, keep geometry
-                for (int k = 0; k < nPts && std::getline(ifs, line); ++k) {
-                    std::istringstream ps(line); std::string pt; int a = -1, b = -1;
-                    ps >> pt >> a >> b;
-                    if (pt == "MP") m.points.push_back({a, b});
-                }
-                for (int k = 0; k < nElems && std::getline(ifs, line); ++k) {
-                    std::istringstream es(line); std::string et; int kind = -1, a = -1, b = -1;
-                    es >> et >> kind >> a >> b;
-                    if (et != "ME") continue;
-                    switch (kind) {
-                        case 0: m.lines.push_back({a, b});   break;
-                        case 1: m.circles.push_back({a, b}); break;
-                        case 2: m.arcs.push_back({a, b});    break;
-                        case 3: m.splines.push_back({a, b}); break;
-                        default: break;                      // unknown kind: drop the pair
+                if (t != "M") { pending = line; break; }   // not ours: hand it back
+                // Trailing fields, absent in files written before they existed.
+                // Their absence is the conservative case: owns nothing.
+                if (!(s >> axisGen))  axisGen = 0;
+                if (!(s >> nPins))    nPins = 0;
+                if (!(s >> nShared))  nShared = 0;
+                m.axisGenerated = (axisGen != 0);
+
+                // TOKEN-DRIVEN, not counted. A count is data in the file and may
+                // be wrong; driving the loop with it lets an inflated count
+                // consume the next legitimate sketch record as a failed child
+                // row, which is then never parsed at all — silent geometry loss.
+                int gotPts = 0, gotElems = 0, gotPins = 0, gotShared = 0;
+                while (nextLine(line)) {
+                    std::istringstream cs(line); std::string ct; cs >> ct;
+                    if (ct == "MP") {
+                        int a = -1, b = -1; cs >> a >> b;
+                        m.points.push_back({a, b}); ++gotPts;
+                    } else if (ct == "ME") {
+                        int kind = -1, a = -1, b = -1; cs >> kind >> a >> b;
+                        ++gotElems;
+                        switch (kind) {
+                            case 0: m.lines.push_back({a, b});   break;
+                            case 1: m.circles.push_back({a, b}); break;
+                            case 2: m.arcs.push_back({a, b});    break;
+                            case 3: m.splines.push_back({a, b}); break;
+                            default: break;                      // unknown kind: drop the pair
+                        }
+                    } else if (ct == "MC") {
+                        int cid = -1; cs >> cid;
+                        m.pinConstraints.push_back(cid); ++gotPins;
+                    } else if (ct == "MS") {
+                        int pid = -1; cs >> pid;
+                        m.sharedPoints.push_back(pid); ++gotShared;
+                    } else {
+                        pending = line;      // someone else's record: give it back
+                        break;
                     }
                 }
+
+                // The counts are a CROSS-CHECK, and what a disagreement means
+                // depends on which count it is. MP/ME describe the relation
+                // itself, so a short read is a truncated mirror and the group
+                // must not be kept. MC/MS describe ownership, so a disagreement
+                // only clears the claim — nothing is deleted either way.
+                if (gotPts != nPts || gotElems != nElems) {
+                    maxMirrorId = std::max(maxMirrorId, m.id);
+                    continue;                                // drop this group, keep geometry
+                }
+                if (gotPins != nPins)     m.pinConstraints.clear();
+                if (gotShared != nShared) m.sharedPoints.clear();
+
                 maxMirrorId = std::max(maxMirrorId, m.id);
                 sk.addRawMirror(m);
             }
@@ -1581,9 +1625,16 @@ void ProjectIO::writeSketchMirrors(std::ostream& os, const Sketch& sk) {
     // know these tokens skips them cleanly and the file still loads (losing the
     // relations, keeping the geometry):
     //   MIRROR_COUNT n
-    //   M  <id> <axisLineId> <nPointPairs> <nElemPairs>
+    //   M  <id> <axisLineId> <nPointPairs> <nElemPairs> <axisGenerated> <nPins> <nShared>
     //   MP <srcId> <dstId>
     //   ME <kind> <srcId> <dstId>        kind: 0 line, 1 circle, 2 arc, 3 spline
+    //   MC <constraintId>                a pin this group created and may delete
+    //   MS <pointId>                     a shared on-axis vertex: its own image
+    //
+    // The three trailing fields on M and the MC/MS rows are APPENDED, so a
+    // reader that predates them stops at nElemPairs and skips the unknown rows
+    // — it loads the relation and simply owns nothing, which is the retaining
+    // (safe) direction rather than the deleting one.
     const auto& mirrors = sk.getMirrors();
     os << "MIRROR_COUNT " << static_cast<int>(mirrors.size()) << "\n";
     for (const auto& m : mirrors) {
@@ -1591,7 +1642,10 @@ void ProjectIO::writeSketchMirrors(std::ostream& os, const Sketch& sk) {
                                   m.arcs.size() + m.splines.size();
         os << "M " << m.id << " " << m.axisLineId << " "
            << static_cast<int>(m.points.size()) << " "
-           << static_cast<int>(elems) << "\n";
+           << static_cast<int>(elems) << " "
+           << (m.axisGenerated ? 1 : 0) << " "
+           << static_cast<int>(m.pinConstraints.size()) << " "
+           << static_cast<int>(m.sharedPoints.size()) << "\n";
         for (const auto& [src, dst] : m.points) os << "MP " << src << " " << dst << "\n";
         int kind = 0;
         for (const auto* v : { &m.lines, &m.circles, &m.arcs, &m.splines }) {
@@ -1599,6 +1653,8 @@ void ProjectIO::writeSketchMirrors(std::ostream& os, const Sketch& sk) {
                 os << "ME " << kind << " " << src << " " << dst << "\n";
             ++kind;
         }
+        for (int cid : m.pinConstraints) os << "MC " << cid << "\n";
+        for (int pid : m.sharedPoints)   os << "MS " << pid << "\n";
     }
 }
 
