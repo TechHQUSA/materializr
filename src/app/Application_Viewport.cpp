@@ -2129,6 +2129,8 @@ void Application::renderViewport() {
                         case InferenceGuide::AngleSnap:
                         case InferenceGuide::OnLineExtension:
                         case InferenceGuide::TangentToCircle:
+                        case InferenceGuide::CornerBisector:
+                        case InferenceGuide::CornerTangent:
                             dashed = true;
                             break;
                         case InferenceGuide::PerpToRef:
@@ -2199,7 +2201,9 @@ void Application::renderViewport() {
                         // which existing feature the guide is sourced from.
                         if (g.kind == InferenceGuide::AxisHFromPoint ||
                             g.kind == InferenceGuide::AxisVFromPoint ||
-                            g.kind == InferenceGuide::PerpToRef) {
+                            g.kind == InferenceGuide::PerpToRef ||
+                            g.kind == InferenceGuide::CornerBisector ||
+                            g.kind == InferenceGuide::CornerTangent) {
                             dl->AddCircleFilled(sa, 5.5f, halo);
                             dl->AddCircleFilled(sa, 4.0f, col);
                         }
@@ -2486,6 +2490,8 @@ void Application::renderViewport() {
                             case InferenceGuide::TangentToCircle: return "Tangent";
                             case InferenceGuide::PerpToRef:       return "Perpendicular from Point";
                             case InferenceGuide::Symmetry:        return "Symmetry";
+                            case InferenceGuide::CornerBisector:  return "Corner Bisector";
+                            case InferenceGuide::CornerTangent:   return "Corner Tangent";
                         }
                         return "";
                     };

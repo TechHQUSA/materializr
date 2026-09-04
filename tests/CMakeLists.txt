@@ -711,6 +711,13 @@ add_executable(test_tangent_inference test_tangent_inference.cpp)
 target_link_libraries(test_tangent_inference PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_tangent_inference COMMAND test_tangent_inference)
 
+# test_corner_inference — the corner bisector / corner tangent guides at a
+# vertex of two segments (Full / Max only), and the displacement budget that
+# stops a nearby inference from quantizing a short segment's length
+add_executable(test_corner_inference test_corner_inference.cpp)
+target_link_libraries(test_corner_inference PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_corner_inference COMMAND test_corner_inference)
+
 # test_mode_inference — the directional inference family (angle snap, tangent,
 # perpendicular/parallel-to-previous) works in the arc, circle, polygon and
 # spline tools too, anchored on the point actually being extended

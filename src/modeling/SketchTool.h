@@ -64,6 +64,8 @@ struct InferenceGuide {
         TangentToCircle,   // cursor lies on a tangent line touching a circle, arc or spline → dashed guide
         PerpToRef,         // cursor is on the perpendicular ray through a hover-charged point → cyan guide
         Symmetry,          // cursor snapped to the mirror image of an existing point across a centreline / axis-aligned line → purple guide
+        CornerBisector,    // anchor is a vertex of two segments; cursor is on the line that bisects their angle → dashed guide
+        CornerTangent,     // same vertex, the direction a smooth curve through it would take (perpendicular to the bisector) → dashed guide
     };
     Kind kind;
     glm::vec2 from;    // ghost guide line start (sketch-space)

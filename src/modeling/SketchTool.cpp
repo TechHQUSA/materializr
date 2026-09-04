@@ -1701,6 +1701,104 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         }
     }
 
+    // Corner bisector / corner tangent: the anchor is a VERTEX where two
+    // existing segments meet. Tangency has no single answer at a corner — the
+    // chain has TWO tangent directions there, one per incident segment, and
+    // OnLineExtension already offers both. What a corner does define uniquely
+    // are the two directions built from the pair, with a and b the unit rays
+    // from the vertex to its neighbours:
+    //
+    //   • Bisector — norm(a + b). "The angle directly between the two lines":
+    //     the miter direction a corner offset follows, and the axis anything
+    //     symmetric about the corner sits on (a centred slot, a witness line
+    //     down the middle of a chamfer).
+    //   • Corner tangent — norm(b − a): the average of the two TRAVEL
+    //     directions (in = −a, out = b), i.e. the tangent a smooth curve
+    //     through the three points would carry through the vertex. Exactly
+    //     perpendicular to the bisector, since (b − a)·(b + a) = |b|² − |a|²
+    //     = 0 for unit vectors — so the two are one pair of guides at right
+    //     angles, not two arbitrary rays.
+    //
+    // Each is registered as an infinite LINE through the vertex, so pointing
+    // either way along it counts. Full / Max only: at Reduced the corner
+    // already publishes two extension guides and these would crowd them.
+    if (allowDirectional && haveDirAnchor &&
+        (m_inferenceLevel == InferenceLevel::Full ||
+         m_inferenceLevel == InferenceLevel::Max)) {
+        glm::vec2 v = pos - dirAnchor;
+        const float len = glm::length(v);
+        if (len > 1e-3f) {
+            // Unit rays from the anchor to every neighbour joined to it by a
+            // straight segment. Position-matched rather than id-matched so
+            // face-reference edges (which carry no ids) contribute the same
+            // way sketch lines do — sketching on a face, the corner you
+            // anchor on is usually the face's own.
+            const float vtxTol = 1e-4f;
+            std::vector<glm::vec2> rays;
+            auto addRay = [&](glm::vec2 from, glm::vec2 to) {
+                if (rays.size() >= 4) return;             // dense hub: bail below
+                glm::vec2 d = to - from;
+                const float l = glm::length(d);
+                if (l < 1e-6f) return;
+                d /= l;
+                // One ray per DIRECTION: two collinear segments meeting at the
+                // vertex describe the same neighbour twice.
+                for (const auto& r : rays)
+                    if (glm::dot(r, d) > 0.9998f) return;
+                rays.push_back(d);
+            };
+            for (const auto& ln : lines) {
+                if (ln.fromText) continue;
+                if (m_snapExcludePoints.count(ln.startPointId) ||
+                    m_snapExcludePoints.count(ln.endPointId)) continue;
+                const SketchPoint* p1 = m_sketch->getPoint(ln.startPointId);
+                const SketchPoint* p2 = m_sketch->getPoint(ln.endPointId);
+                if (!p1 || !p2) continue;
+                if (glm::length(p1->pos - dirAnchor) < vtxTol) addRay(dirAnchor, p2->pos);
+                else if (glm::length(p2->pos - dirAnchor) < vtxTol) addRay(dirAnchor, p1->pos);
+            }
+            for (const auto& fl : m_sketch->getFaceReferences().lines) {
+                if (glm::length(fl.first - dirAnchor) < vtxTol) addRay(dirAnchor, fl.second);
+                else if (glm::length(fl.second - dirAnchor) < vtxTol) addRay(dirAnchor, fl.first);
+            }
+            // Two or three segments meeting is a corner; a denser hub would
+            // publish a bisector for every pair, which is noise, not guidance.
+            if (rays.size() >= 2 && rays.size() <= 3) {
+                // A pure 3 deg window, like the tangent guide — deliberately
+                // WITHOUT perp/parallel-to-prev's absolute floor. That floor
+                // is a fixed distance, so as the segment shrinks it opens the
+                // angular window up: at a 1 mm grid it means 5.7 deg of catch
+                // on a 3 mm leg and worse below that, which is exactly the
+                // "it highlights when I'm nowhere near the bisector" Steve
+                // reported. An angular relationship deserves an angular
+                // tolerance at every length.
+                const float tol = std::sin(0.0524f * angleScale()) * len;
+                auto pushAxis = [&](glm::vec2 dir, InferenceGuide::Kind kind) {
+                    glm::vec2 proj = dirAnchor + dir * glm::dot(v, dir);
+                    const float off = glm::distance(pos, proj);
+                    if (off >= tol) return;
+                    cands.push_back({dirAnchor, dir, kind, -1, dirAnchor,
+                                     false, 0.0f, proj, off, true});
+                };
+                for (size_t i = 0; i < rays.size(); ++i) {
+                    for (size_t j = i + 1; j < rays.size(); ++j) {
+                        const glm::vec2 a = rays[i], b = rays[j];
+                        // Degenerate pairs have no guide to give: a straight
+                        // vertex (a ≈ −b) has no bisector, and a doubled-back
+                        // spike (a ≈ b) has no distinct corner tangent. Both
+                        // survivors are already covered by OnLineExtension.
+                        const glm::vec2 bis = a + b;
+                        if (glm::length(bis) > 1e-3f)
+                            pushAxis(glm::normalize(bis), InferenceGuide::CornerBisector);
+                        const glm::vec2 tan = b - a;
+                        if (glm::length(tan) > 1e-3f)
+                            pushAxis(glm::normalize(tan), InferenceGuide::CornerTangent);
+                    }
+                }
+            }
+        }
+    }
+
     // Hover-charged reference (Full level): the dwelt-on reference projects
     // vertical, horizontal, and per-touching-line perpendicular guides AT
     // its position. Wider tolerance than incidental axis-from-point
@@ -1862,6 +1960,22 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     auto isContact = [](InferenceGuide::Kind k) {
         return k == InferenceGuide::OnLine;
     };
+    // A guide direction and the snap lattice can only both be honoured when
+    // the ray is AXIS-ALIGNED: such a ray passes through lattice points, so
+    // rounding both coordinates keeps the point on it. Any other direction
+    // cannot — onLattice moves the point up to half a diagonal cell OFF the
+    // ray, and near the anchor that is degrees of angular error (measured on
+    // a 1 mm grid: 8.4 deg on a 3 mm leg off a 70 deg corner, 3.4 deg at
+    // 5 mm, decaying as 1/length). The guide still highlights, because it
+    // fired on DIRECTION, so the tool claims an exact bisector / tangent and
+    // then draws something visibly off it — Steve, 2026-09-03. For a
+    // genuinely diagonal ray the angle IS the user's intent, so stay exactly
+    // on it and let gridAlongLine put the dominant coordinate on a step.
+    // (A 45 deg ray is unaffected either way: gridAlongLine already lands
+    // both coordinates on the lattice there.)
+    auto axisAligned = [](glm::vec2 d) {
+        return std::abs(d.x) < 1e-4f || std::abs(d.y) < 1e-4f;
+    };
 
     // Intersection cap is WIDER than the single-line posCap: each cand only
     // enters the list after passing its own perpDist tolerance, so a two-cand
@@ -1871,7 +1985,27 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // path. With posCap (1.5 mm) we'd silently fall through to single-line
     // OnLine even though "On Line + On Vertical Axis" both showed as fired,
     // which is what Steve hit in the 18.9 mm screenshot.
-    const float intersectCap = posCap * 5.0f;
+    //
+    // Both caps are further bounded by the DISPLACEMENT BUDGET: how far any
+    // inference may move the placement from where the cursor actually is.
+    // Every cap above is absolute (or grid-relative), but the damage a pull
+    // does is relative to the segment being drawn — 1.5 mm off a 100 mm line
+    // is nothing, 1.5 mm off a 2 mm line is the line. That asymmetry is why
+    // short segments came out quantized to whatever geometry happened to sit
+    // near the anchor (Steve, 2026-09-03: a 2 mm line placed fine, 1 mm and
+    // 3 mm were unreachable, the only alternatives being no line at all — an
+    // intersection sitting ON the anchor, so the segment collapsed — or a
+    // 19 mm jump to a farther intersection still inside the 5x pair cap).
+    // Capping the pull at a quarter of the extent drawn so far lets an
+    // inference REFINE a placement but never REDEFINE it, and scales itself
+    // out of the way: past ~6 mm of draw the absolute caps bind again, so
+    // nothing changes for normal-sized geometry. Only applies once there's a
+    // drawn extent to measure against — before the first click the absolute
+    // caps stand alone.
+    float pullBudget = 1e30f;
+    if (haveDirAnchor) pullBudget = 0.25f * glm::length(pos - dirAnchor);
+
+    const float intersectCap = std::min(posCap * 5.0f, pullBudget);
     int bestI = -1, bestJ = -1;
     glm::vec2 bestIsect = pos;
     float bestIsectD = intersectCap;
@@ -1916,7 +2050,9 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                k == InferenceGuide::PerpToRef ||
                k == InferenceGuide::TangentToCircle ||
                k == InferenceGuide::OnLine ||
-               k == InferenceGuide::OnLineExtension;
+               k == InferenceGuide::OnLineExtension ||
+               k == InferenceGuide::CornerBisector ||
+               k == InferenceGuide::CornerTangent;
     };
     if (bestI >= 0) {
         // A pair of purely directional guides is quantized outright — both
@@ -1929,7 +2065,10 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
         const bool ci = isContact(cands[bestI].kind);
         const bool cj = isContact(cands[bestJ].kind);
         if (!ci && !cj) {
-            bestIsect = onLattice(bestIsect);
+            // Only when BOTH rays are axis-aligned; otherwise rounding the
+            // crossing breaks the very directions that defined it.
+            if (axisAligned(cands[bestI].dir) && axisAligned(cands[bestJ].dir))
+                bestIsect = onLattice(bestIsect);
         } else if (ci != cj) {
             const auto& con = ci ? cands[bestI] : cands[bestJ];
             bestIsect = gridAlongLine(con.anchor, con.dir, con.isSegment,
@@ -1943,7 +2082,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     }
 
     int bestK = -1;
-    float bestPerp = posCap;
+    float bestPerp = std::min(posCap, pullBudget);
     for (size_t i = 0; i < cands.size(); ++i) {
         if (!cands[i].standaloneAllowed) continue;
         if (cands[i].perpDist < bestPerp) {
@@ -1954,7 +2093,7 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     if (bestK >= 0) {
         const auto& c = cands[bestK];
         glm::vec2 snapped = gridAlongLine(c.anchor, c.dir, c.isSegment, c.segLen, c.proj);
-        if (!isContact(c.kind)) snapped = onLattice(snapped);
+        if (!isContact(c.kind) && axisAligned(c.dir)) snapped = onLattice(snapped);
         emitWithSnap(c, snapped);
         // Preserve a borrowed direction (parallel/perp/tangent/on-line) exactly;
         // only flatten genuinely free near-axis results.
@@ -2006,8 +2145,12 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
                     }
                     // Grid-along-line so the ray's endpoint lands on a lattice
                     // step instead of sub-grid drift.
-                    snappedPos = onLattice(gridAlongLine(dirAnchor, dir, false,
-                                                         0.0f, snappedPos));
+                    snappedPos = gridAlongLine(dirAnchor, dir, false, 0.0f,
+                                               snappedPos);
+                    // A 15 / 30 / 60 deg increment is a diagonal ray: same
+                    // rule as the guides above, or the chosen angle comes out
+                    // wrong by however far the lattice pulled it.
+                    if (axisAligned(dir)) snappedPos = onLattice(snappedPos);
                     m_activeInferences.push_back(
                         {InferenceGuide::AngleSnap, dirAnchor,
                          snappedPos, -1});

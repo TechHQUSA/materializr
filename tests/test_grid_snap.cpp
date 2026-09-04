@@ -13,6 +13,24 @@
 //      buildWires splits that edge at the contact point, and a point rounded
 //      off the edge silently stops closing the region.
 //
+//      CONTRACT REFINED 2026-09-03. "Both coordinates on the lattice" cannot
+//      be required of a DIAGONAL guide: a 35 deg bisector on a 1 mm grid
+//      passes through essentially no lattice crossings, so rounding both
+//      coordinates moves the point off the ray — up to half a diagonal cell,
+//      which near the anchor is degrees of angular error (measured: 8.4 deg
+//      on a 3 mm leg off a 70 deg corner) while the guide still highlights
+//      and claims the exact angle. The old code demanded both and was
+//      self-contradictory: it preserved a borrowed direction from
+//      rectifyNearAxis and then destroyed that same direction with onLattice
+//      one line later. Steve's call, asked and answered: a guide you aimed
+//      down is honoured EXACTLY, and the grid gets the freedom that's left.
+//      So the requirement is now that every placed point sits on a grid LINE
+//      — its dominant coordinate exactly on a step — rather than necessarily
+//      on a grid CROSSING. The drift this test was written against was BOTH
+//      coordinates wandering at once (x=9.0033 and y=12.2012 in the original
+//      report); one pinned coordinate is what makes a placement legible and
+//      repeatable, and that is what is asserted below.
+//
 //   2. Sketch::latticeAnchor — the anchor the drawn grid is laid out from.
 //      Rounding world XYZ and projecting onto the sketch plane (what shipped)
 //      is NOT a lattice point in-plane: the drawn grid sat 10–50% of a cell
@@ -30,6 +48,7 @@
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <string>
@@ -93,18 +112,27 @@ TEST(GridSnap, PlacedPointsLandOnTheLattice) {
         tool.onMouseUp(p);
     }
 
-    int placed = 0;
+    int placed = 0, onCrossing = 0;
     for (const auto& pt : sk.getPoints()) {
         if (preexisting.count(pt.id)) continue;
         ++placed;
-        EXPECT_LE(offLattice(pt.pos.x, step), 1e-4)
-            << "point " << pt.id << " x=" << pt.pos.x << " is off the "
-            << step << "mm lattice";
-        EXPECT_LE(offLattice(pt.pos.y, step), 1e-4)
-            << "point " << pt.id << " y=" << pt.pos.y << " is off the "
-            << step << "mm lattice";
+        const double dx = offLattice(pt.pos.x, step);
+        const double dy = offLattice(pt.pos.y, step);
+        // At least one coordinate exactly on a step: the point sits on a drawn
+        // grid line, so the placement is legible and repeatable even when an
+        // honoured diagonal guide puts the other coordinate between lines.
+        EXPECT_LE(std::min(dx, dy), 1e-4)
+            << "point " << pt.id << " (" << pt.pos.x << ", " << pt.pos.y
+            << ") is off the " << step << "mm grid on BOTH axes — that is the "
+               "free-floating drift this test exists to catch";
+        if (std::max(dx, dy) <= 1e-4) ++onCrossing;
     }
     EXPECT_GT(placed, 0) << "the chain committed no points — test drew nothing";
+    // Honouring a diagonal guide is the exception, not the rule: a chain drawn
+    // around axis-aligned geometry should still land mostly on crossings.
+    EXPECT_GE(onCrossing * 2, placed)
+        << "only " << onCrossing << " of " << placed << " points landed on a "
+           "lattice crossing — the grid has stopped being the default";
 }
 
 // A point landing ON an existing edge stays on that edge. The lattice may
