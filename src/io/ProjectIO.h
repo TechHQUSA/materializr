@@ -101,6 +101,12 @@ public:
     // emits PLANE + all element blocks and a trailing SKETCH_END;
     // parseSketchBody reads them back into `sk`, stopping at `endTok`.
     static void writeSketchBody(std::ostream& os, const Sketch& sk);
+
+    // Mirror groups, appended by every sketch writer just before SKETCH_END.
+    // One place, because there are three writers (here twice, plus the
+    // duplicate in SketchEditOp that persists undo/redo snapshots) and a schema
+    // that lands in only two of them loses groups from saved history.
+    static void writeSketchMirrors(std::ostream& os, const Sketch& sk);
     static void parseSketchBody(std::istream& is, Sketch& sk,
                                 const char* endTok = "SKETCH_END");
 };

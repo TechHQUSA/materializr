@@ -1,5 +1,6 @@
 #include "SketchEditOp.h"
 #include "SketchSolver.h"
+#include "../io/ProjectIO.h"
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
@@ -302,6 +303,7 @@ static void writeSketchBody(std::ostream& os, const Sketch& sk, int sketchId,
            << " " << c.orientX << " " << c.orientY << "\n";
     }
 
+    ProjectIO::writeSketchMirrors(os, sk);
     os << "SKETCH_END\n";
 }
 

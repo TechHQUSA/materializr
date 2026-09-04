@@ -414,6 +414,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
                 << c.orientX << " " << c.orientY << "\n";
         }
 
+        writeSketchMirrors(ofs, *sk);
         ofs << "SKETCH_END\n";
     }
 
@@ -660,6 +661,7 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                          const char* endTok = "SKETCH_END") {
     int maxId = 0;
     int maxConstraintId = 0;
+    int maxMirrorId = 0;
     auto bump = [&](int id) { maxId = std::max(maxId, id); };
 
     std::string line;
@@ -780,12 +782,46 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 maxConstraintId = std::max(maxConstraintId, c.id);
                 sk.addRawConstraint(c);
             }
+        } else if (tok == "MIRROR_COUNT") {
+            int n = 0; iss >> n;
+            for (int i = 0; i < n && std::getline(ifs, line); ++i) {
+                std::istringstream s(line); std::string t;
+                materializr::SketchMirror m; int nPts = 0, nElems = 0;
+                s >> t >> m.id >> m.axisLineId >> nPts >> nElems;
+                if (t != "M") break;                       // malformed: stop, keep geometry
+                for (int k = 0; k < nPts && std::getline(ifs, line); ++k) {
+                    std::istringstream ps(line); std::string pt; int a = -1, b = -1;
+                    ps >> pt >> a >> b;
+                    if (pt == "MP") m.points.push_back({a, b});
+                }
+                for (int k = 0; k < nElems && std::getline(ifs, line); ++k) {
+                    std::istringstream es(line); std::string et; int kind = -1, a = -1, b = -1;
+                    es >> et >> kind >> a >> b;
+                    if (et != "ME") continue;
+                    switch (kind) {
+                        case 0: m.lines.push_back({a, b});   break;
+                        case 1: m.circles.push_back({a, b}); break;
+                        case 2: m.arcs.push_back({a, b});    break;
+                        case 3: m.splines.push_back({a, b}); break;
+                        default: break;                      // unknown kind: drop the pair
+                    }
+                }
+                maxMirrorId = std::max(maxMirrorId, m.id);
+                sk.addRawMirror(m);
+            }
         }
         // Unknown tokens inside a sketch are ignored for forward compatibility.
     }
 
     sk.setNextId(maxId + 1);
     sk.setNextConstraintId(maxConstraintId + 1);
+    sk.setNextMirrorId(maxMirrorId + 1);
+    // `derived` is never trusted from a file: validateMirrors drops groups whose
+    // members have vanished and re-derives every flag from what survives, then
+    // the recompute corrects coordinates that were stale, rounded or hand-edited
+    // rather than believing them.
+    sk.validateMirrors();
+    sk.recomputeMirrors();
 }
 
 // Read one sketch (everything between SKETCH_START and SKETCH_END) and add it to
@@ -1540,6 +1576,32 @@ void ProjectIO::parseSketchBody(std::istream& is, Sketch& sk, const char* endTok
     parseSketchBodyImpl(is, sk, endTok);
 }
 
+void ProjectIO::writeSketchMirrors(std::ostream& os, const Sketch& sk) {
+    // Grammar — every row self-contained on one line, so a reader that does not
+    // know these tokens skips them cleanly and the file still loads (losing the
+    // relations, keeping the geometry):
+    //   MIRROR_COUNT n
+    //   M  <id> <axisLineId> <nPointPairs> <nElemPairs>
+    //   MP <srcId> <dstId>
+    //   ME <kind> <srcId> <dstId>        kind: 0 line, 1 circle, 2 arc, 3 spline
+    const auto& mirrors = sk.getMirrors();
+    os << "MIRROR_COUNT " << static_cast<int>(mirrors.size()) << "\n";
+    for (const auto& m : mirrors) {
+        const std::size_t elems = m.lines.size() + m.circles.size() +
+                                  m.arcs.size() + m.splines.size();
+        os << "M " << m.id << " " << m.axisLineId << " "
+           << static_cast<int>(m.points.size()) << " "
+           << static_cast<int>(elems) << "\n";
+        for (const auto& [src, dst] : m.points) os << "MP " << src << " " << dst << "\n";
+        int kind = 0;
+        for (const auto* v : { &m.lines, &m.circles, &m.arcs, &m.splines }) {
+            for (const auto& [src, dst] : *v)
+                os << "ME " << kind << " " << src << " " << dst << "\n";
+            ++kind;
+        }
+    }
+}
+
 void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
     // Mirrors the per-sketch block of ProjectIO::save (the schema
     // parseSketchBody reads), minus SKETCH_START — callers supply their own
@@ -1610,6 +1672,7 @@ void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
            << (c.isDriving ? 1 : 0) << " "
            << c.orientX << " " << c.orientY << "\n";
 
+    writeSketchMirrors(os, sk);
     os << "SKETCH_END\n";
 }
 

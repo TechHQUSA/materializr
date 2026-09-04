@@ -15,11 +15,13 @@
 #include "modeling/SketchTool.h"
 #include "modeling/SvgImport.h"
 #include "modeling/TextSketchOp.h"
+#include "io/ProjectIO.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
 #include <memory>
+#include <sstream>
 #include <set>
 #include <type_traits>
 
@@ -681,4 +683,88 @@ TEST(SketchMirrorCommit, AConstructionLineNoLongerSplitsAProfile) {
     const int scaffold = sk.addLine(mid0, mid1);     // straight through the square
     sk.setConstruction(scaffold, true);
     EXPECT_EQ(1u, sk.buildWires().size()) << "scaffolding must not carve the profile in two";
+}
+
+// --- Round-trip -------------------------------------------------------------
+
+TEST(SketchMirrorIO, GroupsSurviveASaveAndReload) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    ASSERT_EQ(1u, h->sk.getMirrors().size());
+    const int imageOfTl = [&] {
+        for (const auto& [src, dst] : h->sk.getMirrors()[0].points)
+            if (src == h->tl) return dst;
+        return -1;
+    }();
+    ASSERT_NE(-1, imageOfTl);
+
+    std::ostringstream os;
+    materializr::ProjectIO::writeSketchBody(os, h->sk);
+    std::istringstream is(os.str());
+    materializr::Sketch loaded;
+    materializr::ProjectIO::parseSketchBody(is, loaded);
+
+    ASSERT_EQ(1u, loaded.getMirrors().size()) << "the relation must survive the file";
+    const auto& m = loaded.getMirrors()[0];
+    EXPECT_EQ(h->sk.getMirrors()[0].axisLineId, m.axisLineId);
+    EXPECT_EQ(h->sk.getMirrors()[0].points.size(), m.points.size());
+    EXPECT_EQ(h->sk.getMirrors()[0].lines.size(), m.lines.size());
+    EXPECT_TRUE(loaded.isDerived(imageOfTl));
+
+    // And it is live, not just present: edit the source in the loaded copy.
+    loaded.movePoint(h->tl, {-4.0f, 12.0f});
+    materializr::SketchSolver solver;
+    solver.solve(loaded);
+    EXPECT_NEAR(4.0f, posOf(loaded, imageOfTl).x, 1e-4);
+}
+
+// Coordinates in the file are never trusted: load ends with a recompute, so a
+// hand-edited or stale image is corrected rather than believed.
+TEST(SketchMirrorIO, StaleImageCoordinatesAreCorrectedOnLoad) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int image = h->sk.getMirrors()[0].points.front().second;
+    const int source = h->sk.getMirrors()[0].points.front().first;
+
+    std::ostringstream os;
+    materializr::ProjectIO::writeSketchBody(os, h->sk);
+    materializr::Sketch tampered;
+    {
+        std::istringstream is(os.str());
+        materializr::ProjectIO::parseSketchBody(is, tampered);
+    }
+    tampered.movePoint(image, {999.0f, 999.0f});     // as if hand-edited in the file
+    std::ostringstream os2;
+    materializr::ProjectIO::writeSketchBody(os2, tampered);
+
+    materializr::Sketch loaded;
+    std::istringstream is2(os2.str());
+    materializr::ProjectIO::parseSketchBody(is2, loaded);
+    const glm::vec2 src = posOf(loaded, source);
+    EXPECT_NEAR(-src.x, posOf(loaded, image).x, 1e-4) << "the image is recomputed, not read";
+    EXPECT_NEAR( src.y, posOf(loaded, image).y, 1e-4);
+}
+
+// An old build's file has no MIRROR_COUNT at all. It must load as plain
+// geometry, not fail — the degradation this feature promises.
+TEST(SketchMirrorIO, AFileWithoutMirrorsLoadsAsPlainGeometry) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    std::ostringstream os;
+    materializr::ProjectIO::writeSketchBody(os, h->sk);
+
+    std::string text = os.str(), stripped;
+    std::istringstream lines(text);
+    for (std::string ln; std::getline(lines, ln); )
+        if (ln.rfind("MIRROR_COUNT", 0) != 0 && ln.rfind("M ", 0) != 0 &&
+            ln.rfind("MP ", 0) != 0 && ln.rfind("ME ", 0) != 0)
+            stripped += ln + "\n";
+
+    materializr::Sketch loaded;
+    std::istringstream is(stripped);
+    materializr::ProjectIO::parseSketchBody(is, loaded);
+    EXPECT_TRUE(loaded.getMirrors().empty());
+    EXPECT_EQ(h->sk.getPoints().size(), loaded.getPoints().size()) << "geometry must survive";
+    for (const auto& p : loaded.getPoints())
+        EXPECT_FALSE(p.derived) << "no group means nothing is derived";
 }
