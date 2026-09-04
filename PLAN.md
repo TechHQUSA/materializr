@@ -599,9 +599,38 @@ group whose data cannot be trusted retains everything. Malformed records take th
 | mismatch | path | effect |
 |---|---|---|
 | `nPointPairs` / `nElemPairs` vs `MP`/`ME` | validation failure | group dropped; pins, axis and ALL geometry retained; `derived` flags cleared |
-| `nShared` vs `MS` | re-infer per P8a, then validate | group survives if inference validates; otherwise validation failure, as above |
+| `nShared` vs `MS` | **clear, do NOT re-infer — see P9e** | no legitimate identity mappings remain, so topology validation drops the group; geometry retained |
 | `nPins` vs `MC` | clear ownership claim | group survives owning no pins; nothing deleted |
 
 Only the last row is an ownership-only failure, because `pinConstraints` is the only one of
 the three fields that exists purely to authorise deletion. No malformed file, on any row of
 this table, causes anything to be deleted.
+
+
+---
+
+# Revisions after implementation — P9e (supersedes P9c)
+
+P9c said an `MS` count mismatch should reconstruct the shared set by inference and
+validate it. **That is unsafe — and it was wrong in a plan that had already been
+through seven adversarial rounds.** Shown by test, not by argument:
+
+A file with its `MS` rows dropped still carries correctly-counted `MC` rows, so the
+pins load straight from the record. Re-inferring `sharedPoints` then re-validates
+exactly those pins, and `axisGenerated` survives with them. A record that misstated
+its shared rows walked away with FULL deletion rights. The reasoning that made this
+look safe — "sharedPoints is not ownership metadata, and the pins are gated anyway"
+— missed that those pins never went through inference at all.
+
+**The rule, for both fields:** a record that DECLARED its ownership columns never
+re-infers anything. Inference exists solely to migrate records written before the
+columns existed. `ownershipDeclared` carries that distinction from the reader,
+survives a cleared claim, and is set by `commitMirror` too, so a group built in
+memory states its ownership rather than having it guessed back.
+
+A declared record with bad `MS` rows therefore has an empty shared set, its identity
+mappings are unauthorised, and topology validation drops the group and releases the
+geometry untouched. Correct outcome, no special case.
+
+**Process note.** P9c was reviewed and approved. Approval is not proof — the defect
+surfaced the moment the scenario was written as a test rather than reasoned about.
