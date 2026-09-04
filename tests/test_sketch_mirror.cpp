@@ -1089,6 +1089,8 @@ TEST(SketchMirrorIO, AWrongPinCountClearsTheClaimButKeepsTheGroup) {
     // authorise Delete mirror to remove constraints.
     EXPECT_TRUE(loaded.getMirrors()[0].pinConstraints.empty())
         << "a record whose ownership rows did not back its count owns nothing";
+    EXPECT_FALSE(loaded.getMirrors()[0].axisGenerated)
+        << "and that includes the axis claim, which names no rows of its own";
     EXPECT_EQ(2u, loaded.getConstraints().size()) << "and nothing was deleted";
 }
 
@@ -1157,4 +1159,49 @@ TEST(SketchMirrorIO, AWrongSharedCountRestoresNoOwnership) {
     for (const auto& mir : loaded.getMirrors())
         EXPECT_FALSE(mir.axisGenerated)
             << "nor may it keep the right to delete the axis";
+}
+
+// Codex: an MS mismatch can still retain axis-deletion ownership.
+//
+// The obvious fixture — drop an MS row from the half-profile — is VACUOUS: the
+// shared set is cleared, its identity mappings become unauthorised, and the
+// group is dropped before any ownership question arises. The hole needs a group
+// that SURVIVES the mismatch, which means one with no shared vertices at all:
+// clearing an already-empty list changes nothing, topology is fine, and the
+// record keeps the axis claim it just proved it cannot state correctly.
+TEST(SketchMirrorIO, AnMSMismatchNeverKeepsTheAxisClaim) {
+    auto h = makeHalfProfile();
+    ASSERT_TRUE(h->tool.beginMirror());
+    h->tool.setMirrorAnchor({-40.0f, 5.0f});          // clear of every source point
+    h->tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    h->tool.commitMirror(h->outPts, h->outLines);
+    ASSERT_EQ(1u, h->sk.getMirrors().size());
+    ASSERT_TRUE(h->sk.getMirrors()[0].sharedPoints.empty()) << "no vertex is on this axis";
+    ASSERT_TRUE(h->sk.getMirrors()[0].axisGenerated);
+    const std::size_t constraintsBefore = h->sk.getConstraints().size();
+
+    // Declare shared rows the record does not have.
+    materializr::Sketch loaded = reloadWith(h->sk, [](std::string t) {
+        std::istringstream in(t); std::ostringstream out; std::string line;
+        while (std::getline(in, line)) {
+            if (line.rfind("M ", 0) == 0) {
+                std::istringstream ms(line); std::string tok;
+                int id, axis, nPts, nElems, gen, nPins, nShared;
+                ms >> tok >> id >> axis >> nPts >> nElems >> gen >> nPins >> nShared;
+                out << "M " << id << " " << axis << " " << nPts << " " << nElems
+                    << " " << gen << " " << nPins << " " << (nShared + 3) << "\n";
+            } else out << line << "\n";
+        }
+        return out.str();
+    });
+
+    ASSERT_FALSE(loaded.getMirrors().empty())
+        << "VACUOUS otherwise: this group must survive for ownership to matter";
+    for (const auto& mir : loaded.getMirrors()) {
+        EXPECT_FALSE(mir.axisGenerated)
+            << "a record that misstated its ownership block may not delete the axis";
+        EXPECT_TRUE(mir.pinConstraints.empty()) << "nor keep its pin claims";
+    }
+    EXPECT_EQ(constraintsBefore, loaded.getConstraints().size())
+        << "and nothing may be deleted";
 }

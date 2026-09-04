@@ -634,3 +634,35 @@ geometry untouched. Correct outcome, no special case.
 
 **Process note.** P9c was reviewed and approved. Approval is not proof — the defect
 surfaced the moment the scenario was written as a test rather than reasoned about.
+
+
+---
+
+# Revisions after implementation — P9f: relation input vs deletion right
+
+The count-mismatch table drew one distinction — relation records (`MP`/`ME`) versus
+ownership records (`MC`/`MS`). Implementation showed a THIRD category the plan never
+named, and both of my first two attempts at it were wrong in opposite directions.
+
+**`axisGenerated` names no rows of its own.** Clearing "the list whose count
+disagreed" therefore never touched it, so a record could misstate its ownership
+block and still keep the right to delete the axis. The fixture that exposes this
+has to be a group with NO shared vertices: clearing an already-empty list changes
+nothing, topology validates, and the group survives holding a claim it just proved
+it cannot state. The obvious fixture — drop an `MS` row from a normal mirror — is
+VACUOUS, because the group is dropped before ownership is ever consulted.
+
+**Voiding the whole block is too broad.** `sharedPoints` is a relation input as
+well as a pin gate, so clearing it for a bad `MC` count takes down a mirror whose
+`MP`/`ME` rows are perfectly intact — an ownership problem destroying a relation.
+
+The rule, in three parts:
+
+| field | cleared by | because |
+|---|---|---|
+| `sharedPoints` | its OWN count disagreeing | it authorises identity mappings; the relation needs it |
+| `pinConstraints` | ANY ownership-count disagreement | it is a deletion right |
+| `axisGenerated` | ANY ownership-count disagreement | it is a deletion right, and names no rows to disagree |
+
+Deletion rights are forfeited by any inconsistency anywhere in the ownership block.
+Relation inputs are forfeited only by their own.

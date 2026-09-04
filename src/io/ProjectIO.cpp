@@ -853,11 +853,35 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                     maxMirrorId = std::max(maxMirrorId, m.id);
                     continue;                                // drop this group, keep geometry
                 }
-                // Cleared, and ownershipDeclared stays TRUE: this record had
-                // its chance to say what it owns and the rows did not back the
-                // count up. It owns nothing, permanently — not "nothing yet".
-                if (gotPins != nPins)     m.pinConstraints.clear();
+                // The ownership block is ONE claim, so a disagreement anywhere
+                // in it voids the whole thing — including axisGenerated, which
+                // names no rows of its own and so survived a mismatch that
+                // proved the record cannot state its ownership correctly. A
+                // group with no shared vertices is the case that exposes it:
+                // clearing an empty list changes nothing, topology still
+                // validates, and the record kept the right to delete the axis.
+                //
+                // ownershipDeclared stays TRUE either way: this record had its
+                // chance to say what it owns. It owns nothing, permanently —
+                // not "nothing yet", which is what a legacy record means.
+                // Any disagreement in the ownership block voids every DELETION
+                // RIGHT, including axisGenerated — which names no rows of its
+                // own and so used to survive a mismatch that proved the record
+                // cannot state its ownership correctly. A group with no shared
+                // vertices exposes it: clearing an empty list changes nothing,
+                // topology still validates, and the axis claim stood.
+                //
+                // sharedPoints is cleared only by ITS OWN count disagreeing.
+                // It is a relation input as well as a pin gate, so voiding it
+                // for a bad MC count would take the whole mirror down with an
+                // ownership problem — geometry retained, but the relation lost
+                // for a reason that has nothing to do with it.
+                const bool ownershipBroken = (gotPins != nPins) || (gotShared != nShared);
                 if (gotShared != nShared) m.sharedPoints.clear();
+                if (ownershipBroken) {
+                    m.pinConstraints.clear();
+                    m.axisGenerated = false;
+                }
 
                 maxMirrorId = std::max(maxMirrorId, m.id);
                 sk.addRawMirror(m);
