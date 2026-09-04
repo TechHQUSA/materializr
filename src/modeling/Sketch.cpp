@@ -36,6 +36,7 @@
 #include <TopExp_Explorer.hxx>
 
 #include <algorithm>
+#include <cstring>
 #include <cstdio>
 #include <limits>
 #include <map>
@@ -680,7 +681,8 @@ void Sketch::removeElement(int id) {
     // Two phases. PLAN the full cascade with no mutation, then erase raw:
     // cascading through this same function would re-enter the relationship logic
     // and mutate the group being walked.
-    std::unordered_set<int> alsoErase;
+    std::unordered_set<int> alsoErase;       // image ELEMENTS, unconditionally
+    std::unordered_set<int> pointCandidates; // image POINTS, only if unreferenced
     if (!m_mirrors.empty()) {
         for (auto& mir : m_mirrors) {
             for (auto* v : { &mir.lines, &mir.circles, &mir.arcs, &mir.splines }) {
@@ -694,6 +696,23 @@ void Sketch::removeElement(int id) {
             // moment it is created, and "any pair no element uses" would delete
             // it on sight. A point pair dies with its own source point, or with
             // the group.
+            //
+            // But a group that has just lost its LAST element pair holds only
+            // point pairs, and pruneOrphanPoints protects those points BECAUSE
+            // the group still names them. Deleting a mirror's only source line
+            // therefore left four stranded points and a point-only group that no
+            // command could reach. If nothing paired survives, the relation is
+            // over: take the images with it and let the group go.
+            if (mir.lines.empty() && mir.circles.empty() && mir.arcs.empty() &&
+                mir.splines.empty() && !mir.points.empty()) {
+                // CANDIDATES, not condemned. A user may build on derived
+                // geometry — draw a line to an image point, dimension it — and
+                // erasing these outright strands that line with a missing
+                // endpoint. Whether each one goes is decided in phase 2, after
+                // the elements are gone and the references are truthful.
+                for (const auto& [srcId, dstId] : mir.points) pointCandidates.insert(dstId);
+                mir.points.clear();
+            }
         }
     }
 
@@ -728,12 +747,21 @@ void Sketch::removeElement(int id) {
         m_points.end());
 
     // Phase 2: erase the planned images RAW, without re-entering this function.
-    if (!alsoErase.empty()) {
+    if (!alsoErase.empty() || !pointCandidates.empty()) {
         auto drop = [&](auto& vec) {
             vec.erase(std::remove_if(vec.begin(), vec.end(),
                 [&](const auto& e) { return alsoErase.count(e.id) != 0; }), vec.end());
         };
         drop(m_lines); drop(m_circles); drop(m_arcs); drop(m_splines);
+        // Image POINTS now that the elements are gone, so pointIsReferenced
+        // tells the truth. Constraints deliberately do not count as references:
+        // a dimension follows its geometry, it does not anchor it — the same
+        // rule deleteMirror settled after retention came out circular.
+        m_points.erase(std::remove_if(m_points.begin(), m_points.end(),
+            [&](const SketchPoint& p) {
+                return pointCandidates.count(p.id) != 0 &&
+                       !pointIsReferenced(p.id, -1, /*constraintsCount=*/false);
+            }), m_points.end());
         m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
             [&](const Constraint& k) {
                 return alsoErase.count(k.entityA) || alsoErase.count(k.entityB);
@@ -2309,6 +2337,110 @@ bool Sketch::setConstruction(int entityId, bool on) {
 // Every inbound reference to a point, by TYPE. "Is this id mentioned anywhere"
 // over a bag of untyped ids is the ambiguity the validation rewrite removed; the
 // axis cleanup below must not reintroduce it.
+std::size_t Sketch::stateSignature() const {
+    std::size_t h = 1469598103934665603ull;
+    auto mix = [&](std::size_t v) { h = (h ^ v) * 1099511628211ull; };
+    // Positions and radii, quantised to 1e-4 mm, so a pure move or resize that
+    // keeps every id and count fixed still registers as a mutation.
+    auto mixPos = [&](glm::vec2 p) {
+        mix(static_cast<std::size_t>(std::llround(p.x * 1e4)));
+        mix(static_cast<std::size_t>(std::llround(p.y * 1e4)));
+    };
+    auto mixD = [&](double d) { std::size_t vb; std::memcpy(&vb, &d, sizeof(vb)); mix(vb); };
+
+    mix(m_points.size());
+    for (const auto& p : m_points) {
+        mix(static_cast<std::size_t>(p.id));
+        mixPos(p.pos);
+        // `derived` is deliberately NOT hashed: validateMirrors computes it
+        // from the groups, which are hashed below, so it carries no information
+        // of its own. A mutation removing it survives every test, which is the
+        // honest signal that it was redundant rather than load-bearing.
+        // `isConstruction` IS independent state — setConstruction changes it
+        // with no mirror involved — so it stays.
+        mix(static_cast<std::size_t>(p.isConstruction ? 1 : 0));
+    }
+    auto mixElems = [&](const auto& vec) {
+        mix(vec.size());
+        for (const auto& e : vec) {
+            mix(static_cast<std::size_t>(e.id));
+            mix(static_cast<std::size_t>(e.isConstruction ? 1 : 0));
+        }
+    };
+    mixElems(m_lines);
+    mix(m_circles.size());
+    for (const auto& c : m_circles) {
+        mix(static_cast<std::size_t>(c.id));
+        mix(static_cast<std::size_t>(std::llround(c.radius * 1e4)));
+        mix(static_cast<std::size_t>(c.isConstruction ? 1 : 0));
+    }
+    mix(m_arcs.size());
+    for (const auto& a : m_arcs) {
+        mix(static_cast<std::size_t>(a.id));
+        mix(static_cast<std::size_t>(std::llround(a.radius * 1e4)));
+        mix(static_cast<std::size_t>(a.isConstruction ? 1 : 0));
+    }
+    // Splines by their CONTROL POINT MEMBERSHIP, not just their id. A spline
+    // whose control points are added, removed or reordered keeps its id and its
+    // count, so hashing the id alone made that edit invisible to mutation dedup
+    // and it lost its undo step. mixElems cannot do this — the membership is
+    // the whole content of a spline.
+    mix(m_splines.size());
+    for (const auto& sp : m_splines) {
+        mix(static_cast<std::size_t>(sp.id));
+        mix(static_cast<std::size_t>(sp.isConstruction ? 1 : 0));
+        mix(sp.controlPointIds.size());
+        for (int cp : sp.controlPointIds) mix(static_cast<std::size_t>(cp));
+    }
+    // Same for polygons, which carried even less: a side count or radius edit
+    // regenerates the vertices and keeps the id.
+    mix(m_polygons.size());
+    for (const auto& p : m_polygons) {
+        mix(static_cast<std::size_t>(p.id));
+        mix(static_cast<std::size_t>(p.centerPointId));
+        mix(static_cast<std::size_t>(std::llround(p.radius * 1e4)));
+        mix(static_cast<std::size_t>(p.sides));
+        mix(static_cast<std::size_t>(p.isConstruction ? 1 : 0));
+        mix(p.vertexPointIds.size());
+        for (int vp : p.vertexPointIds) mix(static_cast<std::size_t>(vp));
+    }
+
+    // Constraints, values included, so an EDIT and not just an add/remove
+    // registers. Label offsets: a dedup-replace that only re-places a label
+    // must still get an undo step. isDriving: promoting a dimension changes no
+    // number at all.
+    mix(m_constraints.size());
+    for (const auto& c : m_constraints) {
+        mix(static_cast<std::size_t>(c.id));
+        mix(static_cast<std::size_t>(c.type));
+        mix(static_cast<std::size_t>(c.entityA));
+        mix(static_cast<std::size_t>(c.entityB));
+        mixD(c.value); mixD(c.valueY); mixD(c.labelOffX); mixD(c.labelOffY);
+        mix(static_cast<std::size_t>(c.isDriving ? 1 : 0));
+    }
+
+    // The mirror state itself. Break link and Delete mirror change nothing a
+    // geometry-only hash can see, so this is what makes them undoable at all.
+    mix(m_mirrors.size());
+    for (const auto& mir : m_mirrors) {
+        mix(static_cast<std::size_t>(mir.id));
+        mix(static_cast<std::size_t>(mir.axisLineId));
+        mix(static_cast<std::size_t>(mir.axisGenerated ? 1 : 0));
+        for (const auto* v : { &mir.points, &mir.lines, &mir.circles, &mir.arcs, &mir.splines }) {
+            mix(v->size());
+            for (const auto& [srcId, dstId] : *v) {
+                mix(static_cast<std::size_t>(srcId));
+                mix(static_cast<std::size_t>(dstId));
+            }
+        }
+        mix(mir.sharedPoints.size());
+        for (int pid : mir.sharedPoints) mix(static_cast<std::size_t>(pid));
+        mix(mir.pinConstraints.size());
+        for (int cid : mir.pinConstraints) mix(static_cast<std::size_t>(cid));
+    }
+    return h;
+}
+
 bool Sketch::pointIsReferenced(int pointId, int ignoreLineId, bool constraintsCount) const {
     for (const auto& l : m_lines) {
         if (l.id == ignoreLineId) continue;
@@ -2352,13 +2484,22 @@ bool Sketch::deleteMirror(int mirrorId) {
     // Only an axis this group is PROVEN to own. A claim that could not be
     // substantiated left axisGenerated false at validation, and the axis is then
     // retained forever — the safe direction.
+    // The axis, its endpoints and the pins are INFRASTRUCTURE the record claims
+    // to own. That claim is only honoured for a group built in this session:
+    // see SketchMirror::sessionOwned. A loaded group still deletes its derived
+    // outputs — those are held to the same topology validation that authorises
+    // LOCKING them, and the recompute has already rewritten their coordinates —
+    // but it never removes a line the file merely asserts was generated.
     int killAxis = -1, axisA = -1, axisB = -1;
-    if (mir.axisGenerated) {
+    if (mir.axisGenerated && mir.sessionOwned) {
         for (const auto& l : m_lines)
             if (l.id == mir.axisLineId) { killAxis = l.id; axisA = l.startPointId; axisB = l.endPointId; }
     }
 
-    const std::unordered_set<int> killPins(mir.pinConstraints.begin(), mir.pinConstraints.end());
+    const std::unordered_set<int> killPins =
+        mir.sessionOwned ? std::unordered_set<int>(mir.pinConstraints.begin(),
+                                                   mir.pinConstraints.end())
+                         : std::unordered_set<int>{};
     m_constraints.erase(std::remove_if(m_constraints.begin(), m_constraints.end(),
         [&](const Constraint& k) { return killPins.count(k.id) != 0; }), m_constraints.end());
 

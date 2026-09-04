@@ -91,6 +91,20 @@ public:
 
     // --- Sketch-element selection (Select mode) ---
     const std::set<int>& getSelectedPoints()  const { return m_selectedPoints; }
+
+    // Every point a drag would actually move: the selected points, plus the
+    // endpoints of every selected line. onMouseMove moves this whole set, so a
+    // refusal that only inspects the point under the cursor lets a derived
+    // point ride along in a multi-selection, or be dragged by its line.
+    std::set<int> effectiveDragSet() const;
+    // True when that set contains anything the mirror recompute owns. A drag is
+    // refused at INITIATION on this: allowing it and reverting on the next solve
+    // looks like the app fighting the user.
+    bool dragSetIsLocked() const;
+    // Set when a drag was refused, cleared when read. The viewport turns this
+    // into a message — a silent refusal is indistinguishable from a bug.
+    bool takeDragRefused() { const bool r = m_dragRefused; m_dragRefused = false; return r; }
+    bool isDragging() const { return m_isDragging; }
     const std::set<int>& getSelectedLines()   const { return m_selectedLines; }
     const std::set<int>& getSelectedCircles() const { return m_selectedCircles; }
     const std::set<int>& getSelectedArcs()    const { return m_selectedArcs; }
@@ -541,6 +555,7 @@ private:
 
     // Select/drag state
     int m_dragPointId = -1;
+    bool m_dragRefused = false;   // a drag was refused; the viewport reports it
     bool m_isDragging = false;
     bool m_lastDownAddedToSel = false; // Ctrl state for the current click
     std::set<int> m_selectedPoints;

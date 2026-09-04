@@ -5886,6 +5886,12 @@ void Application::renderViewport() {
                                 glm::vec2 r(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
                                 m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
                             }
+                            // movePoint does not solve, and the mirror image is an
+                            // OUTPUT of its source. Mouse rotation solves each
+                            // frame so it kept up; the typed path never did, so
+                            // the image sat at the previous angle on screen and
+                            // could be snapshotted that way by Apply.
+                            m_activeSketch->recomputeMirrors();
                         }
                         ImGui::Separator();
                         bool apply  = ImGui::Button(materializr::tr("Apply"), materializr::uiSz(70, 0)) || typedEnter;
@@ -5902,6 +5908,7 @@ void Application::renderViewport() {
                                 glm::vec2 r(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
                                 m_activeSketch->movePoint(id, m_sketchGizmoCenter + r);
                             }
+                            m_activeSketch->recomputeMirrors();   // before the snapshot
                             bool changed = false;
                             for (auto& [id, orig] : m_sketchGizmoOriginals) {
                                 if (auto* p = m_activeSketch->getPoint(id))
@@ -5929,8 +5936,15 @@ void Application::renderViewport() {
                             m_sketchGizmoRotateAdjusting = false;
                             ImGui::CloseCurrentPopup();
                         } else if (cancel) {
-                            for (auto& [id, orig] : m_sketchGizmoOriginals)
-                                m_activeSketch->movePoint(id, orig);
+                            // Restoring only the ORIGINALS puts the sources back
+                            // and leaves every mirrored image at the cancelled
+                            // angle until some later solve happens to fix it.
+                            // restoreFrom is the whole snapshot, invariant included.
+                            if (m_sketchGizmoBefore)
+                                m_activeSketch->restoreFrom(*m_sketchGizmoBefore);
+                            else
+                                for (auto& [id, orig] : m_sketchGizmoOriginals)
+                                    m_activeSketch->movePoint(id, orig);
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
                             m_sketchGizmoOriginals.clear();
@@ -5943,6 +5957,7 @@ void Application::renderViewport() {
                         // (whatever angle is currently applied stays). This is the
                         // friendlier default for a CAD adjust popup; Esc reverts
                         // via the shortcut handler.
+                        m_activeSketch->recomputeMirrors();   // whatever is applied, make it current
                         bool changed = false;
                         for (auto& [id, orig] : m_sketchGizmoOriginals) {
                             if (auto* p = m_activeSketch->getPoint(id))
@@ -6105,6 +6120,15 @@ void Application::renderViewport() {
                         // it. Snapshot manually for the drag-commit on mouse-up.
                         m_sketchDragBefore = std::make_shared<Sketch>(*m_activeSketch);
                         recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
+                        // A refused drag is otherwise indistinguishable from a
+                        // bug: the click selects, nothing moves, and nothing
+                        // says why. Mirrored geometry is an OUTPUT — the
+                        // recompute rewrites it after every solve — so moving
+                        // it directly cannot mean anything.
+                        if (m_sketchTool->takeDragRefused())
+                            showToast(materializr::tr(
+                                "Mirrored geometry follows its source. "
+                                "Edit the original, or use Break link."));
                     } else if (m_sketchTool->getMode() == SketchToolMode::Dimension) {
                         // Picking mutates nothing — no undo record. The commit
                         // below records the constraint add as one SketchEditOp.

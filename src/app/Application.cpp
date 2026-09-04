@@ -5981,61 +5981,12 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
     if (!m_activeSketch) { mutator(); return; }
     // Signature includes counts AND element IDs so that swaps (trim line→line,
     // trim circle→arc) register as a mutation even though counts may be equal.
-    auto signature = [](const Sketch& s) {
-        size_t h = 1469598103934665603ull;
-        auto mix = [&](size_t v) { h = (h ^ v) * 1099511628211ull; };
-        // Hash point positions and circle/arc radii too (quantised to 1e-4 mm)
-        // so a pure move/resize — a line length, rectangle W×H, or arc sweep
-        // edit that keeps every id and count fixed — still registers as a
-        // mutation and gets its own undoable history step.
-        auto mixPos = [&](glm::vec2 p) {
-            mix(static_cast<size_t>(std::llround(p.x * 1e4)));
-            mix(static_cast<size_t>(std::llround(p.y * 1e4)));
-        };
-        mix(s.getPoints().size());
-        for (const auto& p : s.getPoints()) { mix(static_cast<size_t>(p.id)); mixPos(p.pos); }
-        mix(s.getLines().size());
-        for (const auto& l : s.getLines()) mix(static_cast<size_t>(l.id));
-        mix(s.getCircles().size());
-        for (const auto& c : s.getCircles()) {
-            mix(static_cast<size_t>(c.id));
-            mix(static_cast<size_t>(std::llround(c.radius * 1e4)));
-        }
-        mix(s.getArcs().size());
-        for (const auto& a : s.getArcs()) {
-            mix(static_cast<size_t>(a.id));
-            mix(static_cast<size_t>(std::llround(a.radius * 1e4)));
-        }
-        mix(s.getSplines().size());
-        for (const auto& sp : s.getSplines()) mix(static_cast<size_t>(sp.id));
-        mix(s.getPolygons().size());
-        for (const auto& p : s.getPolygons()) mix(static_cast<size_t>(p.id));
-        // Constraints too — including their values so an edit (not just an
-        // add / remove) registers as a mutation and pushes a history step.
-        mix(s.getConstraints().size());
-        for (const auto& c : s.getConstraints()) {
-            mix(static_cast<size_t>(c.id));
-            mix(static_cast<size_t>(c.type));
-            mix(static_cast<size_t>(c.entityA));
-            mix(static_cast<size_t>(c.entityB));
-            size_t vb; std::memcpy(&vb, &c.value, sizeof(vb));
-            mix(vb);
-            std::memcpy(&vb, &c.valueY, sizeof(vb));
-            mix(vb);
-            // Label offsets too: a dedup-replace that only re-places a
-            // label (value bitwise-equal) must still register as a
-            // mutation, or the re-placement gets no undo step.
-            std::memcpy(&vb, &c.labelOffX, sizeof(vb));
-            mix(vb);
-            std::memcpy(&vb, &c.labelOffY, sizeof(vb));
-            mix(vb);
-            // Driving/reference too — promoting a dimension changes no
-            // number, so without this the toggle hashes identically and
-            // recordSketchMutation skips the history push entirely.
-            mix(static_cast<size_t>(c.isDriving ? 1 : 0));
-        }
-        return h;
-    };
+    // ONE canonical signature, on Sketch. It used to live here as a lambda and
+    // hashed geometry and constraints only — so Break link, which preserves
+    // every one of those and changes only mirror state, hashed identically and
+    // had its undo step silently discarded. SketchPlugin carried a second,
+    // weaker copy that did not hash positions or constraints at all.
+    auto signature = [](const Sketch& s) { return s.stateSignature(); };
     size_t beforeSig = signature(*m_activeSketch);
     auto before = std::make_shared<Sketch>(*m_activeSketch);
     // Fold a deferred anchor snapshot (from the first click of a line chain) in
@@ -6116,6 +6067,24 @@ void Application::deleteSelectedSketchElements() {
     const auto pts = m_sketchTool->getSelectedPoints();
     const auto lns = m_sketchTool->getSelectedLines();
     if (pts.empty() && lns.empty()) return;
+
+    // removeElement REFUSES derived geometry — the recompute would rebuild it on
+    // the next solve, so deleting it is a lie the model cannot keep. It refuses
+    // silently though, so without this the key does nothing and says nothing,
+    // which reads as a broken Delete rather than a protected relation.
+    int refused = 0;
+    for (int lid : lns) if (m_activeSketch->isDerived(lid)) ++refused;
+    for (int pid : pts) if (m_activeSketch->isDerived(pid)) ++refused;
+    if (refused > 0) {
+        const bool all = refused == static_cast<int>(pts.size() + lns.size());
+        showToast(materializr::tr(
+            all ? "Mirrored geometry cannot be deleted on its own. Use Break link "
+                  "or Delete mirror in the Properties panel."
+                : "Some of the selection is mirrored and was kept. Use Break link "
+                  "or Delete mirror to remove it."));
+        if (all) { m_sketchTool->clearElementSelection(); return; }
+    }
+
     recordSketchMutation([&]{
         for (int lid : lns) m_activeSketch->removeElement(lid);
         for (int pid : pts) m_activeSketch->removeElement(pid);

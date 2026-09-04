@@ -2208,6 +2208,27 @@ void SketchTool::selectAll() {
     for (const auto& a : m_sketch->getArcs())    m_selectedArcs.insert(a.id);
 }
 
+std::set<int> SketchTool::effectiveDragSet() const {
+    std::set<int> pts;
+    if (!m_sketch) return pts;
+    pts = m_selectedPoints;
+    for (int lid : m_selectedLines)
+        for (const auto& l : m_sketch->getLines())
+            if (l.id == lid) { pts.insert(l.startPointId); pts.insert(l.endPointId); break; }
+    if (pts.empty() && m_dragPointId >= 0) pts.insert(m_dragPointId);
+    return pts;
+}
+
+bool SketchTool::dragSetIsLocked() const {
+    if (!m_sketch) return false;
+    for (int lid : m_selectedLines) if (m_sketch->isDerived(lid)) return true;
+    for (int cid : m_selectedCircles) if (m_sketch->isDerived(cid)) return true;
+    for (int aid : m_selectedArcs) if (m_sketch->isDerived(aid)) return true;
+    for (int sid : m_selectedSplines) if (m_sketch->isDerived(sid)) return true;
+    for (int pid : effectiveDragSet()) if (m_sketch->isDerived(pid)) return true;
+    return false;
+}
+
 void SketchTool::handleSelectTool(glm::vec2 pos) {
     if (!m_sketch) return;
 
@@ -2286,6 +2307,15 @@ void SketchTool::handleSelectTool(glm::vec2 pos) {
     if (nearPt >= 0) {
         m_selectedPoints.insert(nearPt);
         m_dragPointId = nearPt;
+        // Refuse at INITIATION, not per point. onMouseMove moves the WHOLE
+        // effective set, so a check on the point under the cursor still lets a
+        // derived point ride along in a multi-selection, or be dragged by its
+        // line. Selection itself stays allowed — only the drag is refused.
+        if (dragSetIsLocked()) {
+            m_dragPointId = -1;
+            m_dragRefused = true;
+            return;
+        }
         m_isDragging = true; // multi-point drag handled in onMouseMove
     } else if (nearLine >= 0) {
         if (m_lastDownAddedToSel) {
@@ -2294,6 +2324,14 @@ void SketchTool::handleSelectTool(glm::vec2 pos) {
             else m_selectedLines.insert(nearLine);
         } else {
             m_selectedLines.insert(nearLine);
+            // Same refusal as the point branch. Dragging a line translates its
+            // endpoints, which for a derived line are images — so guarding only
+            // the point path left the whole of it reachable by clicking the line
+            // instead.
+            if (dragSetIsLocked()) {
+                m_dragRefused = true;
+                return;
+            }
             m_isDragging = true; // dragging the line translates the whole selection
         }
     } else if (nearCircle >= 0) {
@@ -3764,6 +3802,11 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     // Same catch radius findCoincidentPoint welds at (0.3 * snapScale), so
     // "on the axis" here means what "the same point" means everywhere else.
     const float onAxisTolerance = 0.3f * snapScale();
+    // Snapping happens before the function knows whether ANY output will be
+    // created. If every selected entity sits on the axis there is no relation to
+    // build — and the early return below used to leave the user's geometry
+    // moved anyway, for a command that did nothing.
+    std::vector<std::pair<int, glm::vec2>> snapped;
     std::unordered_map<int, int> remap;
     std::vector<int> onAxis;                 // shared vertices, pinned below
     auto remapPt = [&](int oldId) -> int {
@@ -3783,6 +3826,7 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
             // its foot on the axis. Left where the user dropped it, the two
             // halves would join off-centre and the profile would start
             // permanently asymmetric with nothing able to repair it.
+            snapped.push_back({oldId, p->pos});   // so an empty result can undo it
             m_sketch->movePoint(oldId, (p->pos + np) * 0.5f);
             onAxis.push_back(oldId);
             // Recorded on the group: topology validation permits an identity
@@ -3849,8 +3893,12 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     // exists: creating it first and returning here would leave an orphan
     // construction line in the sketch that belongs to no relation.
     if (mir.points.empty() && mir.lines.empty() && mir.circles.empty() &&
-        mir.arcs.empty() && mir.splines.empty())
+        mir.arcs.empty() && mir.splines.empty()) {
+        // Nothing was derived, so nothing should have changed. Put every
+        // snapped source point back where the user had it.
+        for (const auto& [pid, was] : snapped) m_sketch->movePoint(pid, was);
         return;
+    }
 
     // The gizmo is transient; the group needs a real axis that persists, can be
     // dimensioned and moves the image when it moves. Construction, so it never
@@ -3873,6 +3921,7 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     m_sketch->setConstruction(axisB, true);
     m_sketch->setConstruction(mir.axisLineId, true);
     mir.axisGenerated = true;   // this group made the axis, so it may delete it
+    mir.sessionOwned  = true;   // built here, not asserted by a file
     mir.ownershipDeclared = true;  // built here, so its ownership is stated, not inferred
 
     // A shared vertex is the only thing holding the two halves together, and

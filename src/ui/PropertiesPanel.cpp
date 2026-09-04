@@ -784,6 +784,54 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         m_constraintPanelSketchId = sketchId;
     }
 
+    // Mirror groups render BEFORE the empty-constraints return below. A mirror
+    // commonly has no user constraints at all, so putting these after it made
+    // Break link unreachable in exactly the sketches that have a relation to
+    // break.
+    if (!sk->getMirrors().empty()) {
+        ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Mirrors"));
+        ImGui::Separator();
+        int pendingBreak = -1, pendingDelete = -1;
+        for (const auto& mir : sk->getMirrors()) {
+            const std::size_t pairs = mir.points.size() + mir.lines.size() +
+                                      mir.circles.size() + mir.arcs.size() + mir.splines.size();
+            ImGui::PushID(mir.id);
+            // The label and BOTH buttons do not fit one line of this panel — the
+            // second button rendered clipped to "De" against the right edge.
+            // Label on its own row, buttons beneath it.
+            ImGui::Text(materializr::tr("Mirror %d - %d linked"), mir.id, static_cast<int>(pairs));
+            if (ImGui::SmallButton(materializr::tr("Break link"))) pendingBreak = mir.id;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", materializr::tr(
+                    "Keeps all geometry and ends the relation. The mirrored side "
+                    "stops following its source."));
+            ImGui::SameLine();
+            if (ImGui::SmallButton(materializr::tr("Delete mirror"))) pendingDelete = mir.id;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", materializr::tr(
+                    "Removes the mirrored copy and the axis it created. The "
+                    "original is untouched."));
+            ImGui::PopID();
+        }
+        // Applied AFTER the loop (both edit the vector being iterated) and
+        // through m_sketchMutate, which is Application::recordSketchMutation —
+        // that is what pushes the SketchEditOp. Calling the model directly, as
+        // this first did, mutated the sketch with NO history step: the user
+        // could break a relation and not undo it. The whole reason
+        // stateSignature() learned about mirror state was to make these two
+        // visible to that transaction, and then this bypassed it entirely.
+        if (pendingBreak >= 0 && m_sketchMutate) {
+            const int id = pendingBreak;
+            m_sketchMutate([&]{ sk->breakMirrorLink(id); });
+            modified = true;
+        } else if (pendingDelete >= 0 && m_sketchMutate) {
+            const int id = pendingDelete;
+            m_sketchMutate([&]{ sk->deleteMirror(id); });
+            modified = true;
+        }
+        ImGui::Spacing();
+    }
+
     auto& cs = sk->getMutableConstraints();
     if (cs.empty()) {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No constraints on this sketch."));

@@ -61,7 +61,25 @@ static const char* constraintName(ConstraintType t) {
 std::string SketchEditOp::description() const {
     if (!m_before || !m_after) return "Sketch edit";
 
-    // Constraint diff first — these read more specifically than the generic
+    // MIRROR STATE FIRST. Creating a mirror also adds the zero-distance pins
+    // that hold its shared vertices on the axis, and the constraint diff below
+    // reaches those before anything else — so the History panel labelled a
+    // mirror "Add Distance 0.00 mm", which is what the running app showed.
+    const auto& mBefore = m_before->getMirrors();
+    const auto& mAfter  = m_after->getMirrors();
+    if (mAfter.size() > mBefore.size()) return "Mirror";
+    if (mAfter.size() < mBefore.size()) {
+        // Break link and Delete mirror BOTH remove a group, so the count cannot
+        // tell them apart. The geometry does: Break link preserves every entity
+        // it released, Delete mirror takes its images with it.
+        const std::size_t geomBefore = m_before->getLines().size() + m_before->getCircles().size() +
+                                       m_before->getArcs().size() + m_before->getSplines().size();
+        const std::size_t geomAfter  = m_after->getLines().size() + m_after->getCircles().size() +
+                                       m_after->getArcs().size() + m_after->getSplines().size();
+        return geomAfter < geomBefore ? "Delete mirror" : "Break mirror link";
+    }
+
+    // Constraint diff next — these read more specifically than the generic
     // geometry-count descriptions below.
     const auto& cBefore = m_before->getConstraints();
     const auto& cAfter  = m_after->getConstraints();

@@ -16,6 +16,7 @@
 #include "modeling/SvgImport.h"
 #include "modeling/TextSketchOp.h"
 #include "io/ProjectIO.h"
+#include "modeling/SketchEditOp.h"
 
 #include <gtest/gtest.h>
 
@@ -1524,4 +1525,296 @@ TEST(SketchMirrorDelete, DeletingADerivedElementDirectlyIsRefused) {
     for (const auto& l : h->sk.getLines()) if (l.id == imgLine) stillThere = true;
     EXPECT_TRUE(stillThere) << "an image may not be deleted out from under its relation";
     EXPECT_EQ(1u, h->sk.getMirrors().size()) << "and the group is untouched";
+}
+
+// --- undo dedup ------------------------------------------------------------
+// recordSketchMutation compares a signature before and after and DISCARDS the
+// history step when it is unchanged. Break link preserves every point, line and
+// constraint, so a geometry-only signature made it invisible and its undo step
+// was thrown away — the user could not take it back.
+TEST(SketchMirrorSignature, BreakLinkChangesTheStateSignature) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const std::size_t before = h->sk.stateSignature();
+    ASSERT_TRUE(h->sk.breakMirrorLink(h->sk.getMirrors()[0].id));
+    EXPECT_NE(before, h->sk.stateSignature())
+        << "Break link must be visible to mutation dedup, or it gets no undo step";
+}
+
+TEST(SketchMirrorSignature, DeleteMirrorChangesTheStateSignature) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const std::size_t before = h->sk.stateSignature();
+    ASSERT_TRUE(h->sk.deleteMirror(h->sk.getMirrors()[0].id));
+    EXPECT_NE(before, h->sk.stateSignature());
+}
+
+// The signature must still notice everything it noticed before the rewrite,
+// or centralising it quietly drops undo steps elsewhere.
+TEST(SketchMirrorSignature, StillNoticesTheOrdinaryEdits) {
+    auto h = makeHalfProfile();
+    const std::size_t base = h->sk.stateSignature();
+
+    h->sk.movePoint(h->tl, {-11.0f, 10.0f});
+    const std::size_t moved = h->sk.stateSignature();
+    EXPECT_NE(base, moved) << "a pure move";
+
+    materializr::Constraint c{};
+    c.type = materializr::ConstraintType::Distance;
+    c.entityA = h->tl; c.entityB = h->bl; c.value = 10.0; c.isDriving = false;
+    const int cid = h->sk.addConstraint(c);
+    ASSERT_NE(-1, cid);
+    const std::size_t withDim = h->sk.stateSignature();
+    EXPECT_NE(moved, withDim) << "adding a dimension";
+
+    for (auto& k : h->sk.getMutableConstraints()) if (k.id == cid) k.labelOffX = 4.0;
+    const std::size_t movedLabel = h->sk.stateSignature();
+    EXPECT_NE(withDim, movedLabel) << "re-placing a label changes no value";
+
+    h->sk.setDriving(cid, true);
+    EXPECT_NE(movedLabel, h->sk.stateSignature()) << "promoting changes no number";
+}
+
+// BreakLinkChangesTheStateSignature passes on the `derived` flags alone, so it
+// does NOT pin the mirror term. This does: ownership metadata changes while
+// every point, element, constraint and derived flag stays exactly as it was.
+// An undo step that restores a cleared claim has nothing else to be seen by.
+TEST(SketchMirrorSignature, OwnershipAloneMovesTheSignature) {
+    auto h = committedMirror();
+    ASSERT_FALSE(h->sk.getMirrors()[0].pinConstraints.empty()) << "VACUOUS otherwise";
+    const std::size_t before = h->sk.stateSignature();
+
+    groupOf(*h).pinConstraints.clear();     // geometry and flags untouched
+
+    EXPECT_NE(before, h->sk.stateSignature())
+        << "a change only the mirror metadata can see must still be undoable";
+}
+
+// --- history captions ------------------------------------------------------
+// description() inspected constraints before mirror state, so creating a mirror
+// was labelled by the first pin it happened to add: "Add Distance 0.00 mm" —
+// the caption observed in the running app.
+namespace {
+std::string captionFor(const Sketch& before, const Sketch& after) {
+    auto b = std::make_shared<Sketch>(); b->assignRaw(before);
+    auto a = std::make_shared<Sketch>(); a->assignRaw(after);
+    auto target = std::make_shared<Sketch>(); target->assignRaw(before);
+    materializr::SketchEditOp op(target, b, a);
+    return op.description();
+}
+} // namespace
+
+TEST(SketchMirrorCaption, CreatingAMirrorReadsAsMirror) {
+    auto h = makeHalfProfile();
+    Sketch before; before.assignRaw(h->sk);
+    commitVerticalMirrorAtX0(*h);
+    EXPECT_EQ("Mirror", captionFor(before, h->sk));
+}
+
+TEST(SketchMirrorCaption, BreakLinkAndDeleteMirrorReadDifferently) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    Sketch before; before.assignRaw(h->sk);
+
+    Sketch broken; broken.assignRaw(h->sk);
+    ASSERT_TRUE(broken.breakMirrorLink(broken.getMirrors()[0].id));
+    EXPECT_EQ("Break mirror link", captionFor(before, broken));
+
+    Sketch deleted; deleted.assignRaw(h->sk);
+    ASSERT_TRUE(deleted.deleteMirror(deleted.getMirrors()[0].id));
+    EXPECT_EQ("Delete mirror", captionFor(before, deleted))
+        << "both remove a group; only the geometry tells them apart";
+}
+
+// A spline's control-point membership IS its content. Reordering them keeps
+// every id and every count fixed, so an id-only hash made the edit invisible
+// and mutation dedup threw the undo step away.
+TEST(SketchMirrorSignature, SplineControlPointMembershipIsHashed) {
+    Sketch a, b;
+    const auto build = [](Sketch& sk, bool swapped) {
+        const int p1 = sk.addPoint({0.0f, 0.0f});
+        const int p2 = sk.addPoint({5.0f, 5.0f});
+        const int p3 = sk.addPoint({10.0f, 0.0f});
+        sk.addSpline(swapped ? std::vector<int>{p1, p3, p2}
+                             : std::vector<int>{p1, p2, p3});
+    };
+    build(a, false);
+    build(b, true);
+    ASSERT_EQ(a.getPoints().size(), b.getPoints().size()) << "VACUOUS otherwise";
+    ASSERT_EQ(a.getSplines().size(), b.getSplines().size());
+    EXPECT_NE(a.stateSignature(), b.stateSignature())
+        << "reordering control points must be an undoable edit";
+}
+
+// --- drag refusal ----------------------------------------------------------
+// Locking only the point under the cursor is not enough: onMouseMove moves the
+// whole effective set, so a derived point rides along in a multi-selection or
+// gets dragged by its own line.
+TEST(SketchMirrorDrag, ADerivedPointInAMultiSelectionLocksTheWholeDrag) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int derivedPt = h->sk.getMirrors()[0].points.front().second;
+    ASSERT_TRUE(h->sk.isDerived(derivedPt)) << "VACUOUS otherwise";
+
+    // An ORDINARY point is the drag target; the image is merely also selected.
+    h->tool.setSelectionFull({h->tl, derivedPt}, {}, {}, {}, {});
+    EXPECT_TRUE(h->tool.dragSetIsLocked())
+        << "the drag moves every selected point, so one image locks all of it";
+
+    h->tool.setSelectionFull({h->tl}, {}, {}, {}, {});
+    EXPECT_FALSE(h->tool.dragSetIsLocked()) << "ordinary geometry still drags";
+}
+
+// Dragging a derived LINE moves its endpoints, which are images too.
+TEST(SketchMirrorDrag, ADerivedLineLocksTheDragThroughItsEndpoints) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int derivedLine = h->sk.getMirrors()[0].lines.front().second;
+    ASSERT_TRUE(h->sk.isDerived(derivedLine)) << "VACUOUS otherwise";
+
+    h->tool.setSelectionFull({}, {derivedLine}, {}, {}, {});
+    EXPECT_TRUE(h->tool.dragSetIsLocked());
+    const auto set = h->tool.effectiveDragSet();
+    EXPECT_FALSE(set.empty()) << "the line must contribute its endpoints";
+
+    h->tool.setSelectionFull({}, {h->sk.getMirrors()[0].lines.front().first}, {}, {}, {});
+    EXPECT_FALSE(h->tool.dragSetIsLocked()) << "its source is free";
+}
+
+// Guarding only the point branch of handleSelectTool left the whole refusal
+// reachable around: clicking the derived LINE set m_isDragging directly, and
+// dragging a line translates its endpoints — which are images.
+TEST(SketchMirrorDrag, ClickingADerivedLineDoesNotStartADrag) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const auto& mir = h->sk.getMirrors()[0];
+    const int derivedLine = mir.lines.front().second;
+    ASSERT_TRUE(h->sk.isDerived(derivedLine)) << "VACUOUS otherwise";
+
+    // Click the midpoint of the image line, in sketch space.
+    const materializr::SketchLine* img = nullptr;
+    for (const auto& l : h->sk.getLines()) if (l.id == derivedLine) img = &l;
+    ASSERT_NE(nullptr, img);
+    const glm::vec2 mid = 0.5f * (posOf(h->sk, img->startPointId) + posOf(h->sk, img->endPointId));
+
+    h->tool.setMode(materializr::SketchToolMode::Select);
+    h->tool.clearElementSelection();
+    h->tool.onMouseDown(mid, false);
+
+    EXPECT_FALSE(h->tool.isDragging()) << "a derived line must not begin a drag";
+    EXPECT_TRUE(h->tool.takeDragRefused()) << "and the refusal must be reported";
+}
+
+// Committing a selection that lies entirely on the axis derives nothing — and
+// used to leave the user's points snapped onto the axis anyway, for a command
+// that produced no relation.
+TEST(SketchMirrorCommit, AnEmptyResultLeavesSourceGeometryUntouched) {
+    Sketch sk;
+    materializr::SketchTool tool;
+    tool.setSketch(&sk);
+    // Two points a hair off a vertical axis at x=0: within the weld tolerance,
+    // so both are treated as on-axis and nothing can be derived from them.
+    const int a = sk.addPoint({0.05f, 0.0f});
+    const int b = sk.addPoint({-0.05f, 8.0f});
+    const glm::vec2 wasA = posOf(sk, a), wasB = posOf(sk, b);
+
+    ASSERT_TRUE(tool.beginMirror());
+    tool.setMirrorAnchor({0.0f, 4.0f});
+    tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    std::set<int> pts, lines;
+    tool.commitMirror(pts, lines);
+
+    ASSERT_TRUE(sk.getMirrors().empty()) << "VACUOUS otherwise: nothing may be derived";
+    EXPECT_NEAR(wasA.x, posOf(sk, a).x, 1e-6) << "a command that did nothing moved geometry";
+    EXPECT_NEAR(wasB.x, posOf(sk, b).x, 1e-6);
+}
+
+// Deleting a mirror's ONLY source element ends the relation. The existing
+// cascade test uses a three-line profile, so survivors always kept the group
+// alive and this case never ran: the group was left holding point pairs alone,
+// pruneOrphanPoints protected those points BECAUSE the group named them, and
+// nothing could reach either afterwards.
+TEST(SketchMirrorDelete, DeletingTheOnlySourceElementEndsTheRelation) {
+    Sketch sk;
+    materializr::SketchTool tool;
+    tool.setSketch(&sk);
+    const int p1 = sk.addPoint({4.0f, 1.0f});
+    const int p2 = sk.addPoint({6.0f, 8.0f});
+    const int srcLine = sk.addLine(p1, p2);
+    ASSERT_TRUE(tool.beginMirror());
+    tool.setMirrorAnchor({0.0f, 0.0f});
+    tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    std::set<int> pts, lines;
+    tool.commitMirror(pts, lines);
+    ASSERT_EQ(1u, sk.getMirrors().size());
+    ASSERT_EQ(1u, sk.getMirrors()[0].lines.size()) << "VACUOUS otherwise: need a lone pair";
+    const std::size_t before = sk.getPoints().size();
+
+    sk.removeElement(srcLine);
+    sk.pruneOrphanPoints();
+
+    EXPECT_TRUE(sk.getMirrors().empty()) << "a relation with nothing paired must end";
+    EXPECT_LT(sk.getPoints().size(), before) << "its image points must not be stranded";
+    EXPECT_EQ(nullptr, sk.getPoint(p1)) << "and the source's own orphans sweep as usual";
+}
+
+// Validation proves a group is topologically a reflection and that its axis
+// looks isolated. It CANNOT prove the application built any of it: a crafted or
+// corrupted file can nominate two existing user shapes as source/output and a
+// user's own construction line as the axis, pass every check, and have Delete
+// mirror erase that line. Deletion rights are granted by this session only.
+TEST(SketchMirrorDelete, ALoadedGroupMayNotDeleteTheAxisItClaims) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    ASSERT_TRUE(h->sk.getMirrors()[0].sessionOwned) << "VACUOUS otherwise";
+    ASSERT_TRUE(h->sk.getMirrors()[0].axisGenerated);
+
+    // A round trip is exactly how provenance is lost: sessionOwned is never
+    // written, so everything that comes back is file-asserted.
+    materializr::Sketch loaded = reloadWith(h->sk, nullptr);
+    ASSERT_EQ(1u, loaded.getMirrors().size());
+    EXPECT_FALSE(loaded.getMirrors()[0].sessionOwned) << "a file cannot claim provenance";
+    const int axisId = loaded.getMirrors()[0].axisLineId;
+
+    ASSERT_TRUE(loaded.deleteMirror(loaded.getMirrors()[0].id));
+
+    bool axisAlive = false;
+    for (const auto& l : loaded.getLines()) if (l.id == axisId) axisAlive = true;
+    EXPECT_TRUE(axisAlive)
+        << "the axis is infrastructure the FILE claims; only this session may delete it";
+}
+
+// Users may build on derived geometry. When a relation ends because its last
+// element pair went, its image points are CANDIDATES for removal, not condemned:
+// erasing one that a user's own line uses strands that line with a missing
+// endpoint — the identical bug already fixed in deleteMirror.
+TEST(SketchMirrorDelete, EndingARelationKeepsImagePointsSomethingElseUses) {
+    Sketch sk;
+    materializr::SketchTool tool;
+    tool.setSketch(&sk);
+    const int p1 = sk.addPoint({4.0f, 1.0f});
+    const int p2 = sk.addPoint({6.0f, 8.0f});
+    const int srcLine = sk.addLine(p1, p2);
+    ASSERT_TRUE(tool.beginMirror());
+    tool.setMirrorAnchor({0.0f, 0.0f});
+    tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);
+    std::set<int> pts, lines;
+    tool.commitMirror(pts, lines);
+    ASSERT_EQ(1u, sk.getMirrors().size());
+
+    // The user attaches their own line to one of the image points.
+    const int imagePt = sk.getMirrors()[0].points.front().second;
+    const int far = sk.addPoint({-30.0f, -30.0f});
+    const int userLine = sk.addLine(imagePt, far);
+    ASSERT_TRUE(sk.isDerived(imagePt)) << "VACUOUS otherwise";
+
+    sk.removeElement(srcLine);
+
+    EXPECT_TRUE(sk.getMirrors().empty()) << "the relation still ends";
+    EXPECT_NE(nullptr, sk.getPoint(imagePt)) << "but a point in use must survive it";
+    bool userLineWhole = false;
+    for (const auto& l : sk.getLines())
+        if (l.id == userLine && sk.getPoint(l.startPointId) && sk.getPoint(l.endPointId))
+            userLineWhole = true;
+    EXPECT_TRUE(userLineWhole) << "the user's line must not be left with a missing endpoint";
 }

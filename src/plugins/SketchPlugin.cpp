@@ -217,21 +217,11 @@ private:
 
     void recordMutation(PluginContext& ctx, const std::function<void()>& mutator) {
         if (!m_sketch) { mutator(); return; }
-        auto signature = [](const Sketch& s) {
-            size_t h = 1469598103934665603ull;
-            auto mix = [&](size_t v) { h = (h ^ v) * 1099511628211ull; };
-            mix(s.getLines().size());
-            for (const auto& l : s.getLines()) mix(static_cast<size_t>(l.id));
-            mix(s.getCircles().size());
-            for (const auto& c : s.getCircles()) mix(static_cast<size_t>(c.id));
-            mix(s.getArcs().size());
-            for (const auto& a : s.getArcs()) mix(static_cast<size_t>(a.id));
-            mix(s.getSplines().size());
-            for (const auto& sp : s.getSplines()) mix(static_cast<size_t>(sp.id));
-            mix(s.getPolygons().size());
-            for (const auto& p : s.getPolygons()) mix(static_cast<size_t>(p.id));
-            return h;
-        };
+        // The canonical signature on Sketch. This copy hashed ids and counts
+        // only — no positions, no constraints — so a plugin-routed move or
+        // dimension edit hashed identically to its own "before" and lost its
+        // undo step entirely. That was a bug well beyond mirrors.
+        auto signature = [](const Sketch& s) { return s.stateSignature(); };
         size_t beforeSig = signature(*m_sketch);
         auto before = std::make_shared<Sketch>(*m_sketch);
         mutator();

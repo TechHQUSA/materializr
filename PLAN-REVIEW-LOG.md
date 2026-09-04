@@ -476,3 +476,47 @@ unreviewed revisions to a plan this size, and the reason the last two rounds hap
 The plan is now approved for implementation. It is NOT the plan that was approved before any
 code was written: that one was reviewed against a greenfield, and seven commits of reality
 falsified two of its assumptions and reversed one of its decisions.
+
+
+---
+
+# Post-build cross-inspection (2026-09-04)
+
+A FRESH read-only Codex session (`01a06d8c-7b2a-7340-8bd0-8a84a08e6fcc`), given the
+17-commit branch diff and the feature's intent, with no sight of the plan argument above.
+Five findings — four from the cold read, one from the stop-time review that followed the
+fixes. All five accepted; none rejected.
+
+1. **Critical — a crafted file could still authorise deleting user geometry.** Validation
+   proves a group is topologically a reflection and that its axis looks isolated. It cannot
+   prove the APPLICATION built any of it. A file can nominate two existing symmetric user
+   shapes as source/output and a user's own construction line as the axis, pass every check,
+   and have Delete mirror erase that line. This is P9g — "absence is not agreement" — carried
+   one step further than I carried it: every ownership field I had hardened was still
+   FILE-ASSERTED. Fix: `sessionOwned`, never serialised, true only for a group commitMirror
+   built in this session. A loaded group still deletes its derived outputs; it never removes
+   infrastructure the file merely claims.
+2. **High — the gizmo left mirror images stale.** Mouse rotation solves each frame so it kept
+   up; the TYPED path called `movePoint` with no recompute, and Apply snapshotted that into
+   history. Cancel restored only source points, leaving images at the cancelled angle. Four
+   paths fixed; Cancel now uses `restoreFrom`.
+3. **Medium — deleting a mirror's only source element stranded everything.** The deliberate
+   "never sweep point pairs" rule, in a case I had not considered: the group is left holding
+   point pairs alone, `pruneOrphanPoints` protects those points BECAUSE the group names them,
+   and nothing can reach either afterwards.
+4. **Medium — an all-on-axis commit moved geometry, then bailed.** `remapPt` snaps sources
+   onto the axis before the function knows whether any output will exist.
+5. **(stop review) The fix for 3 deleted still-referenced points** — the SAME bug already
+   fixed in `deleteMirror`, reintroduced in the new cleanup path. Users may build on derived
+   geometry; erasing an image point a user's line uses strands that line. Image points are
+   now candidates, filtered after the elements are gone.
+
+### What this pass says about the work
+Findings 3 and 4 are my own tests choosing inputs that could not reach the bug — a three-line
+profile hides the sole-element case, and asserting "no axis remains" hides "geometry moved".
+Finding 5 is worse: a rule I had derived, written down, and then not applied at the next site
+that needed it. That is the session's sharpest recurring failure, and it has the same shape as
+guarding the drag on the point branch but not the line branch, and as building the
+recordSketchMutation routing and then calling the model directly.
+
+The reviewer that found 1 and 5 is the one with no stake in the reasoning that produced them.

@@ -118,6 +118,15 @@ struct SketchMirror {
     // untrusted file, so both are validated before they are honoured and
     // CLEARED when they are not — a cleared claim retains geometry, which is
     // the safe direction. Anything not claimed here survives Delete mirror.
+    // NEVER SERIALISED. True only for a group this session's commitMirror built.
+    // Validation can prove a group is topologically a reflection and that its
+    // axis looks isolated; it cannot prove the APPLICATION made any of it. A
+    // crafted or corrupted file can describe two existing user shapes as
+    // source/output and nominate a user's own construction line as the axis,
+    // pass every check, and have Delete mirror erase that line. So the file
+    // never grants the right to delete infrastructure — only this session does.
+    bool sessionOwned = false;
+
     bool axisGenerated = false;        // commitMirror created the axis line
     std::vector<int> pinConstraints;   // the zero DistancePointLine rows it added
 
@@ -288,6 +297,14 @@ public:
     // they do not anchor it.
     bool pointIsReferenced(int pointId, int ignoreLineId = -1,
                            bool constraintsCount = true) const;
+
+    // One canonical hash of everything an undo step must notice. Mutation
+    // dedup compares this before and after and DISCARDS the step when it is
+    // unchanged, so anything missing from it is an edit the user cannot undo.
+    // Break link is the case in point: it preserves every point, line and
+    // constraint, so without the mirror state below it hashes identically and
+    // its history step is thrown away.
+    std::size_t stateSignature() const;
     // The group owning `entityId` as a derived output, or -1.
     int  mirrorOwning(int entityId) const;
     void clear();
