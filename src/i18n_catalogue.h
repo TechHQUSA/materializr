@@ -528,6 +528,13 @@ inline const TrEntry kEsCatalogue[] = {
     { "Midpoint: %.2f, %.2f, %.2f mm", "Punto medio: %.2f, %.2f, %.2f mm" },
     { "Mirror selected elements across a sketch line you'll pick next.", "Refleja los elementos seleccionados respecto a una l\xc3""\xad""nea del boceto que elegir\xc3""\xa1""s a continuaci\xc3""\xb3""n." },
     { "Mirror the selected bodies across a plane you pick next.", "Refleja los cuerpos seleccionados respecto a un plano que elegir\xc3""\xa1""s a continuaci\xc3""\xb3""n." },
+    { "Mirrors", "Simetr\xc3""\xad""as" },
+    { "Mirror %d - %d linked", "Simetr\xc3""\xad""a %d - %d vinculados" },
+    { "Break link", "Romper v\xc3""\xad""nculo" },
+    { "Delete mirror", "Eliminar simetr\xc3""\xad""a" },
+    { "Keeps all geometry and ends the relation. The mirrored side stops following its source.", "Conserva toda la geometr\xc3""\xad""a y termina la relaci\xc3""\xb3""n. El lado reflejado deja de seguir a su origen." },
+    { "Removes the mirrored copy and the axis it created. The original is untouched.", "Elimina la copia reflejada y el eje que cre\xc3""\xb3"". El original no se toca." },
+    { "Mirrored geometry follows its source. Edit the original, or use Break link.", "La geometr\xc3""\xad""a reflejada sigue a su origen. Edita el original o usa Romper v\xc3""\xad""nculo." },
     { "Mirrored body ID: %d", "ID del cuerpo reflejado: %d" },
     { "Mode: %s", "Modo: %s" },
     { "Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo.", "Mueve o rota con el gizmo como si fuera un plano de construcci\xc3""\xb3""n. Haz un boceto sobre \xc3""\xa9""l para calcar la foto." },
@@ -1165,7 +1172,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1153;
+inline constexpr int kEsCount = 1160;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -1686,6 +1693,13 @@ inline const TrEntry kPtCatalogue[] = {
     { "Midpoint: %.2f, %.2f, %.2f mm", "Ponto m\xc3""\xa9""dio: %.2f, %.2f, %.2f mm" },
     { "Mirror selected elements across a sketch line you'll pick next.", "Espelhe os elementos selecionados em rela\xc3""\xa7""\xc3""\xa3""o a uma linha do esbo\xc3""\xa7""o que voc\xc3""\xaa"" escolher\xc3""\xa1"" em seguida." },
     { "Mirror the selected bodies across a plane you pick next.", "Espelhe os corpos selecionados em rela\xc3""\xa7""\xc3""\xa3""o a um plano que voc\xc3""\xaa"" escolher\xc3""\xa1"" em seguida." },
+    { "Mirrors", "Espelhamentos" },
+    { "Mirror %d - %d linked", "Espelhamento %d - %d vinculados" },
+    { "Break link", "Quebrar v\xc3""\xad""nculo" },
+    { "Delete mirror", "Excluir espelhamento" },
+    { "Keeps all geometry and ends the relation. The mirrored side stops following its source.", "Mant\xc3""\xa9""m toda a geometria e encerra a rela\xc3""\xa7""\xc3""\xa3""o. O lado espelhado deixa de seguir sua origem." },
+    { "Removes the mirrored copy and the axis it created. The original is untouched.", "Remove a c\xc3""\xb3""pia espelhada e o eixo que criou. O original n\xc3""\xa3""o \xc3""\xa9"" alterado." },
+    { "Mirrored geometry follows its source. Edit the original, or use Break link.", "A geometria espelhada segue sua origem. Edite o original ou use Quebrar v\xc3""\xad""nculo." },
     { "Mirrored body ID: %d", "ID do corpo espelhado: %d" },
     { "Mode: %s", "Modo: %s" },
     { "Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo.", "Mova ou rotacione com o gizmo como um plano de constru\xc3""\xa7""\xc3""\xa3""o. Fa\xc3""\xa7""a um esbo\xc3""\xa7""o nele para decalcar a foto." },
@@ -2323,7 +2337,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1153;
+inline constexpr int kPtCount = 1160;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -2844,6 +2858,13 @@ inline const TrEntry kFrCatalogue[] = {
     { "Midpoint: %.2f, %.2f, %.2f mm", "Milieu : %.2f, %.2f, %.2f mm" },
     { "Mirror selected elements across a sketch line you'll pick next.", "R\xc3""\xa9""fl\xc3""\xa9""chir les \xc3""\xa9""l\xc3""\xa9""ments s\xc3""\xa9""lectionn\xc3""\xa9""s par rapport \xc3""\xa0"" une ligne d'esquisse \xc3""\xa0"" choisir ensuite." },
     { "Mirror the selected bodies across a plane you pick next.", "R\xc3""\xa9""fl\xc3""\xa9""chir les corps s\xc3""\xa9""lectionn\xc3""\xa9""s par rapport \xc3""\xa0"" un plan \xc3""\xa0"" choisir ensuite." },
+    { "Mirrors", "Sym\xc3""\xa9""tries" },
+    { "Mirror %d - %d linked", "Sym\xc3""\xa9""trie %d - %d li\xc3""\xa9""s" },
+    { "Break link", "Rompre le lien" },
+    { "Delete mirror", "Supprimer la sym\xc3""\xa9""trie" },
+    { "Keeps all geometry and ends the relation. The mirrored side stops following its source.", "Conserve toute la g\xc3""\xa9""om\xc3""\xa9""trie et met fin \xc3""\xa0"" la relation. Le c\xc3""\xb4""t\xc3""\xa9"" sym\xc3""\xa9""trique cesse de suivre sa source." },
+    { "Removes the mirrored copy and the axis it created. The original is untouched.", "Supprime la copie sym\xc3""\xa9""trique et l'axe qu'elle a cr\xc3""\xa9""\xc3""\xa9"". L'original n'est pas modifi\xc3""\xa9""." },
+    { "Mirrored geometry follows its source. Edit the original, or use Break link.", "La g\xc3""\xa9""om\xc3""\xa9""trie sym\xc3""\xa9""trique suit sa source. Modifiez l'original ou utilisez Rompre le lien." },
     { "Mirrored body ID: %d", "ID du corps sym\xc3""\xa9""trique : %d" },
     { "Mode: %s", "Mode : %s" },
     { "Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo.", "D\xc3""\xa9""placez ou faites pivoter avec le gizmo comme un plan de construction. Esquissez dessus pour tracer la photo." },
@@ -3481,7 +3502,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1153;
+inline constexpr int kFrCount = 1160;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -4002,6 +4023,13 @@ inline const TrEntry kDeCatalogue[] = {
     { "Midpoint: %.2f, %.2f, %.2f mm", "Mittelpunkt: %.2f, %.2f, %.2f mm" },
     { "Mirror selected elements across a sketch line you'll pick next.", "Ausgew\xc3""\xa4""hlte Elemente an einer als N\xc3""\xa4""chstes zu w\xc3""\xa4""hlenden Skizzenlinie spiegeln." },
     { "Mirror the selected bodies across a plane you pick next.", "Ausgew\xc3""\xa4""hlte K\xc3""\xb6""rper an einer als N\xc3""\xa4""chstes zu w\xc3""\xa4""hlenden Ebene spiegeln." },
+    { "Mirrors", "Spiegelungen" },
+    { "Mirror %d - %d linked", "Spiegelung %d - %d verkn\xc3""\xbc""pft" },
+    { "Break link", "Verkn\xc3""\xbc""pfung l\xc3""\xb6""sen" },
+    { "Delete mirror", "Spiegelung l\xc3""\xb6""schen" },
+    { "Keeps all geometry and ends the relation. The mirrored side stops following its source.", "Beh\xc3""\xa4""lt die gesamte Geometrie und beendet die Beziehung. Die gespiegelte Seite folgt ihrer Quelle nicht mehr." },
+    { "Removes the mirrored copy and the axis it created. The original is untouched.", "Entfernt die gespiegelte Kopie und die von ihr erzeugte Achse. Das Original bleibt unver\xc3""\xa4""ndert." },
+    { "Mirrored geometry follows its source. Edit the original, or use Break link.", "Gespiegelte Geometrie folgt ihrer Quelle. Bearbeite das Original oder nutze Verkn\xc3""\xbc""pfung l\xc3""\xb6""sen." },
     { "Mirrored body ID: %d", "ID des gespiegelten K\xc3""\xb6""rpers: %d" },
     { "Mode: %s", "Modus: %s" },
     { "Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo.", "Mit dem Gizmo wie eine Konstruktionsebene verschieben oder drehen. Darauf skizzieren, um das Foto nachzuzeichnen." },
@@ -4639,7 +4667,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1153;
+inline constexpr int kDeCount = 1160;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -5160,6 +5188,13 @@ inline const TrEntry kItCatalogue[] = {
     { "Midpoint: %.2f, %.2f, %.2f mm", "Punto medio: %.2f, %.2f, %.2f mm" },
     { "Mirror selected elements across a sketch line you'll pick next.", "Specchia gli elementi selezionati rispetto a una linea dello schizzo che sceglierai in seguito." },
     { "Mirror the selected bodies across a plane you pick next.", "Specchia i corpi selezionati rispetto a un piano che sceglierai in seguito." },
+    { "Mirrors", "Specchiature" },
+    { "Mirror %d - %d linked", "Specchiatura %d - %d collegati" },
+    { "Break link", "Rompi collegamento" },
+    { "Delete mirror", "Elimina specchiatura" },
+    { "Keeps all geometry and ends the relation. The mirrored side stops following its source.", "Mantiene tutta la geometria e termina la relazione. Il lato specchiato smette di seguire la sua origine." },
+    { "Removes the mirrored copy and the axis it created. The original is untouched.", "Rimuove la copia specchiata e l'asse che ha creato. L'originale resta intatto." },
+    { "Mirrored geometry follows its source. Edit the original, or use Break link.", "La geometria specchiata segue la sua origine. Modifica l'originale o usa Rompi collegamento." },
     { "Mirrored body ID: %d", "ID del corpo specchiato: %d" },
     { "Mode: %s", "Modalit\xc3""\xa0"": %s" },
     { "Move / rotate with the gizmo like a construction plane. Sketch on it to trace the photo.", "Sposta o ruota con il gizmo come un piano di costruzione. Disegna uno schizzo su di esso per ricalcare la foto." },
@@ -5797,6 +5832,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1153;
+inline constexpr int kItCount = 1160;
 
 } // namespace materializr
