@@ -3873,6 +3873,7 @@ void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines)
     m_sketch->setConstruction(axisB, true);
     m_sketch->setConstruction(mir.axisLineId, true);
     mir.axisGenerated = true;   // this group made the axis, so it may delete it
+    mir.ownershipDeclared = true;  // built here, so its ownership is stated, not inferred
 
     // A shared vertex is the only thing holding the two halves together, and
     // nothing otherwise keeps it on the axis: drag it off and the derived half

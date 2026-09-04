@@ -120,6 +120,14 @@ struct SketchMirror {
     // the safe direction. Anything not claimed here survives Delete mirror.
     bool axisGenerated = false;        // commitMirror created the axis line
     std::vector<int> pinConstraints;   // the zero DistancePointLine rows it added
+
+    // Whether this group's record CARRIED ownership metadata, as opposed to
+    // predating it. Without this, "cleared because the counts disagreed" and
+    // "absent because the file is old" are the same empty list, and the legacy
+    // inference in validateMirrors hands a corrupt record its deletion rights
+    // straight back. Not a serialised field: writing a group always emits the
+    // ownership columns, so a record that has them declared them.
+    bool ownershipDeclared = false;
 };
 
 class Sketch {

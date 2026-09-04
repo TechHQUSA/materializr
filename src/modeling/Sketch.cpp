@@ -2443,7 +2443,7 @@ int Sketch::validateMirrors() {
         // formerly shared vertex stays welded to the axis and Break link fails
         // its one job. Claim exactly the one constraint shaped like this
         // group's own pin; zero or several is ambiguity, and ambiguity RETAINS.
-        if (mir.pinConstraints.empty()) {
+        if (mir.pinConstraints.empty() && !mir.ownershipDeclared) {
             for (int pid : mir.sharedPoints) {
                 int found = -1, matches = 0;
                 for (const auto& k : m_constraints) {

@@ -801,7 +801,13 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                 if (t != "M") { pending = line; break; }   // not ours: hand it back
                 // Trailing fields, absent in files written before they existed.
                 // Their absence is the conservative case: owns nothing.
-                if (!(s >> axisGen))  axisGen = 0;
+                // Reading the first trailing field is what distinguishes a
+                // record that declares ownership from one written before the
+                // columns existed. The distinction has to survive, or clearing
+                // a corrupt claim below is indistinguishable from a legacy gap
+                // and the inference gives the rights straight back.
+                m.ownershipDeclared = static_cast<bool>(s >> axisGen);
+                if (!m.ownershipDeclared) axisGen = 0;
                 if (!(s >> nPins))    nPins = 0;
                 if (!(s >> nShared))  nShared = 0;
                 m.axisGenerated = (axisGen != 0);
@@ -847,6 +853,9 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                     maxMirrorId = std::max(maxMirrorId, m.id);
                     continue;                                // drop this group, keep geometry
                 }
+                // Cleared, and ownershipDeclared stays TRUE: this record had
+                // its chance to say what it owns and the rows did not back the
+                // count up. It owns nothing, permanently — not "nothing yet".
                 if (gotPins != nPins)     m.pinConstraints.clear();
                 if (gotShared != nShared) m.sharedPoints.clear();
 

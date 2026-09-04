@@ -1079,9 +1079,13 @@ TEST(SketchMirrorIO, AWrongPinCountClearsTheClaimButKeepsTheGroup) {
         return dropRows(std::move(t), "MC ");   // rows gone, count still says otherwise
     });
     ASSERT_EQ(1u, loaded.getMirrors().size()) << "the relation is intact, so it survives";
-    // Pins are re-inferred by the legacy path; what matters is that the group
-    // lived and nothing was deleted.
-    EXPECT_FALSE(loaded.getPoints().empty());
+    // And the claim must STAY cleared. An earlier version of this test asserted
+    // only that the group survived, which passed while the legacy inference
+    // quietly handed the deletion rights back — a corrupt record could still
+    // authorise Delete mirror to remove constraints.
+    EXPECT_TRUE(loaded.getMirrors()[0].pinConstraints.empty())
+        << "a record whose ownership rows did not back its count owns nothing";
+    EXPECT_EQ(2u, loaded.getConstraints().size()) << "and nothing was deleted";
 }
 
 // The desync only bites when a REAL record follows the mirror block, and the
