@@ -6646,6 +6646,33 @@ void Application::restoreSketchDraftNow() {
         materializr::clearSketchDraft();
         return;
     }
+    // Put it back in the TAB it came from before restoring anything. Without
+    // this the draft was grafted onto whatever session happened to be active,
+    // which after project recovery is always tab 0 — so a sketch begun in an
+    // untitled tab reappeared on top of an unrelated restored project (Steve,
+    // 2026-09-04). sketchDraftTargetSession holds the whole decision.
+    std::vector<std::string> paths;
+    paths.reserve(m_sessions.size());
+    for (size_t i = 0; i < m_sessions.size(); ++i)
+        paths.push_back(i == m_activeSession ? m_currentProjectPath
+                                             : m_sessions[i]->projectPath);
+    const size_t want = materializr::sketchDraftTargetSession(
+        meta.projectPath, paths, m_activeSession, activeSessionIsScratch());
+    size_t target = want;
+    bool madeTab = false;
+    if (want >= m_sessions.size()) {
+        target = createSession();            // its own tab, as it had been in
+        madeTab = true;
+    }
+    if (target != m_activeSession && !switchToSession(target)) {
+        // Refused (mid-sketch / thread re-cut). Can't happen at startup, but
+        // keep the draft rather than restore it into the wrong project — it
+        // will be offered again next launch.
+        if (madeTab) closeSession(target);
+        showToast("Couldn't reopen the unfinished sketch's tab; it's still saved.");
+        return;
+    }
+
     // Re-enter sketch mode on the draft's plane (empty sketch; sets the undo
     // boundary here), then graft the geometry in AS A RECORDED MUTATION so the
     // restore is one undoable history step. Without this the restored geometry
@@ -6663,8 +6690,10 @@ void Application::restoreSketchDraftNow() {
     alignCameraToActiveSketch();
     m_meshesDirty = true;
     m_lastDraftElemCount = -1; // force a fresh draft write going forward
-    std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)\n",
-                 m_activeSketch->elementCount());
+    std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)"
+                         " into tab %zu%s\n",
+                 m_activeSketch->elementCount(), m_activeSession,
+                 madeTab ? " (new)" : "");
 }
 
 void Application::writeProjectRecoveryIfDue() {

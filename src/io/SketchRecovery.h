@@ -1,5 +1,7 @@
 #pragma once
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace materializr {
 
@@ -35,5 +37,41 @@ bool readSketchDraft(Sketch& sk, SketchDraftMeta& meta);
 
 // Delete the draft file (clean finish/discard). No-op if none exists.
 void clearSketchDraft();
+
+// Which open tab a restored draft belongs in.
+//
+// The draft records the project it was being drawn in, but the restore used to
+// ignore that and simply re-entered sketch mode on whatever tab was active —
+// which after project recovery is always tab 0, because that path restores the
+// newest snapshot there and switches back to it. A sketch started in an
+// untitled tab therefore reappeared grafted on top of an unrelated project
+// (Steve, 2026-09-04).
+//
+// `sessionPaths` is every open session's project path in tab order, `active`
+// the tab in front, and `activeIsScratch` whether that tab is an untouched
+// empty workspace. Returns the index to restore into, or sessionPaths.size()
+// for ""give it its own tab"" — the draft's project isn't open, or it came
+// from an untitled tab and the active one is already occupied.
+//
+// Header-inline and dependency-free so the decision is testable on its own:
+// it is the entire bug, and Application itself isn't linkable from the tests.
+inline size_t sketchDraftTargetSession(const std::string& draftProjectPath,
+                                       const std::vector<std::string>& sessionPaths,
+                                       size_t active,
+                                       bool activeIsScratch) {
+    const size_t newTab = sessionPaths.size();
+    if (!draftProjectPath.empty()) {
+        // A saved project is unambiguous: restore into the tab holding it.
+        for (size_t i = 0; i < sessionPaths.size(); ++i)
+            if (sessionPaths[i] == draftProjectPath) return i;
+        return newTab;                       // that project isn't open
+    }
+    // An untitled draft matches EVERY never-saved tab by path, so the path is
+    // no help. The one tab it can safely land in is an untouched empty
+    // workspace — a fresh launch's single tab, which is what it came from.
+    // Anything else already holds work that isn't the draft's.
+    if (activeIsScratch && active < sessionPaths.size()) return active;
+    return newTab;
+}
 
 } // namespace materializr

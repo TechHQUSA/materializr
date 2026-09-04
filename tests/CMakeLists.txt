@@ -711,6 +711,12 @@ add_executable(test_tangent_inference test_tangent_inference.cpp)
 target_link_libraries(test_tangent_inference PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_tangent_inference COMMAND test_tangent_inference)
 
+# test_sketch_draft_tab — a restored in-progress sketch comes back in the tab
+# it was drawn in, not grafted onto whatever project tab 0 happens to hold
+add_executable(test_sketch_draft_tab test_sketch_draft_tab.cpp)
+target_link_libraries(test_sketch_draft_tab PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_draft_tab COMMAND test_sketch_draft_tab)
+
 # test_corner_inference — the corner bisector / corner tangent guides at a
 # vertex of two segments (Full / Max only), and the displacement budget that
 # stops a nearby inference from quantizing a short segment's length
