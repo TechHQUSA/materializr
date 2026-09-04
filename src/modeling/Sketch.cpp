@@ -697,6 +697,14 @@ void Sketch::removeElement(int id) {
         std::remove_if(m_points.begin(), m_points.end(),
             [id](const SketchPoint& p) { return p.id == id; }),
         m_points.end());
+
+    // Deleting half of a mirror pair would otherwise strand the other half:
+    // still flagged derived, so undraggable and still discounted from the DOF
+    // tally, with nothing left to recompute it from. Breaking the group
+    // releases the survivor as ordinary geometry — the same degradation Break
+    // link performs, which is the honest outcome until removeElement learns the
+    // full deletion cascade.
+    if (!m_mirrors.empty()) validateMirrors();
 }
 
 int Sketch::pruneOrphanPoints() {
@@ -762,6 +770,12 @@ void Sketch::clear() {
 }
 
 int Sketch::addConstraint(const Constraint& c) {
+    // Derived geometry is an OUTPUT: recomputeMirrors() overwrites it after
+    // every solve. A driving constraint on it would be silently discarded each
+    // pass while still consuming a degree of freedom, so the sketch would read
+    // over-constrained and never satisfy the row. Refuse it at the door.
+    // Reference dimensions are fine — they only measure.
+    if (c.isDriving && !canDrive(c.entityA, c.entityB)) return -1;
     Constraint copy = c;
     copy.id = m_nextConstraintId++;
     m_constraints.push_back(copy);
@@ -928,6 +942,7 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
         std::vector<glm::vec2> A(nL), B(nL);
         std::vector<bool> ok(nL, false);
         for (int i = 0; i < nL; ++i) {
+            if (m_lines[i].isConstruction) continue;   // never a profile edge
             auto ia = coord.find(m_lines[i].startPointId);
             auto ib = coord.find(m_lines[i].endPointId);
             if (ia != coord.end() && ib != coord.end()) {
@@ -964,6 +979,12 @@ std::vector<TopoDS_Wire> Sketch::buildWires() const {
     // through that point. Without this, the line stays one edge from corner to
     // corner and any element ending mid-line can never form a closed region.
     for (const auto& line : m_lines) {
+        // Construction lines are scaffolding, not profile: buildOpenWire and
+        // both exporters already skip them, and adjacency did not — so a
+        // construction line crossing a closed shape SPLIT it into two regions.
+        // The mirror axis lives inside the profile it mirrors, which is where
+        // that finally bit.
+        if (line.isConstruction) continue;
         auto ai = coord.find(line.startPointId);
         auto bi = coord.find(line.endPointId);
         if (ai == coord.end() || bi == coord.end()) {
@@ -2124,6 +2145,7 @@ void Sketch::recomputeMirrors() {
             auto sIt = pointIdx.find(srcId), dIt = pointIdx.find(dstId);
             if (sIt == pointIdx.end() || dIt == pointIdx.end()) continue;
             m_points[dIt->second].pos = reflectAcross(m_points[sIt->second].pos, a, b);
+            m_points[dIt->second].isConstruction = m_points[sIt->second].isConstruction;
         }
         // Elements carry values a point cannot: a radius, and the construction
         // flag (which today's copy-based mirror silently dropped).
@@ -2181,6 +2203,24 @@ bool Sketch::isDerived(int entityId) const {
     return false;
 }
 
+bool Sketch::setDriving(int constraintId, bool driving) {
+    for (auto& c : m_constraints) {
+        if (c.id != constraintId) continue;
+        c.isDriving = driving && canDrive(c.entityA, c.entityB);
+        return c.isDriving;
+    }
+    return false;
+}
+
+bool Sketch::setConstruction(int entityId, bool on) {
+    for (auto& p : m_points)  if (p.id == entityId) { p.isConstruction = on; return true; }
+    for (auto& l : m_lines)   if (l.id == entityId) { l.isConstruction = on; return true; }
+    for (auto& c : m_circles) if (c.id == entityId) { c.isConstruction = on; return true; }
+    for (auto& a : m_arcs)    if (a.id == entityId) { a.isConstruction = on; return true; }
+    for (auto& sp : m_splines) if (sp.id == entityId) { sp.isConstruction = on; return true; }
+    return false;
+}
+
 bool Sketch::breakMirrorLink(int mirrorId) {
     auto it = std::find_if(m_mirrors.begin(), m_mirrors.end(),
                            [mirrorId](const SketchMirror& m) { return m.id == mirrorId; });
@@ -2234,6 +2274,16 @@ int Sketch::validateMirrors() {
     for (auto& c : m_circles)  c.derived  = derivedIds.count(c.id)  != 0;
     for (auto& a : m_arcs)     a.derived  = derivedIds.count(a.id)  != 0;
     for (auto& sp : m_splines) sp.derived = derivedIds.count(sp.id) != 0;
+
+    // Pass 3: the same rule addConstraint enforces at the door, applied to
+    // constraints that arrived by another route — a project file, a combine
+    // remap, or geometry that only became derived just now. DEMOTED, not
+    // deleted: the row is unsatisfiable as a driver (the recompute overwrites
+    // its geometry) but perfectly good as a measurement, and this runs from
+    // restoreFrom on every undo/redo — deleting there would silently eat the
+    // user's dimensions.
+    for (auto& c : m_constraints)
+        if (c.isDriving && !canDrive(c.entityA, c.entityB)) c.isDriving = false;
 
     return static_cast<int>(before - m_mirrors.size());
 }

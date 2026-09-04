@@ -3734,56 +3734,156 @@ void SketchTool::getMirrorPreview(std::vector<std::vector<glm::vec2>>& polylines
 
 void SketchTool::commitMirror(std::set<int>& outPoints, std::set<int>& outLines) {
     if (!m_sketch || !m_mirrorActive) return;
+
+    // Every source point the selection touches, so the axis can be sized to
+    // span it and so each one gets exactly one pair.
+    // A mirror OF a mirror is a chain the recompute has no ordering guarantee
+    // for, and the plan refuses it at creation. Selecting "everything" after a
+    // previous mirror is the ordinary way to hit this.
+    std::vector<int> sources;
+    for (int id : m_mirrorPoints) if (!m_sketch->isDerived(id)) sources.push_back(id);
+    auto want = [&](int id) { if (id >= 0) sources.push_back(id); };
+    for (const auto& l : m_sketch->getLines())
+        if (m_mirrorLines.count(l.id) && !m_sketch->isDerived(l.id)) { want(l.startPointId); want(l.endPointId); }
+    for (const auto& c : m_sketch->getCircles())
+        if (m_mirrorCircles.count(c.id) && !m_sketch->isDerived(c.id)) want(c.centerPointId);
+    for (const auto& a : m_sketch->getArcs())
+        if (m_mirrorArcs.count(a.id) && !m_sketch->isDerived(a.id)) { want(a.centerPointId); want(a.startPointId); want(a.endPointId); }
+    for (const auto& sp : m_sketch->getSplines())
+        if (m_mirrorSplines.count(sp.id) && !m_sketch->isDerived(sp.id)) for (int cp : sp.controlPointIds) want(cp);
+    if (sources.empty()) return;
+    const glm::vec2 dir(std::cos(m_mirrorAngleRad), std::sin(m_mirrorAngleRad));
+
+    SketchMirror mir;
+
+    // A source point sitting ON the axis reflects to itself. It is SHARED, not
+    // paired: buildWires joins segments by point id, so a second point at the
+    // same coordinate leaves a mirrored half-profile as an open chain that
+    // refuses to extrude (the same trap AirfoilImport documents at its nose).
+    // A shared vertex is nobody's image, so it stays undecorated and free.
+    // Same catch radius findCoincidentPoint welds at (0.3 * snapScale), so
+    // "on the axis" here means what "the same point" means everywhere else.
+    const float onAxisTolerance = 0.3f * snapScale();
     std::unordered_map<int, int> remap;
+    std::vector<int> onAxis;                 // shared vertices, pinned below
     auto remapPt = [&](int oldId) -> int {
         auto it = remap.find(oldId);
         if (it != remap.end()) return it->second;
         const SketchPoint* p = m_sketch->getPoint(oldId);
         if (!p) return -1;
-        glm::vec2 np = mirrorReflect(p->pos);
-        // Weld a reflected vertex onto an existing coincident one (a point on
-        // the mirror line maps to itself) — same as the one-shot mirror did.
-        int existing = findCoincidentPoint(np, -1);
-        int nid = (existing >= 0) ? existing : m_sketch->addPoint(np);
+        const glm::vec2 np = mirrorReflect(p->pos);
+        int nid = oldId;
+        if (glm::length(np - p->pos) >= onAxisTolerance) {
+            nid = m_sketch->addPoint(np);
+            mir.points.push_back({oldId, nid});
+            outPoints.insert(nid);
+        } else {
+            // Shared, so it must be EXACTLY on the axis, not merely within the
+            // weld radius: the midpoint of a point and its own reflection is
+            // its foot on the axis. Left where the user dropped it, the two
+            // halves would join off-centre and the profile would start
+            // permanently asymmetric with nothing able to repair it.
+            m_sketch->movePoint(oldId, (p->pos + np) * 0.5f);
+            onAxis.push_back(oldId);
+        }
         remap[oldId] = nid;
         return nid;
     };
-    for (int id : m_mirrorPoints) { int nid = remapPt(id); if (nid >= 0) outPoints.insert(nid); }
-    for (int lid : m_mirrorLines)
-        for (const auto& l : m_sketch->getLines()) if (l.id == lid) {
-            int s = remapPt(l.startPointId), e = remapPt(l.endPointId);
-            if (s >= 0 && e >= 0 && s != e) {
-                int nl = m_sketch->addLine(s, e);
-                outLines.insert(nl); outPoints.insert(s); outPoints.insert(e);
-            }
-            break;
+
+    // Snapshot the sources BEFORE creating anything: adding to the sketch
+    // reallocates the very vectors these loops would be walking.
+    const std::vector<SketchLine>   srcLines(m_sketch->getLines());
+    const std::vector<SketchCircle> srcCircles(m_sketch->getCircles());
+    const std::vector<SketchArc>    srcArcs(m_sketch->getArcs());
+    const std::vector<SketchSpline> srcSplines(m_sketch->getSplines());
+
+    // An element every vertex of which is shared maps ONTO ITSELF: it is its own
+    // image, and emitting one would stack a duplicate on the original and record
+    // a relation that reflects nothing.
+    auto moved = [&](int oldId) { auto it = remap.find(oldId); return it != remap.end() && it->second != oldId; };
+
+    for (int id : m_mirrorPoints) remapPt(id);
+    for (const auto& l : srcLines) {
+        if (!m_mirrorLines.count(l.id) || m_sketch->isDerived(l.id)) continue;
+        const int s = remapPt(l.startPointId), e = remapPt(l.endPointId);
+        if (s < 0 || e < 0 || s == e) continue;
+        if (!moved(l.startPointId) && !moved(l.endPointId)) continue;
+        const int nl = m_sketch->addLine(s, e);
+        mir.lines.push_back({l.id, nl});
+        outLines.insert(nl);
+    }
+    for (const auto& c : srcCircles) {
+        if (!m_mirrorCircles.count(c.id) || m_sketch->isDerived(c.id)) continue;
+        const int ctr = remapPt(c.centerPointId);
+        if (ctr < 0 || !moved(c.centerPointId)) continue;
+        mir.circles.push_back({c.id, m_sketch->addCircle(ctr, c.radius)});
+    }
+    for (const auto& a : srcArcs) {
+        if (!m_mirrorArcs.count(a.id) || m_sketch->isDerived(a.id)) continue;
+        const int ctr = remapPt(a.centerPointId);
+        const int s = remapPt(a.startPointId), e = remapPt(a.endPointId);
+        if (ctr < 0 || s < 0 || e < 0) continue;
+        if (!moved(a.centerPointId) && !moved(a.startPointId) && !moved(a.endPointId)) continue;
+        // Reflection reverses winding — swap start/end so the rebuilt arc keeps
+        // the same swept (minor) span on the mirrored side. recomputeMirrors
+        // only refreshes the radius, so the swap set here is the lasting one.
+        mir.arcs.push_back({a.id, m_sketch->addArc(ctr, e, s, a.radius)});
+    }
+    for (const auto& sp : srcSplines) {
+        if (!m_mirrorSplines.count(sp.id) || m_sketch->isDerived(sp.id)) continue;
+        std::vector<int> cps;
+        bool any = false;
+        for (int cp : sp.controlPointIds) { const int n2 = remapPt(cp); if (n2 >= 0) cps.push_back(n2); any = any || moved(cp); }
+        if (any && cps.size() >= 2) mir.splines.push_back({sp.id, m_sketch->addSpline(cps)});
+    }
+
+    // Nothing to derive (every source sat on the axis). Bail BEFORE the axis
+    // exists: creating it first and returning here would leave an orphan
+    // construction line in the sketch that belongs to no relation.
+    if (mir.points.empty() && mir.lines.empty() && mir.circles.empty() &&
+        mir.arcs.empty() && mir.splines.empty())
+        return;
+
+    // The gizmo is transient; the group needs a real axis that persists, can be
+    // dimensioned and moves the image when it moves. Construction, so it never
+    // joins a profile.
+    float lo = 0.0f, hi = 0.0f;
+    for (int id : sources)
+        if (const SketchPoint* p = m_sketch->getPoint(id)) {
+            const float t = glm::dot(p->pos - m_mirrorAnchor, dir);
+            lo = std::min(lo, t); hi = std::max(hi, t);
         }
-    for (int cid : m_mirrorCircles)
-        for (const auto& c : m_sketch->getCircles()) if (c.id == cid) {
-            int ctr = remapPt(c.centerPointId);
-            if (ctr >= 0) { m_sketch->addCircle(ctr, c.radius); outPoints.insert(ctr); }
-            break;
-        }
-    for (int aid : m_mirrorArcs)
-        for (const auto& a : m_sketch->getArcs()) if (a.id == aid) {
-            int ctr = remapPt(a.centerPointId);
-            int s = remapPt(a.startPointId), e = remapPt(a.endPointId);
-            // Reflection reverses winding — swap start/end so the rebuilt arc
-            // keeps the same swept (minor) span on the mirrored side.
-            if (ctr >= 0 && s >= 0 && e >= 0) {
-                m_sketch->addArc(ctr, e, s, a.radius);
-                outPoints.insert(s); outPoints.insert(e); outPoints.insert(ctr);
-            }
-            break;
-        }
-    for (int sid : m_mirrorSplines)
-        for (const auto& sp : m_sketch->getSplines()) if (sp.id == sid) {
-            std::vector<int> cps;
-            for (int cp : sp.controlPointIds) { int n2 = remapPt(cp); if (n2 >= 0) cps.push_back(n2); }
-            if (cps.size() >= 2) m_sketch->addSpline(cps);
-            for (int n2 : cps) outPoints.insert(n2);
-            break;
-        }
+    // Floor the half-length: a selection that projects to a single point on the
+    // axis would otherwise produce a zero-length line, which validateMirrors
+    // breaks on sight as degenerate.
+    const float half = std::max({(hi - lo) * 0.6f, std::abs(lo), std::abs(hi),
+                                 std::max(4.0f * m_gridStep, 1.0f)});
+    const int axisA = m_sketch->addPoint(m_mirrorAnchor - dir * half);
+    const int axisB = m_sketch->addPoint(m_mirrorAnchor + dir * half);
+    mir.axisLineId = m_sketch->addLine(axisA, axisB);
+    m_sketch->setConstruction(axisA, true);
+    m_sketch->setConstruction(axisB, true);
+    m_sketch->setConstruction(mir.axisLineId, true);
+
+    // A shared vertex is the only thing holding the two halves together, and
+    // nothing otherwise keeps it on the axis: drag it off and the derived half
+    // reflects while the shared vertex does not, leaving a silently asymmetric
+    // profile the recompute cannot fix. Pin it — a zero perpendicular distance
+    // to the axis is exactly Onshape's coincident-to-mirror-line.
+    for (int pid : onAxis) {
+        Constraint pin{};
+        pin.type = ConstraintType::DistancePointLine;
+        pin.entityA = pid;
+        pin.entityB = mir.axisLineId;
+        pin.value = 0.0;
+        m_sketch->addConstraint(pin);
+    }
+
+    m_sketch->addMirror(mir);
+    // validateMirrors owns the `derived` flags; recompute then puts the image
+    // exactly on the reflection rather than wherever construction left it.
+    m_sketch->validateMirrors();
+    m_sketch->recomputeMirrors();
 }
 
 // --- Offset tool ----------------------------------------------------------

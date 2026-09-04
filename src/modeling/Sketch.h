@@ -228,6 +228,23 @@ public:
     // Is this entity the OUTPUT of a mirror? (Cheap: reads the flag, which
     // validateMirrors keeps honest.)
     bool isDerived(int entityId) const;
+
+    // Whether a DRIVING constraint may reference these entities. Derived
+    // geometry is an output — recomputeMirrors() overwrites it after every
+    // solve — so a driving row on it can never be satisfied while still
+    // consuming a degree of freedom. The one place that rule is written.
+    bool canDrive(int entityA, int entityB) const { return !isDerived(entityA) && !isDerived(entityB); }
+
+    // Promote/demote an existing constraint. Promoting to driving is refused
+    // when canDrive() says no; returns the resulting isDriving state. Flipping
+    // the flag in place through getMutableConstraints() bypasses the rule that
+    // addConstraint enforces at the door, which is why this exists.
+    bool setDriving(int constraintId, bool driving);
+
+    // Set/clear the construction flag on any entity kind. The mirror axis is
+    // a real line in the sketch and must NOT be part of a profile, so it is
+    // created and then marked here; nothing else had needed a setter yet.
+    bool setConstruction(int entityId, bool on);
     // The group owning `entityId` as a derived output, or -1.
     int  mirrorOwning(int entityId) const;
     void clear();

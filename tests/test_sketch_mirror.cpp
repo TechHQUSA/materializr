@@ -12,11 +12,24 @@
 
 #include "modeling/Sketch.h"
 #include "modeling/SketchSolver.h"
+#include "modeling/SketchTool.h"
+#include "modeling/SvgImport.h"
+#include "modeling/TextSketchOp.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <memory>
+#include <set>
 #include <type_traits>
+
+// SketchTool's Text / SVG stamp paths are not part of materializr_core (they
+// pull in font rendering); stub them so this links.
+namespace materializr {
+int SvgImport::place(Sketch*, const SvgPaths&, glm::vec2, float, float) { return 0; }
+int TextSketch::generate(Sketch*, const std::string&, const std::string&,
+                         glm::vec2, float, float) { return 0; }
+}
 
 using materializr::Sketch;
 using materializr::SketchMirror;
@@ -406,4 +419,266 @@ TEST(SketchMirror, ClearDropsMirrorGroupsSoRecycledIdsAreNotClaimed) {
     m.axisLineId = f.sk.addLine(a, b);
     m.points = { {p1, p2} };
     EXPECT_EQ(1, f.sk.addMirror(m)) << "m_nextMirrorId must reset too";
+}
+
+// --- commitMirror: where the user-visible bug actually gets fixed -----------
+//
+// The tool used to reflect the selection into independent copies. It now
+// materialises a construction axis and registers a group, so the image is an
+// output of the source from the moment it is created.
+
+namespace {
+
+// Half of a 10x10 square, open on the right at x=0: the single most common
+// mirror workflow (draw half, mirror, extrude).
+struct HalfProfile {
+    materializr::Sketch sk;
+    materializr::SketchTool tool;
+    int bl = -1, br = -1, tr = -1, tl = -1;   // (-10,0) (0,0) (0,10) (-10,10)
+    std::set<int> outPts, outLines;
+};
+
+std::unique_ptr<HalfProfile> makeHalfProfile() {
+    auto h = std::make_unique<HalfProfile>();
+    h->bl = h->sk.addPoint({-10.0f,  0.0f});
+    h->br = h->sk.addPoint({  0.0f,  0.0f});
+    h->tr = h->sk.addPoint({  0.0f, 10.0f});
+    h->tl = h->sk.addPoint({-10.0f, 10.0f});
+    h->sk.addLine(h->br, h->bl);
+    h->sk.addLine(h->bl, h->tl);
+    h->sk.addLine(h->tl, h->tr);
+    h->tool.setSketch(&h->sk);
+    return h;
+}
+
+void commitVerticalMirrorAtX0(HalfProfile& h) {
+    ASSERT_TRUE(h.tool.beginMirror());
+    h.tool.setMirrorAnchor({0.0f, 5.0f});
+    h.tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);   // vertical
+    h.tool.commitMirror(h.outPts, h.outLines);
+}
+
+} // namespace
+
+TEST(SketchMirrorCommit, BuildsOneGroupWithAConstructionAxis) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    ASSERT_EQ(1u, h->sk.getMirrors().size());
+    const auto& mir = h->sk.getMirrors()[0];
+    const auto* axis = [&]() -> const materializr::SketchLine* {
+        for (const auto& l : h->sk.getLines()) if (l.id == mir.axisLineId) return &l;
+        return nullptr;
+    }();
+    ASSERT_NE(nullptr, axis) << "the axis must be a real line in the sketch";
+    EXPECT_TRUE(axis->isConstruction) << "an axis in a profile would break extrude";
+    EXPECT_TRUE(h->sk.getPoint(axis->startPointId)->isConstruction);
+    EXPECT_EQ(3u, mir.lines.size());
+    for (const auto& [src, dst] : mir.lines) {
+        EXPECT_FALSE(h->sk.isDerived(src));
+        EXPECT_TRUE(h->sk.isDerived(dst)) << "every image must be flagged";
+    }
+    // The axis is not the user's new geometry; selecting it would make Delete
+    // mean "break the link".
+    EXPECT_EQ(0u, h->outLines.count(mir.axisLineId));
+}
+
+// buildWires joins segments by point ID, not by position. A source vertex ON
+// the axis therefore has to be SHARED, not paired: a second point at the same
+// coordinate leaves the profile an open chain that silently refuses to extrude.
+TEST(SketchMirrorCommit, MirroredHalfProfileClosesIntoOneWire) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    EXPECT_FALSE(h->sk.isDerived(h->br)) << "a shared on-axis vertex is nobody's image";
+    EXPECT_FALSE(h->sk.isDerived(h->tr));
+    const auto wires = h->sk.buildWires();
+    ASSERT_EQ(1u, wires.size()) << "the mirrored halves must close into ONE wire";
+}
+
+// The bug the user reported, through the real path: edit the source, solve,
+// and the image has followed.
+TEST(SketchMirrorCommit, EditingTheSourceMovesTheImageThroughSolve) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int imageOfTl = [&] {
+        for (const auto& [src, dst] : h->sk.getMirrors()[0].points)
+            if (src == h->tl) return dst;
+        return -1;
+    }();
+    ASSERT_NE(-1, imageOfTl);
+    EXPECT_NEAR(10.0f, posOf(h->sk, imageOfTl).x, 1e-4);
+
+    h->sk.movePoint(h->tl, {-4.0f, 12.0f});
+    materializr::SketchSolver solver;
+    solver.solve(h->sk);
+    EXPECT_NEAR( 4.0f, posOf(h->sk, imageOfTl).x, 1e-4) << "the image must follow its source";
+    EXPECT_NEAR(12.0f, posOf(h->sk, imageOfTl).y, 1e-4);
+}
+
+// Trap from PLAN.md: the oracle is NOT "same DOF as the original". The commit
+// materialises a free axis whose two endpoints add four freedoms; the derived
+// points subtract exactly what they add.
+TEST(SketchMirrorCommit, DofIsTheOriginalPlusTheFreeAxisLessThePins) {
+    auto h = makeHalfProfile();
+    materializr::SketchSolver solver;
+    solver.solve(h->sk);
+    const int before = solver.degreesOfFreedom();
+    commitVerticalMirrorAtX0(*h);
+    solver.solve(h->sk);
+    // +4 for the axis's two free endpoints, then -1 for each of the two shared
+    // on-axis vertices pinned to it. The derived points subtract exactly what
+    // they add, so they are absent from this sum.
+    EXPECT_EQ(before + 4 - 2, solver.degreesOfFreedom());
+}
+
+// A driving row on an image is unsatisfiable — the recompute overwrites it
+// every solve — while still consuming a freedom, so the sketch would read
+// over-constrained forever. Refused at the door.
+TEST(SketchMirrorCommit, DrivingConstraintOnDerivedGeometryIsRefused) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const int image = h->sk.getMirrors()[0].points.front().second;
+    materializr::Constraint c{};
+    c.type = materializr::ConstraintType::Fixed;
+    c.entityA = image;
+    EXPECT_EQ(-1, h->sk.addConstraint(c)) << "driving on an image must be refused";
+
+    // A reference dimension only measures, so it is allowed through.
+    materializr::Constraint ref{};
+    ref.type = materializr::ConstraintType::Distance;
+    ref.entityA = image;
+    ref.entityB = h->br;
+    ref.isDriving = false;
+    EXPECT_NE(-1, h->sk.addConstraint(ref));
+}
+
+// The same rule for constraints that arrive by another route (a project file, a
+// combine remap): validateMirrors drops them rather than carrying them.
+TEST(SketchMirrorCommit, ValidateDemotesDrivingConstraintsThatBecameDerived) {
+    auto h = makeHalfProfile();
+    materializr::Constraint c{};
+    c.type = materializr::ConstraintType::Fixed;
+    c.entityA = h->sk.addPoint({50.0f, 50.0f});   // not derived yet: accepted
+    const int cid = h->sk.addConstraint(c);
+    ASSERT_NE(-1, cid);
+    // Now make that very point an image of something.
+    materializr::SketchMirror m;
+    m.axisLineId = h->sk.getLines().front().id;
+    m.points = { {h->tl, c.entityA} };
+    h->sk.addMirror(m);
+    h->sk.validateMirrors();
+    // Demoted, not deleted: this path also runs from restoreFrom on every
+    // undo/redo, where deleting would silently eat the user's dimensions. The
+    // row stays and keeps measuring; it just stops driving.
+    bool found = false;
+    for (const auto& cn : h->sk.getConstraints())
+        if (cn.id == cid) { found = true; EXPECT_FALSE(cn.isDriving); }
+    EXPECT_TRUE(found) << "the dimension itself must survive";
+}
+
+// The image copies its source's construction flag, which only happens in the
+// recompute — commitMirror's addLine() cannot know it. Without the recompute at
+// the end of the commit, a mirrored construction line comes back as real
+// profile geometry and silently changes what extrudes.
+TEST(SketchMirrorCommit, MirroredConstructionGeometryStaysConstruction) {
+    auto h = makeHalfProfile();
+    const int scaffold = h->sk.addLine(h->bl, h->tr);
+    h->sk.setConstruction(scaffold, true);
+    commitVerticalMirrorAtX0(*h);
+    const int image = [&] {
+        for (const auto& [src, dst] : h->sk.getMirrors()[0].lines)
+            if (src == scaffold) return dst;
+        return -1;
+    }();
+    ASSERT_NE(-1, image);
+    for (const auto& l : h->sk.getLines())
+        if (l.id == image)
+            EXPECT_TRUE(l.isConstruction) << "the image must inherit construction";
+}
+
+// A selection that lies entirely on the axis mirrors to itself: there is no
+// relation to record. The commit must then leave the sketch exactly as it found
+// it — an axis created before that check would survive as an orphan
+// construction line belonging to no group, which nothing would ever clean up.
+TEST(SketchMirrorCommit, NothingToDeriveLeavesNoOrphanAxis) {
+    materializr::Sketch sk;
+    materializr::SketchTool tool;
+    const int a = sk.addPoint({0.0f,  0.0f});
+    const int b = sk.addPoint({0.0f, 10.0f});
+    sk.addLine(a, b);
+    tool.setSketch(&sk);
+    ASSERT_TRUE(tool.beginMirror());
+    tool.setMirrorAnchor({0.0f, 5.0f});
+    tool.setMirrorAngle(static_cast<float>(M_PI) * 0.5f);   // straight along it
+    std::set<int> pts, lines;
+    tool.commitMirror(pts, lines);
+    EXPECT_TRUE(sk.getMirrors().empty());
+    EXPECT_EQ(2u, sk.getPoints().size()) << "no axis endpoints should be left behind";
+    EXPECT_EQ(1u, sk.getLines().size()) << "no orphan construction axis";
+}
+
+// A shared vertex is what holds the two halves together, so it must sit exactly
+// on the axis and be kept there. Commit snaps it (the user placed the gizmo by
+// hand, within a weld radius, not on the micron) and pins it.
+TEST(SketchMirrorCommit, SharedOnAxisVertexIsSnappedAndPinned) {
+    auto h = makeHalfProfile();
+    h->sk.movePoint(h->br, {0.12f, 0.0f});          // off the axis, inside the weld radius
+    commitVerticalMirrorAtX0(*h);
+    EXPECT_NEAR(0.0f, posOf(h->sk, h->br).x, 1e-5) << "a shared vertex must be ON the axis";
+
+    const int axisId = h->sk.getMirrors()[0].axisLineId;
+    int pins = 0;
+    for (const auto& c : h->sk.getConstraints())
+        if (c.type == materializr::ConstraintType::DistancePointLine &&
+            c.entityB == axisId && c.value == 0.0)
+            ++pins;
+    EXPECT_EQ(2, pins) << "both shared vertices must be pinned to the axis";
+
+    // And the pin holds: nudging it off and solving brings it back.
+    h->sk.movePoint(h->br, {3.0f, 0.0f});
+    materializr::SketchSolver solver;
+    solver.solve(h->sk);
+    EXPECT_NEAR(0.0f, posOf(h->sk, h->br).x, 1e-2) << "the pin must return it to the axis";
+}
+
+// Mirroring an image would chain groups, which the recompute has no ordering
+// guarantee for. Selecting "everything" after a first mirror is the ordinary
+// way a user hits this.
+TEST(SketchMirrorCommit, DerivedGeometryIsRefusedAsASource) {
+    auto h = makeHalfProfile();
+    commitVerticalMirrorAtX0(*h);
+    const std::size_t afterFirst = h->sk.getLines().size();
+
+    materializr::SketchTool second;
+    second.setSketch(&h->sk);
+    ASSERT_TRUE(second.beginMirror());               // no selection: takes everything
+    second.setMirrorAnchor({0.0f, 0.0f});
+    second.setMirrorAngle(0.0f);                     // horizontal
+    std::set<int> pts, lines;
+    second.commitMirror(pts, lines);
+
+    ASSERT_EQ(2u, h->sk.getMirrors().size());
+    for (const auto& [src, dst] : h->sk.getMirrors()[1].lines)
+        EXPECT_EQ(-1, h->sk.mirrorOwning(src))
+            << "an image must never be recorded as a source";
+    EXPECT_LT(h->sk.getLines().size(), afterFirst * 2)
+        << "the derived half must not have been mirrored again";
+}
+
+// The construction filter buildWires gained is not mirror-specific: it changes
+// profile building for every sketch. Pin the general behaviour so the change is
+// visible if anyone reverts it.
+TEST(SketchMirrorCommit, AConstructionLineNoLongerSplitsAProfile) {
+    materializr::Sketch sk;
+    const int a = sk.addPoint({0.0f, 0.0f});
+    const int b = sk.addPoint({10.0f, 0.0f});
+    const int c = sk.addPoint({10.0f, 10.0f});
+    const int d = sk.addPoint({0.0f, 10.0f});
+    sk.addLine(a, b); sk.addLine(b, c); sk.addLine(c, d); sk.addLine(d, a);
+    ASSERT_EQ(1u, sk.buildWires().size());
+
+    const int mid0 = sk.addPoint({5.0f, -2.0f});
+    const int mid1 = sk.addPoint({5.0f, 12.0f});
+    const int scaffold = sk.addLine(mid0, mid1);     // straight through the square
+    sk.setConstruction(scaffold, true);
+    EXPECT_EQ(1u, sk.buildWires().size()) << "scaffolding must not carve the profile in two";
 }

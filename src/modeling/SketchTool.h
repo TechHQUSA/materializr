@@ -227,8 +227,11 @@ public:
     // standalone points (lone vertices). Already in sketch-space.
     void getMirrorPreview(std::vector<std::vector<glm::vec2>>& polylines,
                           std::vector<glm::vec2>& points) const;
-    // Create the reflected elements; returns the new point + line ids so the
-    // host can select them. Coincident vertices weld onto existing geometry.
+    // Materialise the mirror: a construction line for the axis, a reflected
+    // entity per source, and a SketchMirror group tying them together — so the
+    // image is recomputed from its source from here on, not a frozen copy.
+    // Returns the DERIVED point + line ids (never the axis) so the host can
+    // select them. A source vertex on the axis is shared, not paired.
     void commitMirror(std::set<int>& outPoints, std::set<int>& outLines);
     // --- Offset ------------------------------------------------------------
     // Two phases. Pick: hovering highlights the whole connected chain under the

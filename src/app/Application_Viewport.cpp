@@ -3123,8 +3123,13 @@ void Application::renderViewport() {
                                     // dimension to driving. Placing a dimension
                                     // stays a pure measurement; committing a
                                     // value is what opts into driving.
+                                    // setDriving refuses an image: a driving
+                                    // row on derived geometry is overwritten by
+                                    // the mirror recompute every solve while
+                                    // still consuming a freedom, so it stays a
+                                    // reference dimension and keeps measuring.
                                     if (constraintSupportsReference(cn.type))
-                                        cn.isDriving = true;
+                                        m_activeSketch->setDriving(cn.id, true);
                                     break;
                                 }
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
@@ -3146,14 +3151,25 @@ void Application::renderViewport() {
                                 if (cn.id == m_dimEditingId) { cur = &cn; break; }
                             if (cur && constraintSupportsReference(cur->type)) {
                                 ImGui::Spacing();
+                                // A dimension on mirrored geometry can measure
+                                // but never drive: the mirror recompute rewrites
+                                // its image after every solve, so a driving row
+                                // there would consume a freedom it can never
+                                // satisfy. Say so instead of accepting the tick
+                                // and silently dropping it.
+                                const bool drivable =
+                                    m_activeSketch->canDrive(cur->entityA, cur->entityB);
                                 bool drv = cur->isDriving;
-                                if (ImGui::Checkbox(materializr::tr("Driving"), &drv)) {
+                                ImGui::BeginDisabled(!drivable);
+                                const bool toggled =
+                                    ImGui::Checkbox(materializr::tr("Driving"), &drv);
+                                ImGui::EndDisabled();
+                                if (!drivable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                                    ImGui::SetTooltip("%s", materializr::tr(
+                                        "Mirrored geometry can only be measured. Break the mirror link to drive this dimension."));
+                                if (toggled) {
                                     recordSketchMutation([&]{
-                                        for (auto& cn : m_activeSketch->getMutableConstraints()) {
-                                            if (cn.id != m_dimEditingId) continue;
-                                            cn.isDriving = drv;
-                                            break;
-                                        }
+                                        m_activeSketch->setDriving(m_dimEditingId, drv);
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                                     });
                                     markDirty();
@@ -3181,7 +3197,7 @@ void Application::renderViewport() {
                                             cn.entityA = eqA;
                                             cn.entityB = eqB;
                                             cn.value = 0.0;
-                                            cn.isDriving = true;
+                                            m_activeSketch->setDriving(cn.id, true);
                                             break;
                                         }
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);

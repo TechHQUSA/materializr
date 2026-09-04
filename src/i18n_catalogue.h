@@ -448,6 +448,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Draw an axis-aligned rectangle: click one corner, drag to the opposite.", "Dibuja un rect\xc3""\xa1""ngulo alineado a los ejes: haz clic en una esquina y arrastra hasta la opuesta." },
     { "Draw straight line segments. Click to add vertices, Esc to finish.", "Dibuja segmentos de l\xc3""\xad""nea recta. Haz clic para a\xc3""\xb1""adir v\xc3""\xa9""rtices, Esc para terminar." },
     { "Driving", "Conductora" },
+    { "Mirrored geometry can only be measured. Break the mirror link to drive this dimension.", "La geometr\xc3""\xad""a reflejada solo se puede medir. Rompe el v\xc3""\xad""nculo de simetr\xc3""\xad""a para que esta cota sea conductora." },
     { "Duplicate the selected sketch elements at an offset.", "Duplica los elementos de boceto seleccionados con un desfase." },
     { "Each profile is extruded through the others and the prisms are intersected (visual hull).", "Cada perfil se extruye a trav\xc3""\xa9""s de los dem\xc3""\xa1""s y los prismas resultantes se intersecan (envolvente visual)." },
     { "Edges: %d selected", "Aristas: %d seleccionadas" },
@@ -1164,7 +1165,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1152;
+inline constexpr int kEsCount = 1153;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -1605,6 +1606,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Draw an axis-aligned rectangle: click one corner, drag to the opposite.", "Desenhe um ret\xc3""\xa2""ngulo alinhado aos eixos: clique em um canto e arraste at\xc3""\xa9"" o oposto." },
     { "Draw straight line segments. Click to add vertices, Esc to finish.", "Desenhe segmentos de linha reta. Clique para adicionar v\xc3""\xa9""rtices, Esc para finalizar." },
     { "Driving", "Motriz" },
+    { "Mirrored geometry can only be measured. Break the mirror link to drive this dimension.", "A geometria espelhada s\xc3""\xb3"" pode ser medida. Quebre o v\xc3""\xad""nculo do espelho para esta cota ser motriz." },
     { "Duplicate the selected sketch elements at an offset.", "Duplique os elementos do esbo\xc3""\xa7""o selecionados com um deslocamento." },
     { "Each profile is extruded through the others and the prisms are intersected (visual hull).", "Cada perfil \xc3""\xa9"" extrudado atrav\xc3""\xa9""s dos outros e os prismas s\xc3""\xa3""o intersectados (inv\xc3""\xb3""lucro visual)." },
     { "Edges: %d selected", "Arestas: %d selecionadas" },
@@ -2321,7 +2323,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1152;
+inline constexpr int kPtCount = 1153;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -2762,6 +2764,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Draw an axis-aligned rectangle: click one corner, drag to the opposite.", "Dessinez un rectangle align\xc3""\xa9"" sur les axes : cliquez sur un coin, faites glisser jusqu'au coin oppos\xc3""\xa9""." },
     { "Draw straight line segments. Click to add vertices, Esc to finish.", "Dessinez des segments de ligne droite. Cliquez pour ajouter des sommets, \xc3""\x89""chap pour terminer." },
     { "Driving", "Motrice" },
+    { "Mirrored geometry can only be measured. Break the mirror link to drive this dimension.", "La g\xc3""\xa9""om\xc3""\xa9""trie miroir ne peut \xc3""\xaa""tre que mesur\xc3""\xa9""e. Rompez le lien de sym\xc3""\xa9""trie pour rendre cette cote motrice." },
     { "Duplicate the selected sketch elements at an offset.", "Dupliquer les \xc3""\xa9""l\xc3""\xa9""ments d'esquisse s\xc3""\xa9""lectionn\xc3""\xa9""s avec un d\xc3""\xa9""calage." },
     { "Each profile is extruded through the others and the prisms are intersected (visual hull).", "Chaque profil est extrud\xc3""\xa9"" \xc3""\xa0"" travers les autres et les prismes sont intersect\xc3""\xa9""s (enveloppe visuelle)." },
     { "Edges: %d selected", "Ar\xc3""\xaa""tes : %d s\xc3""\xa9""lectionn\xc3""\xa9""es" },
@@ -3478,7 +3481,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1152;
+inline constexpr int kFrCount = 1153;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -3919,6 +3922,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Draw an axis-aligned rectangle: click one corner, drag to the opposite.", "Achsenausgerichtetes Rechteck zeichnen: eine Ecke anklicken, bis zur gegen\xc3""\xbc""berliegenden ziehen." },
     { "Draw straight line segments. Click to add vertices, Esc to finish.", "Gerade Liniensegmente zeichnen. Klicken zum Hinzuf\xc3""\xbc""gen von Eckpunkten, Esc zum Beenden." },
     { "Driving", "Treibend" },
+    { "Mirrored geometry can only be measured. Break the mirror link to drive this dimension.", "Gespiegelte Geometrie kann nur gemessen werden. L\xc3""\xb6""sen Sie die Spiegelverkn\xc3""\xbc""pfung, um dieses Ma\xc3""\x9f"" treibend zu machen." },
     { "Duplicate the selected sketch elements at an offset.", "Ausgew\xc3""\xa4""hlte Skizzenelemente versetzt duplizieren." },
     { "Each profile is extruded through the others and the prisms are intersected (visual hull).", "Jedes Profil wird durch die anderen extrudiert und die entstehenden Prismen werden verschnitten (visuelle H\xc3""\xbc""lle)." },
     { "Edges: %d selected", "Kanten: %d ausgew\xc3""\xa4""hlt" },
@@ -4635,7 +4639,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1152;
+inline constexpr int kDeCount = 1153;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -5076,6 +5080,7 @@ inline const TrEntry kItCatalogue[] = {
     { "Draw an axis-aligned rectangle: click one corner, drag to the opposite.", "Disegna un rettangolo allineato agli assi: fai clic su un angolo e trascina fino a quello opposto." },
     { "Draw straight line segments. Click to add vertices, Esc to finish.", "Disegna segmenti di linea retta. Fai clic per aggiungere vertici, Esc per terminare." },
     { "Driving", "Pilota" },
+    { "Mirrored geometry can only be measured. Break the mirror link to drive this dimension.", "La geometria speculare pu\xc3""\xb2"" solo essere misurata. Interrompi il collegamento speculare per rendere pilota questa quota." },
     { "Duplicate the selected sketch elements at an offset.", "Duplica gli elementi dello schizzo selezionati con un offset." },
     { "Each profile is extruded through the others and the prisms are intersected (visual hull).", "Ogni profilo viene estruso attraverso gli altri e i prismi vengono intersecati (involucro visivo)." },
     { "Edges: %d selected", "Spigoli: %d selezionati" },
@@ -5792,6 +5797,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1152;
+inline constexpr int kItCount = 1153;
 
 } // namespace materializr
