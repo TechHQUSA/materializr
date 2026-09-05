@@ -2556,11 +2556,13 @@ void Application::renderSnapWidget() {
     } else {
         dl->AddRect(widgetPos, widgetEnd, IM_COL32(120, 120, 130, 200), 5.0f, 0, 1.0f);
     }
-    char buf[8];
-    if      (m_sketchGridStep < 0.3f)  std::snprintf(buf, sizeof(buf), "0.1");
-    else if (m_sketchGridStep < 0.75f) std::snprintf(buf, sizeof(buf), "0.5");
-    else if (m_sketchGridStep < 5.0f)  std::snprintf(buf, sizeof(buf), "1");
-    else                               std::snprintf(buf, sizeof(buf), "10");
+    // The badge shows the step in the DISPLAY unit, like the presets that set
+    // it. It used to bucket the raw millimetre value against fixed thresholds
+    // and print a literal, so choosing "1" under centimetres stored 10 mm and
+    // the badge then read "10" — the widget contradicting the popup that had
+    // just set it. %.3g so a converted step stays short enough for the square.
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%.3g", materializr::toDisplay(m_sketchGridStep));
     ImGui::PushFont(nullptr);
     ImVec2 ts = ImGui::CalcTextSize(buf);
     ImVec2 tp(widgetPos.x + (size - ts.x) * 0.5f,
