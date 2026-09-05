@@ -198,14 +198,6 @@ void Application::gizmoPreviewApply(const glm::mat4& m) {
 // both, so the label, the edit-popup prefill, and the popup's commit all have
 // to agree on which convention applies — hence one helper rather than three
 // copies of the scan. Non-Radius types are never arc radii.
-static bool constraintIsArcRadiusIn(const Sketch& sk, const Constraint& c) {
-    if (c.type != ConstraintType::Radius) return false;
-    for (const auto& circ : sk.getCircles())
-        if (circ.id == c.entityA) return false; // a circle wins
-    for (const auto& arc : sk.getArcs())
-        if (arc.id == c.entityA) return true;
-    return false;
-}
 
 // Recover the two comparable entities behind a dimension, so the edit popup
 // can offer "Make equal" (equal length for two lines, equal radius for two
@@ -2571,7 +2563,7 @@ void Application::renderViewport() {
                                     : c.type == ConstraintType::Radius ? materializr::DimKind::Radius
                                                                        : materializr::DimKind::Length;
                     materializr::seedDimensionText(m_dimEditingBuf, sizeof(m_dimEditingBuf), kind,
-                        kind == materializr::DimKind::Radius && constraintIsArcRadiusIn(*m_activeSketch, c),
+                        kind == materializr::DimKind::Radius && materializr::constraintIsArcRadius(*m_activeSketch, c),
                         c.value);
                     m_dimEditingFocus = true;
                     m_dimEditingClickedThisFrame = true;
@@ -2737,7 +2729,7 @@ void Application::renderViewport() {
                         glm::vec2 autoOff =
                             glm::vec2(0.7071f, 0.7071f) * (radius + 1.2f);
                         // Drafting convention: arcs read as R, circles as Ø.
-                        if (constraintIsArcRadiusIn(*m_activeSketch, c))
+                        if (materializr::constraintIsArcRadius(*m_activeSketch, c))
                             std::snprintf(lbl, sizeof(lbl), "R %s", materializr::fmtLength(c.value).c_str());
                         else
                             std::snprintf(lbl, sizeof(lbl), "\xC3\x98 %s",
@@ -3166,7 +3158,7 @@ void Application::renderViewport() {
                                     : cc.type == ConstraintType::Radius ? materializr::DimKind::Radius
                                                                         : materializr::DimKind::Length;
                             dimIsArc = dimKind == materializr::DimKind::Radius &&
-                                       constraintIsArcRadiusIn(*m_activeSketch, cc);
+                                       materializr::constraintIsArcRadius(*m_activeSketch, cc);
                             break;
                         }
                         bool dimCommitted = false;

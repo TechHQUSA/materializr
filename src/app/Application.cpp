@@ -90,6 +90,7 @@ inline void resetFpuForOcct() {
 #include "modeling/DuplicateSketchOp.h"
 #include "modeling/TransformOp.h"
 #include "core/Units.h"
+#include "core/LengthEdit.h"
 #include "modeling/FilletProbe.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
@@ -5976,14 +5977,22 @@ void Application::applyPendingDimension() {
     // geometry, Esc keeps the prefilled value.
     if (editId >= 0) {
         m_dimEditingId = editId;
-        if (pd.type == ConstraintType::Angle)
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                          prefillValue * 180.0 / M_PI);
-        else if (pd.type == ConstraintType::Radius)
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                          prefillValue * 2.0); // edited as diameter
-        else
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f", prefillValue);
+        // Seed through the SAME helper the click-to-edit path uses. These three
+        // lines wrote raw millimetres: placing a dimension under any non-mm unit
+        // showed the millimetre number in the popup while the label beside it
+        // read the display unit — 29.70 in the field against "O 2.970 cm".
+        const auto dimKind = pd.type == ConstraintType::Angle  ? materializr::DimKind::Angle
+                           : pd.type == ConstraintType::Radius ? materializr::DimKind::Radius
+                                                               : materializr::DimKind::Length;
+        bool dimIsArc = false;
+        if (dimKind == materializr::DimKind::Radius && m_activeSketch)
+            for (const auto& c : m_activeSketch->getConstraints())
+                if (c.id == editId) {
+                    dimIsArc = materializr::constraintIsArcRadius(*m_activeSketch, c);
+                    break;
+                }
+        materializr::seedDimensionText(m_dimEditingBuf, sizeof(m_dimEditingBuf),
+                                       dimKind, dimIsArc, prefillValue);
         m_dimEditingFocus = true;
         m_dimOpenEditRequested = true; // viewport calls OpenPopup("##DimEdit") next frame
         // No m_meshesDirty here: for a new dimension pd.measured is the

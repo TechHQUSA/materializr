@@ -2586,15 +2586,39 @@ void Application::renderSnapSettingsPopup() {
             saveAppSettings();
         }
         ImGui::Spacing();
+
+        // The same dropdown as Settings, here because this is where step size
+        // is chosen and the two are meaningless apart. Changing it rewrites the
+        // presets below and every readout in the app.
+        {
+            int unit = m_displayUnit;
+            const char* unitNames[] = {
+                materializr::tr("Millimetres"), materializr::tr("Centimetres"),
+                materializr::tr("Metres"),      materializr::tr("Inches"),
+                materializr::tr("Feet") };
+            ImGui::SetNextItemWidth(materializr::uiSz(150, 0).x);
+            if (ImGui::Combo(materializr::tr("Display unit"), &unit, unitNames, 5)) {
+                applyDisplayUnitChange(unit);
+                saveAppSettings();
+            }
+        }
+
+        ImGui::Spacing();
         ImGui::Text("%s", materializr::trFormat("Step (%s)", materializr::unitSuffix()).c_str());
-        const float steps[] = { 0.1f, 0.5f, 1.0f, 10.0f };
+        // The presets are in the DISPLAY unit, not millimetres. They used to be
+        // literal mm under a header that already said "(cm)" or "(in)", so the
+        // label named one unit while the button set another — 1 meant 1 mm while
+        // the popup claimed centimetres. m_sketchGridStep stays mm; only the
+        // choice offered is converted.
+        const float stepsDisp[] = { 0.1f, 0.5f, 1.0f, 10.0f };
         const char* labels[] = { "0.1", "0.5", "1", "10" };
         for (int i = 0; i < 4; ++i) {
             if (i > 0) ImGui::SameLine();
-            bool active = std::abs(m_sketchGridStep - steps[i]) < 1e-4f;
+            const float stepMm = static_cast<float>(materializr::toMm(stepsDisp[i]));
+            bool active = std::abs(m_sketchGridStep - stepMm) < 1e-4f;
             if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.45f, 0.85f, 1.0f));
             if (ImGui::Button(labels[i], materializr::uiSz(46, 26))) {
-                m_sketchGridStep = steps[i];
+                m_sketchGridStep = stepMm;
                 if (m_toolbar) m_toolbar->setGridStep(m_sketchGridStep);
                 saveAppSettings();
                 // Picking a step is the task — close the popup so drawing
