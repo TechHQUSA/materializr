@@ -7,19 +7,17 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 
 ## Controls by dimension
 
-- CONVERTED: 11
-- LENGTH?: 2
-- angle: 31
-- percent: 11
+- CONVERTED: 148
+- angle: 36
+- percent: 17
 - px/ui: 4
 - ratio: 9
-- seconds: 2
+- seconds: 5
 - unitless: 9
 
 | dim | file:line | code |
 |---|---|---|
-| LENGTH? | src/app/Application_Viewport.cpp:7351 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
-| LENGTH? | src/plugins/SketchPlugin.cpp:135 | `: materializr::parseFinite(m_dimBuf, v);` |
+| seconds | src/app/Application_Dialogs.cpp:170 | `if (ImGui::SliderInt(materializr::tr("Interval (s)"), &interval, 15, 600, "%d s")) {` |
 | seconds | src/app/Application_Dialogs.cpp:320 | `if (ImGui::SliderFloat(materializr::tr("Fillet time limit"),` |
 | px/ui | src/app/Application_Dialogs.cpp:339 | `if (ImGui::SliderFloat(materializr::tr("Selection line width"), &m_selectionLineWidth, 1.0f, 10.0f, "%.1f px")` |
 | px/ui | src/app/Application_Dialogs.cpp:350 | `if (ImGui::SliderFloat(materializr::tr("Sketch line width"), &m_sketchLineWidth, 1.0f, 6.0f, "%.1f px")) {` |
@@ -35,68 +33,218 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/app/Application_Dialogs.cpp:795 | `ImGui::SliderFloat("##slider", &m_multiRotate[i], -180.0f, 180.0f, "%.1f°");` |
 | angle | src/app/Application_Dialogs.cpp:798 | `materializr::inputNumber("##input", &m_multiRotate[i], 0.0f, 0.0f, "%.3f");` |
 | percent | src/app/Application_Dialogs.cpp:994 | `if (materializr::inputNumber("##pct", &m_scalePct[i], 0.0f, 0.0f, "%.1f")) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1059 | `(void)materializr::parseLength(m_scaleMmEdit[i].buf,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1244 | `if (materializr::parseLength(m_sketchPatternDistanceBuf, newDist) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1253 | `if (materializr::lengthSlider("##spdistslider", &m_sketchPatternDistance, 0.1f, 100.0f)) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1258 | `materializr::amountLengthField("spDistAmt", nullptr, &m_sketchPatternDistance, /*allowSign=*/false, 0.1f, 100.` |
 | angle | src/app/Application_Dialogs.cpp:1270 | `if (materializr::parseFinite(m_sketchPatternAngleBuf, newAng) &&` |
 | angle | src/app/Application_Dialogs.cpp:1274 | `if (ImGui::SliderFloat("##spangslider", &m_sketchPatternAngle,` |
 | angle | src/app/Application_Dialogs.cpp:1282 | `touchui::amountField("spAngAmt", nullptr,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1417 | `if (materializr::parseLength(m_patternDistanceBuf, parsed) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1426 | `if (materializr::lengthSlider("##patdistslider", &m_patternDistance, 0.1f, 100.0f)) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1431 | `materializr::amountLengthField("patDistAmt", nullptr, &m_patternDistance, /*allowSign=*/false, 0.1f, 100.0f)) ` |
 | angle | src/app/Application_Dialogs.cpp:1443 | `if (materializr::parseFinite(m_patternAngleBuf, parsed) &&` |
 | angle | src/app/Application_Dialogs.cpp:1447 | `if (ImGui::SliderFloat("##patangleslider", &m_patternAngle, 5.0f, 360.0f, "%.1f°")) {` |
 | angle | src/app/Application_Dialogs.cpp:1453 | `touchui::amountField("patAngAmt", nullptr, &m_patternAngle,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1613 | `if (materializr::amountLengthField("thrPitchAmt", materializr::tr("Pitch"), &m_threadPitch, /*allowSign=*/fals` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1621 | `if (materializr::parseLength(m_threadPitchBuf, v) && v >= 0.1f)` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1628 | `if (materializr::amountLengthField("thrDepthAmt", materializr::tr("Depth"), &m_threadDepth, /*allowSign=*/fals` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1636 | `if (materializr::parseLength(m_threadDepthBuf, v) && v >= 0.05f)` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1673 | `materializr::lengthField("##thrClr", &m_threadClearance);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1687 | `materializr::lengthField("##thrGWidth", &m_threadGrooveWidth);` |
 | percent | src/app/Application_Dialogs.cpp:2069 | `if (ImGui::SliderFloat(materializr::tr("Opacity"), &opacity, 0.05f, 1.0f, "%.2f")) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2077 | `if (materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &widthMM,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2301 | `(void)materializr::parseLength(m_refImgDistBuf, distMM);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2429 | `if (materializr::parseLength(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2436 | `if (materializr::lengthSlider("##slider", &m_sketchMove[i], -100.0f, 100.0f)) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2747 | `if (materializr::parseLength(m_planeOpOffsetBuf, parsed) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2758 | `if (materializr::lengthStepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,` |
 | angle | src/app/Application_Dialogs.cpp:2815 | `materializr::parseFinite(m_planeOpRotBufX, dx);` |
 | angle | src/app/Application_Dialogs.cpp:2816 | `materializr::parseFinite(m_planeOpRotBufY, dy);` |
 | angle | src/app/Application_Dialogs.cpp:2817 | `materializr::parseFinite(m_planeOpRotBufZ, dz);` |
 | angle | src/app/Application_Dialogs.cpp:3035 | `if (materializr::parseFinite(m_revolveAngleBuf, a)) m_revolveAngle = a; }` |
 | angle | src/app/Application_Dialogs.cpp:3039 | `if (ImGui::SliderFloat("##revAngSld", &m_revolveAngle,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3336 | `if (materializr::parseLength(m_alignOffsetBuf, a)) m_alignOffset = a;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3365 | `if (materializr::parseLength(m_alignUBuf, a)) m_alignU = a;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3373 | `if (materializr::parseLength(m_alignVBuf, a)) m_alignV = a;` |
 | angle | src/app/Application_Dialogs.cpp:3492 | `if (materializr::parseFinite(m_rotPlaneAngleBuf, a)) m_rotPlaneAngle = a; }` |
 | angle | src/app/Application_Dialogs.cpp:3496 | `if (ImGui::SliderFloat("##rotPlaneAngSld", &m_rotPlaneAngle, -180.0f, 180.0f, "%.1f°")) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3840 | `if (materializr::parseLength(m_axisOpOriginBuf[i], parsed) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3975 | `if (materializr::lengthSlider(materializr::trFormat("Offset (%s)", materializr::unitSuffix()).c_str(), &m_sect` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4053 | `if (materializr::lengthSlider(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), &h, 1.0` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4153 | `if (materializr::lengthSlider(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, ` |
+| seconds | src/app/Application_Dialogs.cpp:4164 | `if (ImGui::SliderInt(materializr::tr("Points per surface"), &budget, 8, 200) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4277 | `if (materializr::lengthSlider(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &w, 1.0f` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4447 | `if (materializr::lengthField("##offsetDist", &mag,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4519 | `materializr::amountLengthField(label, label, v);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4521 | `materializr::lengthField(label, v);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4550 | `materializr::lengthField("X", &m_primitivePopupOrigin[0]);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4551 | `materializr::lengthField("Y", &m_primitivePopupOrigin[1]);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4552 | `materializr::lengthField("Z", &m_primitivePopupOrigin[2]);` |
 | ratio | src/app/Application_Dialogs.cpp:4720 | `ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");` |
+| CONVERTED | src/app/Application_Dialogs.cpp:5224 | `if (materializr::lengthField(materializr::trFormat("Thickness (%s)", materializr::unitSuffix()).c_str(), &m_un` |
 | angle | src/app/Application_Dialogs.cpp:5238 | `if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))` |
 | angle | src/app/Application_Dialogs.cpp:5297 | `ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");` |
 | CONVERTED | src/app/Application_Viewport.cpp:2001 | `(void)materializr::parseFinite(m_sketchShapeDimBuf,` |
+| CONVERTED | src/app/Application_Viewport.cpp:2003 | `if (touchui::numberField("##bubbleDia", nullptr,` |
+| CONVERTED | src/app/Application_Viewport.cpp:2024 | `materializr::lengthField("##bubbleW", &m_sketchShapeDimW);` |
+| CONVERTED | src/app/Application_Viewport.cpp:2027 | `materializr::lengthField("##bubbleH", &m_sketchShapeDimH);` |
+| CONVERTED | src/app/Application_Viewport.cpp:2047 | `if (!materializr::parseLength(m_sketchShapeDimBuf, mm) \|\| mm <= 0.0) return false;` |
 | CONVERTED | src/app/Application_Viewport.cpp:3170 | `(void)materializr::parseFinite(m_dimEditingBuf, dimPadV);` |
 | CONVERTED | src/app/Application_Viewport.cpp:3175 | `if (materializr::inputNumber("##dimval", &dimPadV, 0.0, 0.0, padFmt,` |
 | angle | src/app/Application_Viewport.cpp:5928 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf,` |
 | angle | src/app/Application_Viewport.cpp:5930 | `bool typedEnter = materializr::inputNumber(` |
 | angle | src/app/Application_Viewport.cpp:5943 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);` |
 | angle | src/app/Application_Viewport.cpp:5960 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);` |
+| CONVERTED | src/app/Application_Viewport.cpp:7262 | `materializr::lengthField("##dimW", &m_sketchShapeDimW);` |
+| CONVERTED | src/app/Application_Viewport.cpp:7265 | `materializr::lengthField("##dimH", &m_sketchShapeDimH);` |
 | CONVERTED | src/app/Application_Viewport.cpp:7297 | `const bool entered = materializr::inputNumber(` |
+| CONVERTED | src/app/Application_Viewport.cpp:7315 | `return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;` |
+| CONVERTED | src/app/Application_Viewport.cpp:7350 | `const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)` |
+| angle | src/app/Application_Viewport.cpp:7351 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
+| CONVERTED | src/app/EdgeOpController.cpp:828 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
+| CONVERTED | src/app/EdgeOpController.cpp:841 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/EdgeOpController.cpp:849 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:863 | `materializr::lengthStepperRow("edgeStep", &m_value,` |
+| CONVERTED | src/app/EdgeOpController.cpp:886 | `if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, ` |
+| CONVERTED | src/app/EdgeOpController.cpp:895 | `(void)materializr::parseLength(m_inputBuf2, m_value2);` |
+| CONVERTED | src/app/EdgeOpController.cpp:900 | `if (materializr::parseLength(m_inputBuf2, p2) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:910 | `materializr::lengthStepperRow("edgeStep2", &m_value2,` |
+| CONVERTED | src/app/EdgeOpController.cpp:934 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/ExtrudeController.cpp:396 | `if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {` |
+| CONVERTED | src/app/ExtrudeController.cpp:412 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
+| CONVERTED | src/app/ExtrudeController.cpp:419 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/ExtrudeController.cpp:432 | `materializr::lengthStepperRow("extrudeStep", &m_distance,` |
+| CONVERTED | src/app/ExtrudeController.cpp:478 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
+| CONVERTED | src/app/FaceOpControllers.cpp:122 | `if (materializr::amountLengthField("shellAmt", nullptr, &m_thickness, /*allowSign=*/false, 0.1f, 20.0f)) {` |
+| CONVERTED | src/app/FaceOpControllers.cpp:138 | `(void)materializr::parseLength(m_inputBuf, m_thickness);` |
+| CONVERTED | src/app/FaceOpControllers.cpp:145 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/FaceOpControllers.cpp:155 | `if (materializr::lengthStepperRow("shellStep", &m_thickness,` |
+| angle | src/app/FaceOpControllers.cpp:319 | `if (materializr::stepperRow("taperStep", &m_angle,` |
 | angle | src/app/FaceOpControllers.cpp:323 | `touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:584 | `if (materializr::lengthStepperRow("projDepthStep", &m_depth,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:589 | `materializr::amountLengthField("projAmt", nullptr, &m_depth, /*allowSign=*/false, 0.1f, 10.0f))` |
+| percent | src/app/FaceOpControllers.cpp:823 | `if (materializr::stepperRow("scaleStep", &m_pctU,` |
 | percent | src/app/FaceOpControllers.cpp:830 | `touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:844 | `if (materializr::stepperRow("scaleUStep", &m_pctU,` |
 | percent | src/app/FaceOpControllers.cpp:849 | `touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:854 | `if (materializr::stepperRow("scaleVStep", &m_pctV,` |
 | percent | src/app/FaceOpControllers.cpp:859 | `touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:865 | `if (materializr::lengthStepperRow("lenStep", &m_len,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:870 | `materializr::amountLengthField("lenAmt", nullptr, &m_len, /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f))` |
+| CONVERTED | src/app/FaceOpControllers.cpp:962 | `if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {` |
+| CONVERTED | src/app/FaceOpControllers.cpp:982 | `materializr::parseLength(buf, parsed) &&` |
+| angle | src/app/FaceOpControllers.cpp:2014 | `if (materializr::stepperRow("tiltStep", &deg,` |
 | angle | src/app/FaceOpControllers.cpp:2018 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:2037 | `if (materializr::stepperRow("twistStep", &twdeg,` |
 | angle | src/app/FaceOpControllers.cpp:2041 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2067 | `if (materializr::stepperRow("sclStep", &pct,` |
 | percent | src/app/FaceOpControllers.cpp:2072 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2079 | `if (materializr::stepperRow("sclAStep", &a,` |
 | percent | src/app/FaceOpControllers.cpp:2084 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2088 | `if (materializr::stepperRow("sclBStep", &b,` |
 | percent | src/app/FaceOpControllers.cpp:2093 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| CONVERTED | src/app/PushPullController.cpp:533 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
+| CONVERTED | src/app/PushPullController.cpp:547 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/PushPullController.cpp:554 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
+| CONVERTED | src/app/PushPullController.cpp:570 | `materializr::lengthStepperRow("ppStep", &m_st.distance,` |
+| CONVERTED | src/app/PushPullController.cpp:616 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/SplitController.cpp:167 | `if (materializr::lengthStepperRow("splitOffset", &m_offset, /*allowNegative=*/true,` |
+| CONVERTED | src/app/SplitController.cpp:171 | `materializr::amountLengthField("splitOffsetAmt", nullptr, &m_offset, /*allowSign=*/true, -lim, lim))` |
+| CONVERTED | src/core/LengthEdit.h:23 | `inline double lengthFieldCommit(double displayValue) { return toMm(displayValue); }` |
+| CONVERTED | src/core/LengthEdit.h:97 | `if (!parseLength(buf, mm) \|\| mm <= 0.0) return false;` |
+| CONVERTED | src/modeling/AlignOp.cpp:86 | `if (materializr::lengthField(materializr::tr("Src X"), &sx) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:87 | `materializr::lengthField(materializr::tr("Src Y"), &sy) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:88 | `materializr::lengthField(materializr::tr("Src Z"), &sz)) {` |
+| CONVERTED | src/modeling/AlignOp.cpp:93 | `if (materializr::lengthField(materializr::tr("Tgt X"), &tx) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:94 | `materializr::lengthField(materializr::tr("Tgt Y"), &ty) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:95 | `materializr::lengthField(materializr::tr("Tgt Z"), &tz)) {` |
+| CONVERTED | src/modeling/ChamferOp.cpp:800 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/ChamferOp.cpp:805 | `materializr::lengthField(materializr::tr("Distance 2"), &m_distance2);` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:259 | `materializr::lengthField(materializr::tr("Offset Distance"), &m_offset);` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:269 | `if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:273 | `if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:277 | `if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:286 | `if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
+| CONVERTED | src/modeling/CopyOp.cpp:79 | `materializr::lengthField("X", &m_dx);` |
+| CONVERTED | src/modeling/CopyOp.cpp:80 | `materializr::lengthField("Y", &m_dy);` |
+| CONVERTED | src/modeling/CopyOp.cpp:81 | `materializr::lengthField("Z", &m_dz);` |
+| CONVERTED | src/modeling/ExtrudeOp.cpp:807 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
 | angle | src/modeling/ExtrudeOp.cpp:823 | `materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");` |
+| CONVERTED | src/modeling/FilletOp.cpp:675 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
+| CONVERTED | src/modeling/PatternOp.cpp:226 | `materializr::lengthField(materializr::tr("Spacing X"), &m_spacingX);` |
+| CONVERTED | src/modeling/PatternOp.cpp:227 | `materializr::lengthField(materializr::tr("Spacing Y"), &m_spacingY);` |
+| CONVERTED | src/modeling/PatternOp.cpp:228 | `materializr::lengthField(materializr::tr("Spacing Z"), &m_spacingZ);` |
 | unitless | src/modeling/PatternOp.cpp:230 | `materializr::inputNumber(materializr::tr("Axis X"), &m_axisX, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/PatternOp.cpp:231 | `materializr::inputNumber(materializr::tr("Axis Y"), &m_axisY, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/PatternOp.cpp:232 | `materializr::inputNumber(materializr::tr("Axis Z"), &m_axisZ, 0.1, 1.0, "%g");` |
 | angle | src/modeling/PatternOp.cpp:233 | `materializr::inputNumber(materializr::tr("Total Angle"), &m_totalAngle, 1.0, 15.0, "%.1f");` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:139 | `materializr::lengthField(materializr::tr("Width (X)"), &m_x);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:140 | `materializr::lengthField(materializr::tr("Depth (Y)"), &m_y);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:141 | `materializr::lengthField(materializr::tr("Height (Z)"), &m_z);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:144 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:145 | `materializr::lengthField(materializr::tr("Height"), &m_height);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:148 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:151 | `materializr::lengthField(materializr::tr("Bottom radius"), &m_radius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:152 | `materializr::lengthField(materializr::tr("Top radius"), &m_topRadius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:153 | `materializr::lengthField(materializr::tr("Height"), &m_height);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:156 | `materializr::lengthField(materializr::tr("Major radius"), &m_radius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:157 | `materializr::lengthField(materializr::tr("Minor radius"), &m_minorRadius);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:162 | `materializr::lengthField("X", &m_ox);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:163 | `materializr::lengthField("Y", &m_oy);` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:164 | `materializr::lengthField("Z", &m_oz);` |
+| CONVERTED | src/modeling/ProjectSketchOp.cpp:537 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
+| CONVERTED | src/modeling/PushPullOp.cpp:639 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:682 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia))` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:689 | `if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) ` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:693 | `if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {` |
 | angle | src/modeling/RevolveOp.cpp:278 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");` |
+| CONVERTED | src/modeling/RevolveOp.cpp:284 | `materializr::lengthField(materializr::tr("Origin X"), &m_axisOriginX);` |
+| CONVERTED | src/modeling/RevolveOp.cpp:285 | `materializr::lengthField(materializr::tr("Origin Y"), &m_axisOriginY);` |
+| CONVERTED | src/modeling/RevolveOp.cpp:286 | `materializr::lengthField(materializr::tr("Origin Z"), &m_axisOriginZ);` |
 | unitless | src/modeling/RevolveOp.cpp:290 | `materializr::inputNumber(materializr::tr("Dir X"), &m_axisDirX, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/RevolveOp.cpp:291 | `materializr::inputNumber(materializr::tr("Dir Y"), &m_axisDirY, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/RevolveOp.cpp:292 | `materializr::inputNumber(materializr::tr("Dir Z"), &m_axisDirZ, 0.1, 1.0, "%g");` |
 | percent | src/modeling/ScaleFaceOp.cpp:328 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
 | percent | src/modeling/ScaleFaceOp.cpp:329 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:330 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
+| CONVERTED | src/modeling/ShellOp.cpp:326 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
+| CONVERTED | src/modeling/SketchEditOp.cpp:396 | `if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,` |
+| CONVERTED | src/modeling/SketchEditOp.cpp:408 | `if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/SketchEditOp.cpp:418 | `if (materializr::inputNumber(materializr::tr("Angle (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
+| CONVERTED | src/modeling/SketchEditOp.cpp:462 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/TaperOp.cpp:143 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2109 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2111 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2137 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2144 | `materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_cl` |
+| CONVERTED | src/modeling/TransformOp.cpp:270 | `materializr::lengthField("X", &m_dx);` |
+| CONVERTED | src/modeling/TransformOp.cpp:271 | `materializr::lengthField("Y", &m_dy);` |
+| CONVERTED | src/modeling/TransformOp.cpp:272 | `materializr::lengthField("Z", &m_dz);` |
 | unitless | src/modeling/TransformOp.cpp:275 | `materializr::inputNumber(materializr::tr("Axis X"), &m_ax, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/TransformOp.cpp:276 | `materializr::inputNumber(materializr::tr("Axis Y"), &m_ay, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/TransformOp.cpp:277 | `materializr::inputNumber(materializr::tr("Axis Z"), &m_az, 0.1, 1.0, "%g");` |
 | angle | src/modeling/TransformOp.cpp:278 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 15.0, "%.1f");` |
 | ratio | src/modeling/TransformOp.cpp:281 | `materializr::inputNumber(materializr::tr("Scale Factor"), &m_scale, 0.1, 0.5, "%g");` |
+| CONVERTED | src/plugins/PushPullPlugin.cpp:139 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
+| CONVERTED | src/plugins/PushPullPlugin.cpp:144 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/plugins/PushPullPlugin.cpp:154 | `if (materializr::lengthStepperRow("ppStep", &m_distance,` |
+| CONVERTED | src/plugins/SketchPlugin.cpp:134 | `const bool dimOk = dimIsLen ? materializr::parseLength(m_dimBuf, v)` |
+| angle | src/plugins/SketchPlugin.cpp:135 | `: materializr::parseFinite(m_dimBuf, v);` |
 | ratio | src/ui/MaterialPanel.cpp:100 | `ImGui::SliderFloat(materializr::tr("Roughness"), &m_customRoughness, 0.0f, 1.0f);` |
 | ratio | src/ui/MaterialPanel.cpp:101 | `ImGui::SliderFloat(materializr::tr("Metallic"), &m_customMetallic, 0.0f, 1.0f);` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:638 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:651 | `if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, Im` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:665 | `if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, I` |
 | angle | src/ui/PropertiesPanel.cpp:677 | `if (materializr::inputNumber(materializr::tr("Sweep (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:697 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:699 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:714 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:877 | `(void)materializr::parseFinite(edit.buf, padVal);` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:880 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, "%.3f",` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:899 | `(void)materializr::parseFinite(edit.buf, typed);` |
+| CONVERTED | src/ui/SectionPanel.cpp:51 | `if (materializr::lengthSlider(materializr::tr("Offset"), &m_offset, -100.0f, 100.0f)) {` |
+| seconds | src/ui/VersionPanel.cpp:58 | `if (ImGui::SliderInt(materializr::tr("Interval (min)"), &intervalMinutes, 1, 30)) {` |
 
 ## `mm` literals by class
 

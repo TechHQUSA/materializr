@@ -11,13 +11,29 @@ pinned in OVERRIDE. Anything left LENGTH? or READOUT-LITERAL is work.
 import collections, os, re, subprocess, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CONTROLS = r'InputFloat\(|InputDouble\(|InputScalar|SliderFloat\(|DragFloat\(|inputNumber\(|amountField\(|parseFinite\('
+# Every spelling of "a numeric control". The length widgets this feature added
+# were absent, so a length routed through one was not even inventoried.
+CONTROLS = (r'InputFloat\(|InputDouble\(|InputScalar|SliderFloat\(|DragFloat\(|inputNumber\(|'
+            r'amountField\(|parseFinite\(|stepperRow\(|numberField\(|SliderInt\(|DragScalar|'
+            r'lengthField\(|lengthSlider\(|amountLengthField\(|lengthStepperRow\(|parseLength\(|'
+            r'lengthFieldCommit\(')
 LITERALS = r'\bmm\b'
-SKIP_CTRL = ("src/ui/NumField.h", "src/ui/LengthField.h", "src/core/NumParse.h", "src/ui/TouchWidgets", "src/core/Units.h")
+SKIP_CTRL = ("src/ui/NumField.h", "src/ui/LengthField.h", "src/core/NumParse.h", "src/ui/TouchWidgets", "src/core/Units.h", "src/ui/StepperRow.h")
 SKIP_LIT  = ("src/core/Units.h", "src/core/LengthEdit.h", "src/ui/LengthField.h", "i18n_catalogue.h")
 
 # (file, fragment-of-line) -> dimension, for rows the line alone does not reveal.
 OVERRIDE = [
+    # Sites whose quantity cannot be read off the line itself. Pinned by hand
+    # so the tool reports them as settled rather than guessing — every row it
+    # cannot classify should be a decision someone made, not a silence.
+    ("src/app/FaceOpControllers.cpp", "sclAStep", "percent"),
+    ("src/app/FaceOpControllers.cpp", "sclBStep", "percent"),
+    ("src/app/FaceOpControllers.cpp", "twistStep", "angle"),
+    ("src/app/Application_Viewport.cpp", "##bubbleDia", "CONVERTED"),   # commits via parseLength below
+    ("src/app/Application_Viewport.cpp", "parseFinite(m_sketchDimBuf", "angle"),  # sweep deg / polygon sides
+    ("src/plugins/SketchPlugin.cpp", "parseFinite(m_dimBuf", "angle"),            # same non-length branch
+    ("src/app/Application_Dialogs.cpp", "Fillet time limit", "seconds"),
+    ("src/app/Application_Dialogs.cpp", "Double-click speed", "seconds"),
     ("src/ui/MaterialPanel.cpp", "Roughness", "ratio"), ("src/ui/MaterialPanel.cpp", "Metallic", "ratio"),
     ("src/app/Application_Dialogs.cpp", "touchSens", "ratio"), ("src/app/Application_Dialogs.cpp", "Ambient", "ratio"),
     ("src/app/Application_Dialogs.cpp", "STL accuracy", "ratio"), ("src/app/Application_Dialogs.cpp", "m_stlDialogAccuracy", "ratio"),
@@ -80,12 +96,47 @@ def classify_control(f, ln, code):
     for af, frag, dim in OVERRIDE:
         if f == af and frag in code: return dim
     c = code.lower()
-    if any(k in c for k in ("angle", "deg", "taper", "rotate", "sweep", "tilt", "draft", "rot")): return "angle"
-    if "%%" in code or any(k in c for k in ("percent", "opacity", "alpha", "scale u", "scale v")): return "percent"
-    if any(k in c for k in ("px", "pixel", "linewidth", "line width", "sensitivity", "uiscale")): return "px/ui"
-    if any(k in c for k in ("sec", "seconds", "time", "interval", "probe")): return "seconds"
-    if any(k in c for k in ("count", "copies", "sides", "segments", "instances", "turns", "starts", "inputnumberint")): return "count"
-    if any(k in c for k in ("lengthfield", "lengthslider", "amountlengthfield", "parselength", "lengthtextfield", "formatlengthdigits", "todisplay(")): return "CONVERTED"
+
+    # Does this site run the value through a LENGTH path (converts display<->mm)?
+    length_widget = any(k in c for k in (
+        "lengthfield", "lengthslider", "amountlengthfield", "lengthstepperrow",
+        "parselength", "lengthtextfield", "lengthfieldcommit",
+        "formatlengthdigits", "seeddimensiontext", "todisplay("))
+
+    # What does the site's NAME say the quantity is?
+    # WORD boundaries, not substrings. "EnterReturnsTrue" contains "turns" and
+    # filed six genuine length fields as counts; "intersect" contains "sec" and
+    # "rotate" was matched by a bare "rot". A heuristic that reads inside
+    # identifiers reports whatever the surrounding API happens to spell.
+    # Split the line into identifier WORDS first: camelCase to two words, then
+    # every non-alphanumeric to a space. So "m_angle" and "taperAngle" both
+    # yield the word "angle", while "EnterReturnsTrue" yields "returns" and
+    # never "turns". Raw substring matching filed six length fields as counts
+    # (via "EnterReturnsTrue"); raw \b matching then missed "m_angle", because
+    # an underscore is a word character. Neither reads identifiers correctly.
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", code)
+    words = re.sub(r"[^A-Za-z0-9]+", " ", words).lower()
+    def word(*ws):
+        return any(re.search(r"\b" + re.escape(w) + r"\b", words) for w in ws)
+
+    named = None
+    if word("angle", "deg", "taper", "rotate", "sweep", "tilt", "draft"): named = "angle"
+    elif "%%" in code or word("percent", "pct", "opacity", "alpha") or "scale u" in c or "scale v" in c: named = "percent"
+    elif word("px", "pixel", "linewidth", "sensitivity", "uiscale") or "line width" in c: named = "px/ui"
+    elif word("seconds", "interval", "timeout", "budget"): named = "seconds"
+    elif word("count", "copies", "sides", "segments", "instances", "turns", "starts"): named = "count"
+
+    # THE FINDING THIS TOOL EXISTS FOR. The name checks used to run FIRST and
+    # return, so `lengthField(tr("Angle (deg)"), &m_angle)` was filed as "angle"
+    # and passed clean — which is exactly how five degree fields, two
+    # percentages, an arc sweep and a polygon side count shipped. A length
+    # widget on a quantity that is not a length is a CONTRADICTION, not a
+    # classification.
+    if length_widget and named is not None:
+        return "MISMATCH:" + named
+
+    if length_widget: return "CONVERTED"
+    if named is not None: return named
     return "LENGTH?"
 
 def main():
