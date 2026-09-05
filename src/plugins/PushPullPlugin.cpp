@@ -132,12 +132,14 @@ public:
 
         // parseFinite: reject garbage / non-finite input ("1e999" -> inf
         // used to flow straight into the extrude) — the previous value stays.
+        // The member is the truth; the buffer follows unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##dist", m_inputBuf, sizeof(m_inputBuf), m_distance);
         if (ImGui::InputText("##dist", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             (void)materializr::parseLength(m_inputBuf, m_distance);
             updatePreview(ctx);
             commit(ctx);
-        } else {
+        } else if (materializr::lengthBufferIsActive("##dist")) {
             float parsed = m_distance;
             if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_distance) > 0.01f) {

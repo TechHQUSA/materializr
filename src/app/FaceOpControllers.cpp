@@ -963,16 +963,24 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
         if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {
             parsed = v;
             edited = std::abs(parsed - *val) > 0.001;
-            std::snprintf(buf, 32, "%.2f", v);
+            // v is millimetres; this buffer is read back with parseLength, i.e.
+            // in DISPLAY units. "%.2f" wrote mm into it and also fixed the
+            // precision at two decimals, quantising metres to 10 mm. Its
+            // sibling ten lines down already used formatLengthDigits.
+            materializr::formatLengthDigits(buf, 32, v);
         }
     } else {
         ImGui::SetNextItemWidth(140);
+        // The member is the truth; the buffer follows unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##rcyldia", buf, 32, *val);
         if (ImGui::InputText("##rcyldia", buf, 32,
-                             ImGuiInputTextFlags_EnterReturnsTrue |
-                             ImGuiInputTextFlags_CharsDecimal))
+                             ImGuiInputTextFlags_EnterReturnsTrue))
             requestCommit();   // Enter in the field = Confirm
-        // parseFinite: garbage/inf keeps the previous value.
-        edited = materializr::parseLength(buf, parsed) &&
+        // Only re-read while typing: an idle re-parse rewrote the model from
+        // the buffer's rounded text, and reinterpreted stale text after a unit
+        // switch. CharsDecimal dropped so a typed "2in" can reach parseLength.
+        edited = materializr::lengthBufferIsActive("##rcyldia") &&
+                 materializr::parseLength(buf, parsed) &&
                  std::abs(parsed - *val) > 0.001;
         ImGui::SameLine();
         ImGui::Text("%s", materializr::unitSuffix());

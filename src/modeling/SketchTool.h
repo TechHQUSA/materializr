@@ -331,6 +331,19 @@ public:
     // side of the chord still decides which way the arc bows: that is a
     // direction, not a dimension, so no number can express it.
     enum class ArcDimMode { Sweep, Radius };
+    // Is the value applyDimension() expects right now a LENGTH? Not always:
+    // an arc's second click in Sweep mode takes DEGREES (clamped 0.1..359.9),
+    // and a polygon's first takes a SIDE COUNT. Both were being converted
+    // display->mm on the way in, so under inches a typed 180 deg arrived as
+    // 4572 and a typed 6 sides as 152. Callers that convert must ask first;
+    // this lives here because applyDimension's own switch is the only place
+    // that knows.
+    bool dimensionValueIsLength() const {
+        if (m_mode == SketchToolMode::Polygon && m_clickCount == 0) return false;
+        if (m_mode == SketchToolMode::Arc && m_clickCount == 2 &&
+            m_arcDimMode == ArcDimMode::Sweep) return false;
+        return true;
+    }
     void setArcDimMode(ArcDimMode m) { m_arcDimMode = m; }
     ArcDimMode getArcDimMode() const { return m_arcDimMode; }
     // Half the chord — the smallest radius any arc through these two endpoints

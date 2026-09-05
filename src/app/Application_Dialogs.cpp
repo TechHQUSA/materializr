@@ -1236,10 +1236,19 @@ void Application::renderSketchPatternPopup() {
                          sizeof(m_sketchPatternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
-        float newDist = m_sketchPatternDistance;
-        if (materializr::parseLength(m_sketchPatternDistanceBuf, newDist) &&
-            std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
-            m_sketchPatternDistance = newDist; changed = true;
+        // Only while typing. An idle re-parse rewrote the model from the
+        // buffer's rounded text and, after a unit switch, reinterpreted the old
+        // unit's digits in the new one.
+        if (materializr::lengthBufferIsActive("##spdist")) {
+            float newDist = m_sketchPatternDistance;
+            if (materializr::parseLength(m_sketchPatternDistanceBuf, newDist) &&
+                std::abs(newDist - m_sketchPatternDistance) > 1e-4f) {
+                m_sketchPatternDistance = newDist; changed = true;
+            }
+        } else {
+            materializr::formatLengthDigits(m_sketchPatternDistanceBuf,
+                                            sizeof(m_sketchPatternDistanceBuf),
+                                            m_sketchPatternDistance);
         }
         if (materializr::lengthSlider("##spdistslider", &m_sketchPatternDistance, 0.1f, 100.0f)) {
             materializr::formatLengthDigits(m_sketchPatternDistanceBuf, sizeof(m_sketchPatternDistanceBuf), m_sketchPatternDistance);
@@ -1403,10 +1412,15 @@ void Application::renderPatternPanel() {
                          sizeof(m_patternDistanceBuf),
                          ImGuiInputTextFlags_CharsDecimal);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
-        float parsed = m_patternDistance;
-        if (materializr::parseLength(m_patternDistanceBuf, parsed) &&
-            std::abs(parsed - m_patternDistance) > 1e-4f) {
-            m_patternDistance = parsed; distChanged = true;
+        if (materializr::lengthBufferIsActive("##patdist")) {
+            float parsed = m_patternDistance;
+            if (materializr::parseLength(m_patternDistanceBuf, parsed) &&
+                std::abs(parsed - m_patternDistance) > 1e-4f) {
+                m_patternDistance = parsed; distChanged = true;
+            }
+        } else {
+            materializr::formatLengthDigits(m_patternDistanceBuf,
+                                            sizeof(m_patternDistanceBuf), m_patternDistance);
         }
         // Slider that mirrors the text field — quick sweep without retyping.
         if (materializr::lengthSlider("##patdistslider", &m_patternDistance, 0.1f, 100.0f)) {
@@ -2410,8 +2424,13 @@ void Application::renderSketchMovePanel() {
                          ImGuiInputTextFlags_CharsNoBlank |
                          ImGuiInputTextFlags_AutoSelectAll);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
-        { float mv = m_sketchMove[i];
-          if (materializr::parseLength(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv; }
+        if (materializr::lengthBufferIsActive("##input")) {
+            float mv = m_sketchMove[i];
+            if (materializr::parseLength(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv;
+        } else {
+            materializr::formatLengthDigits(m_sketchMoveBuf[i],
+                                            sizeof(m_sketchMoveBuf[i]), m_sketchMove[i]);
+        }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(130);
         if (materializr::lengthSlider("##slider", &m_sketchMove[i], -100.0f, 100.0f)) {

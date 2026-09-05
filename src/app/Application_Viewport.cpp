@@ -7309,13 +7309,18 @@ void Application::renderViewport() {
                              SketchTool::ArcDimMode::Radius)
                             ? m_sketchTool->arcMinRadius() : 0.0f;
                     // The pad edits in the display unit; the floor is mm.
+                    // Same rule as the desktop path: only convert a LENGTH.
+                    const bool dimIsLen = m_sketchTool->dimensionValueIsLength();
+                    auto dimToModel = [&](double shown) {
+                        return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;
+                    };
                     ImGui::BeginDisabled(m_sketchDimValue <= 0.0f ||
-                                         materializr::lengthFieldCommit(m_sketchDimValue) < dimFloor);
+                                         dimToModel(m_sketchDimValue) < dimFloor);
                     const bool applied =
                         ImGui::Button(materializr::tr("Apply"), ImVec2(-1.0f, uiW(44.0f)));
                     ImGui::EndDisabled();
                     if ((entered || applied) && m_sketchDimValue > 0.0f) {
-                        const float v = static_cast<float>(materializr::lengthFieldCommit(m_sketchDimValue));
+                        const float v = static_cast<float>(dimToModel(m_sketchDimValue));
                         recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
                         m_sketchDimValue = 0.0f;
                         m_sketchDimBuf[0] = '\0';
@@ -7336,9 +7341,16 @@ void Application::renderViewport() {
                 if (ImGui::InputText("##sketchDim", m_sketchDimBuf, sizeof(m_sketchDimBuf),
                                      ImGuiInputTextFlags_EnterReturnsTrue |
                                      ImGuiInputTextFlags_AutoSelectAll)) {
-                    double mm = 0.0;
-                    if (materializr::parseLength(m_sketchDimBuf, mm) && mm > 0.0) {
-                        const float v = static_cast<float>(mm);
+                    // Not every typed dimension is a length: an arc's sweep is
+                    // DEGREES and a polygon's first value is a SIDE COUNT.
+                    // Converting those display->mm made a typed 180 deg arrive
+                    // as 4572 (clamped to 359.9) and 6 sides arrive as 152.
+                    double v0 = 0.0;
+                    const bool isLen = m_sketchTool->dimensionValueIsLength();
+                    const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)
+                                          : materializr::parseFinite(m_sketchDimBuf, v0);
+                    if (ok && v0 > 0.0) {
+                        const float v = static_cast<float>(v0);
                         recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
                     }
                     m_sketchDimBuf[0] = '\0';
