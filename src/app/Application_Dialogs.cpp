@@ -1234,7 +1234,7 @@ void Application::renderSketchPatternPopup() {
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##spdist", m_sketchPatternDistanceBuf,
                          sizeof(m_sketchPatternDistanceBuf),
-                         ImGuiInputTextFlags_CharsDecimal);
+                         0 /* letters allowed: parseLength accepts a typed "2in" */);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
         // Only while typing. An idle re-parse rewrote the model from the
         // buffer's rounded text and, after a unit switch, reinterpreted the old
@@ -1410,7 +1410,7 @@ void Application::renderPatternPanel() {
         ImGui::SetNextItemWidth(100);
         ImGui::InputText("##patdist", m_patternDistanceBuf,
                          sizeof(m_patternDistanceBuf),
-                         ImGuiInputTextFlags_CharsDecimal);
+                         0 /* letters allowed: parseLength accepts a typed "2in" */);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
         if (materializr::lengthBufferIsActive("##patdist")) {
             float parsed = m_patternDistance;
@@ -1616,7 +1616,7 @@ void Application::renderThreadPanel() {
     ImGui::Text("%s", materializr::tr("Pitch")); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrPitch", m_threadPitchBuf, sizeof(m_threadPitchBuf),
-                         ImGuiInputTextFlags_CharsDecimal)) {
+                         0 /* letters allowed: parseLength accepts a typed "2in" */)) {
         float v = 0.0f; // parseFinite: inf would pass the >= 0.1 guard
         if (materializr::parseLength(m_threadPitchBuf, v) && v >= 0.1f)
             m_threadPitch = v;
@@ -1631,7 +1631,7 @@ void Application::renderThreadPanel() {
     ImGui::Text("%s", materializr::tr("Depth")); ImGui::SameLine();
     ImGui::SetNextItemWidth(90);
     if (ImGui::InputText("##thrDepth", m_threadDepthBuf, sizeof(m_threadDepthBuf),
-                         ImGuiInputTextFlags_CharsDecimal)) {
+                         0 /* letters allowed: parseLength accepts a typed "2in" */)) {
         float v = 0.0f;
         if (materializr::parseLength(m_threadDepthBuf, v) && v >= 0.05f)
             m_threadDepth = v;
@@ -2420,7 +2420,7 @@ void Application::renderSketchMovePanel() {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(110);
         ImGui::InputText("##input", m_sketchMoveBuf[i], sizeof(m_sketchMoveBuf[i]),
-                         ImGuiInputTextFlags_CharsDecimal |
+                         0 |
                          ImGuiInputTextFlags_CharsNoBlank |
                          ImGuiInputTextFlags_AutoSelectAll);
         ImGui::SameLine(); ImGui::Text("%s", materializr::unitSuffix());
@@ -2742,7 +2742,7 @@ void Application::renderConstructionPlanePanel() {
     ImGui::SetNextItemWidth(100);
     bool offsetChanged = false;
     if (ImGui::InputText("##planeoffset", m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf),
-                         ImGuiInputTextFlags_CharsDecimal)) {
+                         0 /* letters allowed: parseLength accepts a typed "2in" */)) {
         double parsed = m_planeOpOffset;
         if (materializr::parseLength(m_planeOpOffsetBuf, parsed) &&
             std::abs(parsed - m_planeOpOffset) > 1e-4) {
@@ -3331,7 +3331,7 @@ void Application::renderAlignFacePopup() {
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Offset from plane"));
     ImGui::SetNextItemWidth(100);
     if (ImGui::InputText("##alignOff", m_alignOffsetBuf, sizeof(m_alignOffsetBuf),
-                         ImGuiInputTextFlags_CharsDecimal)) {
+                         0 /* letters allowed: parseLength accepts a typed "2in" */)) {
         float a = m_alignOffset;
         if (materializr::parseLength(m_alignOffsetBuf, a)) m_alignOffset = a;
         changed = true;
@@ -3360,7 +3360,7 @@ void Application::renderAlignFacePopup() {
         ImGui::TextDisabled("%s", materializr::tr("Face centre, along the plane's own axes"));
         ImGui::SetNextItemWidth(90);
         if (ImGui::InputText("U##alignU", m_alignUBuf, sizeof(m_alignUBuf),
-                             ImGuiInputTextFlags_CharsDecimal)) {
+                             0 /* letters allowed: parseLength accepts a typed "2in" */)) {
             float a = m_alignU;
             if (materializr::parseLength(m_alignUBuf, a)) m_alignU = a;
             changed = true;
@@ -3368,7 +3368,7 @@ void Application::renderAlignFacePopup() {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(90);
         if (ImGui::InputText("V##alignV", m_alignVBuf, sizeof(m_alignVBuf),
-                             ImGuiInputTextFlags_CharsDecimal)) {
+                             0 /* letters allowed: parseLength accepts a typed "2in" */)) {
             float a = m_alignV;
             if (materializr::parseLength(m_alignVBuf, a)) m_alignV = a;
             changed = true;

@@ -60,15 +60,15 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/app/Application_Viewport.cpp:5943 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);` |
 | angle | src/app/Application_Viewport.cpp:5960 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);` |
 | CONVERTED | src/app/Application_Viewport.cpp:7297 | `const bool entered = materializr::inputNumber(` |
-| angle | src/app/FaceOpControllers.cpp:324 | `touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,` |
-| percent | src/app/FaceOpControllers.cpp:831 | `touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,` |
-| percent | src/app/FaceOpControllers.cpp:850 | `touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,` |
-| percent | src/app/FaceOpControllers.cpp:860 | `touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,` |
-| angle | src/app/FaceOpControllers.cpp:2019 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
-| angle | src/app/FaceOpControllers.cpp:2042 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2073 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2085 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2094 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:323 | `touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,` |
+| percent | src/app/FaceOpControllers.cpp:830 | `touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:849 | `touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:859 | `touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,` |
+| angle | src/app/FaceOpControllers.cpp:2018 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:2041 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2072 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2084 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2093 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:269 | `if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:273 | `if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:277 | `if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
@@ -201,11 +201,11 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | diagnostic | src/app/ExtrudeController.cpp:257 | `std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",` |
 | diagnostic | src/app/ExtrudeController.cpp:281 | `std::fprintf(stdout, "Extruded %.1f mm\n", m_distance);` |
 | diagnostic | src/app/ExtrudeController.cpp:290 | `std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",` |
-| comment | src/app/FaceOpControllers.cpp:158 | `// Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a` |
-| comment | src/app/FaceOpControllers.cpp:159 | `// free-floating 3.47 mm slider value is just noise.` |
-| comment | src/app/FaceOpControllers.cpp:967 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
-| comment | src/app/FaceOpControllers.cpp:968 | `// precision at two decimals, quantising metres to 10 mm. Its` |
-| comment | src/app/FaceOpControllers.cpp:1491 | `// of the hole rather than swamping a 3 mm bore.` |
+| comment | src/app/FaceOpControllers.cpp:157 | `// Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a` |
+| comment | src/app/FaceOpControllers.cpp:158 | `// free-floating 3.47 mm slider value is just noise.` |
+| comment | src/app/FaceOpControllers.cpp:966 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
+| comment | src/app/FaceOpControllers.cpp:967 | `// precision at two decimals, quantising metres to 10 mm. Its` |
+| comment | src/app/FaceOpControllers.cpp:1490 | `// of the hole rather than swamping a 3 mm bore.` |
 | comment | src/app/PushPullController.cpp:81 | `// hundreds of mm away — a push/pull on an unlinked sketch must` |
 | diagnostic | src/app/PushPullController.cpp:404 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
 | diagnostic | src/app/PushPullController.cpp:416 | `std::fprintf(stdout, "Push/Pull (smart cut) committed at %.2f mm\n",` |

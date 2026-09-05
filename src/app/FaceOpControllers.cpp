@@ -134,8 +134,7 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     // The member is the truth; the buffer follows it unless being typed in.
     materializr::reseedLengthBufferIfIdle("##shellThickness", m_inputBuf, sizeof(m_inputBuf), m_thickness);
     if (ImGui::InputText("##shellThickness", m_inputBuf, sizeof(m_inputBuf),
-                         ImGuiInputTextFlags_EnterReturnsTrue |
-                         ImGuiInputTextFlags_CharsDecimal)) {
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
         (void)materializr::parseLength(m_inputBuf, m_thickness);
         requestCommit();
     } else if (materializr::lengthBufferIsActive("##shellThickness")) {

@@ -167,6 +167,10 @@ CAT = [
     # ---- Sketch dimension input (incl. the arc work from today) ------------
     E("Length (%s)",        "Longitud (%s)","Comprimento (%s)","Longueur (%s)","Länge (%s)","Lunghezza (%s)"),
     E("Diameter (%s)",      "Diámetro (%s)","Diâmetro (%s)","Diamètre (%s)","Durchmesser (%s)","Diametro (%s)"),
+    E("\u00d8 (%s)","\u00d8 (%s)","\u00d8 (%s)","\u00d8 (%s)","\u00d8 (%s)","\u00d8 (%s)"),
+    E("Modelling","Modelado","Modelagem","Mod\u00e9lisation","Modellierung","Modellazione"),
+    E("Fillet time limit","L\u00edmite de tiempo de redondeo","Limite de tempo do arredondamento","Limite de temps du cong\u00e9","Zeitlimit f\u00fcr Verrundung","Limite di tempo del raccordo"),
+    E("  \u0394 %s","  \u0394 %s","  \u0394 %s","  \u0394 %s","  \u0394 %s","  \u0394 %s"),
     E("Radius (%s)",        "Radio (%s)","Raio (%s)","Rayon (%s)","Radius (%s)","Raggio (%s)"),
     E("Width (%s)",         "Ancho (%s)","Largura (%s)","Largeur (%s)","Breite (%s)","Larghezza (%s)"),
     E("Height (%s)",        "Alto (%s)","Altura (%s)","Hauteur (%s)","Höhe (%s)","Altezza (%s)"),

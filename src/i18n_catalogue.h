@@ -131,6 +131,10 @@ inline const TrEntry kEsCatalogue[] = {
     { "Octagon (8)", "Oct\xc3""\xa1""gono (8)" },
     { "Length (%s)", "Longitud (%s)" },
     { "Diameter (%s)", "Di\xc3""\xa1""metro (%s)" },
+    { "\xc3""\x98"" (%s)", "\xc3""\x98"" (%s)" },
+    { "Modelling", "Modelado" },
+    { "Fillet time limit", "L\xc3""\xad""mite de tiempo de redondeo" },
+    { "  \xce""\x94"" %s", "  \xce""\x94"" %s" },
     { "Radius (%s)", "Radio (%s)" },
     { "Width (%s)", "Ancho (%s)" },
     { "Height (%s)", "Alto (%s)" },
@@ -1170,7 +1174,7 @@ inline const TrEntry kEsCatalogue[] = {
     { "Appearance", "Apariencia" },
     { "Interface language", "Idioma de la interfaz" },
 };
-inline constexpr int kEsCount = 1158;
+inline constexpr int kEsCount = 1162;
 
 // --- Portuguese ---
 inline const TrEntry kPtCatalogue[] = {
@@ -1294,6 +1298,10 @@ inline const TrEntry kPtCatalogue[] = {
     { "Octagon (8)", "Oct\xc3""\xb3""gono (8)" },
     { "Length (%s)", "Comprimento (%s)" },
     { "Diameter (%s)", "Di\xc3""\xa2""metro (%s)" },
+    { "\xc3""\x98"" (%s)", "\xc3""\x98"" (%s)" },
+    { "Modelling", "Modelagem" },
+    { "Fillet time limit", "Limite de tempo do arredondamento" },
+    { "  \xce""\x94"" %s", "  \xce""\x94"" %s" },
     { "Radius (%s)", "Raio (%s)" },
     { "Width (%s)", "Largura (%s)" },
     { "Height (%s)", "Altura (%s)" },
@@ -2333,7 +2341,7 @@ inline const TrEntry kPtCatalogue[] = {
     { "Appearance", "Apar\xc3""\xaa""ncia" },
     { "Interface language", "Idioma da interface" },
 };
-inline constexpr int kPtCount = 1158;
+inline constexpr int kPtCount = 1162;
 
 // --- French ---
 inline const TrEntry kFrCatalogue[] = {
@@ -2457,6 +2465,10 @@ inline const TrEntry kFrCatalogue[] = {
     { "Octagon (8)", "Octogone (8)" },
     { "Length (%s)", "Longueur (%s)" },
     { "Diameter (%s)", "Diam\xc3""\xa8""tre (%s)" },
+    { "\xc3""\x98"" (%s)", "\xc3""\x98"" (%s)" },
+    { "Modelling", "Mod\xc3""\xa9""lisation" },
+    { "Fillet time limit", "Limite de temps du cong\xc3""\xa9""" },
+    { "  \xce""\x94"" %s", "  \xce""\x94"" %s" },
     { "Radius (%s)", "Rayon (%s)" },
     { "Width (%s)", "Largeur (%s)" },
     { "Height (%s)", "Hauteur (%s)" },
@@ -3496,7 +3508,7 @@ inline const TrEntry kFrCatalogue[] = {
     { "Appearance", "Apparence" },
     { "Interface language", "Langue de l'interface" },
 };
-inline constexpr int kFrCount = 1158;
+inline constexpr int kFrCount = 1162;
 
 // --- German ---
 inline const TrEntry kDeCatalogue[] = {
@@ -3620,6 +3632,10 @@ inline const TrEntry kDeCatalogue[] = {
     { "Octagon (8)", "Achteck (8)" },
     { "Length (%s)", "L\xc3""\xa4""nge (%s)" },
     { "Diameter (%s)", "Durchmesser (%s)" },
+    { "\xc3""\x98"" (%s)", "\xc3""\x98"" (%s)" },
+    { "Modelling", "Modellierung" },
+    { "Fillet time limit", "Zeitlimit f\xc3""\xbc""r Verrundung" },
+    { "  \xce""\x94"" %s", "  \xce""\x94"" %s" },
     { "Radius (%s)", "Radius (%s)" },
     { "Width (%s)", "Breite (%s)" },
     { "Height (%s)", "H\xc3""\xb6""he (%s)" },
@@ -4659,7 +4675,7 @@ inline const TrEntry kDeCatalogue[] = {
     { "Appearance", "Darstellung" },
     { "Interface language", "Sprache der Oberfl\xc3""\xa4""che" },
 };
-inline constexpr int kDeCount = 1158;
+inline constexpr int kDeCount = 1162;
 
 // --- Italian ---
 inline const TrEntry kItCatalogue[] = {
@@ -4783,6 +4799,10 @@ inline const TrEntry kItCatalogue[] = {
     { "Octagon (8)", "Ottagono (8)" },
     { "Length (%s)", "Lunghezza (%s)" },
     { "Diameter (%s)", "Diametro (%s)" },
+    { "\xc3""\x98"" (%s)", "\xc3""\x98"" (%s)" },
+    { "Modelling", "Modellazione" },
+    { "Fillet time limit", "Limite di tempo del raccordo" },
+    { "  \xce""\x94"" %s", "  \xce""\x94"" %s" },
     { "Radius (%s)", "Raggio (%s)" },
     { "Width (%s)", "Larghezza (%s)" },
     { "Height (%s)", "Altezza (%s)" },
@@ -5822,6 +5842,6 @@ inline const TrEntry kItCatalogue[] = {
     { "Appearance", "Aspetto" },
     { "Interface language", "Lingua dell'interfaccia" },
 };
-inline constexpr int kItCount = 1158;
+inline constexpr int kItCount = 1162;
 
 } // namespace materializr

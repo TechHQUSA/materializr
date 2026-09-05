@@ -104,11 +104,11 @@ src/app/PushPullController.cpp:81:
 src/app/PushPullController.cpp:404:
 src/app/PushPullController.cpp:416:
 src/app/PushPullController.cpp:423:
+src/app/FaceOpControllers.cpp:157:
 src/app/FaceOpControllers.cpp:158:
-src/app/FaceOpControllers.cpp:159:
+src/app/FaceOpControllers.cpp:966:
 src/app/FaceOpControllers.cpp:967:
-src/app/FaceOpControllers.cpp:968:
-src/app/FaceOpControllers.cpp:1491:
+src/app/FaceOpControllers.cpp:1490:
 src/app/Application.cpp:782:
 src/app/Application.cpp:1032:
 src/app/Application.cpp:1806:
