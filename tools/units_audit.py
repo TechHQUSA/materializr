@@ -93,8 +93,6 @@ def classify_literal(f, code, ln=None):
     return "identifier/other"
 
 def classify_control(f, ln, code):
-    for af, frag, dim in OVERRIDE:
-        if f == af and frag in code: return dim
     c = code.lower()
 
     # Does this site run the value through a LENGTH path (converts display<->mm)?
@@ -132,9 +130,27 @@ def classify_control(f, ln, code):
     # percentages, an arc sweep and a polygon side count shipped. A length
     # widget on a quantity that is not a length is a CONTRADICTION, not a
     # classification.
-    if length_widget and named is not None:
+    # OVERRIDE supplies a dimension the line cannot express — but it must NOT
+    # exempt the row from the contradiction test. It used to run first and
+    # return, so every pinned row was permanently invisible to the one check
+    # this tool exists for: pin a site as "angle" and hand it a lengthField and
+    # the tool says "angle". That is the SAME shape as the bug being fixed — a
+    # name-based answer pre-empting the type-based one — reproduced inside the
+    # fix for it. A pin says what the quantity IS; it never says the widget is
+    # allowed to disagree.
+    pinned = None
+    for af, frag, dim in OVERRIDE:
+        if f == af and frag in code:
+            pinned = dim
+            break
+    if pinned is not None and pinned != "CONVERTED":
+        named = pinned
+
+    NON_LENGTH = ("angle", "percent", "px/ui", "seconds", "count", "ratio", "unitless")
+    if length_widget and named in NON_LENGTH:
         return "MISMATCH:" + named
 
+    if pinned is not None: return pinned
     if length_widget: return "CONVERTED"
     if named is not None: return named
     return "LENGTH?"
