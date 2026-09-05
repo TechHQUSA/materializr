@@ -275,7 +275,7 @@ void RevolveOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Lathe"));
     ImGui::Separator();
 
-    materializr::lengthField(materializr::tr("Angle (deg)"), &m_angle);
+    materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");
     if (m_angle < 0.0) m_angle = 0.0;
     if (m_angle > 360.0) m_angle = 360.0;
 

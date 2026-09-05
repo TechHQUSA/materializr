@@ -102,9 +102,9 @@ TEST(LengthEdit, SliderBoundsConvertTogether) {
 
 // 13. Drags snap in the DISPLAY unit's step, not to 0.1 mm.
 TEST(LengthEdit, DragQuantisesInDisplayUnit) {
-    { ScopedUnit s(LengthUnit::In); EXPECT_NEAR(25.4, materializr::quantiseDragMm(25.7), 1e-9) << "1.012 in -> 1.0 in"; }
-    { ScopedUnit s(LengthUnit::Mm); EXPECT_NEAR(26.0, materializr::quantiseDragMm(25.7), 1e-9) << "mm step is 1.0"; }
-    { ScopedUnit s(LengthUnit::Cm); EXPECT_NEAR(26.0, materializr::quantiseDragMm(25.7), 1e-9) << "cm step 0.1 = 1 mm"; }
+    { ScopedUnit s(LengthUnit::In); EXPECT_NEAR(25.654, materializr::quantiseDragMm(25.7), 1e-9) << "in dragStep 0.01 in = 0.254 mm"; }
+    { ScopedUnit s(LengthUnit::Mm); EXPECT_NEAR(25.7, materializr::quantiseDragMm(25.7), 1e-9) << "mm dragStep 0.1 — the snap upstream always had"; }
+    { ScopedUnit s(LengthUnit::Cm); EXPECT_NEAR(25.7, materializr::quantiseDragMm(25.7), 1e-9) << "cm dragStep 0.01 cm = 0.1 mm"; }
 }
 
 // 14. The buffer follows the model unless THIS field is being edited.

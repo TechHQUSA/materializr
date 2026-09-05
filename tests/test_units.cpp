@@ -6,10 +6,12 @@
 // existed) fails right here at compile time.
 
 #include "core/Units.h"
+#include "core/LengthEdit.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <iterator>
 #include <string>
 
 using materializr::LengthUnit;
@@ -155,4 +157,53 @@ TEST(Units, ScopedUnitRestores) {
     auto earlyReturn = [] { ScopedUnit s(LengthUnit::Cm); return; };
     earlyReturn();
     EXPECT_EQ(LengthUnit::Mm, materializr::currentUnit());
+}
+
+// --- seed/commit symmetry --------------------------------------------------
+// Every editable length field has two halves: a SEED that writes the model into
+// a text buffer, and a COMMIT that parses that buffer back. If only one of them
+// converts, opening a dialog and pressing Enter without typing anything moves
+// the value by the unit factor — silent corruption from doing nothing.
+//
+// Seven fields shipped exactly that way: commit through parseLength (converts),
+// seed through snprintf("%.2f") (does not). No test could see it, because each
+// half was correct in isolation. This pins the PAIR.
+TEST(Units, SeedThenCommitIsIdentity) {
+    const double values[] = { 0.5, 1.0, 12.7, 25.4, 100.0, 304.8, 1234.5 };
+    for (int u = 0; u < static_cast<int>(std::size(kAll)); ++u) {
+        ScopedUnit guard(kAll[u]);
+        for (double mm : values) {
+            char buf[64] = "";
+            ASSERT_TRUE(materializr::formatLengthDigits(buf, sizeof(buf), mm))
+                << "unit " << u << " value " << mm;
+            double back = 0.0;
+            ASSERT_TRUE(materializr::parseLength(buf, back))
+                << "unit " << u << " could not re-read its own seed: \"" << buf << "\"";
+            // Tolerance is what the unit's own decimals can represent — the
+            // seed rounds to that many places, so the round trip cannot beat it.
+            const double step = std::pow(10.0, -materializr::unitInfo(
+                                    materializr::currentUnit()).decimals);
+            const double tol = materializr::unitInfo(materializr::currentUnit()).toMm * step;
+            EXPECT_NEAR(mm, back, tol)
+                << "unit " << u << ": seeded \"" << buf << "\" read back as " << back
+                << " from " << mm << " mm";
+        }
+    }
+}
+
+// The dimension popup's seed is the same contract, with the diameter doubling
+// folded in. A circle's Radius constraint stores a radius and is shown as Ø.
+TEST(Units, DimensionSeedThenCommitIsIdentity) {
+    ScopedUnit guard(LengthUnit::Cm);
+    const double radiusMm = 14.85;            // the value that exposed the bug
+    char buf[64] = "";
+    ASSERT_TRUE(materializr::seedDimensionText(buf, sizeof(buf),
+                materializr::DimKind::Radius, /*isArc=*/false, radiusMm));
+    EXPECT_STREQ("2.970", buf) << "a circle seeds its DIAMETER in the display unit";
+
+    double committed = radiusMm;
+    ASSERT_TRUE(materializr::applyDimensionEdit(materializr::DimKind::Radius,
+                /*isArc=*/false, buf, committed));
+    EXPECT_NEAR(radiusMm, committed, 1e-6)
+        << "committing an untouched seed must not move the value";
 }

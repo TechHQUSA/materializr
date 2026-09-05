@@ -35,7 +35,7 @@ inline SliderShadow sliderShadow(double mm, double minMm, double maxMm) {
 // the display unit, which under inches is a non-round 0.0039 in grid. Snap in
 // the display unit's step instead, then return mm.
 inline double quantiseDragMm(double mm) {
-    const double step = unitInfo(currentUnit()).step;
+    const double step = unitInfo(currentUnit()).dragStep;
     return toMm(std::round(toDisplay(mm) / step) * step);
 }
 

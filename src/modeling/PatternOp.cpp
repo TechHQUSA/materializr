@@ -230,7 +230,7 @@ void PatternOp::renderProperties() {
         materializr::inputNumber(materializr::tr("Axis X"), &m_axisX, 0.1, 1.0, "%g");
         materializr::inputNumber(materializr::tr("Axis Y"), &m_axisY, 0.1, 1.0, "%g");
         materializr::inputNumber(materializr::tr("Axis Z"), &m_axisZ, 0.1, 1.0, "%g");
-        materializr::lengthField(materializr::tr("Total Angle"), &m_totalAngle);
+        materializr::inputNumber(materializr::tr("Total Angle"), &m_totalAngle, 1.0, 15.0, "%.1f");
     }
 
     if (!m_createdBodyIds.empty()) {

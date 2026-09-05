@@ -795,7 +795,7 @@ void Application::renderMultiTransformPanel() {
         ImGui::SliderFloat("##slider", &m_multiRotate[i], -180.0f, 180.0f, "%.1f°");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80);
-        materializr::lengthField("##input", &m_multiRotate[i]);
+        materializr::inputNumber("##input", &m_multiRotate[i], 0.0f, 0.0f, "%.3f");
         ImGui::PopID();
     }
 

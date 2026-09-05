@@ -820,7 +820,7 @@ void ExtrudeOp::renderProperties() {
         m_direction = static_cast<ExtrudeDirection>(dirIndex);
     }
 
-    materializr::lengthField(materializr::tr("Draft Angle"), &m_draftAngle);
+    materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");
 
     if (m_mode != ExtrudeMode::NewBody) {
         materializr::inputNumberInt("Target Body ID", &m_targetBodyId);

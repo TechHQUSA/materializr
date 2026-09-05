@@ -38,6 +38,11 @@ struct UnitInfo {
     const char* suffix;    // as printed after a number
     int         decimals;  // printed precision
     double      step;      // widget +/- increment, in display units
+    double      dragStep;  // drag SNAP granularity, in display units — finer than
+                           // `step`. One field served both and made the fillet
+                           // drag snap to 1 mm where it had always snapped to
+                           // 0.1 mm: a 10x coarser handle for every mm user, in
+                           // the default unit, from a units feature.
 };
 
 inline const UnitInfo& unitInfo(LengthUnit u) {
@@ -45,11 +50,11 @@ inline const UnitInfo& unitInfo(LengthUnit u) {
     // precision and increment. Decimals are chosen so each unit resolves at
     // least ~0.01 mm: 0.001 in = 0.0254 mm, 0.0001 ft = 0.03 mm.
     static const UnitInfo kTable[kLengthUnitCount] = {
-        {   1.0, "mm", 2, 1.0  },
-        {  10.0, "cm", 3, 0.1  },
-        {1000.0, "m",  4, 0.01 },
-        {  25.4, "in", 3, 0.1  },
-        { 304.8, "ft", 4, 0.1  },
+        {   1.0, "mm", 2, 1.0 , 0.1   },
+        {  10.0, "cm", 3, 0.1 , 0.01  },
+        {1000.0, "m",  4, 0.01, 0.001 },
+        {  25.4, "in", 3, 0.1 , 0.01  },
+        { 304.8, "ft", 4, 0.1 , 0.001 },
     };
     const int i = static_cast<int>(u);
     return kTable[(i < 0 || i >= kLengthUnitCount) ? 0 : i];
