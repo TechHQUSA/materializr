@@ -71,6 +71,24 @@ inline std::string trFormat(const char* fmt, const A&... a) {
     return out;
 }
 
+// Reseed a controller's own text buffer from its millimetre member, unless
+// that field is being edited RIGHT NOW. Decided before the item is submitted,
+// using the field's own id, so an external change — or a unit switch — shows
+// this frame while a half-typed value is never clobbered.
+//
+// The hand-rolled controllers treated their buffer as the source of truth and
+// re-parsed it into the model every frame. Two consequences, both silent:
+// switching units left the OLD unit's text in the buffer to be reinterpreted
+// in the new one (1.00 mm became 1.00 in = 25.4 mm), and a model value with
+// more precision than the buffer's decimals was truncated to them just by
+// opening the tool. The member is the truth; the buffer follows it.
+inline bool lengthBufferIsActive(const char* label) {
+    return ImGui::GetActiveID() == ImGui::GetID(label);
+}
+inline void reseedLengthBufferIfIdle(const char* label, char* buf, size_t n, double mm) {
+    if (!lengthBufferIsActive(label)) formatLengthDigits(buf, n, mm);
+}
+
 inline std::string fmtVec3(double xMm, double yMm, double zMm) {
     const UnitInfo& u = unitInfo(currentUnit());
     char b[96];

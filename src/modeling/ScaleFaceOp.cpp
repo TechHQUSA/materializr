@@ -321,8 +321,12 @@ std::string ScaleFaceOp::description() const {
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
-    materializr::lengthField(materializr::tr("Scale U (%)"), &m_scaleU);
-    materializr::lengthField(materializr::tr("Scale V (%)"), &m_scaleV);
+    // PERCENTAGES, not lengths — the header says "percent along the face
+    // plane's XDirection" and the labels say (%). Routed through lengthField
+    // they were converted display->mm on commit, so typing 100 under inches
+    // stored 2540%.
+    materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");
+    materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");
     materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);
     ImGui::Text(materializr::tr("Mode: %s"), m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);

@@ -131,12 +131,17 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::SetNextItemWidth(140);
     // parseFinite: non-finite input keeps the previous thickness rather
     // than feeding inf into MakeThickSolid.
+    // The member is the truth; the buffer follows it unless being typed in.
+    materializr::reseedLengthBufferIfIdle("##shellThickness", m_inputBuf, sizeof(m_inputBuf), m_thickness);
     if (ImGui::InputText("##shellThickness", m_inputBuf, sizeof(m_inputBuf),
                          ImGuiInputTextFlags_EnterReturnsTrue |
                          ImGuiInputTextFlags_CharsDecimal)) {
         (void)materializr::parseLength(m_inputBuf, m_thickness);
         requestCommit();
-    } else {
+    } else if (materializr::lengthBufferIsActive("##shellThickness")) {
+        // Only while the user is typing. Parsing an IDLE buffer wrote the
+        // buffer's rounded text back over a more precise member — a value was
+        // truncated to the display decimals just by opening the tool.
         float parsed = m_thickness;
         if (materializr::parseLength(m_inputBuf, parsed) &&
             std::abs(parsed - m_thickness) > 0.001f) {

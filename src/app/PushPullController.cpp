@@ -540,13 +540,16 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
         if (materializr::touchMode() && ImGui::IsItemClicked())
             ImGui::SetKeyboardFocusHere(-1);
     } else {
+        // The member is the truth; the buffer follows it unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##ppdist", m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
         if (ImGui::InputText("##ppdist", m_st.inputBuf, sizeof(m_st.inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             (void)materializr::parseLength(m_st.inputBuf, m_st.distance);
             m_st.distanceRaw = m_st.distance;
             updatePushPull(ctx);
             doCommit = true;
-        } else {
+        } else if (materializr::lengthBufferIsActive("##ppdist")) {
+            // Only while typing — see the shell controller for why.
             float parsed = m_st.distance;
             if (materializr::parseLength(m_st.inputBuf, parsed) &&
                 std::abs(parsed - m_st.distance) > 0.01f) {

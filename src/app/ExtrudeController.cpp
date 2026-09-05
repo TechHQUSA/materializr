@@ -404,14 +404,17 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         if (materializr::touchMode() && ImGui::IsItemClicked())
             ImGui::SetKeyboardFocusHere(-1);
     } else {
+        // The member is the truth; the buffer follows it unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##dist", m_inputBuf, sizeof(m_inputBuf), m_distance);
         if (ImGui::InputText("##dist", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             // Enter pressed — commit (parseFinite: keep last on garbage)
             (void)materializr::parseLength(m_inputBuf, m_distance);
             updateExtrude(ctx);
             doCommit = true;
-        } else {
-            // Update distance from text as user types
+        } else if (materializr::lengthBufferIsActive("##dist")) {
+            // Only while typing — an idle re-parse truncated the member to the
+            // buffer's decimals and reinterpreted stale text after a unit switch.
             float parsed = m_distance;
             if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_distance) > 0.01f && std::abs(parsed) > 0.01f) {

@@ -834,12 +834,17 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         if (materializr::touchMode() && ImGui::IsItemClicked())
             ImGui::SetKeyboardFocusHere(-1);
     } else {
+        // The member is the truth; the buffer follows it unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##val", m_inputBuf, sizeof(m_inputBuf), m_value);
         if (ImGui::InputText("##val", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
             (void)materializr::parseLength(m_inputBuf, m_value);
             update(ctx);
             doCommit = true;
-        } else {
+        } else if (materializr::lengthBufferIsActive("##val")) {
+            // Only while typing — an idle re-parse wrote the buffer's rounded
+            // text back over a more precise member, and reinterpreted the old
+            // unit's text after a unit switch.
             float parsed = m_value;
             if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_value) > 0.01f && parsed > 0.01f) {
@@ -883,12 +888,14 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
                     update(ctx);
                 }
             } else {
+                // The member is the truth; the buffer follows it unless being typed in.
+                materializr::reseedLengthBufferIfIdle("##val2", m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                 if (ImGui::InputText("##val2", m_inputBuf2, sizeof(m_inputBuf2),
                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
                     (void)materializr::parseLength(m_inputBuf2, m_value2);
                     update(ctx);
                     doCommit = true;
-                } else {
+                } else if (materializr::lengthBufferIsActive("##val2")) {
                     float p2 = m_value2;
                     if (materializr::parseLength(m_inputBuf2, p2) &&
                         std::abs(p2 - m_value2) > 0.01f && p2 > 0.01f) {

@@ -105,9 +105,9 @@ src/app/PushPullController.cpp:81:
 src/app/PushPullController.cpp:404:
 src/app/PushPullController.cpp:416:
 src/app/PushPullController.cpp:423:
-src/app/FaceOpControllers.cpp:153:
-src/app/FaceOpControllers.cpp:154:
-src/app/FaceOpControllers.cpp:1478:
+src/app/FaceOpControllers.cpp:158:
+src/app/FaceOpControllers.cpp:159:
+src/app/FaceOpControllers.cpp:1483:
 src/app/Application.cpp:782:
 src/app/Application.cpp:1032:
 src/app/Application.cpp:1806:
@@ -170,6 +170,7 @@ src/modeling/FilletOp.cpp:511:
 src/modeling/FilletOp.cpp:523:
 src/modeling/FilletOp.cpp:854:
 src/modeling/FilletOp.cpp:855:
+src/modeling/ScaleFaceOp.cpp:326:
 src/modeling/TextSketchOp.h:30:
 src/modeling/TextSketchOp.h:37:
 src/modeling/PrimitiveOp.h:23:
