@@ -151,7 +151,7 @@ public:
         ImGui::SameLine();
         ImGui::Text("%s", materializr::unitSuffix());
 
-        if (materializr::stepperRow("ppStep", &m_distance,
+        if (materializr::lengthStepperRow("ppStep", &m_distance,
                                     /*allowNegative=*/true, -50.0f, 50.0f)) {
             materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
             updatePreview(ctx);

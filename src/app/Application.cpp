@@ -3780,6 +3780,13 @@ ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
     // Walk the steps backward, reading each op's stored before-shapes. This is
     // non-destructive (unlike undo()) and never recomputes geometry.
     std::vector<ProjectHistoryStep> steps(n);
+    // Descriptions go INTO THE FILE (ProjectIO writes them as DESC), and
+    // Operation::description() now formats lengths in the display unit. Saved
+    // under inches, a step read "Extrude 2.000 in" forever after — on any
+    // machine, whatever its unit setting — because a step that reloads as a
+    // baked ReplayOp returns the stored string verbatim. Capture in
+    // millimetres so what reaches disk is canonical and portable.
+    const materializr::ScopedUnit canonicalForFile(materializr::LengthUnit::Mm);
     for (int i = n - 1; i >= 0; --i) {
         const Operation* op = m_history->getStep(i);
         if (!op) continue;

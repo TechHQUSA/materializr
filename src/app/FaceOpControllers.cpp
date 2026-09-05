@@ -153,7 +153,7 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::Text("%s", materializr::unitSuffix());
     }
 
-    if (materializr::stepperRow("shellStep", &m_thickness,
+    if (materializr::lengthStepperRow("shellStep", &m_thickness,
                                 /*allowNegative=*/false, 0.1f, 20.0f)) {
         // Snap to 0.1 mm — wall thicknesses are almost always in tenths, and a
         // free-floating 3.47 mm slider value is just noise.
@@ -582,7 +582,7 @@ void ProjectSketchController::panelBody(const IopContext& ctx,
     if (ImGui::RadioButton(materializr::tr("Emboss"), &m_mode, 1)) changed = true;
 
     ImGui::TextDisabled("%s", materializr::trFormat("Depth: %s", materializr::fmtLength(m_depth)).c_str());
-    if (materializr::stepperRow("projDepthStep", &m_depth,
+    if (materializr::lengthStepperRow("projDepthStep", &m_depth,
                                 /*allowNegative=*/false, 0.1f, 10.0f)) {
         changed = true;
     }
@@ -863,7 +863,7 @@ void ScaleFaceController::panelBody(const IopContext& ctx, bool& changed) {
     }
     ImGui::TextDisabled("%s", materializr::tr("Or drag the two arrows on the face."));
     ImGui::TextDisabled("%s", materializr::trFormat("Length: %s", materializr::fmtLength(m_len)).c_str());
-    if (materializr::stepperRow("lenStep", &m_len,
+    if (materializr::lengthStepperRow("lenStep", &m_len,
                                 /*allowNegative=*/false, 0.5f,
                                 std::max(m_lenMax, 1.0f)))
         changed = true;

@@ -96,6 +96,19 @@ inline std::string fmtLength(double mm)  { return detail::fmtQuantity(toDisplay(
 inline std::string fmtArea(double mm2)   { return detail::fmtQuantity(areaToDisplay(mm2), "\xC2\xB2"); }
 inline std::string fmtVolume(double mm3) { return detail::fmtQuantity(volToDisplay(mm3), "\xC2\xB3"); }
 
+// Force a unit for a scope and restore it on exit, including on an early
+// return or a throw. For values that must be produced in a CANONICAL unit
+// regardless of what the user is looking at — history captions are written
+// into the .mzr file, so they must not carry the unit that happened to be
+// selected at save time.
+struct ScopedUnit {
+    LengthUnit saved;
+    explicit ScopedUnit(LengthUnit u) : saved(currentUnit()) { setCurrentUnit(u); }
+    ~ScopedUnit() { setCurrentUnit(saved); }
+    ScopedUnit(const ScopedUnit&) = delete;
+    ScopedUnit& operator=(const ScopedUnit&) = delete;
+};
+
 // Parse a typed length into mm.
 //
 // Accepts ONLY a pure numeric literal with an optional trailing unit token —

@@ -567,7 +567,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     // clamp positive while ticked. 0 clears the change. Desktop only —
     // im-touch stays a single well.
     if (!imTouch &&
-        materializr::stepperRow("ppStep", &m_st.distance,
+        materializr::lengthStepperRow("ppStep", &m_st.distance,
                                 /*allowNegative=*/!m_st.symmetric,
                                 m_st.symmetric ? 0.1f : -50.0f, 50.0f)) {
         m_st.distanceRaw = m_st.distance;

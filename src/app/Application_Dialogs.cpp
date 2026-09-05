@@ -2755,7 +2755,7 @@ void Application::renderConstructionPlanePanel() {
     // in, and dragging a -100..100 slider cannot land on 12.5 mm. Same row the
     // push/pull dialog uses, so the gesture is identical across ops.
     float offsetF = static_cast<float>(m_planeOpOffset);
-    if (materializr::stepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,
+    if (materializr::lengthStepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,
                                 -1000.0f, 1000.0f)) {
         m_planeOpOffset = offsetF;
         materializr::formatLengthDigits(m_planeOpOffsetBuf, sizeof(m_planeOpOffsetBuf), m_planeOpOffset);

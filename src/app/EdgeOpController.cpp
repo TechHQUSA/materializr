@@ -860,7 +860,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     // setback; 0 shows the original body mid-preview. Confirming at 0 still
     // cancels — zero fillet = no fillet. Desktop only.
     if (!imTouch &&
-        materializr::stepperRow("edgeStep", &m_value,
+        materializr::lengthStepperRow("edgeStep", &m_value,
                                 /*allowNegative=*/false, 0.1f, 20.0f)) {
         materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
         update(ctx);
@@ -907,7 +907,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
                 ImGui::Text("%s", materializr::unitSuffix());
             }
             if (!imTouch &&
-                materializr::stepperRow("edgeStep2", &m_value2,
+                materializr::lengthStepperRow("edgeStep2", &m_value2,
                                         /*allowNegative=*/false, 0.1f, 20.0f)) {
                 materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                 update(ctx);

@@ -429,7 +429,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     // Quick-nudge stepper (replaces the slider): ±10/1/0.1, and 0 to clear
     // the extrusion mid-preview. Desktop only — im-touch stays a single well.
     if (!imTouch &&
-        materializr::stepperRow("extrudeStep", &m_distance,
+        materializr::lengthStepperRow("extrudeStep", &m_distance,
                                 /*allowNegative=*/true, -50.0f, 50.0f)) {
         materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
         updateExtrude(ctx, /*applySnap=*/false);  // steppers override the grid

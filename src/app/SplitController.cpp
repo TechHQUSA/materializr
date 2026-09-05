@@ -164,7 +164,7 @@ void SplitController::panelBody(const IopContext& ctx, bool& changed) {
     // to show for the step.
     const float lim = std::max(half * 0.98f, 0.0f);
     ImGui::TextDisabled("%s", materializr::trFormat("Offset from centre: %s", materializr::fmtLength(m_offset)).c_str());
-    if (materializr::stepperRow("splitOffset", &m_offset, /*allowNegative=*/true,
+    if (materializr::lengthStepperRow("splitOffset", &m_offset, /*allowNegative=*/true,
                                 -lim, lim))
         changed = true;
     if (ctx.cornerCommitUi &&

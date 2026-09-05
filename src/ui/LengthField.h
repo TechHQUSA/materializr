@@ -22,6 +22,7 @@
 #include "../core/Units.h"
 #include "../i18n.h"
 #include "NumField.h"
+#include "StepperRow.h"
 #include "TouchWidgets.h"
 
 #include <imgui.h>
@@ -82,6 +83,56 @@ inline std::string trFormat(const char* fmt, const A&... a) {
 // in the new one (1.00 mm became 1.00 in = 25.4 mm), and a model value with
 // more precision than the buffer's decimals was truncated to them just by
 // opening the tool. The member is the truth; the buffer follows it.
+// A stepper row whose buttons mean what their labels say. stepperRow adds its
+// literal magnitudes (10 / 1 / 0.1) straight to a millimetre member, so beside
+// a field reading "in" the button labelled +1 moved the value by 1 mm — 0.039
+// in — and the mm min/max bounds shrank the usable range by the unit factor.
+//
+// Magnitudes come from the unit table as {10*step, step, 0.1*step}, which for
+// millimetres is exactly {10, 1, 0.1} — the behaviour that was already there.
+// Bounds stay millimetres and keep stepperRow's clamp semantics (a bound only
+// stops motion TOWARDS it), so call sites pass what they always passed.
+inline bool lengthStepperRow(const char* id, float* mm, bool allowNegative,
+                             float minMm, float maxMm, float zeroMm = 0.0f) {
+    const double s = unitInfo(currentUnit()).step;
+    const double mags[3] = { 10.0 * s, s, 0.1 * s };   // DISPLAY units
+    bool changed = false;
+    bool first = true;
+    ImGui::PushID(id);
+    const float h = std::max(ImGui::GetFrameHeight(), 34.0f);
+
+    auto button = [&](const char* label) -> bool {
+        if (!first) ImGui::SameLine();
+        first = false;
+        return ImGui::Button(label, ImVec2(0.0f, h));
+    };
+    auto step = [&](const char* label, double deltaDisplay) {
+        if (button(label)) {
+            const float target = static_cast<float>(toMm(toDisplay(*mm) + deltaDisplay));
+            *mm = steppedValue(*mm, target - *mm, minMm, maxMm);
+            changed = true;
+        }
+    };
+
+    char buf[24];
+    if (allowNegative)
+        for (double m : mags) {
+            std::snprintf(buf, sizeof(buf), "-%g", m);
+            step(buf, -m);
+        }
+    {
+        char zbuf[24];
+        std::snprintf(zbuf, sizeof(zbuf), "%g", toDisplay(zeroMm));
+        if (button(zbuf)) { *mm = zeroMm; changed = true; }
+    }
+    for (int i = 2; i >= 0; --i) {
+        std::snprintf(buf, sizeof(buf), "+%g", mags[i]);
+        step(buf, mags[i]);
+    }
+    ImGui::PopID();
+    return changed;
+}
+
 inline bool lengthBufferIsActive(const char* label) {
     return ImGui::GetActiveID() == ImGui::GetID(label);
 }

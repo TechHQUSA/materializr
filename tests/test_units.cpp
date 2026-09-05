@@ -207,3 +207,35 @@ TEST(Units, DimensionSeedThenCommitIsIdentity) {
     EXPECT_NEAR(radiusMm, committed, 1e-6)
         << "committing an untouched seed must not move the value";
 }
+
+// --- canonical capture ------------------------------------------------------
+// Operation::description() formats lengths in the DISPLAY unit, and those
+// strings are written into the .mzr as DESC. Saved under inches, a step read
+// "Extrude 2.000 in" forever after, on any machine, because a step that
+// reloads as a baked ReplayOp returns the stored string verbatim. Anything
+// destined for the file is captured under a forced-mm scope.
+TEST(Units, ScopedUnitForcesAndRestores) {
+    materializr::setCurrentUnit(materializr::LengthUnit::In);
+    ASSERT_EQ("1.000 in", materializr::fmtLength(25.4)) << "precondition";
+    {
+        materializr::ScopedUnit canonical(materializr::LengthUnit::Mm);
+        EXPECT_EQ("25.40 mm", materializr::fmtLength(25.4))
+            << "inside the scope, a caption is millimetres regardless of the user's unit";
+    }
+    EXPECT_EQ("1.000 in", materializr::fmtLength(25.4))
+        << "and the user's unit is restored on scope exit";
+    materializr::setCurrentUnit(materializr::LengthUnit::Mm);
+}
+
+// The guard must survive an early return — a throw mid-capture would otherwise
+// leave the whole app formatting in millimetres.
+TEST(Units, ScopedUnitRestoresOnEarlyExit) {
+    materializr::setCurrentUnit(materializr::LengthUnit::Ft);
+    auto bail = []() {
+        materializr::ScopedUnit canonical(materializr::LengthUnit::Mm);
+        return;   // early return with the guard live
+    };
+    bail();
+    EXPECT_EQ(materializr::LengthUnit::Ft, materializr::currentUnit());
+    materializr::setCurrentUnit(materializr::LengthUnit::Mm);
+}

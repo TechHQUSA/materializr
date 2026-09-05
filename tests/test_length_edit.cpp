@@ -118,3 +118,25 @@ TEST(LengthEdit, BufferReseedsUnlessActive) {
     char tiny[3];
     EXPECT_FALSE(materializr::reseedBuffer(tiny, sizeof tiny, 25.4, false)) << "too small: refused, not truncated";
 }
+
+// The stepper magnitudes must mean what their labels say. stepperRow added its
+// literal 10/1/0.1 to a millimetre member, so beside a field reading "in" the
+// button labelled +1 moved the value by 1 mm (0.039 in) and the mm bounds
+// shrank the usable range by the unit factor.
+TEST(LengthEdit, StepperMagnitudesFollowTheUnit) {
+    // Millimetres must be UNCHANGED from the old literal magnitudes.
+    { ScopedUnit s(LengthUnit::Mm);
+      const double st = materializr::unitInfo(materializr::currentUnit()).step;
+      EXPECT_NEAR(10.0, 10.0 * st, 1e-9);
+      EXPECT_NEAR(1.0,  1.0  * st, 1e-9);
+      EXPECT_NEAR(0.1,  0.1  * st, 1e-9) << "mm keeps exactly the old 10/1/0.1"; }
+    // Inches: the middle button means one tenth of an inch, i.e. 2.54 mm.
+    { ScopedUnit s(LengthUnit::In);
+      const double st = materializr::unitInfo(materializr::currentUnit()).step;
+      EXPECT_NEAR(2.54, materializr::toMm(st) , 1e-9)
+          << "a +0.1 in button must move the model by 2.54 mm, not 0.1 mm"; }
+    // Centimetres land back on the millimetre grid.
+    { ScopedUnit s(LengthUnit::Cm);
+      const double st = materializr::unitInfo(materializr::currentUnit()).step;
+      EXPECT_NEAR(1.0, materializr::toMm(st), 1e-9); }
+}
