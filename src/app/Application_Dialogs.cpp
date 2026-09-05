@@ -949,8 +949,15 @@ void Application::renderScalePanel() {
         ImGuiWindowFlags_AlwaysAutoResize);
 
     const bool mm = (m_scaleUnitMode == ScaleUnitMode::Millimeter);
-    ImGui::TextColored(materializr::accentText(),
-                       mm ? "Scale (target %s)" : "Scale (%% of current)");
+    // Two calls, not one format string with a conditional: TextColored is
+    // printf-style, and the mm branch takes an argument the other does not.
+    // Sharing one call left "%s" with nothing to consume it — undefined
+    // behaviour, and the compiler said so (-Wformat-insufficient-args).
+    if (mm)
+        ImGui::TextColored(materializr::accentText(), "Scale (target %s)",
+                           materializr::unitSuffix());
+    else
+        ImGui::TextColored(materializr::accentText(), "Scale (%% of current)");
     ImGui::Separator();
 
     // Unit toggle. mm disabled when multi-body so we don't mislead — there's
