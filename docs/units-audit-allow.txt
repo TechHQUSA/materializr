@@ -6,7 +6,8 @@ src/ui/StepperRow.h:18:
 src/ui/HistoryPanel.cpp:169:
 src/ui/ItemsPanel.h:72:
 src/ui/PropertiesPanel.cpp:341:
-src/ui/PropertiesPanel.cpp:900:
+src/ui/PropertiesPanel.cpp:866:
+src/ui/PropertiesPanel.cpp:906:
 src/viewport/SketchRenderer.cpp:755:
 src/viewport/Camera.cpp:215:
 src/viewport/Camera.cpp:231:
@@ -77,8 +78,8 @@ src/app/Application_Viewport.cpp:4717:
 src/app/Application_Viewport.cpp:5175:
 src/app/Application_Viewport.cpp:5612:
 src/app/Application_Viewport.cpp:6140:
-src/app/Application_Viewport.cpp:7311:
-src/app/Application_Viewport.cpp:7346:
+src/app/Application_Viewport.cpp:7316:
+src/app/Application_Viewport.cpp:7350:
 src/app/SplitController.h:49:
 src/app/Application.h:615:
 src/app/Application.h:884:

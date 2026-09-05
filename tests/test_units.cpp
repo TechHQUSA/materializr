@@ -239,3 +239,28 @@ TEST(Units, ScopedUnitRestoresOnEarlyExit) {
     EXPECT_EQ(materializr::LengthUnit::Ft, materializr::currentUnit());
     materializr::setCurrentUnit(materializr::LengthUnit::Mm);
 }
+
+// The unit table picks decimals so every unit resolves to about 0.01 mm.
+// A hardcoded "%.3f" under metres or feet (which ask for 4) snapped the stored
+// value to a 1 mm grid on every commit.
+TEST(Units, LengthFormatFollowsTheTable) {
+    struct { materializr::LengthUnit u; const char* fmt; } cases[] = {
+        { materializr::LengthUnit::Mm, "%.2f" },
+        { materializr::LengthUnit::Cm, "%.3f" },
+        { materializr::LengthUnit::M,  "%.4f" },
+        { materializr::LengthUnit::In, "%.3f" },
+        { materializr::LengthUnit::Ft, "%.4f" },
+    };
+    for (const auto& c : cases) {
+        materializr::ScopedUnit s(c.u);
+        EXPECT_STREQ(c.fmt, materializr::lengthFormat());
+    }
+    // And the precision it buys: metres must still resolve a 0.1 mm edit.
+    materializr::ScopedUnit s(materializr::LengthUnit::M);
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), materializr::lengthFormat(),
+                  materializr::toDisplay(1234.5));
+    double back = 0.0;
+    ASSERT_TRUE(materializr::parseLength(buf, back));
+    EXPECT_NEAR(1234.5, back, 0.05) << "4 decimals of metres keeps 0.1 mm";
+}

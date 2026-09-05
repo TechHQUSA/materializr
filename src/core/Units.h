@@ -96,6 +96,16 @@ inline std::string fmtLength(double mm)  { return detail::fmtQuantity(toDisplay(
 inline std::string fmtArea(double mm2)   { return detail::fmtQuantity(areaToDisplay(mm2), "\xC2\xB2"); }
 inline std::string fmtVolume(double mm3) { return detail::fmtQuantity(volToDisplay(mm3), "\xC2\xB3"); }
 
+// printf format for a length in the current display unit, e.g. "%.3f". The
+// unit table picks decimals so every unit resolves to about 0.01 mm; a
+// hardcoded "%.3f" under metres or feet (4 decimals) instead snaps the value
+// to a 1 mm grid on every commit.
+inline const char* lengthFormat() {
+    static thread_local char f[8];
+    std::snprintf(f, sizeof f, "%%.%df", unitInfo(currentUnit()).decimals);
+    return f;
+}
+
 // Force a unit for a scope and restore it on exit, including on an early
 // return or a throw. For values that must be produced in a CANONICAL unit
 // regardless of what the user is looking at — history captions are written

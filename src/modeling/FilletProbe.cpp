@@ -145,7 +145,6 @@ bool probe(const TopoDS_Shape& shape, const std::vector<TopoDS_Edge>& edges,
         return false;
     }
 
-    g_runs.fetch_add(1);   // a real build is about to start
     auto slot = std::make_shared<Slot>();
     try {
     std::thread([slot, copy, copyEdges, radius]() {
@@ -168,6 +167,12 @@ bool probe(const TopoDS_Shape& shape, const std::vector<TopoDS_Edge>& edges,
         if (late) g_abandoned.fetch_sub(1);
         slot->cv.notify_all();
     }).detach();
+    // Counted only once the worker is actually running. It used to be
+    // incremented before the thread was constructed, so a thread-exhaustion
+    // failure below still counted as a run — and probeRunCount() is documented
+    // as "probes that have actually run a build" and is the sole assertion in
+    // the memoisation test.
+    g_runs.fetch_add(1);
     } catch (const std::system_error&) {
         // Out of threads — every previously abandoned probe still holds one.
         // Refuse rather than propagate: the caller's only guard wraps Build().

@@ -266,15 +266,15 @@ void ConstructionPlaneOp::renderProperties() {
             double coords3[3] = { m_p3.X(), m_p3.Y(), m_p3.Z() };
 
             { double disp[3] = { materializr::toDisplay(coords1[0]), materializr::toDisplay(coords1[1]), materializr::toDisplay(coords1[2]) };
-              if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {
+              if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat())) {
                 m_p1.SetCoord(materializr::toMm(disp[0]), materializr::toMm(disp[1]), materializr::toMm(disp[2]));
               } }
             { double disp[3] = { materializr::toDisplay(coords2[0]), materializr::toDisplay(coords2[1]), materializr::toDisplay(coords2[2]) };
-              if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {
+              if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat())) {
                 m_p2.SetCoord(materializr::toMm(disp[0]), materializr::toMm(disp[1]), materializr::toMm(disp[2]));
               } }
             { double disp[3] = { materializr::toDisplay(coords3[0]), materializr::toDisplay(coords3[1]), materializr::toDisplay(coords3[2]) };
-              if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {
+              if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat())) {
                 m_p3.SetCoord(materializr::toMm(disp[0]), materializr::toMm(disp[1]), materializr::toMm(disp[2]));
               } }
             break;
@@ -283,7 +283,7 @@ void ConstructionPlaneOp::renderProperties() {
         case PlaneCreationType::ParallelToFace: {
             double coords[3] = { m_p1.X(), m_p1.Y(), m_p1.Z() };
             { double disp[3] = { materializr::toDisplay(coords[0]), materializr::toDisplay(coords[1]), materializr::toDisplay(coords[2]) };
-              if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {
+              if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat())) {
                 m_p1.SetCoord(materializr::toMm(disp[0]), materializr::toMm(disp[1]), materializr::toMm(disp[2]));
               } }
             ImGui::TextWrapped("%s", materializr::tr("Creates a plane parallel to the selected face, passing through the specified point."));

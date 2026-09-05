@@ -861,8 +861,14 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
               : c.type == ConstraintType::DistancePointLine ? "Dist \xE2\x8A\xA5"
               : c.type == ConstraintType::CircleGap ? "Gap"
                                                    : "Angle";
+            // Decimals from the unit table, not a hardcoded 3 — under metres
+            // or feet the table asks for 4, and "%.3f" quantised the stored
+            // value to a 1 mm grid on every commit. An Angle is degrees and
+            // keeps its own fixed precision.
+            const char* shownFmt =
+                (c.type == ConstraintType::Angle) ? "%.3f" : materializr::lengthFormat();
             if (!edit.focused) {
-                std::snprintf(edit.buf, sizeof(edit.buf), "%.3f", shown);
+                std::snprintf(edit.buf, sizeof(edit.buf), shownFmt, shown);
             }
 
             ImGui::TextUnformatted(label);
@@ -877,7 +883,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             (void)materializr::parseFinite(edit.buf, padVal);
             bool justActivated   = false;
             bool justDeactivated =
-                materializr::inputNumber("##val", &padVal, 0.0, 0.0, "%.3f",
+                materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,
                                          ImGuiInputTextFlags_EnterReturnsTrue,
                                          &justActivated);
             // Keep the buffer authoritative — the commit path below parses it.

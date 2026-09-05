@@ -2001,7 +2001,7 @@ void Application::renderViewport() {
                             (void)materializr::parseFinite(m_sketchShapeDimBuf,
                                                            diaPadV);
                             if (touchui::numberField("##bubbleDia", nullptr,
-                                                     &diaPadV, "%.2f",
+                                                     &diaPadV, materializr::lengthFormat(),
                                                      nullptr, hint)) {
                                 if (diaPadV > 0.0)
                                     std::snprintf(m_sketchShapeDimBuf,
@@ -7294,8 +7294,13 @@ void Application::renderViewport() {
                     // keyboard. Enter (pad or hardware) and Apply both commit;
                     // Apply stays for the finger route, since the pad's own
                     // Enter is the only way digits reach us on a tablet.
+                    // The same predicate the commit uses: this field holds a
+                    // length, an arc's sweep in DEGREES, or a polygon's SIDE
+                    // COUNT. Only a length takes the unit's decimals.
+                    const bool dimIsLen = m_sketchTool->dimensionValueIsLength();
                     const bool entered = materializr::inputNumber(
-                        "##sketchDimT", &m_sketchDimValue, 0.0f, 0.0f, "%.2f",
+                        "##sketchDimT", &m_sketchDimValue, 0.0f, 0.0f,
+                        dimIsLen ? materializr::lengthFormat() : "%.2f",
                         ImGuiInputTextFlags_EnterReturnsTrue);
                     ImGui::PopStyleVar();
                     ImGui::Spacing();
@@ -7310,7 +7315,6 @@ void Application::renderViewport() {
                             ? m_sketchTool->arcMinRadius() : 0.0f;
                     // The pad edits in the display unit; the floor is mm.
                     // Same rule as the desktop path: only convert a LENGTH.
-                    const bool dimIsLen = m_sketchTool->dimensionValueIsLength();
                     auto dimToModel = [&](double shown) {
                         return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;
                     };

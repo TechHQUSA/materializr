@@ -98,10 +98,10 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/app/Application_Viewport.cpp:5960 | `(void)materializr::parseFinite(m_sketchGizmoRotateBuf, deg);` |
 | CONVERTED | src/app/Application_Viewport.cpp:7262 | `materializr::lengthField("##dimW", &m_sketchShapeDimW);` |
 | CONVERTED | src/app/Application_Viewport.cpp:7265 | `materializr::lengthField("##dimH", &m_sketchShapeDimH);` |
-| CONVERTED | src/app/Application_Viewport.cpp:7297 | `const bool entered = materializr::inputNumber(` |
-| CONVERTED | src/app/Application_Viewport.cpp:7315 | `return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;` |
-| CONVERTED | src/app/Application_Viewport.cpp:7350 | `const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)` |
-| angle | src/app/Application_Viewport.cpp:7351 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
+| CONVERTED | src/app/Application_Viewport.cpp:7301 | `const bool entered = materializr::inputNumber(` |
+| CONVERTED | src/app/Application_Viewport.cpp:7319 | `return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;` |
+| CONVERTED | src/app/Application_Viewport.cpp:7354 | `const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)` |
+| angle | src/app/Application_Viewport.cpp:7355 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
 | CONVERTED | src/app/EdgeOpController.cpp:828 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
 | CONVERTED | src/app/EdgeOpController.cpp:841 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
 | CONVERTED | src/app/EdgeOpController.cpp:849 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
@@ -162,10 +162,10 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/ChamferOp.cpp:800 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
 | CONVERTED | src/modeling/ChamferOp.cpp:805 | `materializr::lengthField(materializr::tr("Distance 2"), &m_distance2);` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:259 | `materializr::lengthField(materializr::tr("Offset Distance"), &m_offset);` |
-| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:269 | `if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
-| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:273 | `if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
-| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:277 | `if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
-| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:286 | `if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, disp, 3, nullptr, nullptr, "%.3f")) {` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:269 | `if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat(` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:273 | `if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat(` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:277 | `if (ImGui::InputScalarN("Point 3", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat(` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:286 | `if (ImGui::InputScalarN("Through Point", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthF` |
 | CONVERTED | src/modeling/CopyOp.cpp:79 | `materializr::lengthField("X", &m_dx);` |
 | CONVERTED | src/modeling/CopyOp.cpp:80 | `materializr::lengthField("Y", &m_dy);` |
 | CONVERTED | src/modeling/CopyOp.cpp:81 | `materializr::lengthField("Z", &m_dz);` |
@@ -240,17 +240,17 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/ui/PropertiesPanel.cpp:697 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:699 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:714 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:877 | `(void)materializr::parseFinite(edit.buf, padVal);` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:880 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, "%.3f",` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:899 | `(void)materializr::parseFinite(edit.buf, typed);` |
-| CONVERTED | src/ui/SectionPanel.cpp:51 | `if (materializr::lengthSlider(materializr::tr("Offset"), &m_offset, -100.0f, 100.0f)) {` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:883 | `(void)materializr::parseFinite(edit.buf, padVal);` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:886 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:905 | `(void)materializr::parseFinite(edit.buf, typed);` |
+| CONVERTED | src/ui/SectionPanel.cpp:54 | `if (materializr::lengthSlider(` |
 | seconds | src/ui/VersionPanel.cpp:58 | `if (ImGui::SliderInt(materializr::tr("Interval (min)"), &intervalMinutes, 1, 30)) {` |
 
 ## `mm` literals by class
 
 - CONVERTED: 1
 - allowed-by-hand: 13
-- comment: 221
+- comment: 222
 - diagnostic: 9
 - identifier/other: 9
 
@@ -337,8 +337,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application_Viewport.cpp:5175 | `// ~ 0.85 mm at 240 dpi is unhittable). Still clamped` |
 | comment | src/app/Application_Viewport.cpp:5612 | `// 0.5 mm line nudge → 1 mm mirror shift on a 1 mm grid).` |
 | comment | src/app/Application_Viewport.cpp:6140 | `// user lands within 0.4 mm of the previous click —` |
-| comment | src/app/Application_Viewport.cpp:7311 | `// The pad edits in the display unit; the floor is mm.` |
-| comment | src/app/Application_Viewport.cpp:7346 | `// Converting those display->mm made a typed 180 deg arrive` |
+| comment | src/app/Application_Viewport.cpp:7316 | `// The pad edits in the display unit; the floor is mm.` |
+| comment | src/app/Application_Viewport.cpp:7350 | `// Converting those display->mm made a typed 180 deg arrive` |
 | diagnostic | src/app/EdgeOpController.cpp:556 | `std::fprintf(stdout, "%s edited to %.1f mm\n",` |
 | diagnostic | src/app/EdgeOpController.cpp:565 | `std::fprintf(stdout, "%s %.1f mm committed\n",` |
 | comment | src/app/EdgeOpController.cpp:602 | `// visible arrow length (1 mm single / 0.6 mm per chamfer arrow) keeps the hit` |
@@ -493,7 +493,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/ui/HistoryPanel.cpp:169 | `// dimension steps a useful caption ("Add Distance 25 mm") instead` |
 | comment | src/ui/ItemsPanel.h:72 | `// menu. Routes to Application::exportSketchAsSvg (1:1-mm polyline SVG for` |
 | comment | src/ui/PropertiesPanel.cpp:341 | `// % / mm toggle and shows live dimensions in mm mode.` |
-| comment | src/ui/PropertiesPanel.cpp:900 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
+| comment | src/ui/PropertiesPanel.cpp:866 | `// value to a 1 mm grid on every commit. An Angle is degrees and` |
+| comment | src/ui/PropertiesPanel.cpp:906 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
 | comment | src/ui/PropertiesPanel.h:130 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
 | comment | src/ui/StepperRow.h:18 | `// value, and pulling an 80 mm extrude down to 50 because you pressed +1 loses` |
 | allowed-by-hand | src/ui/Toolbar.cpp:526 | `tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens` |
