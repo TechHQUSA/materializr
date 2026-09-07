@@ -23,8 +23,12 @@ SKIP_LIT  = ("src/core/Units.h", "src/core/LengthEdit.h", "src/ui/LengthField.h"
 
 # (file, fragment-of-line) -> dimension, for rows the line alone does not reveal.
 OVERRIDE = [
+    # Patch's Advanced panel. Three controls the line cannot classify:
+    ("src/app/Application_Dialogs.cpp", "patchDetailStep", "count"),      # nbPtsOnCur: sample points per boundary curve
+    ("src/app/Application_Dialogs.cpp", "patchTolCurv",    "unitless"),   # G2: RELATIVE curvature error
+    ("src/app/Application_Dialogs.cpp", "patchTol3d",      "absolute-mm"),# G0 gap tolerance: a length, deliberately shown in mm
     # Sites whose quantity cannot be read off the line itself. Pinned by hand
-    # so the tool reports them as settled rather than guessing — every row it
+    # so the tool reports them as settled rather than guessing - every row it
     # cannot classify should be a decision someone made, not a silence.
     ("src/app/FaceOpControllers.cpp", "sclAStep", "percent"),
     ("src/app/FaceOpControllers.cpp", "sclBStep", "percent"),
@@ -67,7 +71,7 @@ def before_comment(code):
     i = code.find("//"); return code if i < 0 else code[:i]
 
 # Literals that legitimately keep the word "mm" (checked by hand). Keyed by a
-# fragment of the line, not its number — numbers drift under every edit above.
+# fragment of the line, not its number - numbers drift under every edit above.
 LITERAL_ALLOW = [
     ("src/app/Application_Dialogs.cpp", "verify print scale",   "print scale bar: a physical 50 mm reference on paper"),
     ("src/app/Application_Dialogs.cpp", "a 50 mm scale bar",    "help text describing that scale bar"),
@@ -80,6 +84,16 @@ LITERAL_ALLOW = [
     ("src/modeling/ShellOp.cpp",        "(thickness %.3f mm)",  "stderr diagnostic"),
     ("src/modeling/ShellOp.cpp",        "failed at thickness",  "stderr diagnostic"),
     ("src/plugins/SvgImportPlugin.cpp", "on the ground plane",  "stderr diagnostic (continuation line)"),
+    # Numerical solver tolerances and fit residuals, NOT model dimensions.
+    # Their useful range is roughly 1e-5..1e-1 mm, and the unit table's FIXED
+    # decimals cannot show that in ft (4 dp) or m (4 dp) - every one of them
+    # would read "0.0000" and tol3d would become uneditable. They stay in
+    # millimetres as an absolute, and say so on screen. Revisit if fmtLength
+    # ever becomes significant-figure aware rather than fixed-decimal.
+    ("src/app/Application_Dialogs.cpp", "Gap tolerance (mm)",   "G0 solver tolerance, 1e-5..1e-1 mm: unrepresentable in ft/m at fixed decimals"),
+    ("src/app/Application_Dialogs.cpp", "Gap %.4f mm",          "achieved G0 fit residual, same range as the tolerance that drove it"),
+    ("src/modeling/PatchOp.cpp",        "Fit: gap %.4f mm",     "achieved G0 fit residual"),
+    ("src/modeling/SewOp.cpp",          "Joined at %.4f mm.",   "the sewing tolerance actually used, a solver quantity"),
 ]
 
 def classify_literal(f, code, ln=None):
@@ -126,16 +140,16 @@ def classify_control(f, ln, code):
 
     # THE FINDING THIS TOOL EXISTS FOR. The name checks used to run FIRST and
     # return, so `lengthField(tr("Angle (deg)"), &m_angle)` was filed as "angle"
-    # and passed clean — which is exactly how five degree fields, two
+    # and passed clean - which is exactly how five degree fields, two
     # percentages, an arc sweep and a polygon side count shipped. A length
     # widget on a quantity that is not a length is a CONTRADICTION, not a
     # classification.
-    # OVERRIDE supplies a dimension the line cannot express — but it must NOT
+    # OVERRIDE supplies a dimension the line cannot express - but it must NOT
     # exempt the row from the contradiction test. It used to run first and
     # return, so every pinned row was permanently invisible to the one check
     # this tool exists for: pin a site as "angle" and hand it a lengthField and
-    # the tool says "angle". That is the SAME shape as the bug being fixed — a
-    # name-based answer pre-empting the type-based one — reproduced inside the
+    # the tool says "angle". That is the SAME shape as the bug being fixed - a
+    # name-based answer pre-empting the type-based one - reproduced inside the
     # fix for it. A pin says what the quantity IS; it never says the widget is
     # allowed to disagree.
     pinned = None
@@ -146,12 +160,23 @@ def classify_control(f, ln, code):
     if pinned is not None and pinned != "CONVERTED":
         named = pinned
 
+    # "absolute-mm" is deliberately NOT here. It marks a genuine LENGTH that is
+    # presented in millimetres on purpose (a solver tolerance the unit table's
+    # fixed decimals cannot render in ft/m). Converting one later would be a
+    # legitimate decision, not the contradiction this list exists to catch, so
+    # a length widget on such a site must not be reported as a MISMATCH.
     NON_LENGTH = ("angle", "percent", "px/ui", "seconds", "count", "ratio", "unitless")
     if length_widget and named in NON_LENGTH:
         return "MISMATCH:" + named
 
-    if pinned is not None: return pinned
+    # The WIDGET outranks the pin. A pin is a claim about what the quantity is;
+    # a length widget is evidence of what the code actually does with it. If a
+    # pinned site later gains one, the honest answer is CONVERTED, not the stale
+    # pin - otherwise pinning a site as absolute-mm would hide its conversion
+    # forever, which is the same "a claim pre-empts the evidence" failure the
+    # contradiction test above exists to prevent.
     if length_widget: return "CONVERTED"
+    if pinned is not None: return pinned
     if named is not None: return named
     return "LENGTH?"
 
