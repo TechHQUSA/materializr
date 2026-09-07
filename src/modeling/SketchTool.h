@@ -294,7 +294,7 @@ public:
     // 0 disables grid snap entirely.
     // POINTING precision, not grid coarseness. Trim, pick, inference and hover
     // distances track the user's chosen step so a fine grid gives fine picking
-    // — but they must not grow without bound when that step is coarse. With
+    // - but they must not grow without bound when that step is coarse. With
     // the step following the display unit, a 1 ft grid put the trim threshold
     // at 152 mm: a click on empty space could cut geometry 15 cm away, with
     // grid snapping OFF. The cap is the largest step the presets ever offered
@@ -302,7 +302,7 @@ public:
     //
     // It is m_toleranceStep that is capped here, not the snap lattice. Since
     // the lattice started following the zoom, capping THAT would have pinned
-    // the pick radius at 10 mm the moment a 1 mm grid coarsened — see tolStep.
+    // the pick radius at 10 mm the moment a 1 mm grid coarsened - see tolStep.
     static constexpr float kToleranceStepCapMm = 10.0f;
     // How many SCREEN PIXELS a click may be from an existing point and still
     // WELD onto it. Deliberately tighter than the pointing radius below:
@@ -341,14 +341,14 @@ public:
         // ZOOM (it is the user's base scaled by decades), and a tolerance that
         // followed it with it would grow every time the view pulled back: a
         // 1 mm base coarsening to 10 mm pins this at the cap below, turning a
-        // ~1.5 mm pick radius into 10 mm — an 80-pixel grab — for no reason
+        // ~1.5 mm pick radius into 10 mm - an 80-pixel grab - for no reason
         // the user expressed. The base is the precision they actually chose.
         const float fromGrid   = std::min(m_toleranceStep, kToleranceStepCapMm);
         const float fromScreen = kPointingRadiusPx * m_mmPerPixel;
         return std::max(fromGrid, fromScreen);
     }
 
-    // The lattice points snap to — scaled by zoom, so it changes as you zoom.
+    // The lattice points snap to - scaled by zoom, so it changes as you zoom.
     // Also moves the tolerance step, so a caller that only ever sets this one
     // behaves exactly as this class did before the two were separated. The
     // viewport calls setToleranceStep straight after, to pin tolerances to the
@@ -577,7 +577,7 @@ private:
     // clicked. Generated geometry must use findExactCoincidentPoint.
     int findCoincidentPoint(glm::vec2 pos, int excludeId = -1) const;
 
-    // Coincidence for GENERATED geometry — a mirrored vertex, an offset
+    // Coincidence for GENERATED geometry - a mirrored vertex, an offset
     // endpoint, a derived circle centre. Fixed model-space radius, so the same
     // operation on the same sketch produces the same topology no matter where
     // the camera is. A screen radius here would make the model a function of

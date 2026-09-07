@@ -495,7 +495,7 @@ void Application::renderViewport() {
                 // draws lines every effective step FROM it and SketchTool::snap
                 // rounds to multiples of the effective step from the PLANE
                 // origin. Those two agree only when the anchor is itself a
-                // multiple of the effective step — so as soon as zoom coarsened
+                // multiple of the effective step - so as soon as zoom coarsened
                 // the step (base 1 mm -> 10 mm) the drawn grid sat up to a full
                 // cell off the lattice the cursor actually lands on. That is
                 // "I can't draw a line on the snap grid" again, and it is the
@@ -1081,7 +1081,7 @@ void Application::renderViewport() {
             // grid itself is the infinite world grid above (now aligned to the
             // sketch plane), so face sketches no longer need a separate per-face
             // grid — drawing across to neighbouring faces just works.
-            // Snapping takes the EFFECTIVE step — the cursor must land on the
+            // Snapping takes the EFFECTIVE step - the cursor must land on the
             // lines actually drawn. Pointing tolerances keep taking the BASE:
             // they are a precision preference, not a lattice, and letting zoom
             // coarsen them pinned the trim/pick radius at its 10 mm cap the
@@ -1092,7 +1092,7 @@ void Application::renderViewport() {
             // only other writer was the classic-toolbar branch, which modern
             // and im-touch never run. So in those layouts the badge said
             // "Snap off" while SketchTool sat on its own default of true and
-            // kept snapping — the setting was honoured on screen and ignored
+            // kept snapping - the setting was honoured on screen and ignored
             // in the geometry, from launch, with no way to correct it.
             m_sketchTool->setSnapToGridEnabled(m_snapToGrid);
             // Sketch millimetres per screen pixel, measured by unprojecting two

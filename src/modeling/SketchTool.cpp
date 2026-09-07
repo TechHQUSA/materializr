@@ -2194,11 +2194,11 @@ int SketchTool::findCoincidentPoint(glm::vec2 pos, int excludeId) const {
     if (!m_sketch) return -1;
 
     // A weld radius is a SCREEN distance. As a fixed 0.3 mm it shrank with the
-    // zoom — 15 px in a millimetre view but a fifth of a pixel in a metre one —
+    // zoom - 15 px in a millimetre view but a fifth of a pixel in a metre one -
     // and welding is the ONLY thing that closes a loop into an extrudable
     // region. Grid snap hid that for years: with a stable lattice the closing
     // click lands EXACTLY on the first vertex, so a radius of nearly zero still
-    // welded. Change the lattice underfoot and it stops — switching feet -> mm
+    // welded. Change the lattice underfoot and it stops - switching feet -> mm
     // makes the new lattice incommensurable with a vertex placed on the old one
     // (304.8-based vs 1-based), the closing click snaps elsewhere, and 0.3 mm
     // cannot bridge the gap: "I can't close out a sketch to extrude."
@@ -2381,7 +2381,7 @@ void SketchTool::handleLineTool(glm::vec2 pos) {
         const SketchPoint* anchorPt = m_sketch->getPoint(m_lastPointId);
         if (anchorPt && glm::length(pos - anchorPt->pos) < 1e-4f)
             return;
-        // Reuse an existing vertex when the click lands on one — this is what
+        // Reuse an existing vertex when the click lands on one - this is what
         // CLOSES a loop, by landing the last click on the chain's start.
         //
         // It used to be a hand-rolled scan at 1e-4 mm, which is exact equality
@@ -2480,7 +2480,7 @@ void SketchTool::handleCircleTool(glm::vec2 pos, bool exact) {
             //
             // Centre mode: the centre IS the user's first click, so the
             // interactive aim radius is right. TwoPoint mode: the centre is
-            // the DERIVED midpoint of two clicks — nothing was aimed at it, and
+            // the DERIVED midpoint of two clicks - nothing was aimed at it, and
             // welding it to a neighbour up to 6 px away would move the centre
             // while `radius` stays measured from the original midpoint, so the
             // rim would no longer pass through the clicks. Same rule the arc

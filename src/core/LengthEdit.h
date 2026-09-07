@@ -18,8 +18,8 @@ namespace materializr {
 
 // M_PI is NOT standard C++. MSVC defines it only when <cmath> is reached with
 // _USE_MATH_DEFINES, and this header cannot assume that: the app target sets
-// it (CMakeLists.txt, MSVC branch) but materializr_core — which the tests and
-// every modeling Op build against — does not. The other M_PI users in core get
+// it (CMakeLists.txt, MSVC branch) but materializr_core - which the tests and
+// every modeling Op build against - does not. The other M_PI users in core get
 // away with it because they include OpenCASCADE headers first, and OCCT
 // defines the macro itself; this header deliberately includes no OCCT, so in a
 // translation unit where it lands first there is nothing to supply it. Windows

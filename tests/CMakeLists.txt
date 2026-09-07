@@ -829,7 +829,7 @@ if(DEFINED MZR_OCCT_PREFIX)
     endif()
 endif()
 
-# test_grid_scale — the sketch grid's drawn lattice vs its snap lattice.
+# test_grid_scale - the sketch grid's drawn lattice vs its snap lattice.
 # GridScale.h is header-only and deliberately GL-free, so this links against
 # neither the viewport nor ImGui.
 add_executable(test_grid_scale test_grid_scale.cpp)

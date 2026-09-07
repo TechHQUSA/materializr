@@ -179,7 +179,7 @@ TEST(GridSnap, ContactWithAnEdgeStaysOnTheEdge) {
 // ─── 2. the drawn grid is the same lattice ───────────────────────────────────
 // The grid the user SEES is laid from the anchor, every effective step. The
 // cursor snaps to multiples of the effective step from the PLANE ORIGIN. Those
-// coincide only while the anchor is itself a multiple of the EFFECTIVE step —
+// coincide only while the anchor is itself a multiple of the EFFECTIVE step -
 // so once zoom scales the step, re-anchoring on the base is not enough.
 //
 // This is the case the test above structurally cannot reach: it uses one step
@@ -203,7 +203,7 @@ TEST(GridSnap, AnchorFollowsTheZoomScaledStepNotTheBase) {
                            offLattice(onBase.second, effective)), 1e-6)
             << "a base-built anchor is expected to sit OFF the effective "
                "lattice at effective=" << effective
-            << " — if this ever passes, the case being guarded is gone";
+            << " - if this ever passes, the case being guarded is gone";
 
         // What it does now: anchor on the effective step, so every drawn line
         // lands exactly where the cursor can.
@@ -214,8 +214,8 @@ TEST(GridSnap, AnchorFollowsTheZoomScaledStepNotTheBase) {
             << "effective=" << effective << " v=" << onEff.second;
     }
 
-    // The zoomed-IN direction was always safe — a finer effective step divides
-    // the base — but it is asserted so the claim is checked, not assumed.
+    // The zoomed-IN direction was always safe - a finer effective step divides
+    // the base - but it is asserted so the claim is checked, not assumed.
     const auto fine = uvOf(Sketch::latticeAnchor(pln, lookAt, base));
     EXPECT_LE(offLattice(fine.first,  0.1), 1e-6);
     EXPECT_LE(offLattice(fine.second, 0.1), 1e-6);
@@ -336,7 +336,7 @@ TEST(GridSnap, ToleranceStepIsCappedWhileTheLatticeIsNot) {
 // MODEL space, so it shrinks on screen as you zoom out: at a metre-scale view
 // it is a fraction of a pixel and no human click can hit it.
 //
-// It stayed hidden because grid snap papered over it — with a stable lattice
+// It stayed hidden because grid snap papered over it - with a stable lattice
 // the closing click lands EXACTLY on the first vertex (distance 0) and welds.
 // Change the lattice underfoot and that stops: switching feet -> mm makes the
 // new lattice incommensurable with where the first vertex sits (it was placed
@@ -352,7 +352,7 @@ TEST(GridSnap, WeldRadiusIsAScreenDistanceNotAFixedModelDistance) {
     const Case cases[] = {
         {"millimetre view",  0.02f},   // 0.3 mm = 15 px: the old radius is fine here
         {"centimetre view",  0.2f},    // 0.3 mm = 1.5 px
-        {"metre view",       1.5f},    // 0.3 mm = 0.2 px — unhittable
+        {"metre view",       1.5f},    // 0.3 mm = 0.2 px - unhittable
         {"feet-scale view",  3.0f},    // 0.3 mm = 0.1 px
     };
     for (const Case& cs : cases) {
@@ -364,7 +364,7 @@ TEST(GridSnap, WeldRadiusIsAScreenDistanceNotAFixedModelDistance) {
         const glm::vec2 first(10.0f, 10.0f);
         const int firstId = sk.addPoint(first);
 
-        // A click three pixels away — visually on top of the point.
+        // A click three pixels away - visually on top of the point.
         const glm::vec2 click = first + glm::vec2(3.0f * cs.mmPerPx, 0.0f);
         EXPECT_EQ(firstId, t.coincidentPoint(click, -1))
             << cs.name << ": a click 3 px from a point must weld to it "
@@ -391,7 +391,7 @@ TEST(GridSnap, WeldRadiusStillRefusesPointsThatAreFarApartOnScreen) {
 }
 
 // The screen term is an AIM radius, and aim is interactive. Generated geometry
-// — a mirrored vertex, an offset endpoint, a derived circle centre — must weld
+// - a mirrored vertex, an offset endpoint, a derived circle centre - must weld
 // by a fixed model distance, or the same operation on the same sketch produces
 // different TOPOLOGY depending only on where the camera happens to be. That is
 // a correctness bug, not a UX one: the model becomes a function of the view.
@@ -436,9 +436,9 @@ TEST(GridSnap, InteractiveWeldRadiusIsCapped) {
     // Below the cap the screen term still governs: at 1.0 mm/px, 6 px = 6 mm.
     t.setPixelScale(1.0f);
     EXPECT_GE(t.coincidentPoint(p + glm::vec2(5.0f, 0.0f), -1), 0)
-        << "5 mm at 1 mm/px is 5 px — inside the aim radius, must weld";
+        << "5 mm at 1 mm/px is 5 px - inside the aim radius, must weld";
     EXPECT_EQ(-1, t.coincidentPoint(p + glm::vec2(9.0f, 0.0f), -1))
-        << "9 mm at 1 mm/px is 9 px — outside the aim radius";
+        << "9 mm at 1 mm/px is 9 px - outside the aim radius";
 }
 
 // Before the viewport has pushed a scale, m_mmPerPixel is 0. The floor is what
@@ -456,7 +456,7 @@ TEST(GridSnap, WeldRadiusSurvivesTheFirstFrameWithNoPixelScale) {
 }
 
 // The helper tests above pass whichever finder a call site is wired to, so they
-// cannot see a site wired to the wrong one — proven: reverting commitMirror to
+// cannot see a site wired to the wrong one - proven: reverting commitMirror to
 // the interactive radius left all of them green. These drive the call sites.
 //
 // Geometry: a source vertex, and a decoy 5 mm from where its reflection lands.
@@ -486,7 +486,7 @@ TEST(GridSnap, MirrorTopologyDoesNotDependOnTheCamera) {
     ASSERT_EQ(4u, fine) << "setup: mirroring two points must add two more";
     EXPECT_EQ(fine, coarse)
         << "mirroring the same sketch gave " << fine << " points zoomed in and "
-        << coarse << " zoomed out — the camera changed the model";
+        << coarse << " zoomed out - the camera changed the model";
 }
 
 // Same contract for offset, the other generated-geometry caller. An offset
@@ -519,11 +519,11 @@ TEST(GridSnap, OffsetTopologyDoesNotDependOnTheCamera) {
     ASSERT_GT(fine, 3u) << "setup: the offset must have produced geometry";
     EXPECT_EQ(fine, coarse)
         << "offsetting the same chain gave " << fine << " points zoomed in and "
-        << coarse << " zoomed out — the camera changed the model";
+        << coarse << " zoomed out - the camera changed the model";
 }
 
 // The third generated-geometry site. In TwoPoint mode the circle's centre is
-// the DERIVED midpoint of two clicks — the user aimed at the rim, not at it.
+// the DERIVED midpoint of two clicks - the user aimed at the rim, not at it.
 // Welding it to a neighbour moves the centre while `radius` stays measured from
 // the original midpoint, so the rim stops passing through the clicks. Centre
 // mode is deliberately different: there the centre IS the click, so the
@@ -560,7 +560,7 @@ TEST(GridSnap, TwoPointCircleCentreIsNotPulledAboutByTheCamera) {
 }
 
 // Closing a line loop by clicking back on the start vertex. This is the
-// reported bug — "I can't close any sketches" — and it is NOT the weld radius
+// reported bug - "I can't close any sketches" - and it is NOT the weld radius
 // in findCoincidentPoint: handleLineTool never calls it. It has its own
 // coincidence test at 1e-4 mm, which is exact equality for any practical
 // purpose, so the loop only closes when grid snap happens to place the click
@@ -580,7 +580,7 @@ TEST(GridSnap, ALineLoopClosesByAimNotByExactEquality) {
             t.setSnapToGridEnabled(snapOn);
             t.setMode(SketchToolMode::Line);
 
-            // A triangle. The closing click lands 2 px from the start vertex —
+            // A triangle. The closing click lands 2 px from the start vertex -
             // visually on top of it, but never exactly on it.
             const glm::vec2 p0(0.0f, 0.0f);
             const glm::vec2 p1(50.0f, 0.0f);
@@ -604,7 +604,7 @@ TEST(GridSnap, ALineLoopClosesByAimNotByExactEquality) {
     }
 }
 
-// The anchor — the vertex the current segment is being drawn FROM — is excluded
+// The anchor - the vertex the current segment is being drawn FROM - is excluded
 // from that lookup. Without the exclusion a click a few pixels from the anchor
 // welds onto it and builds a line from a point to itself. The pre-existing
 // zero-length guard only rejects clicks within 1e-4 mm, so it does not cover

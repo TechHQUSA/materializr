@@ -4519,7 +4519,7 @@ void Application::applyDisplayUnitChange(int unit) {
     if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
 
     // ClearActiveID drops FOCUS, and the sketch dimension field only ever
-    // grabs focus once per placement — m_sketchDimWasShown latches true on the
+    // grabs focus once per placement - m_sketchDimWasShown latches true on the
     // first frame and is cleared only on commit or on leaving placement. So
     // switching units mid-placement left that popup on screen with an input
     // nothing could type into, and no way to finish the shape by keyboard.
@@ -4529,7 +4529,7 @@ void Application::applyDisplayUnitChange(int unit) {
     // The buffer goes too, and not just for tidiness: it still holds digits
     // meant as the OLD unit. Clearing the active ID stops THIS frame's commit,
     // but the characters survive, so clicking back into the field and pressing
-    // Enter would commit them as the new unit — the exact misreading the
+    // Enter would commit them as the new unit - the exact misreading the
     // ClearActiveID above exists to prevent.
     m_sketchDimBuf[0] = '\0';
     m_sketchDimValue = 0.0f;
@@ -6431,11 +6431,11 @@ void Application::alignCameraToActiveSketch() {
     // the way across the screen measured 0.24 ft.
     //
     // Only the FRAMING is unit-aware here. The BASE step is left alone: the
-    // tolerance decoupling this comment used to defer has since happened —
+    // tolerance decoupling this comment used to defer has since happened -
     // SketchTool takes the zoom-scaled step for SNAPPING (setGridStep) and the
-    // base for TOLERANCES (setToleranceStep) — but the base is still the value
+    // base for TOLERANCES (setToleranceStep) - but the base is still the value
     // the user chose, and framing has no business rewriting it.
-    // Bounded — see openingSketchSpanMm. 40 of a large unit is a twelve-metre
+    // Bounded - see openingSketchSpanMm. 40 of a large unit is a twelve-metre
     // opening view, which is how geometry ended up drawn metres from the plane
     // origin and floating above the ground grid on exit.
     const float unitSpan = static_cast<float>(materializr::toMm(40.0));
@@ -7647,7 +7647,7 @@ void Application::run() {
                 action = m_toolbar->render();
                 m_sketchGridStep = m_toolbar->getGridStep();
                 m_snapToGrid = m_toolbar->getSnapToGrid();
-                // The toolbar owns neither the step nor the toggle any more —
+                // The toolbar owns neither the step nor the toggle any more -
                 // renderViewport pushes both, for every layout. It still READS
                 // the toolbar's widgets above, which is what makes a classic
                 // user's click take effect.

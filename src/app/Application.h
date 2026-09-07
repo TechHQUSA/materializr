@@ -886,14 +886,14 @@ private:
     //
     // 300 mm because it reads as a round number in the units that needed
     // bounding: about one foot, twelve inches, thirty centimetres. Under feet
-    // the unit-aware 40-unit span is 12192 mm — a twelve-metre view, which put
+    // the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put
     // a shape drawn at screen centre metres from the plane origin and left it
     // hanging above the ground grid on exit. Under millimetres the span is
     // 40 mm and this never engages, so the common case does not move.
     //
     // Metres are the unit this serves least well: a 300 mm view makes every
-    // reading 0.x m. Bounding is still the right call there — a 40 m opening
-    // view is worse — but if metre work becomes common this is the number to
+    // reading 0.x m. Bounding is still the right call there - a 40 m opening
+    // view is worse - but if metre work becomes common this is the number to
     // revisit.
     static constexpr float kOpeningSketchSpanCapMm = 300.0f;
 
@@ -902,7 +902,7 @@ private:
     float m_sketchGridStep = 1.0f;
     // The base scaled by whole decades to suit the CURRENT zoom, recomputed
     // every frame in renderViewport's drawGrid (which both branches call, so
-    // it is never stale) — see viewport/GridScale.h. Equal to the base outside
+    // it is never stale) - see viewport/GridScale.h. Equal to the base outside
     // sketch mode and whenever the base already suits the zoom.
     //
     // WHICH STEP A SITE WANTS:

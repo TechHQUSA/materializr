@@ -2784,7 +2784,7 @@ void Application::renderSnapWidget() {
     // and print a literal, so choosing "1" under centimetres stored 10 mm and
     // the badge then read "10" — the widget contradicting the popup that had
     // just set it. %.3g so a converted step stays short enough for the square.
-    // The EFFECTIVE step, which is what the cursor snaps to at this zoom —
+    // The EFFECTIVE step, which is what the cursor snaps to at this zoom -
     // not the base preset. A badge naming a step the cursor ignores is the
     // same contradiction the display-unit conversion already fixed here once.
     char buf[16];
@@ -2828,14 +2828,14 @@ void Application::renderSnapSettingsPopup() {
             if (ImGui::Combo(materializr::tr("Display unit"), &unit, unitNames, 5)) {
                 applyDisplayUnitChange(unit);
                 saveAppSettings();
-                // Close, for the same reason the step presets below do — and
+                // Close, for the same reason the step presets below do - and
                 // here it is not just convenience. m_snapWidgetHovered is held
                 // true for as long as this popup is open, and that flag gates
                 // the WHOLE sketch input block (onMouseMove, onMouseDown,
                 // onMouseUp alike). Leaving it open froze the rubber-band
                 // preview and swallowed every canvas click, so after picking a
                 // unit mid-sketch the only thing that still responded was the
-                // dimension field — "I can only click and input".
+                // dimension field - "I can only click and input".
                 ImGui::CloseCurrentPopup();
             }
         }

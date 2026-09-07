@@ -284,7 +284,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application.h:616 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
 | comment | src/app/Application.h:885 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
 | comment | src/app/Application.h:887 | `// 300 mm because it reads as a round number in the units that needed` |
-| comment | src/app/Application.h:889 | `// the unit-aware 40-unit span is 12192 mm — a twelve-metre view, which put` |
+| comment | src/app/Application.h:889 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
 | comment | src/app/Application.h:892 | `// 40 mm and this never engages, so the common case does not move.` |
 | comment | src/app/Application.h:894 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
 | comment | src/app/Application.h:900 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
@@ -486,7 +486,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/SketchTool.cpp:2167 | `// when they explicitly asked for 1 mm precision. The toolbar "Snap to` |
 | comment | src/modeling/SketchTool.cpp:2177 | `// declaration for why. 0.3 mm is the radius every caller here used before the` |
 | comment | src/modeling/SketchTool.cpp:2196 | `// A weld radius is a SCREEN distance. As a fixed 0.3 mm it shrank with the` |
-| comment | src/modeling/SketchTool.cpp:2201 | `// welded. Change the lattice underfoot and it stops — switching feet -> mm` |
+| comment | src/modeling/SketchTool.cpp:2201 | `// welded. Change the lattice underfoot and it stops - switching feet -> mm` |
 | comment | src/modeling/SketchTool.cpp:2203 | `// (304.8-based vs 1-based), the closing click snaps elsewhere, and 0.3 mm` |
 | comment | src/modeling/SketchTool.cpp:2206 | `// Same shape as tolStep()'s screen term, and the 0.3 mm stays as a floor so` |
 | comment | src/modeling/SketchTool.cpp:2387 | `// It used to be a hand-rolled scan at 1e-4 mm, which is exact equality` |
@@ -498,7 +498,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | identifier/other | src/modeling/SketchTool.h:195 | `void  setAirfoilChord(float mm) { m_airfoilChord = (mm < 0.1f) ? 0.1f : mm; }` |
 | comment | src/modeling/SketchTool.h:293 | `// Grid step (in sketch-plane mm). Used for both visual grid and snap-to-line.` |
 | comment | src/modeling/SketchTool.h:299 | `// at 152 mm: a click on empty space could cut geometry 15 cm away, with` |
-| comment | src/modeling/SketchTool.h:305 | `// the pick radius at 10 mm the moment a 1 mm grid coarsened — see tolStep.` |
+| comment | src/modeling/SketchTool.h:305 | `// the pick radius at 10 mm the moment a 1 mm grid coarsened - see tolStep.` |
 | comment | src/modeling/SketchTool.h:313 | `// an aim radius; at 3 mm/px it is an 18 mm topological merge and it grows` |
 | comment | src/modeling/SketchTool.h:316 | `// merging. At the zooms sketching actually happens (under ~1.7 mm/px) this` |
 | comment | src/modeling/SketchTool.h:320 | `// the default millimetre framing this lands on the 0.3-1 mm the tolerances` |
@@ -506,7 +506,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/SketchTool.h:331 | `// (a click on empty space cut distant geometry) and, once capped at 10 mm,` |
 | comment | src/modeling/SketchTool.h:332 | `// gave 5 mm in a view where one pixel is 8 mm: sub-pixel, so nothing could` |
 | comment | src/modeling/SketchTool.h:343 | `// 1 mm base coarsening to 10 mm pins this at the cap below, turning a` |
-| comment | src/modeling/SketchTool.h:344 | `// ~1.5 mm pick radius into 10 mm — an 80-pixel grab — for no reason` |
+| comment | src/modeling/SketchTool.h:344 | `// ~1.5 mm pick radius into 10 mm - an 80-pixel grab - for no reason` |
 | comment | src/modeling/SketchTool.h:400 | `// on the drawing (a 90-degree corner versus a 6 mm fillet run). The cursor's` |
 | comment | src/modeling/SketchTool.h:407 | `// display->mm on the way in, so under inches a typed 180 deg arrived as` |
 | comment | src/modeling/SketchTool.h:608 | `// or diameter (2-point mode) to whole grid units, so a 1 mm grid can't` |
@@ -550,7 +550,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/viewport/GridScale.h:6 | `// -> mm turns a 304.8 mm grid into a 1 mm one without moving the camera, and a` |
 | comment | src/viewport/GridScale.h:9 | `// the opposite end: a 1 ft grid in a view 100 mm across puts one cell every` |
 | comment | src/viewport/GridScale.h:21 | `// 100 mm view with nothing to show.` |
-| comment | src/viewport/GridScale.h:53 | `// Framing a fixed count of DISPLAY units is right in spirit — 40 mm is a fine` |
+| comment | src/viewport/GridScale.h:53 | `// Framing a fixed count of DISPLAY units is right in spirit - 40 mm is a fine` |
 | comment | src/viewport/GridScale.h:65 | `// shows a sensible number of cells, but a 1 ft base makes it 12192 mm on its` |
 | comment | src/viewport/Picker.cpp:295 | `// plane is positive in front and negative behind. The 0.3 mm slack covers` |
 | comment | src/viewport/Picker.cpp:296 | `// tessellation noise on curved silhouettes while rejecting any wall ≥ 0.3 mm` |

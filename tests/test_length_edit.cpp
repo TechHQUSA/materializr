@@ -18,7 +18,7 @@
 // poison survives.
 //
 // If M_PI comes back in that header, THIS FILE STOPS COMPILING with an
-// undeclared identifier. A build error here means the dependency returned —
+// undeclared identifier. A build error here means the dependency returned -
 // it does not mean this test is broken.
 #include <cmath>
 #undef M_PI

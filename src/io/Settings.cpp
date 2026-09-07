@@ -145,7 +145,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readBool(kv, "supporter",            s.supporter);
     readBool(kv, "snapToGrid",           s.snapToGrid);
     // Normalised HERE, before anything reads it. An out-of-range value means
-    // millimetres, never a clamp to the nearest legal index — clamping made 99
+    // millimetres, never a clamp to the nearest legal index - clamping made 99
     // mean Feet during the grid-step migration below while the same 99 meant
     // millimetres for the setting itself, so one file was read two ways.
     { int v = s.displayUnit; readInt(kv, "displayUnit", v);
@@ -181,7 +181,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
                 // foot: finer than the smallest preset and a lattice the
                 // renderer fades to nothing. The presets are labelled with bare
                 // numbers, so someone who picked "1" meant one of something.
-                // Only where a CONVERSION made it impractical — never under
+                // Only where a CONVERSION made it impractical - never under
                 // millimetres, where a deliberate 0.05 mm grid is a real choice
                 // and not something to overwrite.
                 if (s.displayUnit != 0 && s.sketchGridStep < 0.1f)
