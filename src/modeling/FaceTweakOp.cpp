@@ -129,7 +129,7 @@ std::string FaceTweakOp::description() const {
     const gp_XYZ t = m_xf.TranslationPart();
     const double dist = std::sqrt(t.X() * t.X() + t.Y() * t.Y() + t.Z() * t.Z());
     double ang = 0.0;
-    try { ang = m_xf.GetRotation().GetRotationAngle() * 180.0 / M_PI; } catch (...) {}
+    try { ang = m_xf.GetRotation().GetRotationAngle() * 180.0 / materializr::kPi; } catch (...) {}
     // The distance is a MODEL DIMENSION - how far the face actually moved - so
     // it reads in the display unit like every other length in the history
     // panel. description() is called live per frame, so switching units

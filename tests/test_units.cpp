@@ -5,13 +5,18 @@
 // review caught a ClearActiveID() that would have crashed before the context
 // existed) fails right here at compile time.
 
-#include "core/Units.h"
-#include "core/LengthEdit.h"
-
+// OCCT FIRST, deliberately. Standard_Real.hxx defines _USE_MATH_DEFINES and
+// then includes <math.h>; that is a no-op if <math.h> is already in, and
+// core/Units.h includes <cmath>. Put the core headers first and MSVC loses
+// M_PI for the inline bodies in gp_Vec.hxx / gp_Dir.hxx.
 #include "modeling/FaceTweakOp.h"
 #include <gp_Ax1.hxx>
 #include <gp_Vec.hxx>
 #include <gp_Trsf.hxx>
+
+#include "core/Units.h"
+#include "core/LengthEdit.h"
+
 #include <gtest/gtest.h>
 
 #include <cmath>

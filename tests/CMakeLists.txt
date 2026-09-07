@@ -124,6 +124,8 @@ add_library(materializr_core STATIC
 # does nothing for them, since executables only link this library.
 if(NOT WIN32)
     target_compile_definitions(materializr_core PRIVATE OCC_CONVERT_SIGNALS)
+
+
     # And force TestSignalInit.cpp's object INTO every test binary. Its
     # initialiser is referenced by nothing, and a static archive contributes
     # only the members whose symbols are needed — so the linker dropped it and
@@ -142,6 +144,21 @@ if(NOT WIN32)
     else()
         target_link_options(materializr_core INTERFACE "-u" "mzrInstallOcctSignalHandler")
     endif()
+endif()
+
+# MSVC only. The app target sets these (see the MSVC block in the top-level
+# CMakeLists.txt) but materializr_core never did, and that gap has broken the
+# Windows build twice now: once when a lean core header used M_PI directly, and
+# once when a test included core/Units.h (which pulls <cmath>) BEFORE an OCCT
+# header. OCCT defines M_PI only via "#ifndef _USE_MATH_DEFINES / #define /
+# #include <math.h>" in Standard_Real.hxx, which is a no-op once <math.h> has
+# already been included, so the inline bodies in gp_Vec.hxx and gp_Dir.hxx then
+# fail to compile.
+#
+# PUBLIC, not PRIVATE: the test targets link materializr_core and must inherit
+# it, since they are where the bad include order actually appears.
+if(MSVC)
+    target_compile_definitions(materializr_core PUBLIC _USE_MATH_DEFINES NOMINMAX)
 endif()
 
 target_include_directories(materializr_core PUBLIC

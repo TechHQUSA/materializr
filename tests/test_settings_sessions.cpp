@@ -190,13 +190,12 @@ TEST(SettingsSessions, LegacyGridStepMigratesByKey) {
     auto roundTrip = [](const std::string& body) {
         const std::string path = tmpCfg("grid_mig");
         { std::ofstream o(path); o << body; }
-        // Assert the file exists before trusting anything loaded from it. Two
-        // of the four cases below expect 1.0f, which is exactly the DEFAULT
-        // sketchGridStep - so when the write silently failed on Windows they
-        // passed against the defaults and only the 10.0 and 0.5 cases went red.
-        // A test that cannot tell "the migration worked" from "no file was
-        // written" is not testing the migration.
-        EXPECT_TRUE(fs::exists(path)) << "settings file was never written: " << path;
+        // Prove the CONTENT landed before trusting anything loaded from it.
+        // Most cases in these two tests expect the DEFAULT sketchGridStep, so a
+        // silent write failure makes them pass against the defaults rather than
+        // against the migration. fs::exists is not enough on its own: a
+        // zero-byte file exists and still loads as defaults.
+        EXPECT_EQ(body, readAll(path)) << "settings file was not written: " << path;
         materializr::AppSettings s = materializr::SettingsIO::load(path);
         std::remove(path.c_str());
         return s;
@@ -228,6 +227,10 @@ TEST(SettingsSessions, GridStepMigrationBoundaries) {
     const std::string path = tmpCfg("gridbounds");
     auto load = [&](const std::string& body) {
         { std::ofstream o(path); o << body; }
+        // Same guard as LegacyGridStepMigratesByKey, and this test needs it
+        // more: of its assertions, all but two expect kDefault, so a write
+        // failure hides in almost every case rather than in half of them.
+        EXPECT_EQ(body, readAll(path)) << "settings file was not written: " << path;
         AppSettings s = SettingsIO::load(path);
         std::remove(path.c_str());
         return s;

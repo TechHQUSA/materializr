@@ -199,6 +199,16 @@ def main():
             if d in ("comment", "export/import-format", "diagnostic", "platform-string", "identifier/other", "allowed-by-hand", "CONVERTED"):
                 a.write("%s:%d:\n" % (f, ln))
     print("controls:", dict(cc)); print("literals:", dict(lc))
+
+    # A gate that always exits 0 is not a gate. LENGTH? and READOUT-LITERAL are
+    # the unfinished-work classes this tool exists to surface, so their presence
+    # is a failure, not a report. Nothing in CI runs this yet; wiring it up is
+    # `python3 tools/units_audit.py && git diff --exit-code docs/units-audit*`,
+    # which catches both new work rows and a regenerated-vs-committed drift.
+    open_rows = cc.get("LENGTH?", 0) + lc.get("READOUT-LITERAL", 0)
+    if open_rows:
+        print(f"FAIL: {open_rows} unclassified row(s) - see docs/units-audit.md")
+        return 1
     return 0
 
 if __name__ == "__main__":

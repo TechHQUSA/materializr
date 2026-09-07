@@ -16,21 +16,6 @@
 
 namespace materializr {
 
-// M_PI is NOT standard C++. MSVC defines it only when <cmath> is reached with
-// _USE_MATH_DEFINES, and this header cannot assume that: the app target sets
-// it (CMakeLists.txt, MSVC branch) but materializr_core - which the tests and
-// every modeling Op build against - does not. The other M_PI users in core get
-// away with it because they include OpenCASCADE headers first, and OCCT
-// defines the macro itself; this header deliberately includes no OCCT, so in a
-// translation unit where it lands first there is nothing to supply it. Windows
-// CI caught exactly that, in eighteen Ops at once.
-//
-// A header should not depend on a macro its consumer's build happens to set.
-// tests/test_length_edit.cpp POISONS M_PI before including this, so the
-// dependency cannot come back unnoticed. It poisons rather than #undefs
-// because a bare #undef does not hold: this header includes <cmath>, which
-// defines the macro straight back.
-constexpr double kPi = 3.14159265358979323846;
 
 // A numeric field reported a change: the value the user now sees, in display
 // units, becomes the model value in mm. This is the ONLY write-back path for
