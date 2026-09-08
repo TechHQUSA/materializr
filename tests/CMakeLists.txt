@@ -101,6 +101,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/core/ThrowTrace.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Unfold.cpp
     ${CMAKE_SOURCE_DIR}/src/viewport/SectionCap.cpp
+    ${CMAKE_SOURCE_DIR}/src/viewport/MeshWorker.cpp
     # Picker + Camera are GL-free (pure OCCT + glm), so the hover-pick
     # regression test (test_picker.cpp) can drive them headless.
     ${CMAKE_SOURCE_DIR}/src/viewport/Picker.cpp
@@ -290,6 +291,11 @@ add_test(NAME test_fillet_probe COMMAND test_fillet_probe)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
+
+# test_mesh_worker - off-thread meshing lands the same triangulation as a direct run
+add_executable(test_mesh_worker test_mesh_worker.cpp)
+target_link_libraries(test_mesh_worker PRIVATE materializr_core gtest gtest_main Threads::Threads)
+add_test(NAME test_mesh_worker COMMAND test_mesh_worker)
 
 # test_picker - hover picking reuses the renderer mesh, never re-runs the mesher
 add_executable(test_picker test_picker.cpp)

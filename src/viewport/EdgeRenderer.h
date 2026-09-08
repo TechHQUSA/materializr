@@ -50,6 +50,11 @@ public:
     /// renderer's during interactive previews.
     int findSlotByBody(int bodyId) const;
 
+    /// Bring the retired slot of `bodyId` back as it is, old edges and all,
+    /// so a body whose new mesh is still being built off-thread keeps drawing
+    /// its previous edges. Returns false if no retired slot has that id.
+    bool reclaimStale(int bodyId);
+
     /// Per-body model matrix - applied during render() so a live preview
     /// can transform the edges visually without re-extracting them. Cheap
     /// because the cached vertex data is unchanged; only the MVP uniform

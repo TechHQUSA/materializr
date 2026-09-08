@@ -349,6 +349,7 @@ add_executable(materializr
     src/viewport/BoxSelect.cpp
     src/viewport/SectionView.cpp
     src/viewport/SectionCap.cpp
+    src/viewport/MeshWorker.cpp
     src/viewport/SelectionHighlight.cpp
     src/ui/Toolbar.cpp
     src/ui/TouchWidgets.cpp

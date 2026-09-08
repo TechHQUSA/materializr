@@ -12,6 +12,8 @@
 #include <functional>
 #include <string>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <map>
 #include <glm/glm.hpp>
 #include "io/ImageDecode.h"   // DecodedImage - thumbnail peek results
@@ -59,6 +61,7 @@ class EdgeRenderer;
 class BackgroundRenderer;
 class ViewCube;
 class Picker;
+class MeshWorker;
 class Gizmo;
 class SelectionHighlight;
 class BoxSelect;
@@ -696,6 +699,23 @@ private:
     std::unique_ptr<BackgroundRenderer> m_backgroundRenderer;
     std::unique_ptr<ViewCube> m_viewCube;
     std::unique_ptr<Picker> m_picker;
+    // Off-thread meshing of heavy bodies (see rebuildMeshes / meshAsync).
+    std::unique_ptr<MeshWorker> m_meshWorker;
+    struct PendingMesh {
+        const void* tshape = nullptr;
+        float deflection = 0.0f;
+        float angularDeflection = 0.0f;
+    };
+    std::unordered_map<int, PendingMesh> m_meshPending; // body id -> job in flight
+    std::unordered_map<int, double> m_meshMs;           // body id -> last mesher time
+    std::unordered_set<const void*> m_meshSyncOnly;     // TShapes the worker left partly unmeshed
+    // A body whose last mesh took at least this long is meshed off-thread
+    // while its previous mesh stays on screen; anything quicker is meshed in
+    // the frame, where a worker round trip would only add a frame of latency.
+    static constexpr double kAsyncMeshMs = 20.0;
+    void landMeshes(); // adopt finished worker meshes; call before the dirty check
+    bool meshAsync(int bodyId, const TopoDS_Shape& shape, float deflection,
+                   float angularDeflection);
     std::unique_ptr<Gizmo> m_gizmo;
     std::unique_ptr<SelectionHighlight> m_selectionHighlight;
     std::unique_ptr<BoxSelect> m_boxSelect;

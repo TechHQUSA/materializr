@@ -282,6 +282,19 @@ void EdgeRenderer::freeRetired() {
     m_retired.clear();
 }
 
+bool EdgeRenderer::reclaimStale(int bodyId) {
+    for (size_t i = 0; i < m_retired.size(); ++i) {
+        if (m_retired[i].bodyId != bodyId || !m_retired[i].vao) continue;
+        const int slot = static_cast<int>(m_meshes.size());
+        m_meshes.push_back(m_retired[i]);
+        m_retired[i] = m_retired.back();
+        m_retired.pop_back();
+        m_bodyToSlot[bodyId] = slot;
+        return true;
+    }
+    return false;
+}
+
 int EdgeRenderer::findSlotByBody(int bodyId) const {
     auto it = m_bodyToSlot.find(bodyId);
     return (it == m_bodyToSlot.end()) ? -1 : it->second;

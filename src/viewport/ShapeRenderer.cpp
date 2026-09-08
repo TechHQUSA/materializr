@@ -7,6 +7,7 @@
 #include <TopoDS_Shape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include "core/MeshParams.h"
+#include <chrono>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -260,8 +261,11 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
         // surfaces by normal angle, so rounded edges/holes get more facets
         // (smoother) while flat faces stay cheap. Run in parallel to absorb
         // the extra triangles.
+        const auto t0 = std::chrono::steady_clock::now();
         BRepMesh_IncrementalMesh meshGen(
             shape, materializr::meshParams(deflection, angularDeflection, true));
+        m_lastMeshMs = std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - t0).count();
         m_meshedAt[key] = {deflection, angularDeflection};
     }
 
@@ -384,9 +388,51 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
     return index;
 }
 
+bool ShapeRenderer::isPreMeshed(const TopoDS_Shape& shape, float deflection,
+                                float angularDeflection) const
+{
+    // Same rule as tessellate(): the tag for this TShape, in either map, must
+    // name exactly these parameters.
+    constexpr float kSameDeflection = 1e-6f;
+    const void* key = shape.TShape().get();
+    auto tag = m_meshedAt.find(key);
+    if (tag == m_meshedAt.end()) {
+        tag = m_meshedAtPrev.find(key);
+        if (tag == m_meshedAtPrev.end()) return false;
+    }
+    return std::abs(tag->second.first - deflection) < kSameDeflection &&
+           std::abs(tag->second.second - angularDeflection) < kSameDeflection;
+}
+
+bool ShapeRenderer::reclaimStale(int bodyId)
+{
+    for (size_t i = 0; i < m_retired.size(); ++i) {
+        if (m_retired[i].bodyId != bodyId || !m_retired[i].vao) continue;
+        const int slot = static_cast<int>(m_meshes.size());
+        m_meshes.push_back(m_retired[i]);
+        m_retired[i] = m_retired.back();
+        m_retired.pop_back();
+        m_bodyToSlot[bodyId] = slot;
+        return true;
+    }
+    return false;
+}
+
+bool ShapeRenderer::hasMeshFor(int bodyId) const
+{
+    auto it = m_bodyToSlot.find(bodyId);
+    if (it != m_bodyToSlot.end() && it->second >= 0 &&
+        it->second < static_cast<int>(m_meshes.size()) && m_meshes[it->second].vao)
+        return true;
+    for (const MeshData& r : m_retired)
+        if (r.bodyId == bodyId && r.vao) return true;
+    return false;
+}
+
 int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
                                float deflection, float angularDeflection)
 {
+    m_lastMeshMs = -1.0;
     // Reclaim the slot retireAll() kept for this exact shape at this quality,
     // if any: no mesher, no vertex collection, no upload. It comes back as a
     // fresh slot (default colour / flags / matrix), exactly like a new

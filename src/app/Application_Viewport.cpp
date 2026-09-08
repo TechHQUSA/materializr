@@ -425,6 +425,7 @@ void Application::renderViewport() {
         const int fbh = static_cast<int>(contentSize.y * fbScaleY);
         m_viewport->resize(fbw, fbh);
 
+        landMeshes(); // a finished worker mesh marks its body dirty
         bool geomChanged = m_meshesDirty || !m_dirtyBodyIds.empty();
         if (geomChanged) {
             rebuildMeshes();
@@ -7437,6 +7438,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
 
     // Meshes can be stale when a save lands between frames (deferred slot).
     // Done BEFORE the bounding box so the box can ride on the triangulation.
+    landMeshes();
     if (m_meshesDirty || !m_dirtyBodyIds.empty()) {
         rebuildMeshes();
         m_meshesDirty = false;

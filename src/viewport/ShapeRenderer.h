@@ -59,6 +59,24 @@ public:
     void notePreMeshed(const TopoDS_Shape& shape, float requestedDeflection,
                        float requestedAngularDeflection);
 
+    /// Whether tessellate() would skip the mesher for `shape` at this quality:
+    /// the shape carries the pre-meshed tag for exactly these parameters.
+    bool isPreMeshed(const TopoDS_Shape& shape, float deflection,
+                     float angularDeflection) const;
+
+    /// Bring the retired slot of `bodyId` back as it is, old mesh and all, so
+    /// a body whose new mesh is still being built off-thread keeps drawing its
+    /// previous one. Returns false if no retired slot has that id.
+    bool reclaimStale(int bodyId);
+
+    /// Whether `bodyId` has a mesh on screen or in the retired list: the
+    /// off-thread path is only taken when there is an old mesh to keep.
+    bool hasMeshFor(int bodyId) const;
+
+    /// Wall time of the mesher run inside the last setBodyMesh(), in
+    /// milliseconds, or -1 when that call reused a mesh.
+    double lastMeshMillis() const { return m_lastMeshMs; }
+
     /// Remove the mesh associated with `bodyId`. The slot is marked empty
     /// (vertexCount = 0, GL buffers freed) but kept in the array so other
     /// slots' indices don't shift. A future setBodyMesh for the same id can
@@ -164,6 +182,7 @@ private:
     // triangulation before it trusts the tag.
     std::unordered_map<const void*, std::pair<float, float>> m_meshedAt;
     std::unordered_map<const void*, std::pair<float, float>> m_meshedAtPrev;
+    double m_lastMeshMs = -1.0;
 
     // Mesh shader program
     unsigned int m_meshProgram = 0;

@@ -7,6 +7,18 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Editing a heavy body no longer freezes the viewport while it re-meshes.**
+  After every operation the changed body was re-meshed on the main thread
+  before the next frame could draw; on a body that takes long to mesh the app
+  stalled for that time. A body whose last mesh took 20 ms or more is now
+  meshed on a worker thread from a private copy while its previous mesh and
+  edges stay on screen, and the new mesh lands when it is ready; on a plate
+  with 300 holes the frame now pays about 3 ms to copy the body instead of
+  about 50 ms to mesh it. Quicker bodies, the first mesh of a new body, and
+  project load are unchanged. While
+  the new mesh is pending the body cannot be picked, its Section View cap and
+  outline are missing, and when it is dragged it follows the cursor at the
+  pace the worker meshes it.
 - **Section View no longer runs any OCCT boolean.** The filled cross-section
   came from a half-space boolean on each body, re-meshed (735 ms on a
   1683-face plate and 210 ms on a fused part per plane change, and far longer
