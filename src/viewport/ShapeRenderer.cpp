@@ -206,23 +206,45 @@ bool ShapeRenderer::initialize()
     return true;
 }
 
+void ShapeRenderer::notePreMeshed(const TopoDS_Shape& shape,
+                                  float requestedDeflection,
+                                  float requestedAngularDeflection) {
+    if (!shape.IsNull())
+        m_meshedAt[shape.TShape().get()] = {requestedDeflection,
+                                            requestedAngularDeflection};
+}
+
 int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
                               float angularDeflection)
 {
-    // A worker thread may have PRE-MESHED this shape at the current quality
-    // (heavy results like a swept thread - meshing its 35-turn helicoid faces
-    // on the main thread froze the app for ~10s). Reuse that cache only when
-    // every face carries a triangulation at EXACTLY the requested linear
-    // deflection - any other value re-meshes below, so the quality slider
-    // still takes effect in BOTH directions (a finer-than-requested cache
-    // must NOT survive a quality lowering; that was a real bug once).
-    bool preMeshed = true;
+    // Skip the mesher when this exact TShape was already meshed for the
+    // requested (linear, angular) deflection - by an earlier tessellate (a full rebuild
+    // re-runs setBodyMesh for every body, not just the ones the last
+    // operation touched) or by a worker thread that pre-meshed a heavy result
+    // (a swept thread's 35-turn helicoid took ~10 s on the main thread; see
+    // notePreMeshed). The tag lives in m_meshedAt because OCCT stores only the
+    // ACHIEVED deflection on each Poly_Triangulation (0 on a plane, ~0.007 on
+    // a small cylinder asked for 0.1), never the requested value; comparing
+    // that against the request could never match, so the old pre-mesh check
+    // re-meshed every time. The quality slider still takes effect in BOTH
+    // directions: a different value never matches, so a finer-than-requested
+    // mesh cannot survive a quality lowering (that was a real bug once).
+    // Every face must also still carry a triangulation - that is what makes a
+    // stale tag on a recycled TShape address harmless.
+    constexpr float kSameDeflection = 1e-6f; // exact match, not "close enough"
+    const void* key = shape.TShape().get();
+    auto tag = m_meshedAt.find(key);
+    if (tag == m_meshedAt.end()) {
+        auto prev = m_meshedAtPrev.find(key);
+        if (prev != m_meshedAtPrev.end()) tag = m_meshedAt.insert(*prev).first;
+    }
+    bool preMeshed = tag != m_meshedAt.end() &&
+                     std::abs(tag->second.first - deflection) < kSameDeflection &&
+                     std::abs(tag->second.second - angularDeflection) < kSameDeflection;
     for (TopExp_Explorer fx(shape, TopAbs_FACE); fx.More() && preMeshed;
          fx.Next()) {
         TopLoc_Location l;
-        Handle(Poly_Triangulation) t =
-            BRep_Tool::Triangulation(TopoDS::Face(fx.Current()), l);
-        if (t.IsNull() || std::abs(t->Deflection() - deflection) > 1e-4)
+        if (BRep_Tool::Triangulation(TopoDS::Face(fx.Current()), l).IsNull())
             preMeshed = false;
     }
     if (!preMeshed) {
@@ -240,6 +262,7 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
         BRepMesh_IncrementalMesh meshGen(shape, deflection, Standard_False,
                                          angularDeflection, Standard_True);
         meshGen.Perform();
+        m_meshedAt[key] = {deflection, angularDeflection};
     }
 
     // Collect all triangle vertices (position + normal)
@@ -598,6 +621,8 @@ void ShapeRenderer::clear()
     }
     m_meshes.clear();
     m_bodyToSlot.clear();
+    m_meshedAtPrev.swap(m_meshedAt);
+    m_meshedAt.clear();
 }
 
 void ShapeRenderer::debugDumpSlots() const

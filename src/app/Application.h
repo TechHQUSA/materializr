@@ -1400,6 +1400,10 @@ private:
     // going "not responding". The future carries the cut result; the main
     // thread polls it each frame and pushes the op when ready.
     std::future<TopoDS_Shape> m_threadFuture;
+    // The (linear, angular) deflection the renderer will ask for the Apply
+    // worker's result - captured at launch, see ShapeRenderer::notePreMeshed.
+    float m_threadPreMeshDefl = 0.0f;
+    float m_threadPreMeshAng = 0.0f;
     bool   m_threadComputing = false;
     // Async thread RE-CUT (cascade/editStep recompute path - distinct from the
     // popup's initial Apply worker above). ThreadOp::execute hands the heavy
@@ -1412,6 +1416,8 @@ private:
         TopoDS_Shape launchedFrom;   // doc body at launch - stale-guard
         std::future<TopoDS_Shape> fut;
         int attempts = 1;            // relaunch-on-stale counter (cap 3)
+        float meshDefl = 0.0f;       // renderer's (linear, angular) request at
+        float meshAng = 0.0f;        // launch - see ShapeRenderer::notePreMeshed
         std::shared_ptr<std::atomic<bool>> cancel; // per-job worker token
     };
     std::vector<PendingThreadRecut> m_threadRecuts;

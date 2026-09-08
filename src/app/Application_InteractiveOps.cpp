@@ -276,6 +276,8 @@ void Application::commitThread() {
     float mdefl, mang;
     meshQualityParams(mdefl, mang);
     const float meshAng = std::min(mang, 0.15f);
+    m_threadPreMeshDefl = mdefl;
+    m_threadPreMeshAng = mang;
     m_threadFuture = std::async(std::launch::async,
         [worker, body, mdefl, meshAng]() {
             TopoDS_Shape r = worker->buildResult(body);
@@ -2504,6 +2506,8 @@ bool Application::launchThreadRecut(ThreadOp& op, int attempts) {
     float rdefl, rang;
     meshQualityParams(rdefl, rang);
     const float recutAng = std::min(rang, 0.15f);
+    p.meshDefl = rdefl;
+    p.meshAng = rang;
     p.fut = std::async(std::launch::async,
                        [worker, body, rdefl, recutAng]() {
                            std::fprintf(stderr, "[Thread] recut worker "
@@ -2601,6 +2605,8 @@ void Application::pollThreadRecuts() {
         } else {
             std::fprintf(stderr, "[Thread] recut landed - applying to body "
                                  "%d\n", p.bodyId);
+            if (m_shapeRenderer)
+                m_shapeRenderer->notePreMeshed(result, p.meshDefl, p.meshAng);
             m_document->updateBody(p.bodyId, result);
             m_meshesDirty = true;
         }

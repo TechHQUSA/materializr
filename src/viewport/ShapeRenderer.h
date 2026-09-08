@@ -7,6 +7,8 @@
 #include <TopoDS_Shape.hxx>
 
 #include <map>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 #include <string>
 
@@ -47,6 +49,15 @@ public:
     /// avoid re-tessellating every body on every preview frame.
     int setBodyMesh(int bodyId, const TopoDS_Shape& shape,
                     float deflection = 0.1f, float angularDeflection = 0.2f);
+    /// A worker thread meshed `shape` off the main thread well enough for a
+    /// tessellate(shape, deflection, angularDeflection) request: remember
+    /// that so tessellate() reuses it. Pass the pair the renderer WILL ask
+    /// for (the worker may have meshed at a finer angular deflection, which
+    /// satisfies that request). OCCT records only the ACHIEVED deflection on
+    /// each face, never the requested one, so the mesh itself cannot say
+    /// which quality it was built at.
+    void notePreMeshed(const TopoDS_Shape& shape, float requestedDeflection,
+                       float requestedAngularDeflection);
 
     /// Remove the mesh associated with `bodyId`. The slot is marked empty
     /// (vertexCount = 0, GL buffers freed) but kept in the array so other
@@ -118,6 +129,17 @@ private:
     // bodyId → slot index in m_meshes. Lets setBodyMesh / removeBody resolve
     // by body id without scanning the vector.
     std::map<int, int> m_bodyToSlot;
+    // TShape -> requested (linear, angular) deflection it was last meshed
+    // for (see tessellate). Both, because callers do vary them independently
+    // (the ghost preview uses the default angular value). clear() - the
+    // start of every full rebuild - retires the map to m_meshedAtPrev, and
+    // tessellate carries an entry back only when it is looked up again, so
+    // the map holds what the last full rebuild visited plus previews since
+    // (a long drag makes a fresh TShape per frame). A recycled address is
+    // harmless because tessellate also requires every face to carry a
+    // triangulation before it trusts the tag.
+    std::unordered_map<const void*, std::pair<float, float>> m_meshedAt;
+    std::unordered_map<const void*, std::pair<float, float>> m_meshedAtPrev;
 
     // Mesh shader program
     unsigned int m_meshProgram = 0;

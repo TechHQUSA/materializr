@@ -3,6 +3,7 @@
 #include "../viewport/ShapeRenderer.h"
 
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -156,7 +157,10 @@ GltfExportResult GltfExport::exportFile(const std::string& filePath, const Docum
         MeshBufferData md;
         md.name = doc.getBodyName(id);
         md.color = ShapeRenderer::bodyColor(colorIndex);
-        tessellateMesh(shape, md, 0.02f);
+        // Mesh a COPY: meshing the live body in place would leave it carrying
+        // an export-quality triangulation the viewport's mesh cache
+        // (ShapeRenderer::m_meshedAt) still believes is viewport quality.
+        tessellateMesh(BRepBuilderAPI_Copy(shape).Shape(), md, 0.02f);
 
         if (!md.positions.empty()) {
             meshes.push_back(std::move(md));

@@ -17,6 +17,14 @@ All notable changes to Materializr are documented here. Format loosely follows
   onto the exact surface so Measure is unaffected by mesh quality. At Low
   quality the old path also re-meshed every body finer than the viewport asked
   for on the first hover after each edit; that is gone too.
+- **The viewport re-meshed every body after every operation.** The check meant
+  to skip bodies that were already tessellated at the current quality compared
+  the requested deflection against the value OCCT stores on the mesh, which is
+  the *achieved* deflection (0 on a plane), so it never matched. Bodies the
+  last operation did not touch now keep their mesh, and a thread cut on a
+  worker thread is no longer meshed a second time on the main thread. glTF
+  export now meshes a copy of each body, so an export can no longer leave the
+  viewport holding an export-quality mesh.
 
 ## [1.6.3] - 2026-08-28
 

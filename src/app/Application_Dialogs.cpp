@@ -1516,6 +1516,9 @@ void Application::renderThreadPanel() {
             TopoDS_Shape result = m_threadFuture.get();
             m_threadComputing = false;
             if (!result.IsNull()) {
+                if (m_shapeRenderer)
+                    m_shapeRenderer->notePreMeshed(result, m_threadPreMeshDefl,
+                                                   m_threadPreMeshAng);
                 auto op = makeThreadOpFromState();
                 op->setPrecomputedResult(result);
                 if (!m_history->pushOperation(std::move(op), *m_document)) {
