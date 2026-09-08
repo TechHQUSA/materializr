@@ -195,7 +195,7 @@ SectionView::Result SectionView::compute(
         if (shape.IsNull()) continue;
         try {
             // BRepAlgoAPI_Section derives from the boolean machinery, so the
-            // cancel token can abort MID-boolean via OCCT user-break — a
+            // cancel token can abort MID-boolean via OCCT user-break - a
             // superseded/disabled 100-second section dies quickly instead of
             // finishing into the void.
             BRepAlgoAPI_Section section;

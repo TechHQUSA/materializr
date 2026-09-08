@@ -210,10 +210,10 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
                               float angularDeflection)
 {
     // A worker thread may have PRE-MESHED this shape at the current quality
-    // (heavy results like a swept thread — meshing its 35-turn helicoid faces
+    // (heavy results like a swept thread - meshing its 35-turn helicoid faces
     // on the main thread froze the app for ~10s). Reuse that cache only when
     // every face carries a triangulation at EXACTLY the requested linear
-    // deflection — any other value re-meshes below, so the quality slider
+    // deflection - any other value re-meshes below, so the quality slider
     // still takes effect in BOTH directions (a finer-than-requested cache
     // must NOT survive a quality lowering; that was a real bug once).
     bool preMeshed = true;
@@ -365,7 +365,7 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
     // the new tessellation actually succeeds.
     int appendedSlot = tessellate(shape, deflection, angularDeflection);
     if (appendedSlot < 0) {
-        // Failed — leave the existing slot (if any) in place. LOUDLY: a
+        // Failed - leave the existing slot (if any) in place. LOUDLY: a
         // kept stale slot means the screen shows geometry the document no
         // longer has (phantom bodies, "unclickable" faces).
         auto it = m_bodyToSlot.find(bodyId);
@@ -383,12 +383,12 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
         m_bodyToSlot[bodyId] = appendedSlot;
         return appendedSlot;
     }
-    // Existing slot — relocate the new mesh's GL data into it so callers
+    // Existing slot - relocate the new mesh's GL data into it so callers
     // that cached the slot index keep working (setColor / setSelected use
     // index lookups). Carry over cosmetic state.
     int oldSlot = it->second;
     if (oldSlot < 0 || oldSlot >= static_cast<int>(m_meshes.size())) {
-        // Stale mapping — treat as fresh insert.
+        // Stale mapping - treat as fresh insert.
         m_meshes[appendedSlot].bodyId = bodyId;
         m_bodyToSlot[bodyId] = appendedSlot;
         return appendedSlot;
@@ -440,7 +440,7 @@ void ShapeRenderer::render(const glm::mat4& view, const glm::mat4& projection,
 
     glEnable(GL_DEPTH_TEST);
 
-    // Section-view clip uniforms. Set before BOTH passes — the outline pass
+    // Section-view clip uniforms. Set before BOTH passes - the outline pass
     // below also runs the mesh program for its stencil fill, and it must
     // clip identically or the selection glow paints over the removed half.
     glUseProgram(m_meshProgram);
@@ -476,11 +476,11 @@ void ShapeRenderer::render(const glm::mat4& view, const glm::mat4& projection,
     // Coincident-face tie-break, third generation. Overlapping bodies can
     // share exactly coplanar faces (Extrude From leaves the new body's base on
     // the source face) and shimmer as they z-fight. 878b7ca resolved that with
-    // a per-body glPolygonOffset(rank, 2*rank) — but rank grew with BODY COUNT,
+    // a per-body glPolygonOffset(rank, 2*rank) - but rank grew with BODY COUNT,
     // and the slope term multiplies each face's per-pixel depth gradient, so on
     // a 68-body assembly old bodies drew centimetres behind their true position
     // (worse zoomed out, where the per-pixel gradient grows). Their GL_LINES
-    // edges — which polygon offset cannot move — stayed put, so whole bodies
+    // edges - which polygon offset cannot move - stayed put, so whole bodies
     // degenerated into edges floating over displaced or invisible faces (the
     // corvus ghost bug). Clamping the rank only shrank the wedge: faces still
     // visibly recessed close up, and interior edges still popped through thin
@@ -489,12 +489,12 @@ void ShapeRenderer::render(const glm::mat4& view, const glm::mat4& projection,
     //
     // Instead: bodies draw in slot order (creation order, oldest first) with
     // GL_LEQUAL, so wherever two faces produce EQUAL depth the newest body
-    // deterministically wins by drawing last — the exact semantics the offset
+    // deterministically wins by drawing last - the exact semantics the offset
     // was built for, with zero geometric displacement. The invariant vertex
     // shaders (shared with EdgeRenderer) make coplanar faces genuinely hit
     // equal depths. Residual risk: differently-tessellated coplanar faces can
     // still disagree by a few depth quanta at extreme grazing angles and
-    // sparkle there — minor and localized, where the offset's failure mode was
+    // sparkle there - minor and localized, where the offset's failure mode was
     // structural and scene-wide.
     glDepthFunc(GL_LEQUAL);
     const int slotCount = static_cast<int>(m_meshes.size());

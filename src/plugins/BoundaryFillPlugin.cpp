@@ -2,11 +2,11 @@
 #include "../plugin/PluginContext.h"
 #include "../core/SelectionManager.h"
 
-// Boundary Fill — a SEPARATE feature from Loft by design. N closed sketches
+// Boundary Fill - a SEPARATE feature from Loft by design. N closed sketches
 // are treated as silhouettes (the body's outline seen along each sketch
 // plane's normal); each is extruded through the others and the prisms are
 // boolean-intersected. Order doesn't matter, planes can be anything, and
-// profiles that don't overlap fail cleanly — none of the section-ordering /
+// profiles that don't overlap fail cleanly - none of the section-ordering /
 // vertex-pairing sensitivity that makes a loft of perpendicular profiles
 // weave through itself.
 REGISTER_PLUGIN(BoundaryFill, [](materializr::PluginContext& ctx) {

@@ -13,7 +13,7 @@
 #include <TopoDS_Face.hxx>
 #include <gp_Trsf.hxx>
 
-#include <zlib.h> // crc32 — already a project dependency (gzip project files)
+#include <zlib.h> // crc32 - already a project dependency (gzip project files)
 
 #include <array>
 #include <cmath>

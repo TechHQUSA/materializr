@@ -6,16 +6,16 @@
 #include <string>
 #include <vector>
 
-// Scale a planar END face of a body — pinch (or flare) the body toward a
+// Scale a planar END face of a body - pinch (or flare) the body toward a
 // scaled copy of that face's profile over a blend length. The winglet op:
 // take a wing's tip face, scale it to 30%, and the skin tapers into it.
 //
 // Two modes, both built from boolean-safe constructions (the loft runs
 // between two TRANSFORMED COPIES of the same wire, so profile
 // compatibility is exact; boolean interfaces are planar):
-//   EXTEND — loft cap-outline → scaled outline offset outward by L; fuse.
+//   EXTEND - loft cap-outline → scaled outline offset outward by L; fuse.
 //            Adds a tapered tip of length L beyond the current face.
-//   PINCH  — cut the last L off the body, intersect that tip piece with a
+//   PINCH  - cut the last L off the body, intersect that tip piece with a
 //            pinching frustum, fuse it back. Reshapes existing material.
 class ScaleFaceOp : public Operation {
 public:

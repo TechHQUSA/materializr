@@ -1,5 +1,5 @@
 // MoveFaceOp on a SHELLED (hollow) body: the loft/shear rebuild can produce a
-// topologically-"valid" but WRONG result — an inside-out solid (negative
+// topologically-"valid" but WRONG result - an inside-out solid (negative
 // volume) on a slide, or a re-solidified body whose cavity was silently
 // discarded on a tilt. Steve hit both in-app ("doing anything to a shelled
 // body makes the shell disappear"). The op must REFUSE cleanly and leave the
@@ -87,10 +87,10 @@ TEST(MoveFaceHollow, TiltRefusesInsteadOfFillingCavity) {
         << "a refusal must leave the hollow body untouched";
 }
 
-// THE REAL PATH — History::pushOperation. A face transform on a shelled body
+// THE REAL PATH - History::pushOperation. A face transform on a shelled body
 // AUTO-REFLOWS beneath the Shell step: it applies to the pre-shell solid and
 // the shell re-runs on the moved body ("the order flipped"), so the very
-// operations the direct guards refuse SUCCEED through history — hollow body,
+// operations the direct guards refuse SUCCEED through history - hollow body,
 // moved geometry, no corruption.
 TEST(MoveFaceHollow, SlideReflowsBeneathShellThroughHistory) {
     Document doc;

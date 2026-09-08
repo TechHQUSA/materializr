@@ -56,7 +56,7 @@ TEST(LengthEdit, LengthFieldCommitWritesMm) {
 
 // 11. Convert, THEN halve. A circle's Radius constraint is typed as a diameter:
 // "2" under inches is a 2 in diameter = 50.8 mm, stored as a 25.4 mm radius.
-// Mutation: halve then convert gives the same number here — so the arc case
+// Mutation: halve then convert gives the same number here - so the arc case
 // and the angle case pin the order: an arc must NOT be halved, an angle must
 // NOT be converted.
 TEST(LengthEdit, RadiusEditConvertsThenHalves) {
@@ -93,7 +93,7 @@ TEST(LengthEdit, DimensionEditRefusesBadInput) {
 }
 
 // Seeding mirrors the commit: a circle shows its diameter, an arc its radius,
-// an angle its degrees — all in the current unit except the angle.
+// an angle its degrees - all in the current unit except the angle.
 TEST(LengthEdit, SeedDimensionTextMirrorsApply) {
     ScopedUnit s(LengthUnit::In);
     char b[32];

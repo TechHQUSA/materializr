@@ -182,7 +182,7 @@ bool findFirstUse(const std::string& svg, size_t& outStart, size_t& outEnd,
 }
 
 void expandSvgUses(std::string& svg) {
-    const int maxIter = 1024; // termination guard — pathological self-refs only
+    const int maxIter = 1024; // termination guard - pathological self-refs only
     // Output-size cap defusing the "billion laughs" amplification: when a <use>
     // target itself contains <use>, each expansion roughly doubles the buffer
     // (L_k ~= 2^k * L0), so the iteration cap alone lets a few-hundred-byte file
@@ -239,7 +239,7 @@ void sampleCubic(std::vector<glm::vec2>& out, const float* p, float ref) {
     // small chord length but bends ~180°, so length-based sampling gives it 1–2
     // points and its lone chord reads as a sharp corner (squared end). Also
     // sample by how much the control polygon TURNS, so a bendy cubic gets enough
-    // points that no chord exceeds the corner threshold — the end stays a smooth
+    // points that no chord exceeds the corner threshold - the end stays a smooth
     // curve while a straight edge (no turn) stays cheap.
     auto polyAng = [&](int a, int b, int c) -> double {
         double v1x = p[b*2] - p[a*2], v1y = p[b*2+1] - p[a*2+1];
@@ -268,8 +268,8 @@ void sampleCubic(std::vector<glm::vec2>& out, const float* p, float ref) {
 // nanosvg's CSS support is thin, so those paths arrive with NO fill and get
 // dropped or left open. We resolve the simple rules (.class / #id / tag, the
 // common single-token selectors) and stamp the matching fill/stroke onto each
-// element as a presentation attribute — only where the element doesn't already
-// set it inline — before nanosvg parses. A text-level approximation of the CSS
+// element as a presentation attribute - only where the element doesn't already
+// set it inline - before nanosvg parses. A text-level approximation of the CSS
 // cascade, enough for the "I grabbed this off the internet" case without a real
 // CSS engine.
 
@@ -434,7 +434,7 @@ void inlineSvgCss(std::string& svg) {
 // so it inherits the same viewBox/transform pipeline as every other path and
 // lands aligned. Font resolution is OCCT's Font_BRepFont::FindAndCreate, which
 // matches the requested font-family against the system's installed fonts (with
-// a sane fallback) — so "I have the font" just works, no per-import picking.
+// a sane fallback) - so "I have the font" just works, no per-import picking.
 // First cut: single-run text (tspans flattened), font-size / family / weight /
 // style / text-anchor, and the element's own transform; per-glyph positioning,
 // textPath, and multi-line tspans are out of scope.
@@ -488,7 +488,7 @@ std::string svgTextRuns(const std::string& inner) {
 
 void expandSvgText(std::string& svg) {
     // DoS budget: <text> content goes through OCCT glyph tessellation
-    // (Font_BRepTextBuilder), which is heavy per character — an adversarial
+    // (Font_BRepTextBuilder), which is heavy per character - an adversarial
     // file with megabytes of text (or thousands of elements) would otherwise
     // pin the CPU and balloon the heap while every neighbouring stage
     // (inlineSvgCss, expandSvgUses) is already budgeted.
@@ -555,7 +555,7 @@ void expandSvgText(std::string& svg) {
                 TCollection_AsciiString(fam.empty() ? "Sans" : fam.c_str()),
                 svgFontAspect(weight, style), fs, Font_StrictLevel_Any);
         } catch (...) {}
-        if (fontH.IsNull()) continue; // no font available — leave text dropped
+        if (fontH.IsNull()) continue; // no font available - leave text dropped
 
         TopoDS_Shape shape;
         try {
@@ -616,7 +616,7 @@ void expandSvgText(std::string& svg) {
 
 // ─── stroke → outline ────────────────────────────────────────────────────────
 // Modern "line icons" (Feather / Lucide / Heroicons-outline, etc.) are drawn as
-// STROKES with no fill — so there's no closed area to emboss/engrave. Offset the
+// STROKES with no fill - so there's no closed area to emboss/engrave. Offset the
 // centerline by half the stroke width into a closed ribbon. OCCT's wire offsetter
 // (arc joins) handles the corners robustly (no miter spikes). Closed paths give
 // concentric outer+inner loops (a ring); open paths get both sides + butt caps.
@@ -681,7 +681,7 @@ bool strokeToOutline(const std::vector<glm::vec2>& center, bool closed,
 
 bool SvgImport::load(const std::string& path, SvgPaths& out) {
     out = SvgPaths();
-    // Read the file ourselves so we can preprocess <use> references — nanosvg
+    // Read the file ourselves so we can preprocess <use> references - nanosvg
     // doesn't understand them and would silently drop every cloned shape.
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -701,7 +701,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     inlineSvgCss(text);   // resolve <style> class fills → presentation attrs
     expandSvgText(text);  // render live <text> to glyph-outline <path>s
     expandSvgUses(text);
-    // nsvgParse mutates the buffer in place — give it a null-terminated copy.
+    // nsvgParse mutates the buffer in place - give it a null-terminated copy.
     text.push_back('\0');
     NSVGimage* img = nsvgParse(text.data(), "mm", 96.0f);
     if (!img) {
@@ -719,7 +719,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
 
     bool haveBB = false;
     // Global vertex budget: per-segment sampling is capped (sampleCubic), but
-    // nothing else bounds the TOTAL across a file — tens of thousands of path
+    // nothing else bounds the TOTAL across a file - tens of thousands of path
     // commands would otherwise flatten into millions of sketch entities and
     // freeze buildWires/regions/snapping. Generous for real artwork; refused
     // (not silently truncated) so the user gets honest feedback.
@@ -746,7 +746,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
             pts.push_back(glm::vec2(p->pts[0], p->pts[1]));
             for (int i = 0; i < p->npts - 1; i += 3)
                 sampleCubic(pts, &p->pts[i * 2], ref);
-            // Collapse consecutive duplicates — SVG paths routinely carry
+            // Collapse consecutive duplicates - SVG paths routinely carry
             // degenerate (zero-length) cubics at joints, and a zero-length
             // sketch line would sink the whole wire in buildWires.
             {
@@ -775,11 +775,11 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
                 out.closed.push_back(isClosed);
             };
 
-            // Stroke-only path (a "line icon"): no fill area to emboss — offset
+            // Stroke-only path (a "line icon"): no fill area to emboss - offset
             // the centerline into a closed ribbon. Fall back to the centerline if
             // the offset can't be built. EXCEPTION: a hairline stroke (tiny
-            // relative to the artwork) is the laser/CAM cut-line convention —
-            // including our own sketch export — and means "this IS the curve",
+            // relative to the artwork) is the laser/CAM cut-line convention -
+            // including our own sketch export - and means "this IS the curve",
             // not "draw me this thick". Ribboning those produced two parallel
             // copies of every segment ("lines on top of each other") and turned
             // closed loops into rings that never formed a region on re-import.
@@ -830,11 +830,11 @@ namespace {
 // runs (SketchSpline through Douglas–Peucker-simplified samples). The spline is
 // the SAME centripetal Catmull-Rom the renderer draws and buildWires extrudes,
 // and it interpolates its control points, so adjacent segments join exactly (no
-// gaps) and stay true to the curve — unlike a fitted arc, whose circle doesn't
+// gaps) and stay true to the curve - unlike a fitted arc, whose circle doesn't
 // pass through the sampled endpoints. Anything jagged / oversized falls back to
 // the original dense fromText polyline, so the worst case equals the old
 // behaviour. Circles and the shared corner points are real (non-fromText)
-// geometry — they snap, edit and can anchor a region; spline-internal points and
+// geometry - they snap, edit and can anchor a region; spline-internal points and
 // leftover lines stay fromText (out of the inference guides). Returns true if it
 // placed anything.
 bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) {
@@ -894,7 +894,7 @@ bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) 
     // ── Otherwise: split at sharp corners (so straight edges stay straight),
     //    then each run becomes a single line or a spline that passes THROUGH the
     //    samples. Centripetal Catmull-Rom interpolates its control points, so a
-    //    spline joins its neighbours exactly — no gaps, and truer to the curve
+    //    spline joins its neighbours exactly - no gaps, and truer to the curve
     //    than the arc fit was. ──
     auto turnAt = [&](int i) -> double {
         glm::vec2 v1 = at(i) - at(i-1), v2 = at(i+1) - at(i);
@@ -904,7 +904,7 @@ bool emitDetectedLoop(Sketch* sk, const std::vector<glm::vec2>& P, bool closed) 
         return std::atan2(cr, dt);
     };
     // A corner is simply a sample whose turn exceeds the threshold. (An earlier
-    // "concentration" test — turn must beat its neighbours combined — was meant
+    // "concentration" test - turn must beat its neighbours combined - was meant
     // to keep tight rounded tips smooth, but small text has corners spaced only
     // a sample or two apart, so a corner's neighbour is another corner and the
     // test wrongly rejected it, rounding whole letters into comic-sans. The tip

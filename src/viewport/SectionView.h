@@ -34,7 +34,7 @@ public:
         std::vector<float> positions; // x,y,z per vertex, TRIANGLES
         glm::vec3 color;
     };
-    // Everything a section recompute produces — plain CPU data, so it can be
+    // Everything a section recompute produces - plain CPU data, so it can be
     // built on a WORKER thread (one recompute on a swept-thread body took
     // 100s; on the main thread that was the whole app frozen).
     struct Result {
@@ -42,7 +42,7 @@ public:
         std::vector<CapMesh> caps;
         glm::vec3 capNormal{0.0f, 0.0f, 1.0f};
     };
-    // Worker-safe computation over COPIED shapes (deep-copy the bodies —
+    // Worker-safe computation over COPIED shapes (deep-copy the bodies -
     // live TShapes' lazy caches are touched by the render thread). `cancel`
     // aborts between bodies and mid-boolean (OCCT user-break).
     static Result compute(

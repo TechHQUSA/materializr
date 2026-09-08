@@ -10,7 +10,7 @@
 #include "../ui/NumField.h"      // btnConfirm / btnCancel
 #include "../ui/StepperRow.h"
 #include "../ui/TouchWidgets.h"  // im-touch number-pad amount field
-#include "../ui/TouchIcons.h"    // MZ_ICON_BODY — the all-bodies pill
+#include "../ui/TouchIcons.h"    // MZ_ICON_BODY - the all-bodies pill
 #include "../ui/OpDialogGrip.h"
 #include "../touch_mode.h"
 #include <imgui.h>
@@ -55,8 +55,8 @@ static std::vector<std::pair<int, TopoDS_Shape>> cutCandidates(
 }
 
 int ExtrudeController::resolveCutTarget(const IopContext& ctx) const {
-    // The live preview IS the tool volume — the exact solid the user is
-    // watching — so ask which bodies it overlaps rather than re-deriving it.
+    // The live preview IS the tool volume - the exact solid the user is
+    // watching - so ask which bodies it overlaps rather than re-deriving it.
     const int previewId = previewBodyId();
     if (previewId < 0) {
         std::fprintf(stderr, "[Subtract] no tool volume to cut with "
@@ -69,7 +69,7 @@ int ExtrudeController::resolveCutTarget(const IopContext& ctx) const {
     const auto cands = cutCandidates(ctx, previewId);
     const int hit = cutpick::pickCutTarget(cands, tool, m_targetBody);
     if (hit < 0) {
-        // Say what was actually measured — "nothing to cut" is a claim about
+        // Say what was actually measured - "nothing to cut" is a claim about
         // geometry, and a wrong one is invisible without the numbers (this
         // dump is what turned "but it CLEARLY overlaps" into "the tool spans
         // x -18..-6 and every body starts at 0"). Re-running the booleans to
@@ -101,7 +101,7 @@ bool ExtrudeController::beginExtrude(const IopContext& ctx,
                                      const TopoDS_Shape& profile,
                                      ExtrudeMode mode, int targetBody,
                                      int sourceSketchId) {
-    // Extrude sweeps a profile along its normal — only meaningful for a FLAT
+    // Extrude sweeps a profile along its normal - only meaningful for a FLAT
     // profile. A single curved body face (cylinder / sphere / fillet) has no
     // single normal, so extruding it produced garbage geometry; refuse with
     // guidance instead (mirrors Sketch-on-Face). Checked BEFORE anything is
@@ -129,7 +129,7 @@ int ExtrudeController::onBegin(const IopContext& ctx) {
     materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);
     m_inputFocus = true;
 
-    // Face normal and centre. A compound profile (multi-region extrude —
+    // Face normal and centre. A compound profile (multi-region extrude -
     // several letters at once) uses its first face: all regions of one sketch
     // are coplanar, so any face gives the right normal.
     TopoDS_Shape normShape = m_profile;
@@ -149,7 +149,7 @@ int ExtrudeController::onBegin(const IopContext& ctx) {
         m_origin = glm::vec3(center.X(), center.Y(), center.Z());
     }
     // Point the on-screen arrow INTO the material for a Subtract, so dragging
-    // toward it deepens the cut. A face sketch gets that for free — its normal
+    // toward it deepens the cut. A face sketch gets that for free - its normal
     // points OUT of the host body, so the cut runs the other way. A sketch on a
     // construction or origin plane has no host and no such convention: its
     // normal points wherever the plane faces, which half the time is away from
@@ -177,7 +177,7 @@ int ExtrudeController::onBegin(const IopContext& ctx) {
 
 std::unique_ptr<Operation> ExtrudeController::buildOp(const IopContext& ctx) {
     (void)ctx;
-    // The live instance. Always NewBody — the user watches the tool volume
+    // The live instance. Always NewBody - the user watches the tool volume
     // being swept; Subtract's real boolean is buildCommitOp's job.
     auto op = std::make_unique<ExtrudeOp>();
     op->setProfile(m_profile);
@@ -237,7 +237,7 @@ std::vector<int> ExtrudeController::resolveAllCutTargets(
 // op, so this takes over the whole tail of the gesture: drop the preview volume
 // (it is a NewBody tool that must not survive), then push a real Subtract per
 // target. Each carries the same profile and distance, so each cuts its own body
-// exactly as a single-target Subtract would — including its face lineage, which
+// exactly as a single-target Subtract would - including its face lineage, which
 // is per-body and would have to be reinvented to pack them into one op.
 void ExtrudeController::commitCutAll(const IopContext& ctx,
                                      const std::vector<int>& targets) {
@@ -256,7 +256,7 @@ void ExtrudeController::commitCutAll(const IopContext& ctx,
     }
     std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",
                  std::abs(m_distance), done, targets.size());
-    // A body whose cut FAILED is not a silent loss — pushOperation refuses an
+    // A body whose cut FAILED is not a silent loss - pushOperation refuses an
     // op that can't produce a valid solid, so that body is simply unchanged,
     // and the ones that worked still landed.
     if (done < static_cast<int>(targets.size()) && ctx.toast) {
@@ -274,7 +274,7 @@ void ExtrudeController::commitCutAll(const IopContext& ctx,
 
 std::unique_ptr<Operation> ExtrudeController::buildCommitOp(const IopContext& ctx) {
     (void)ctx;
-    // NewBody: the previewed instance IS the result — let the base record it
+    // NewBody: the previewed instance IS the result - let the base record it
     // as-is. Subtract: the preview was only a tool volume, so hand back the
     // real boolean cut against the body the sketch was drawn on.
     if (m_mode != ExtrudeMode::Subtract || m_targetBody < 0) {
@@ -311,7 +311,7 @@ int ExtrudeController::previewBodyId() const {
 }
 
 // Left-drag anywhere in the viewport moves the distance along the arrow's
-// normal. No handle to latch — the whole viewport is the drag surface — so
+// normal. No handle to latch - the whole viewport is the drag surface - so
 // draggingHandle() stays false and the camera keeps its own claim (the
 // dispatch loop skips this while the camera is dragging).
 void ExtrudeController::onViewportInput(const IopViewport& vp,
@@ -390,7 +390,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
 
     bool doCommit = false, doCancel = false;
     if (imTouch) {
-        // im-touch: the WHOLE panel is this one tappable value well — no
+        // im-touch: the WHOLE panel is this one tappable value well - no
         // header, hint or steppers (Steve: the full "distance dialog" kept
         // showing up; drag for coarse, pad for exact).
         if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {
@@ -408,12 +408,12 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         materializr::reseedLengthBufferIfIdle("##dist", m_inputBuf, sizeof(m_inputBuf), m_distance);
         if (ImGui::InputText("##dist", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            // Enter pressed — commit (parseFinite: keep last on garbage)
+            // Enter pressed - commit (parseFinite: keep last on garbage)
             (void)materializr::parseLength(m_inputBuf, m_distance);
             updateExtrude(ctx);
             doCommit = true;
         } else if (materializr::lengthBufferIsActive("##dist")) {
-            // Only while typing — an idle re-parse truncated the member to the
+            // Only while typing - an idle re-parse truncated the member to the
             // buffer's decimals and reinterpreted stale text after a unit switch.
             float parsed = m_distance;
             if (materializr::parseLength(m_inputBuf, parsed) &&
@@ -427,7 +427,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     }
 
     // Quick-nudge stepper (replaces the slider): ±10/1/0.1, and 0 to clear
-    // the extrusion mid-preview. Desktop only — im-touch stays a single well.
+    // the extrusion mid-preview. Desktop only - im-touch stays a single well.
     if (!imTouch &&
         materializr::lengthStepperRow("extrudeStep", &m_distance,
                                 /*allowNegative=*/true, -50.0f, 50.0f)) {
@@ -436,7 +436,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
     }
 
     // Subtract only: cut everything the sweep passes through, not just the one
-    // body. Off by default — a sketch on a face means that face's body, and
+    // body. Off by default - a sketch on a face means that face's body, and
     // carving a neighbour it merely overlaps would be a surprise. The checkbox
     // is here (not a setting) because it is a property of THIS cut: a profile
     // meant to pass through a stack and one meant to pocket a single plate are
@@ -445,7 +445,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         ImGui::Spacing();
         // Nothing to re-preview either way: the preview IS the tool volume, and
         // which bodies it cuts is decided at commit. The panel is pinned to
-        // 240*s, so the label has to stay short or it clips — the tooltip
+        // 240*s, so the label has to stay short or it clips - the tooltip
         // carries the detail. im-touch gets a pill instead of a checkbox: a
         // checkbox tickbox is a fingertip-hostile tap target.
         if (imTouch) {
@@ -467,7 +467,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
             doCancel = true;
     }
     ImGui::End();
-    // Commit/cancel AFTER End() — they tear the controller's state down, and
+    // Commit/cancel AFTER End() - they tear the controller's state down, and
     // the window has to be closed first.
     if (doCommit) commit(ctx);
     else if (doCancel) cancel(ctx);

@@ -4,7 +4,7 @@
 
 namespace materializr {
 
-// How rigid the sheet material is — this (plus thickness) is what defines how the
+// How rigid the sheet material is - this (plus thickness) is what defines how the
 // flattened geometry is processed, instead of naming specific materials. A few
 // materials map onto each: Pliable = thin vinyl / Monokote / film; SemiRigid =
 // foam board / corrugated (score & fold); Rigid = plywood / acrylic (mitred).

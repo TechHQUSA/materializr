@@ -41,7 +41,7 @@ public:
     /// renderer's during interactive previews.
     int findSlotByBody(int bodyId) const;
 
-    /// Per-body model matrix — applied during render() so a live preview
+    /// Per-body model matrix - applied during render() so a live preview
     /// can transform the edges visually without re-extracting them. Cheap
     /// because the cached vertex data is unchanged; only the MVP uniform
     /// shifts per draw.

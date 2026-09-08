@@ -52,7 +52,7 @@ namespace {
 // The far cross-section of the feature attached to `face`: the edge LOOPS where
 // the side-wall faces sharing `face`'s boundary end (meet a step / other
 // geometry). On a plain prism that's the opposite cap; on a funnel→step→spout,
-// from the spout cap it's the spout-top — which is an ANNULUS (outer + inner
+// from the spout cap it's the spout-top - which is an ANNULUS (outer + inner
 // ring) when the spout is hollow, so this returns a SET of loops. Empty if it
 // can't assemble clean closed loops (caller falls back to the opposite cap).
 std::vector<TopoDS_Wire> featureFarLoops(const TopoDS_Shape& body,
@@ -127,7 +127,7 @@ bool MoveFaceOp::execute(Document& doc) {
 
         // Name the target face on the first run (while m_face is still valid),
         // then re-resolve it whenever it's no longer a live sub-shape of the
-        // (possibly rebuilt) body — an upstream sketch edit that MOVED the face
+        // (possibly rebuilt) body - an upstream sketch edit that MOVED the face
         // leaves m_face pointing at the old body. Sketch-anchored, so it
         // follows; falls back to the stale handle if unnameable.
         if (m_faceRef.empty()) {
@@ -149,7 +149,7 @@ bool MoveFaceOp::execute(Document& doc) {
                     // SANITY GUARD: only adopt the resolved face if it points
                     // the same way as the stale one. The stale face's geometry
                     // is still readable (its TShape lives on), and it's what
-                    // the pre-topo code would have used — so a resolution that
+                    // the pre-topo code would have used - so a resolution that
                     // flips orientation is a MIS-resolve (this is what made a
                     // body "slump": a taper re-applied about a wrong plane).
                     // Reject it and keep the old behaviour instead.
@@ -189,7 +189,7 @@ bool MoveFaceOp::execute(Document& doc) {
             pivot = gp.CentreOfMass();
         }
 
-        // The single transform applied to the moving (top) loops — translate,
+        // The single transform applied to the moving (top) loops - translate,
         // rotate-about-pivot, or scale-about-pivot. Everything downstream (loft,
         // sketch follow, undo) just applies this one gp_Trsf.
         gp_Vec V = m_move - N * m_move.Dot(N); // in-plane slide (Translate)
@@ -242,7 +242,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // the moved top outer wire, then subtract a loft of each HOLE loop
         // (base inner -> moved top inner). Every loop moves by V here (the whole
         // face slides, holes included); per-loop control (move a hole on its
-        // own) layers on top later. All geometry is local wires — no whole-body
+        // own) layers on top later. All geometry is local wires - no whole-body
         // convert, so it survives bodies the shear crashed on. Non-prism bodies
         // refuse here instead of crashing.
 
@@ -250,7 +250,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // FARTHEST along -N from the selected face. The normal need only be
         // roughly opposite (dot < -0.3), NOT near-perfectly antiparallel: after
         // a TILT the top is tilted while the base stays flat, so they're no
-        // longer parallel — a strict test made a second op on a tilted face
+        // longer parallel - a strict test made a second op on a tilted face
         // refuse. The loose test still excludes the perpendicular side walls.
         TopoDS_Face baseFace;
         double bestDist = -1e300;
@@ -390,7 +390,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // Build the feature solid base→top. applyMove OFF reconstructs the
         // ORIGINAL feature (the cut tool); ON builds the transformed one. The
         // hole rings ride/stay per the three-state flags (TILT must ride, else
-        // the face can't close — the "half cover" bug).
+        // the face can't close - the "half cover" bug).
         auto buildFeature = [&](bool applyMove) -> TopoDS_Shape {
             TopoDS_Wire bOuter = baseOuter; bOuter.Reverse();
             TopoDS_Shape feat;
@@ -438,7 +438,7 @@ bool MoveFaceOp::execute(Document& doc) {
             result = newFeature; // the loft IS the new body (plain prism)
         } else {
             // Cut the ORIGINAL feature out of the body, fuse the transformed one
-            // back — keeps every other feature (the funnel above the spout).
+            // back - keeps every other feature (the funnel above the spout).
             TopoDS_Shape oldFeature = isTwist ? buildTwistFeature(false) : buildFeature(false);
             if (oldFeature.IsNull()) {
                 std::fprintf(stderr, "[MoveFace] original-feature loft failed\n");
@@ -474,7 +474,7 @@ bool MoveFaceOp::execute(Document& doc) {
         for (TopExp_Explorer sx(result, TopAbs_SOLID); sx.More(); sx.Next()) ++nsolids;
         if (nsolids < 1) return false;
 
-        // Sanity guards BRepCheck can't provide — a shelled (hollow) body run
+        // Sanity guards BRepCheck can't provide - a shelled (hollow) body run
         // through the loft/shear rebuild can come out topologically "valid" yet
         // WRONG: an inside-out solid (negative volume) or a re-solidified body
         // whose cavity was silently discarded. Refuse cleanly instead of
@@ -518,7 +518,7 @@ bool MoveFaceOp::execute(Document& doc) {
         doc.updateBody(m_bodyId, result);
 
         // Move on-face sketches by the SAME transform (slide / tilt / scale), so
-        // they stay glued to the face — but only when the face OUTLINE moves
+        // they stay glued to the face - but only when the face OUTLINE moves
         // (sketches ride the face, not a hole). Stored for undo.
         m_appliedXform = m_moveOuter ? topT : gp_Trsf();
         if (m_moveOuter)
@@ -527,7 +527,7 @@ bool MoveFaceOp::execute(Document& doc) {
                 gp_Pln pln = sk->getPlane();
                 pln.Transform(m_appliedXform);
                 sk->setPlane(pln);
-                // The cached host face is used to build the sketch's regions —
+                // The cached host face is used to build the sketch's regions -
                 // move it too (copy=true forces a fresh TShape so the region
                 // cache, keyed on it, invalidates), or its stale geometry
                 // highlights at the OLD position when the region is clicked.
@@ -629,7 +629,7 @@ bool MoveFaceOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
-        // faceref is a length-prefixed opaque blob written last — read to end.
+        // faceref is a length-prefixed opaque blob written last - read to end.
         if (key == "faceref") {
             std::string rest = blob.substr(eq + 1);
             size_t c = rest.find(':');

@@ -1,7 +1,7 @@
 // Scale Face in BOTH directions.
 //
 // Steve, 2026-08-04: "scale is supposed to increase or decrease the size of the
-// face selected with the side walls following." Pinch did only half of that —
+// face selected with the side walls following." Pinch did only half of that -
 // it was Common(body, frustum), an intersection, which can only ever REMOVE
 // material, so >100% returned success and changed nothing. Extend was no
 // substitute: it adds a new tapered section on top rather than re-sloping the
@@ -65,7 +65,7 @@ TEST(ScaleFaceRange, PinchBelow100Shrinks) {
 }
 
 // THE REPORT: >100% must now GROW the body, with the side walls flaring out
-// from the base — not silently do nothing.
+// from the base - not silently do nothing.
 TEST(ScaleFaceRange, PinchAbove100Grows) {
     Boxed f;
     ScaleFaceOp op;

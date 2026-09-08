@@ -48,7 +48,7 @@ class Picker {
 public:
     Picker();
 
-    // Per-body diagnostic prints inside pick() — set for ONE call (the
+    // Per-body diagnostic prints inside pick() - set for ONE call (the
     // re-pick the click diagnostic runs), then cleared. Static so call
     // sites need no plumbing.
     static bool s_verbose;
@@ -77,8 +77,8 @@ private:
     // and explores every face + every edge each hover frame) is ruinous. Instead
     // we flatten the body ONCE into a cached list of world-space triangles, each
     // tagged with its owning face, and ray-test that. Returns the face index
-    // (exploration order) and sets hitFace to the actual TopoDS_Face — so face
-    // selection and sketch-on-face keep working — or -1 on a miss.
+    // (exploration order) and sets hitFace to the actual TopoDS_Face - so face
+    // selection and sketch-on-face keep working - or -1 on a miss.
     int pickMeshBody(const glm::vec3& origin, const glm::vec3& dir,
                      const TopoDS_Shape& shape, float& bestDist,
                      glm::vec3& hitPt, TopoDS_Shape& hitFace);

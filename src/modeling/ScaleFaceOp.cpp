@@ -70,7 +70,7 @@ bool ScaleFaceOp::execute(Document& doc) {
             return false;
         }
 
-        // Outward normal (orientation-aware) and the face centroid — the
+        // Outward normal (orientation-aware) and the face centroid - the
         // scale pivot.
         BRepGProp_Face gpf(m_face);
         double u1, u2, v1, v2;
@@ -94,7 +94,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         // X / Y directions (deterministic per face, so reload-safe):
         // M = su*(u (x) u) + sv*(v (x) v) + (n (x) n), translation keeps
         // the centroid fixed. gp_Trsf can't do this; gp_GTrsf can.
-        // COPY the plane — Pln() returns a temporary, and a reference
+        // COPY the plane - Pln() returns a temporary, and a reference
         // into it dangles after this statement (the axes came out as
         // uninitialized garbage: zero scale matrix, NaN directions).
         const gp_Pln fpln = pl->Pln();
@@ -127,7 +127,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         };
         // UNIFORM scale must stay exact. GTransform converts every analytic
         // curve to a bspline (a general affine map can turn a circle into an
-        // ellipse, so OCCT downgrades unconditionally) — a uniformly scaled
+        // ellipse, so OCCT downgrades unconditionally) - a uniformly scaled
         // circle came back as a wobbly approximation: the loft wall rendered
         // lumpy and the scaled cap centroid drifted off-axis (Steve's
         // "strange geometry on the side wall", 2026-08-04). gp_Trsf's true
@@ -172,7 +172,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         } else {
             // Pinch: reshape the last L of the body toward the scaled
             // outline. When L spans the WHOLE body ("scale the top face
-            // and the sides follow from the base" — the default), the cut
+            // and the sides follow from the base" - the default), the cut
             // degenerates and a single Common against the frustum does
             // everything.
             Bnd_Box bb;
@@ -221,8 +221,8 @@ bool ScaleFaceOp::execute(Document& doc) {
             // material, so a frustum wider than the body just clipped back to
             // the body and the op reported success having changed nothing
             // (Steve: "scale only makes a face smaller"). The frustum already
-            // describes the wanted shape in both directions — full-size
-            // outline at the base, scaled outline at the face — so growing is
+            // describes the wanted shape in both directions - full-size
+            // outline at the base, scaled outline at the face - so growing is
             // the same solid UNIONED on instead of intersected, which flares
             // the side walls outward from the base and keeps the body's other
             // features. Union works for the partial-length case too: the
@@ -259,7 +259,7 @@ bool ScaleFaceOp::execute(Document& doc) {
                 tipCommon.SetFuzzyValue(1.0e-4);
                 tipCommon.Build();
                 if (!tipCommon.IsDone()) return false;
-                // Keep only the part beyond the cut plane — the frustum
+                // Keep only the part beyond the cut plane - the frustum
                 // also overlaps inboard material.
                 BRepAlgoAPI_Common tipPiece(tipCommon.Shape(), tipBox);
                 tipPiece.SetFuzzyValue(1.0e-4);
@@ -277,7 +277,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         if (result.IsNull()) return false;
 
         // The booleans (the grow-Fuse especially) leave same-surface faces
-        // split — the grown cap arrived as the ORIGINAL top disc plus a
+        // split - the grown cap arrived as the ORIGINAL top disc plus a
         // coplanar annulus stacked at the same height. Merge them, the same
         // way Push/Pull does after its cut/fuse.
         result = materializr::unifySameDomain(result, "ScaleFace");
@@ -321,7 +321,7 @@ std::string ScaleFaceOp::description() const {
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
-    // PERCENTAGES, not lengths — the header says "percent along the face
+    // PERCENTAGES, not lengths - the header says "percent along the face
     // plane's XDirection" and the labels say (%). Routed through lengthField
     // they were converted display->mm on commit, so typing 100 under inches
     // stored 2540%.

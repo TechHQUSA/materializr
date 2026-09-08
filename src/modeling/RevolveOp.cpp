@@ -171,7 +171,7 @@ bool RevolveOp::rebuildProfileFromSketch(Document& doc) {
     auto sk = doc.getSketch(m_sketchId);
     if (!sk) return false;
     auto regions = sk->buildRegions();
-    // Outermost region (largest outer bbox) — mirrors the Revolve popup's
+    // Outermost region (largest outer bbox) - mirrors the Revolve popup's
     // creation pick, so a reload re-derives the same profile (its face
     // carries any inner boundaries as holes).
     int bestIdx = -1;

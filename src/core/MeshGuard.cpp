@@ -27,7 +27,7 @@ std::vector<int> selectedBodyIds(const SelectionManager& sel) {
 std::string meshRefusalMessage(const char* opName, size_t meshCount,
                                size_t total) {
     const std::string op = opName ? opName : "That operation";
-    // An import is a reference, so say what it IS good for in the same breath —
+    // An import is a reference, so say what it IS good for in the same breath -
     // otherwise the refusal reads as a missing feature rather than a boundary.
     if (meshCount >= total) {
         return op + " needs solid geometry, and this is an imported mesh - "

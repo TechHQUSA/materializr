@@ -176,7 +176,7 @@ void main() {
     if (axisU > 0.0) { rgb = mix(rgb, vec3(0.80, 0.20, 0.20), axisU); a = max(a, axisU); }
     if (axisV > 0.0) { rgb = mix(rgb, vec3(0.20, 0.20, 0.80), axisV); a = max(a, axisV); }
 
-    // Distance fade, then the global opacity slider — both linear multipliers so
+    // Distance fade, then the global opacity slider - both linear multipliers so
     // the whole grid dims uniformly instead of culling lines one by one.
     float alpha = a * fade * u_globalAlpha;
     if (alpha < 0.001) discard;

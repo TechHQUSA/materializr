@@ -50,18 +50,18 @@ void refreshAllEdgeOpFaces(History& hist, Document& doc) {
         };
         // A fillet/chamfer's body may have been DELETED by a later step (e.g. a
         // filleted lid that was then deleted). getBody() throws on a missing
-        // id, which — uncaught — aborted the whole app on load ("Fatal error:
+        // id, which - uncaught - aborted the whole app on load ("Fatal error:
         // Body not found: N"). Skip any op whose body is gone.
         TopoDS_Shape own;
         try { own = doc.getBody(bodyId); } catch (...) {}
         if (!own.IsNull()) {
             try { refresh(own, bodyId); } catch (...) {}
         } else {
-            // The op's own body was CONSUMED by a downstream boolean — its
+            // The op's own body was CONSUMED by a downstream boolean - its
             // bevel faces now live on the successor body. Refresh against every
             // current body; refreshGeneratedFaces matches by the op's stable
             // face-lineage ids (exact) or blend geometry, so only the body that
-            // actually carried the faces forward updates — the rest are no-ops.
+            // actually carried the faces forward updates - the rest are no-ops.
             // Without this a filleted/chamfered body that was later unioned
             // into another lost its history-hover highlight entirely.
             for (int b : doc.getAllBodyIds()) {
@@ -111,7 +111,7 @@ void EdgeOpController::computeHandleFrame(bool outwardFromFaces) {
             // Outward handle direction = the average of the two adjacent faces'
             // OUTWARD normals at the edge, made perpendicular to the edge. This
             // points the arrow the way the fillet actually grows for BOTH
-            // convex (outer) edges AND concave inner corners — e.g. the inside
+            // convex (outer) edges AND concave inner corners - e.g. the inside
             // corners of a thin-wall hollow box, where the fillet bulges into
             // the cavity. The old "bbox centre → edge" heuristic was inverted
             // on concave edges (arrow faced out toward the wall).
@@ -178,7 +178,7 @@ void EdgeOpController::computeFaceDirs() {
 
         auto inFaceDir = [&](const TopoDS_Shape& fshape) -> glm::vec3 {
             // Centroid heuristic (perp-to-edge component of centroid − edge
-            // mid) — kept only as the last-resort fallback. It points the WRONG
+            // mid) - kept only as the last-resort fallback. It points the WRONG
             // way whenever the face wraps around other features and its
             // centroid lands on the far side of the edge (the light cover's
             // shelf face flipped the yellow A-arrow, #57).
@@ -347,15 +347,15 @@ int EdgeOpController::onBegin(const IopContext& ctx) {
         m_origValue  = m_value;   // restored on cancel
         m_origValue2 = m_value2;
         // Snapshot the WHOLE document + every op's edit state BEFORE the first
-        // preview replay — see HistoryEditPreview for why both halves matter.
+        // preview replay - see HistoryEditPreview for why both halves matter.
         m_editPreview.begin(ctx.doc, ctx.history);
         // Clear the face selection so the gizmo / overlay rendering doesn't
         // fight a stale "Face Operations" panel while editing.
         ctx.selection.clear();
         // The picked body's geometry NOW, before any preview: commit compares
         // against this to spot a frozen op. Measuring it at commit instead
-        // would compare "new radius" against "new radius" — the preview has
-        // already moved the body — and always report "unchanged".
+        // would compare "new radius" against "new radius" - the preview has
+        // already moved the body - and always report "unchanged".
         m_prePickedVol = m_prePickedArea = 0.0;
         if (m_pickedBodyId >= 0) {
             try {
@@ -477,14 +477,14 @@ void EdgeOpController::commit(const IopContext& ctx) {
     const bool editing = m_editingIndex >= 0;
     const bool isFillet = m_kind == EdgeOpKind::Fillet;
 
-    // CREATE previews a transient op against the snapshot — restore it before
+    // CREATE previews a transient op against the snapshot - restore it before
     // pushing the real op. EDIT previews through editStep, so the document
     // already reflects history; clobbering the body here would just be churn.
     if (!editing && bodyId() >= 0 && !snapshot().IsNull())
         ctx.doc.updateBody(bodyId(), snapshot());
 
-    // Confirming with no size set is a no-op — cancel out. In EDIT mode a zero
-    // value would mean "remove this fillet" — surprising semantics, so treat it
+    // Confirming with no size set is a no-op - cancel out. In EDIT mode a zero
+    // value would mean "remove this fillet" - surprising semantics, so treat it
     // as cancel too: restore the ORIGINAL parameter (the live preview mutates
     // the real op) and replay.
     if (m_value < 0.01f) {
@@ -504,7 +504,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
         writeEditedParams(ctx, m_value, m_twoDist ? m_value2 : -1.0f);
         if (!m_editPreview.replay(m_editingIndex, ctx.doc, ctx.history)) {
             // The step couldn't rebuild on the current body (its edges
-            // reference geometry a later feature consumed — the classic case
+            // reference geometry a later feature consumed - the classic case
             // for a chamfer/fillet originally applied BEFORE those features).
             // replay() already restored the pre-edit snapshot; put the op's
             // parameter back and tell the user the honest remedy.
@@ -523,13 +523,13 @@ void EdgeOpController::commit(const IopContext& ctx) {
         }
         // Refresh face→op mapping after the edit so ownsFace() works on the new
         // body positions. The replay re-ran EVERY op's execute(), so every
-        // fillet/chamfer (not just the edited one) needs rebinding — otherwise
+        // fillet/chamfer (not just the edited one) needs rebinding - otherwise
         // the others' faces stay at their pre-Transform positions and become
         // un-clickable until the next reload.
         refreshAllEdgeOpFaces(ctx.history, ctx.doc);
 
         // Detect a frozen op: the clicked body's geometry matches what was
-        // measured at begin — before any preview ran. If the commit didn't
+        // measured at begin - before any preview ran. If the commit didn't
         // change the body at all from its original pre-edit state, the op
         // likely drives a different/deleted body (save-corruption edge case).
         if (m_pickedBodyId >= 0 &&
@@ -566,7 +566,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
                      isFillet ? "Fillet" : "Chamfer", m_value);
     } else if (ctx.toast) {
         // execute() rejected the result (invalid topology / unbuildable at this
-        // size) and left the body untouched — say so instead of silently doing
+        // size) and left the body untouched - say so instead of silently doing
         // nothing.
         ctx.toast(std::string(isFillet ? "Fillet" : "Chamfer")
                       .append(" couldn't be built on those edges - the "
@@ -579,7 +579,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
 void EdgeOpController::cancel(const IopContext& ctx) {
     if (!active()) { finish(ctx); return; }
     if (m_editingIndex >= 0) {
-        // The live preview mutated the real op — restore the parameter it had
+        // The live preview mutated the real op - restore the parameter it had
         // when the edit began, then replay so the committed state (including
         // downstream ops) returns. Replaying at the original value can itself
         // fail for a step that no longer rebuilds; replay() falls back to the
@@ -589,7 +589,7 @@ void EdgeOpController::cancel(const IopContext& ctx) {
     } else if (bodyId() >= 0 && !snapshot().IsNull()) {
         ctx.doc.updateBody(bodyId(), snapshot());
     }
-    refreshAllEdgeOpFaces(ctx.history, ctx.doc);   // body replayed — rebind
+    refreshAllEdgeOpFaces(ctx.history, ctx.doc);   // body replayed - rebind
     finish(ctx);
 }
 
@@ -682,7 +682,7 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
                 m_value = (proj <= 0.0f) ? 0.0f : std::max(0.1f, proj);
                 // Quantise the drag to the displayed precision (0.1 mm): every
                 // readout shows %.1f, so committing the raw float stored
-                // "1.9948" behind an on-screen "2.0" — visible later in the
+                // "1.9948" behind an on-screen "2.0" - visible later in the
                 // Properties editor after a reload.
                 m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm
                 materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
@@ -783,7 +783,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         opName);
 
     // im-touch: anchor the well next to the edge being rounded/cut (latched
-    // midpoint — static while values change, same rule as the sketch fields);
+    // midpoint - static while values change, same rule as the sketch fields);
     // other layouts keep the fixed top-right spot.
     bool anchored = false;
     if (imTouch && ctx.panel.anchorValid) {
@@ -824,7 +824,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     bool doCommit = false, doCancel = false;
     if (imTouch) {
         // im-touch: the panel is the value well (+ the chamfer's two-distance
-        // controls below) — no header, hint or steppers.
+        // controls below) - no header, hint or steppers.
         if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false, 0.1f, 20.0f)) {
             materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
             update(ctx);
@@ -842,7 +842,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             update(ctx);
             doCommit = true;
         } else if (materializr::lengthBufferIsActive("##val")) {
-            // Only while typing — an idle re-parse wrote the buffer's rounded
+            // Only while typing - an idle re-parse wrote the buffer's rounded
             // text back over a more precise member, and reinterpreted the old
             // unit's text after a unit switch.
             float parsed = m_value;
@@ -858,7 +858,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
 
     // Quick-nudge stepper (replaces the slider). Positive-only for a radius /
     // setback; 0 shows the original body mid-preview. Confirming at 0 still
-    // cancels — zero fillet = no fillet. Desktop only.
+    // cancels - zero fillet = no fillet. Desktop only.
     if (!imTouch &&
         materializr::lengthStepperRow("edgeStep", &m_value,
                                 /*allowNegative=*/false, 0.1f, 20.0f)) {
@@ -924,7 +924,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             doCancel = true;
     }
     ImGui::End();
-    // Commit/cancel AFTER End() — they tear down state the window is reading.
+    // Commit/cancel AFTER End() - they tear down state the window is reading.
     if (doCommit) commit(ctx);
     else if (doCancel) cancel(ctx);
 }

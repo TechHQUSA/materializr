@@ -28,7 +28,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
 
     // Cond_Always, not Appearing: on iOS the window can first appear on a
     // frame with a degenerate viewport (splash → UI handoff), and an
-    // Appearing-only position lands wrong ONCE and NoMove pins it there —
+    // Appearing-only position lands wrong ONCE and NoMove pins it there -
     // a 45px sliver at ImGui's (60,60) cascade default while the modal dim
     // blocks all input (the "second launch locks up" report). Re-asserting
     // the centre every frame makes a bad first frame self-heal.
@@ -40,7 +40,7 @@ WelcomeScreen::Action WelcomeScreen::render() {
                                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
 
-        // App name — slightly larger via font scaling, same as the About dialog.
+        // App name - slightly larger via font scaling, same as the About dialog.
         float origScale = ImGui::GetFont()->Scale;
         ImGui::GetFont()->Scale = 2.0f;
         ImGui::PushFont(ImGui::GetFont());

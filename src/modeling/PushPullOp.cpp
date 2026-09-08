@@ -50,7 +50,7 @@
 
 // A point that genuinely lies on the face's MATERIAL. Returns `center` when it's
 // already inside the trimmed face; otherwise samples a UV grid (rejecting points
-// in holes via the face classifier) — so a holed/annular face whose parametric
+// in holes via the face classifier) - so a holed/annular face whose parametric
 // centre falls in a hole still yields a usable probe point. False if none found.
 static bool faceMaterialPoint(const TopoDS_Face& face, const gp_Pnt& center,
                               gp_Pnt& out) {
@@ -96,7 +96,7 @@ gp_Vec correctedOutwardNormal(const TopoDS_Shape& solid, const TopoDS_Face& face
             double diag = gp_Vec(xmax - xmin, ymax - ymin, zmax - zmin).Magnitude();
             eps = std::min(0.05, std::max(1e-4, diag * 5e-4));
         }
-        // Probe from a point ON the face material — NOT the parametric centre,
+        // Probe from a point ON the face material - NOT the parametric centre,
         // which for a holed/annular face lands in a hole and makes both ±ε
         // probes read OUTSIDE (ambiguous → a reversed face stays inverted).
         gp_Pnt probe = center;
@@ -120,7 +120,7 @@ PushPullOp::PushPullOp() = default;
 void PushPullOp::setTargets(std::vector<Target> targets) {
     m_targets = std::move(targets);
     // Keep the cascade-source arrays sized in lockstep with m_targets. -1
-    // entries mean "no sketch source" — face-driven push/pulls stay opaque
+    // entries mean "no sketch source" - face-driven push/pulls stay opaque
     // to the cascade walker.
     m_sketchSourceIds.assign(m_targets.size(), -1);
     m_sketchSourceRegions.assign(m_targets.size(), -1);
@@ -150,7 +150,7 @@ int PushPullOp::getSketchIdAt(int targetIndex) const {
 
 // Rebuild any target.profile that was originally produced by the given
 // sketch. Used by the cascade walker after a constraint commit. Returns
-// true if at least one profile was rebuilt — caller should then re-execute
+// true if at least one profile was rebuilt - caller should then re-execute
 // the op so the body shape catches up.
 bool PushPullOp::rebuildProfileFromSketch(Document& doc, int sketchId) {
     if (sketchId < 0) return false;
@@ -179,7 +179,7 @@ void PushPullOp::refreshFaceTargets(Document& doc) {
         Target& t = m_targets[i];
         if (t.sourceBodyId < 0) continue;            // free-floating
         // SKETCH-sourced target on a body: the profile is a sketch-region
-        // face, which is NEVER a face of the source body — the liveness scan
+        // face, which is NEVER a face of the source body - the liveness scan
         // below always fails and resolve() swaps in the closest BODY face
         // (the host face), silently replacing the drawn region with the whole
         // face ("push a hole" moved the face and ignored the sketch). Sketch
@@ -216,7 +216,7 @@ void PushPullOp::refreshFaceTargets(Document& doc) {
 
 // A boolean result that keeps the document renderable: at least one real
 // solid with non-trivial volume. A cut deeper than its body returns an empty
-// (or solid-less) compound — storing that made the body untessellatable and
+// (or solid-less) compound - storing that made the body untessellatable and
 // it vanished on commit (the pull-through-body bug, PR #13).
 static bool keepsASolid(const TopoDS_Shape& s) {
     if (s.IsNull()) return false;
@@ -252,16 +252,16 @@ void PushPullOp::publishLineage(Document& doc, int bodyId,
     if (lit == m_ledgers.end() || result.IsNull()) return;
 
     // The body's ancestry before this rebuild (snapshotLineage stored it while
-    // the doc's map was still populated — updateBody has since cleared it).
+    // the doc's map was still populated - updateBody has since cleared it).
     materializr::topo::FaceIdMap inMap;
     if (auto pit = m_prevFaceIds.find(bodyId); pit != m_prevFaceIds.end())
         inMap = pit->second;
 
-    // Stage 1 — propagate ancestry through the BOOLEAN onto its PRE-unify
+    // Stage 1 - propagate ancestry through the BOOLEAN onto its PRE-unify
     // result (the ledger names those faces), then give every pre-unify face an
     // id: inherited where possible, else a STABLE minted one (reused while the
     // uncovered count is unchanged, so a downstream fillet's captured pairs
-    // survive the next re-execute — see BooleanOp).
+    // survive the next re-execute - see BooleanOp).
     materializr::topo::FaceIdMap mid = materializr::topo::propagate(
         {{&inMap, before}}, lit->second, rawResult);
     std::vector<TopoDS_Shape> uncovered;
@@ -277,7 +277,7 @@ void PushPullOp::publishLineage(Document& doc, int bodyId,
     for (size_t i = 0; i < uncovered.size(); ++i)
         materializr::topo::addId(mid, uncovered[i], minted[i]);
 
-    // Stage 2 — carry that complete map through the UnifySameDomain merge onto
+    // Stage 2 - carry that complete map through the UnifySameDomain merge onto
     // the final faces (a no-op when nothing was unified).
     materializr::topo::FaceIdMap next =
         result.IsEqual(rawResult)
@@ -301,7 +301,7 @@ bool PushPullOp::execute(Document& doc) {
     }
     m_previousBodies.clear();
     m_createdBodyIds.clear();
-    // Fresh undo snapshot each execute (m_mintedIds is KEPT — reusing it gives
+    // Fresh undo snapshot each execute (m_mintedIds is KEPT - reusing it gives
     // the prism's new faces stable ids across re-executes). m_ledgers is NOT
     // cleared: Document::setBodyLedger holds pointers into it for bodies this
     // op touched, and clearing would free those nodes (dangling for any body a
@@ -328,8 +328,8 @@ bool PushPullOp::execute(Document& doc) {
         int n = 0;
         Bnd_Box prismBox; BRepBndLib::Add(prism, prismBox);
         // The tool prism's own volume sets the scale for "a real cut". A prism
-        // that only GRAZES a body — or lands coincident with a hole the same
-        // sketch already cut — removes a numerically-negligible sliver (a
+        // that only GRAZES a body - or lands coincident with a hole the same
+        // sketch already cut - removes a numerically-negligible sliver (a
         // BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such
         // a result is valid but tessellates as garbage, and committing it is
         // never what the user meant. Require the removed volume to be a real
@@ -388,7 +388,7 @@ bool PushPullOp::execute(Document& doc) {
         // Compute push/pull direction. For a flat face this is the face's
         // outward normal at its UV midpoint. For a CURVED face (chamfer cone,
         // fillet torus, cylinder side, etc.) that UV-midpoint normal is the
-        // surface tangent perpendicular at one specific point — sloped and
+        // surface tangent perpendicular at one specific point - sloped and
         // dependent on where you happened to click. The user expects a stable
         // axis-aligned direction instead, so we use the surface's natural
         // rotation axis for chamfers/fillets/cylinders/revolves. Sign-correct
@@ -407,7 +407,7 @@ bool PushPullOp::execute(Document& doc) {
                 faceNormal = n.Normalized();
                 // NO outward correction: BRepGProp_Face::Normal() already
                 // applies the face's topological orientation, so this IS
-                // the outward normal — verified against the solid
+                // the outward normal - verified against the solid
                 // classifier on every face of a pocketed box (REVERSED
                 // cavity walls included). Two generations of "fixes" here
                 // each broke a case by distrusting it: a classifier probe
@@ -431,7 +431,7 @@ bool PushPullOp::execute(Document& doc) {
                     faceNormal = axisVec.Normalized();
                 } else if (tgt.sourceBodyId >= 0) {
                     // Planar face: correct a genuinely-inverted orientation
-                    // (bug #5 — BRepGProp_Face::Normal pointed INTO the solid)
+                    // (bug #5 - BRepGProp_Face::Normal pointed INTO the solid)
                     // via the unambiguous antipodal classifier test. Pockets,
                     // cavity walls and thin bodies don't produce that reading,
                     // so they're left exactly as the war story requires.
@@ -451,7 +451,7 @@ bool PushPullOp::execute(Document& doc) {
             // MakePrism INSTANCES the profile face as the prism's caps, so
             // two pulls from the same cached region face produced bodies
             // SHARING face TShapes (with each other AND the sketch region)
-            // — which scrambled every TShape-keyed subsystem (selection
+            // - which scrambled every TShape-keyed subsystem (selection
             // highlight, face context, hover): clicks selected correctly
             // but looked dead.
             TopoDS_Shape ownProfile = BRepBuilderAPI_Copy(tgt.profile).Shape();
@@ -469,7 +469,7 @@ bool PushPullOp::execute(Document& doc) {
             if (!mk.IsDone()) continue;
             // Deep-copy the RESULT too: MakePrism instances the profile
             // TShape as BOTH caps, so even with a copied profile the
-            // front and back cap of one prism share a face object — and
+            // front and back cap of one prism share a face object - and
             // the TShape-keyed selection highlight then draws the back
             // cap's highlight on the front instance (invisible from
             // behind: "selection doesn't register"). Copying the prism
@@ -504,11 +504,11 @@ bool PushPullOp::execute(Document& doc) {
                     captureLedger(tgt.sourceBodyId, current, cut);
                     // CUT vs ADD: when the inward sweep passes through space
                     // the body doesn't own (an existing hole), the cut removes
-                    // ~nothing — the gesture is a FILL, not a cut. The margin
+                    // ~nothing - the gesture is a FILL, not a cut. The margin
                     // is relative to the tool volume: coincident-face booleans
                     // leave ~1e-3 mm³ slivers, and the plug/hole pair can
                     // mismatch by that much noise, so an absolute epsilon
-                    // can't tell "grazed" from "cut". Fuse instead — but only
+                    // can't tell "grazed" from "cut". Fuse instead - but only
                     // accept a result that welds into ONE solid; a prism that
                     // merely missed the body entirely must stay a no-op, not
                     // graft a disjoint lump onto it.
@@ -559,13 +559,13 @@ bool PushPullOp::execute(Document& doc) {
             // feature).
             //
             // BUT a REPLAY must reproduce what was saved. If this op previously
-            // created a body for this output (a reuse id is queued — set on redo,
+            // created a body for this output (a reuse id is queued - set on redo,
             // or on reload from the saved diff's created-id), it was a NEW-BODY
             // extrude, not a cut. It must recreate that body even though its
             // prism now overlaps an upstream body it didn't overlap at author
             // time. Without this guard a reloaded additive extrude (e.g. a lid
             // built from a duplicated sketch) silently cuts the overlapping box
-            // instead of creating its body — and the downstream boolean that
+            // instead of creating its body - and the downstream boolean that
             // consumes the missing body then hard-fails, stranding the whole
             // replay (the "editing the box deletes its floor" bug).
             bool willReuse = m_reuseIdx < m_reuseBodyIds.size();
@@ -587,14 +587,14 @@ bool PushPullOp::execute(Document& doc) {
 
         // Attached CUT that runs through the model: after the source body was
         // cut above, also remove the prism from every OTHER visible body in its
-        // path (hidden bodies skipped). Only for cut direction — an extrude
+        // path (hidden bodies skipped). Only for cut direction - an extrude
         // (add) still only affects its source body.
         if (m_cutIntersecting && tgt.sourceBodyId >= 0 && m_distance < 0.0)
             if (cutVisibleBodies(prism, tgt.sourceBodyId) > 0) anyChange = true;
     }
 
     // Refused/no-op targets leave saved snapshots behind; only a real
-    // mutation makes the op a success — History::pushOperation rejects the
+    // mutation makes the op a success - History::pushOperation rejects the
     // rest instead of committing a step that did nothing.
     return anyChange;
 }
@@ -611,7 +611,7 @@ bool PushPullOp::undo(Document& doc) {
         m_reuseBodyIds = std::move(m_createdBodyIds);
         m_createdBodyIds.clear();
         m_reuseIdx = 0;
-        // Restore mutated bodies — and their pre-op face lineage, so a partial
+        // Restore mutated bodies - and their pre-op face lineage, so a partial
         // replay that rolls back to here still has ancestry for the ops it
         // re-runs (updateBody clears the map; the minters never re-run).
         for (const auto& [id, shape] : m_previousBodies) {
@@ -650,10 +650,10 @@ OperationDiff PushPullOp::captureDiff() const {
 }
 
 std::string PushPullOp::serializeParams() const {
-    // Profiles are NOT stored — each sketch-sourced target re-derives its face
+    // Profiles are NOT stored - each sketch-sourced target re-derives its face
     // from (sketch id, region index) on reload. Targets without a sketch
     // source (a push/pull on a bare body face) still serialise their scalars,
-    // but rehydrateFromReload declines them — the face reference needs
+    // but rehydrateFromReload declines them - the face reference needs
     // persistent topological naming to survive a reload.
     std::string blob;
     char buf[96];
@@ -713,7 +713,7 @@ bool PushPullOp::deserializeParams(const std::string& blob) {
         pos = end + 1;
     }
     // `count` is supplied by the file and is the SIZE of the five allocations
-    // below — the indexed writes further down are bounds-checked against it, but
+    // below - the indexed writes further down are bounds-checked against it, but
     // that happens far too late: "count=2000000000" allocates first. Bound it here.
     if (count <= 0) return any;
     if (count > materializr::kMaxProfiles) return false;
@@ -789,7 +789,7 @@ bool PushPullOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
         if (t.profile.IsNull()) return false;
     }
     // A push/pull must have created or mutated SOMETHING; both sets empty
-    // means the step's diff is missing from the file — decline so undo
+    // means the step's diff is missing from the file - decline so undo
     // doesn't silently no-op.
     if (state.created.empty() && state.modifiedBefore.empty()) {
         std::fprintf(stderr,

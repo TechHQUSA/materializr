@@ -7,8 +7,8 @@
 //
 // The tour OPENS with a layout picker: three cards (Classic / Modern /
 // im-touch), each with a plain-language description. Tapping a card switches
-// the interface LIVE behind the modal — the running app is the preview, not a
-// screenshot — and every later step then points at the right place for the
+// the interface LIVE behind the modal - the running app is the preview, not a
+// screenshot - and every later step then points at the right place for the
 // layout the user picked (the highlighted "In this layout" line).
 //
 // Built entirely as a plugin (no Application changes beyond the generic plugin
@@ -373,7 +373,7 @@ void renderTutorial(materializr::PluginContext&) {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     // Fixed (slightly wider) width, but height auto-fits the CURRENT step every
     // frame (the 0 axis) so a longer step grows the window instead of forcing a
-    // scrollbar — the body and the Next/Skip row stay visible without scrolling.
+    // scrollbar - the body and the Next/Skip row stay visible without scrolling.
     // Re-centered each frame so it grows symmetrically and never runs off the
     // bottom; both width and height are clamped to the available screen.
     const float w = std::min(uiW(520.0f), vp->WorkSize.x * 0.90f);
@@ -410,7 +410,7 @@ void renderTutorial(materializr::PluginContext&) {
         ImGui::TextUnformatted(s.body);
 
         // Layout-specific location line: where to find this in the layout the
-        // user picked on the first page. Highlighted — it's the line that makes
+        // user picked on the first page. Highlighted - it's the line that makes
         // the step actionable on THIS screen.
         {
             const int li = std::clamp(currentUiLayoutIndex(), 0, 2);
@@ -472,7 +472,7 @@ void renderTutorial(materializr::PluginContext&) {
 
 REGISTER_PLUGIN(Tutorial, [](materializr::PluginContext& ctx) {
     // Launcher: Help > Getting Started (rendered via Application's generic
-    // plugin-menu wiring). Reopening also starts at the layout picker — it
+    // plugin-menu wiring). Reopening also starts at the layout picker - it
     // shows the current choice and is the friendliest place to change it.
     materializr::MenuContribution menu;
     menu.path = "Help > Getting Started";

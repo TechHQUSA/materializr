@@ -1,9 +1,9 @@
 // Regression: with snap-to-grid on, a click must land ON the snap lattice, and
 // the grid the viewport draws must BE that lattice. Steve, 2026-07-31, at a
-// 0.1 mm grid: "I cannot draw a line on that snap grid" — the grid appeared to
+// 0.1 mm grid: "I cannot draw a line on that snap grid" - the grid appeared to
 // wander arbitrarily. Two independent causes, one test each:
 //
-//   1. SketchTool::snap() — directional inference guides (perpendicular- and
+//   1. SketchTool::snap() - directional inference guides (perpendicular- and
 //      parallel-to-previous, axis-from-point, angle snap) returned a point on
 //      their guide LINE, grid-aligned on the guide's dominant axis only. The
 //      free coordinate came out wherever the geometry put it, so placed points
@@ -16,7 +16,7 @@
 //      CONTRACT REFINED 2026-09-03. "Both coordinates on the lattice" cannot
 //      be required of a DIAGONAL guide: a 35 deg bisector on a 1 mm grid
 //      passes through essentially no lattice crossings, so rounding both
-//      coordinates moves the point off the ray — up to half a diagonal cell,
+//      coordinates moves the point off the ray - up to half a diagonal cell,
 //      which near the anchor is degrees of angular error (measured: 8.4 deg
 //      on a 3 mm leg off a 70 deg corner) while the guide still highlights
 //      and claims the exact angle. The old code demanded both and was
@@ -25,13 +25,13 @@
 //      one line later. Steve's call, asked and answered: a guide you aimed
 //      down is honoured EXACTLY, and the grid gets the freedom that's left.
 //      So the requirement is now that every placed point sits on a grid LINE
-//      — its dominant coordinate exactly on a step — rather than necessarily
+//      - its dominant coordinate exactly on a step - rather than necessarily
 //      on a grid CROSSING. The drift this test was written against was BOTH
 //      coordinates wandering at once (x=9.0033 and y=12.2012 in the original
 //      report); one pinned coordinate is what makes a placement legible and
 //      repeatable, and that is what is asserted below.
 //
-//   2. Sketch::latticeAnchor — the anchor the drawn grid is laid out from.
+//   2. Sketch::latticeAnchor - the anchor the drawn grid is laid out from.
 //      Rounding world XYZ and projecting onto the sketch plane (what shipped)
 //      is NOT a lattice point in-plane: the drawn grid sat 10–50% of a cell
 //      off the lattice clicks land on, so no click could ever appear to sit on
@@ -150,7 +150,7 @@ TEST(GridSnap, ContactWithAnEdgeStaysOnTheEdge) {
     tool.setSnapToGridEnabled(true);
     tool.setInferenceLevel(SketchTool::InferenceLevel::Full);
 
-    // A single diagonal edge — a lattice point almost never sits exactly on
+    // A single diagonal edge - a lattice point almost never sits exactly on
     // one, so this is the case where the two demands genuinely conflict.
     int a = sk.addPoint({0.0f, 0.0f});
     int b = sk.addPoint({10.0f, 7.0f});
@@ -223,7 +223,7 @@ TEST(GridSnap, AnchorFollowsTheZoomScaledStepNotTheBase) {
 
 TEST(GridSnap, LatticeAnchorSitsOnTheSnapLattice) {
     struct Case { const char* name; gp_Ax3 ax; gp_Pnt lookAt; };
-    // A sketch started on a face gets whatever plane origin the geometry has —
+    // A sketch started on a face gets whatever plane origin the geometry has -
     // fractional world coordinates are the norm, not the exception.
     const Case cases[] = {
         {"XY plane at a fractional origin",
@@ -272,7 +272,7 @@ TEST(GridSnap, LatticeAnchorSitsOnTheSnapLattice) {
 // A pointing tolerance is a SCREEN distance. Deriving it from the grid failed
 // in both directions: uncapped it was 152 mm under a foot grid, so a click on
 // empty space cut geometry 15 cm away; capped at 10 mm it was 5 mm in a view
-// where one pixel is 8 mm, which is sub-pixel — nothing could be picked at all.
+// where one pixel is 8 mm, which is sub-pixel - nothing could be picked at all.
 TEST(GridSnap, PointingToleranceTracksTheScreenNotTheModel) {
     SketchTool t;
     const float cap = SketchTool::kToleranceStepCapMm;
@@ -295,12 +295,12 @@ TEST(GridSnap, PointingToleranceTracksTheScreenNotTheModel) {
     // The same gesture, in pixels, whatever the unit.
     EXPECT_NEAR(px, t.tolStep() / 8.128f, 1e-3);
 
-    // The LATTICE is untouched by any of this — a foot grid is still a foot.
+    // The LATTICE is untouched by any of this - a foot grid is still a foot.
     EXPECT_FLOAT_EQ(304.8f, t.getGridStep());
 }
 
 // Pointing tolerances must not scale without bound when the grid does.
-// The grid step follows the display unit, so a 1 ft grid is 304.8 mm — and
+// The grid step follows the display unit, so a 1 ft grid is 304.8 mm - and
 // trim, pick, inference and hover distances all derived from it directly.
 // That put the trim threshold at max(0.3, 304.8*0.5) = 152 mm: a click on
 // empty space could cut geometry 15 cm away, with grid snapping OFF.
@@ -310,7 +310,7 @@ TEST(GridSnap, ToleranceStepIsCappedWhileTheLatticeIsNot) {
     t.setPixelScale(0.0f);   // no frame yet: the grid term alone
 
     // Every grid the presets ever offered in millimetres behaves EXACTLY as
-    // before — the cap is the largest of them, so nothing existing moves.
+    // before - the cap is the largest of them, so nothing existing moves.
     for (float mm : { 0.1f, 0.5f, 1.0f, 10.0f }) {
         t.setGridStep(mm);
         EXPECT_FLOAT_EQ(mm, t.tolStep()) << "mm grid unchanged: " << mm;
@@ -322,7 +322,7 @@ TEST(GridSnap, ToleranceStepIsCappedWhileTheLatticeIsNot) {
     EXPECT_NEAR(5.0f, std::max(0.3f, t.tolStep() * 0.5f), 1e-4)
         << "the trim threshold must stay millimetres, not become 152 mm";
 
-    // The LATTICE itself is not capped — a foot grid still snaps to a foot.
+    // The LATTICE itself is not capped - a foot grid still snaps to a foot.
     // The LATTICE itself is not capped: tolStep() is a ceiling on POINTING
     // distance only, and the snap arithmetic keeps using m_gridStep. Asserted
     // on the accessor because snap() is private; the lattice sites were left

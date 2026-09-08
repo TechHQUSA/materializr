@@ -33,7 +33,7 @@ public:
 
     /// Tessellate a TopoDS_Shape and store the resulting mesh.
     /// Returns the mesh index (for later color/selection control).
-    /// `angularDeflection` (radians) controls faceting of curved surfaces — a
+    /// `angularDeflection` (radians) controls faceting of curved surfaces - a
     /// tighter angle makes fillets/holes/cylinders visibly smoother while adding
     /// almost no triangles to flat faces.
     int tessellate(const TopoDS_Shape& shape, float deflection = 0.1f,
@@ -78,7 +78,7 @@ public:
     void setLighting(const LightingParams& params) { m_lighting = params; }
 
     /// Section view: clip away the half-space on the `normal` side of the
-    /// plane through `point`. Render-only — geometry is untouched.
+    /// plane through `point`. Render-only - geometry is untouched.
     void setSectionPlane(bool enabled, const glm::vec3& point,
                          const glm::vec3& normal) {
         m_sectionEnabled = enabled;
@@ -90,7 +90,7 @@ public:
     void clear();
 
     /// Diagnostic: print every slot (bodyId, vertex count, flags) to
-    /// stderr — used by the click-miss diagnostic to expose phantom slots
+    /// stderr - used by the click-miss diagnostic to expose phantom slots
     /// whose body no longer exists or whose mesh is stale.
     void debugDumpSlots() const;
 

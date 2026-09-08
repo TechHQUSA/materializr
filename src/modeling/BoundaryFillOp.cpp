@@ -178,7 +178,7 @@ void BoundaryFillOp::renderProperties() {
 
 std::string BoundaryFillOp::serializeParams() const {
     // Scalars + per-profile hole counts + plane frames, then ALL geometry as
-    // one length-prefixed ASCII BREP compound (outer_i, holes_i..., repeat) —
+    // one length-prefixed ASCII BREP compound (outer_i, holes_i..., repeat) -
     // the LoftOp discipline.
     std::ostringstream head;
     head << "created=" << m_createdBodyId << ";np=" << m_outers.size();

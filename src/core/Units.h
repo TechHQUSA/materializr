@@ -1,5 +1,5 @@
 #pragma once
-// Display units for lengths — mm, cm, m, in, ft.
+// Display units for lengths - mm, cm, m, in, ft.
 //
 // The model is millimetres and stays millimetres: OCCT geometry, every Operation
 // parameter, the .mzr file, exports and the sketch solver all speak mm. This
@@ -10,7 +10,7 @@
 //
 // The current unit is a process-global setting, like the UI language. It is a
 // presentation preference, not model state; nothing that computes geometry
-// reads it. Operation::description() methods DO read it (through fmtLength) —
+// reads it. Operation::description() methods DO read it (through fmtLength) -
 // they are presentation methods that happen to live on modeling classes, and
 // that is stated rather than hidden. The setter has one caller,
 // Application::applyDisplayUnitChange, which also owns the ImGui side effect
@@ -54,7 +54,7 @@ struct UnitInfo {
     const char* suffix;    // as printed after a number
     int         decimals;  // printed precision
     double      step;      // widget +/- increment, in display units
-    double      dragStep;  // drag SNAP granularity, in display units — finer than
+    double      dragStep;  // drag SNAP granularity, in display units - finer than
                            // `step`. One field served both and made the fillet
                            // drag snap to 1 mm where it had always snapped to
                            // 0.1 mm: a 10x coarser handle for every mm user, in
@@ -86,7 +86,7 @@ inline LengthUnit& currentUnitRef() {
 } // namespace detail
 
 inline LengthUnit currentUnit() { return detail::currentUnitRef(); }
-// Pure store. Deliberately no UI side effects — see the header comment.
+// Pure store. Deliberately no UI side effects - see the header comment.
 inline void setCurrentUnit(LengthUnit u) { detail::currentUnitRef() = u; }
 
 inline double toDisplay(double mm)      { return mm / unitInfo(currentUnit()).toMm; }
@@ -136,7 +136,7 @@ inline const char* lengthFormat() {
 
 // Force a unit for a scope and restore it on exit, including on an early
 // return or a throw. For values that must be produced in a CANONICAL unit
-// regardless of what the user is looking at — history captions are written
+// regardless of what the user is looking at - history captions are written
 // into the .mzr file, so they must not carry the unit that happened to be
 // selected at save time.
 struct ScopedUnit {
@@ -149,9 +149,9 @@ struct ScopedUnit {
 
 // Parse a typed length into mm.
 //
-// Accepts ONLY a pure numeric literal with an optional trailing unit token —
+// Accepts ONLY a pure numeric literal with an optional trailing unit token -
 // "25.4", "1in", "2\"", "3 ft", "3'". No suffix means the current display unit.
-// Anything else — an operator, an identifier, a second number — is refused and
+// Anything else - an operator, an identifier, a second number - is refused and
 // `mm` is left untouched, exactly the parseFinite() contract. That refusal is
 // what keeps formulas safe: a variable-bearing expression is always mm and must
 // never be scaled here, so it must never be accepted here.

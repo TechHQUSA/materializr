@@ -85,7 +85,7 @@ StlExportResult StlExport::exportShape(const std::string& filePath, const TopoDS
     }
 
     // Y-up scene → Z-up file, same proper rotation StepIO::exportBodies
-    // applies (a bare Y/Z swap would MIRROR the part — inside-out STLs).
+    // applies (a bare Y/Z swap would MIRROR the part - inside-out STLs).
     // Slicers and other CAD expect Z-up; without this, exported parts lie
     // on their side on the print bed.
     gp_Trsf yUpToZUp;

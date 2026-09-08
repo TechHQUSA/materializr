@@ -216,7 +216,7 @@ void EdgeRenderer::render(const glm::mat4& view, const glm::mat4& projection) {
     // Depth: edges compute the exact same depth as their faces (invariant
     // shader above), so LEQUAL lets an edge win the tie against its own
     // surface while anything genuinely behind a wall still loses. No bias:
-    // the old glPolygonOffset(GL_POLYGON_OFFSET_LINE) was a no-op here —
+    // the old glPolygonOffset(GL_POLYGON_OFFSET_LINE) was a no-op here -
     // polygon offset applies to polygons rasterized in line MODE, never to
     // GL_LINES primitives.
     glEnable(GL_DEPTH_TEST);

@@ -48,7 +48,7 @@ void AboutDialog::render() {
     if (ImGui::BeginPopupModal("About Materializr", &m_visible,
                                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
 
-        // App name — slightly larger via font scaling.
+        // App name - slightly larger via font scaling.
         float origScale = ImGui::GetFont()->Scale;
         ImGui::GetFont()->Scale = 2.0f;
         ImGui::PushFont(ImGui::GetFont());
@@ -99,7 +99,7 @@ void AboutDialog::render() {
 
         ImGui::Spacing();
 
-        // Community Discord — Discord "blurple" so it reads as its own action,
+        // Community Discord - Discord "blurple" so it reads as its own action,
         // the same way the coffee button is branded yellow.
         const char* discordUrl = "https://discord.gg/BRjzbMGZvE";
         ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.345f, 0.396f, 0.949f, 1.0f));
@@ -116,7 +116,7 @@ void AboutDialog::render() {
 
         ImGui::Spacing();
 
-        // Buy Me a Coffee — proceeds split between stevebushwa and R4stl1n
+        // Buy Me a Coffee - proceeds split between stevebushwa and R4stl1n
         // (stevebushwa just runs the page). Coloured in the BMC brand yellow
         // so it reads as a separate "support" action rather than another
         // navigation button.

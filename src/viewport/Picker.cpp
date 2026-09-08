@@ -226,7 +226,7 @@ int Picker::pickMeshBody(const glm::vec3& origin, const glm::vec3& dir,
     auto it = m_meshCache.find(key);
     if (it == m_meshCache.end() || !it->second.shape.IsEqual(shape)) {
         // Build (or rebuild after a pose change) the flat world-space triangle
-        // list, each tagged with its owning face. Coarse deflection — this is
+        // list, each tagged with its owning face. Coarse deflection - this is
         // only for hit-testing, and a mesh body's facets are already the limit.
         MeshCacheEntry entry;
         entry.shape = shape;
@@ -294,7 +294,7 @@ void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
     // is oriented camera-side by the caller, so signed distance against the
     // plane is positive in front and negative behind. The 0.3 mm slack covers
     // tessellation noise on curved silhouettes while rejecting any wall ≥ 0.3 mm
-    // — and it's camera-angle-independent, unlike a view-direction depth check.
+    // - and it's camera-angle-independent, unlike a view-direction depth check.
     bool havePlaneCheck = glm::length(facePlaneNormal) > 0.5f;
     glm::vec3 planeN = havePlaneCheck ? glm::normalize(facePlaneNormal) : glm::vec3(0.0f);
     const float planeTol = 0.3f;
@@ -398,7 +398,7 @@ PickResult Picker::pick(float screenX, float screenY,
             continue;
         }
 
-        // Imported meshes: cached, face-resolving ray test — no per-frame
+        // Imported meshes: cached, face-resolving ray test - no per-frame
         // re-mesh, no O(edges) edge/vertex refinement. Still returns a real
         // TopoDS_Face so face selection + "Sketch on Face" work; we just skip
         // edge/corner promotion (meaningless on a faceted mesh anyway).
@@ -533,7 +533,7 @@ PickResult Picker::pick(float screenX, float screenY,
     // Planes are rendered as finite quads (halfSize × halfSize around the
     // origin in the plane's local X/Y). Ray-vs-plane gives t; checking
     // |u|,|v| ≤ halfSize bounds it to the visible quad. A plane only wins
-    // over a body if it's closer (smaller t) — bodies still take priority
+    // over a body if it's closer (smaller t) - bodies still take priority
     // at the same point, so clicking through a body to a plane behind it
     // requires hiding the body first (consistent with Items panel filter).
     {
@@ -587,7 +587,7 @@ PickResult Picker::pick(float screenX, float screenY,
     }
 
     // ─── Construction-axis hit-test ──────────────────────────────────────
-    // Axes are 1D so a strict ray-line intersection almost never hits —
+    // Axes are 1D so a strict ray-line intersection almost never hits -
     // instead we measure the minimum distance from the cursor ray to the
     // axis line and accept any axis whose closest approach is within ~6 px
     // on screen at the hit depth. The closest-approach formula uses the

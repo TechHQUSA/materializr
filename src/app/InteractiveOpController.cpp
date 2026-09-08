@@ -49,7 +49,7 @@ bool InteractiveOpController::begin(const IopContext& ctx) {
 
 void InteractiveOpController::update(const IopContext& ctx) {
     if (!m_active) return;
-    // HistoryEdit controllers override update/commit/cancel outright — the
+    // HistoryEdit controllers override update/commit/cancel outright - the
     // policy is entirely op-specific. Reaching the base here means one forgot.
     if (previewModel() == PreviewModel::HistoryEdit) return;
     if (previewModel() == PreviewModel::LiveOp) { updateLive(ctx); return; }
@@ -84,7 +84,7 @@ void InteractiveOpController::update(const IopContext& ctx) {
 
 // LiveOp preview: ONE instance, toggled against the document. Undo whatever
 // it currently has applied, push the new values in, run it again. History is
-// not involved until commit — and because it is the same instance every
+// not involved until commit - and because it is the same instance every
 // frame, any body it creates keeps the same id (the whole point).
 void InteractiveOpController::updateLive(const IopContext& ctx) {
     if (m_liveApplied && m_liveOp) {
@@ -122,10 +122,10 @@ void InteractiveOpController::commit(const IopContext& ctx) {
             m_liveOp.reset();
             ctx.history.pushOperation(std::move(alt), ctx.doc);
         } else if (m_liveApplied && m_liveOp) {
-            // The preview IS the result — record it without re-running it.
+            // The preview IS the result - record it without re-running it.
             ctx.history.pushExecuted(std::move(m_liveOp));
         }
-        // Anything else (nothing applied — a zero-distance gesture) records
+        // Anything else (nothing applied - a zero-distance gesture) records
         // nothing, which is right: the document is already untouched.
         ctx.selection.clear();
         ctx.markMeshesDirty();
@@ -182,7 +182,7 @@ void InteractiveOpController::cleanup() {
     m_active = false;
     m_commitRequested = false;
     m_previewOk = false;
-    // A latched handle must not survive the op — the viewport reads this to
+    // A latched handle must not survive the op - the viewport reads this to
     // suppress camera orbit and picking, so leaving it set would wedge both.
     m_draggingHandle = false;
     m_bodyId = -1;
@@ -197,14 +197,14 @@ void InteractiveOpController::renderPanel(const IopContext& ctx) {
 
     // Seed the panel's RIGHT edge a fixed margin inside the viewport (pivot 1,0)
     // and let it grow leftward. The panel is AlwaysAutoResize and, on touch, its
-    // padded content is wider than panelWidth() — anchoring the LEFT edge by a
+    // padded content is wider than panelWidth() - anchoring the LEFT edge by a
     // fixed offset (winWidth - w - 20) let that extra width run off the right
     // edge on the tablet. Right-anchoring keeps it on-screen at any scale.
     //
     // ImGuiCond_Appearing + no NoMove flag: same as the Pattern / Edit-Diameter
-    // popups — seed the position on first appearance, then let the user drag the
+    // popups - seed the position on first appearance, then let the user drag the
     // panel somewhere convenient (it otherwise landed over the top-left menu in
-    // im-touch with no way to move it — issue #29). Dragging the panel body
+    // im-touch with no way to move it - issue #29). Dragging the panel body
     // (there's no title bar) moves it.
     const float w = panelWidth();
     ImGui::SetNextWindowPos(ImVec2(ImGui::GetWindowPos().x +

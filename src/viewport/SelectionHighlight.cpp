@@ -109,7 +109,7 @@ bool SelectionHighlight::initialize() {
 
     // Second program with a geometry shader for thick lines. GL ES 3.0 has no
     // geometry shaders, so on Android m_lineProgram stays 0 and drawThickLines()
-    // becomes a no-op — selected faces still highlight; thick edge outlines are
+    // becomes a no-op - selected faces still highlight; thick edge outlines are
     // skipped (TODO: emulate with an instanced-quad expansion in the touch pass).
 #if !defined(MZ_GLES)
     unsigned int lvert = 0, lgeom = 0, lfrag = 0;
@@ -141,7 +141,7 @@ bool SelectionHighlight::initialize() {
     m_locHalfWidth = glGetUniformLocation(m_lineProgram, "u_halfWidth");
 #endif
 
-    // No shared scratch VAO/VBO any more — each cache entry owns its own
+    // No shared scratch VAO/VBO any more - each cache entry owns its own
     // persistent buffer (see CacheEntry), uploaded once on build.
     return true;
 }
@@ -245,10 +245,10 @@ void SelectionHighlight::clearCaches() {
 
 void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::mat4& vp,
                                      const glm::vec3& color) {
-    // Just a blue tint over the face — no outline, no solid
+    // Just a blue tint over the face - no outline, no solid
     TopoDS_Face face = TopoDS::Face(faceShape);
 
-    // Cache the triangulated vertex buffer per face — walking every triangle
+    // Cache the triangulated vertex buffer per face - walking every triangle
     // per frame was 5-50ms on a big NURBS face. See the CacheEntry comment in
     // the header for the key/ownership/revalidation/cap scheme.
     const void* key = faceShape.TShape().get();
@@ -399,7 +399,7 @@ void SelectionHighlight::drawThickLines(unsigned int vao, int count, const glm::
 
 #if defined(MZ_GLES)
     // GL ES 3.0 has no geometry shader, so there's no screen-space line widening
-    // (m_lineProgram is 0). Fall back to plain GL_LINES with the basic program —
+    // (m_lineProgram is 0). Fall back to plain GL_LINES with the basic program -
     // the selection outline renders, just at hardware line width rather than the
     // antialiased ribbon. (void halfWidthPx; line width is fixed.)
     (void)halfWidthPx;

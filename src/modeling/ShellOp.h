@@ -25,7 +25,7 @@ public:
     int getBodyId() const { return m_bodyId; }
     double getThickness() const { return m_thickness; }
 
-    // Distinct radii (ascending) of the body's rounded faces — cylinders and
+    // Distinct radii (ascending) of the body's rounded faces - cylinders and
     // tori, i.e. fillets/rounds and round holes. A shell fails outright when
     // the wall thickness nears one of these (offsetting a round by ~its own
     // radius is singular); the interactive panel uses this to explain WHY.
@@ -53,8 +53,8 @@ private:
     // canonical face map, parsed from a saved project (see SubShapeIndex.h).
     std::vector<int> m_faceIndices;
 
-    // Geometric identity of each opened face — its outward normal and a point
-    // on it — so the face can be re-found on a REGENERATED body (a sketch edit
+    // Geometric identity of each opened face - its outward normal and a point
+    // on it - so the face can be re-found on a REGENERATED body (a sketch edit
     // upstream rebuilds the body, leaving the stored TopoDS_Face handles stale;
     // matching a raw handle would silently drop the opening and the shell would
     // vanish on the next edit). Captured on the first valid execute.
@@ -69,7 +69,7 @@ private:
     // Returns false only if an anchor can't be matched at all.
     bool rebindFaces(const TopoDS_Shape& shape);
 
-    // Topological names of the opened faces — the robust path tried before the
+    // Topological names of the opened faces - the robust path tried before the
     // geometric normal+point rebind. Sketch-anchored, so an opened face SURVIVES
     // a dimension edit that MOVES it (which normal+point can't follow). Captured
     // on the first valid execute; serialized additively as `facerefs=`.

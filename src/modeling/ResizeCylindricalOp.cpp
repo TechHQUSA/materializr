@@ -49,14 +49,14 @@ namespace {
 // (Removed in 0.3.0: detectCap / CapInfo / makeRevolvedFill. The Option-A
 //  chamfer-aware revolved fill was abandoned in favour of the simpler
 //  topology-agnostic cap-following half-space / prism trim implemented in
-//  execute() below — which handles planar (incl. tilted) AND curved caps
+//  execute() below - which handles planar (incl. tilted) AND curved caps
 //  without classifying the cap surface type.)
 
 
 // Locate the cap face adjacent to the body's cylindrical hole face at the
 // extremal-V wire edge (max V if topEdge, min V if !topEdge). Returns a null
 // face if no match is found. Used by the cap-following fill to build a
-// half-space that confines the fill to the body's natural axial extent — works
+// half-space that confines the fill to the body's natural axial extent - works
 // for plane / cone / sphere / NURBS / anything, because we don't interpret
 // the surface, we just use the face to bound a half-space.
 TopoDS_Face findCapFace(const TopoDS_Shape& body, const gp_Ax2& cylAxis,
@@ -67,7 +67,7 @@ TopoDS_Face findCapFace(const TopoDS_Shape& body, const gp_Ax2& cylAxis,
 
     // Find the cylindrical face by AXIS LINE + radius. The caller's axis has
     // been shifted by v1 (the face's V_min) from the body's surface origin so
-    // comparing point locations directly fails — instead, accept any cylinder
+    // comparing point locations directly fails - instead, accept any cylinder
     // whose location lies anywhere on our axis line.
     TopoDS_Face cylFace;
     for (TopExp_Explorer fex(body, TopAbs_FACE); fex.More(); fex.Next()) {
@@ -128,7 +128,7 @@ TopoDS_Face findCapFace(const TopoDS_Shape& body, const gp_Ax2& cylAxis,
 }
 
 
-// MakeCone with equal R1/R2 has degenerate edge cases — use MakeCylinder
+// MakeCone with equal R1/R2 has degenerate edge cases - use MakeCylinder
 // where the radii match exactly, MakeCone where they differ.
 // `BRepPrimAPI_Make*` primitives report IsDone() == false until Build() is
 // explicitly called; the lazy Shape() accessor builds on demand but checking
@@ -186,7 +186,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         std::abs(m_newTopR    - m_oldTopR)    < 1e-5) return true;
 
     try {
-        // We DON'T build the full new/old cylinder and swap them — that would
+        // We DON'T build the full new/old cylinder and swap them - that would
         // destroy other features sharing the cylinder's volume (e.g. a tube
         // becomes a solid cylinder because OLD is a R=0…outerR cylinder that
         // includes the tube's inner hole). Instead, build only the RING /
@@ -203,7 +203,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         double paddedOldBot = std::max(1e-4, m_oldBottomR + kRadialPad);
         double paddedOldTop = std::max(1e-4, m_oldTopR    + kRadialPad);
 
-        // The "outer" cone contains the "inner" cone geometrically — pick by
+        // The "outer" cone contains the "inner" cone geometrically - pick by
         // grow direction. For face edits both ends move together; for edge
         // edits only one end moves and the other stays at oldR, but the pad
         // still makes outer ≥ inner everywhere.
@@ -217,7 +217,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         }
 
         // Axial extent of the change ring. m_height is the cylindrical FACE's
-        // V range, which is fine when the hole exits through PLANAR caps —
+        // V range, which is fine when the hole exits through PLANAR caps -
         // the face stops right where the cylinder meets the cap. For curved
         // or angular caps the face's V range stops short of where the body's
         // cap surface actually ends axially, so the boolean leaves a sliver
@@ -230,7 +230,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         // trick adds stubs of fresh material sticking out past the body's
         // caps, so we keep the axial extent equal to the face's V range
         // (current limitation: curved/angular cap on a SHRINK / solid-grow
-        // looks the same as before — work for a future pass).
+        // looks the same as before - work for a future pass).
         bool addMaterial = (m_isHole != growing);
         double height = m_height;
         gp_Ax2 ringAxis = m_axis;
@@ -243,7 +243,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                     double diag = std::sqrt(dx*dx + dy*dy + dz*dz);
                     double pad  = diag + 1.0;
                     // Pad the cut ring PAST the caps so a curved/angular cap's
-                    // sliver of old-radius geometry gets removed — but ONLY
+                    // sliver of old-radius geometry gets removed - but ONLY
                     // past a FREE end. Padding past an end that butts a LARGER
                     // coaxial neighbour (a 13mm section next to a resized 11mm
                     // one) carves the [newR,oldR] shell out of that neighbour,
@@ -322,7 +322,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
             // the volume to add into the body = (the body's hole void confined
             // to the old hole's axial column) MINUS (a cylinder of the new
             // radius). That carves the fill so it follows whatever cap surface
-            // the body already has — no need to identify the cap face's
+            // the body already has - no need to identify the cap face's
             // surface type or stitch a slope into the fill manually.
             //
             // Steps, for the HOLE-shrink case:
@@ -422,7 +422,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                     //       conforming. Works for any surface type because we
                     //       just extrude the existing face.
                     // Whichever strategy is used, the resulting clipped shape
-                    // must have strictly less volume than the input — otherwise
+                    // must have strictly less volume than the input - otherwise
                     // we picked the wrong-orientation half-space (or the prism
                     // entirely contains the input). Both strategies retry with
                     // the opposite-side reference / opposite-direction extrude
@@ -453,11 +453,11 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                             }
                             return {};
                         }
-                        // Strategy 2: non-planar — extrude an UNTRIMMED face
+                        // Strategy 2: non-planar - extrude an UNTRIMMED face
                         // built from the cap's underlying surface. The body's
                         // cap face is trimmed by the hole circle (so its
                         // footprint is OUTSIDE the hole), but the ring lives
-                        // INSIDE the hole — so extruding the trimmed face
+                        // INSIDE the hole - so extruding the trimmed face
                         // misses the ring entirely. Re-facing the surface
                         // with its natural domain gives us a face whose
                         // footprint covers the hole region too, so extruding
@@ -551,7 +551,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         }
 
         // Merge the ring's caps with the body's adjacent caps so the top and
-        // bottom faces are single uniform faces again — without this OCCT
+        // bottom faces are single uniform faces again - without this OCCT
         // leaves them as separate adjacent planar faces that share an edge
         // (a visible hairline seam across the cap face). UnifySameDomain
         // walks the topology and merges any pair of adjacent same-surface
@@ -560,7 +560,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                                              /*concatBSplines=*/false);
 
         // Validate before committing: a hole grown past the outer wall
-        // (or any degenerate resize) removes all material — the cut
+        // (or any degenerate resize) removes all material - the cut
         // returns an empty/invalid solid. Storing it leaves nothing but
         // the stale face highlight on screen. Refuse so the caller
         // restores the original and flags an error, exactly as Scale
@@ -591,7 +591,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
 
 std::string ResizeCylindricalOp::serializeParams() const {
     // The cylinder axis (gp_Ax2: location + main dir + X dir) is geometric, so
-    // it serialises directly — execute() rebuilds the cut/fuse tools from it.
+    // it serialises directly - execute() rebuilds the cut/fuse tools from it.
     const gp_Pnt& loc = m_axis.Location();
     const gp_Dir& dir = m_axis.Direction();
     const gp_Dir& xd  = m_axis.XDirection();
@@ -669,7 +669,7 @@ bool ResizeCylindricalOp::undo(Document& doc) {
 void ResizeCylindricalOp::renderProperties() {
     ImGui::Text(materializr::tr("Resize %s"), m_isHole ? "Hole" : "Cylinder");
     ImGui::Separator();
-    // Directly editable — Apply (or Enter) re-executes the op with the new
+    // Directly editable - Apply (or Enter) re-executes the op with the new
     // diameters (m_old* stays the original cylinder, so the change volume is
     // rebuilt correctly). A uniform cylinder edits one Ø; a cone edits both.
     // FIXED item width: without it, the field grows with every typed digit in
@@ -695,7 +695,7 @@ void ResizeCylindricalOp::renderProperties() {
         }
     }
     ImGui::TextUnformatted(materializr::trFormat("Length: %s", materializr::fmtLength(m_height)).c_str());
-    // WRAPPED: inline history-panel editor — see ThreadOp for the same note.
+    // WRAPPED: inline history-panel editor - see ThreadOp for the same note.
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
     ImGui::TextWrapped("%s", materializr::tr("Clicking the circular edge / face in the viewport also re-edits."));
     ImGui::PopStyleColor();

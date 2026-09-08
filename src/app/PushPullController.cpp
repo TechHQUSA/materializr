@@ -78,7 +78,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
             // A DETACHED sketch has been deliberately broken away from its
             // former host (moved independently in 3D). Keeping the stale
             // source-body id fused the new prism into a body that can be
-            // hundreds of mm away — a push/pull on an unlinked sketch must
+            // hundreds of mm away - a push/pull on an unlinked sketch must
             // behave like a free-floating sketch and make its own body.
             t.sourceBodyId = sketch->isDetachedFromBody()
                                  ? -1
@@ -88,7 +88,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
             // PUSH/PULL adopts the body the sketch sits flat ON. A sketch with
             // no body link (e.g. drawn on a construction plane and used to cut
             // a hole) that lies coplanar-and-over a visible body's face should
-            // fuse/cut that body in place — not spawn a separate solid that
+            // fuse/cut that body in place - not spawn a separate solid that
             // overlaps and z-fights it. (Extrude From keeps its always-new-
             // body semantics; a new body from this sketch is one Extrude
             // away.) A DETACHED sketch was deliberately unlinked, so it stays
@@ -112,16 +112,16 @@ int PushPullController::onBegin(const IopContext& ctx) {
             if (t.profile.IsNull()) continue;
             // Push/Pull only works on FLAT faces. Sweeping a prism from a
             // curved face (fillet / round / cylinder wall) and booling it
-            // produces self-intersecting garbage — skip it (and toast below).
+            // produces self-intersecting garbage - skip it (and toast below).
             // Same planarity test as "Sketch on face"; a flat face bounded by
-            // fillets still pushes fine — this only rejects the rounded face
+            // fillets still pushes fine - this only rejects the rounded face
             // itself. #28
             if (!faceIsPlanar(t.profile)) { curvedFaceSkipped = true; continue; }
             m_st.targets.push_back(t);
         } else if (e.type == SelectionType::Sketch && e.sketchId >= 0) {
             // Whole-sketch push/pull (selected from the Items panel, no
             // specific region): push/pull EVERY region of the sketch. Mirrors
-            // the SketchRegion branch above, per region — so a body-attached
+            // the SketchRegion branch above, per region - so a body-attached
             // sketch picked from the panel edits its host body, matching
             // Extrude's whole-sketch behaviour. The rail only offers Push here
             // for an attached sketch, so sourceBodyId resolves to the real host.
@@ -149,7 +149,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
         }
     }
 
-    // A rounded/fillet face was picked — tell the user why it was ignored (#28).
+    // A rounded/fillet face was picked - tell the user why it was ignored (#28).
     if (curvedFaceSkipped && ctx.toast)
         ctx.toast("Push/Pull works on flat faces - not curved or "
                   "fillet faces.");
@@ -170,7 +170,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
     //
     // For a flat face the UV-midpoint surface normal IS the face normal, but
     // for a CURVED face (chamfer cone, fillet torus, side of a cylinder, etc.)
-    // that normal is the surface tangent perpendicular at one specific point —
+    // that normal is the surface tangent perpendicular at one specific point -
     // sloped for a cone, twisted for a torus. The push/pull arrow then looks
     // like it "follows the polygon clicked" instead of a stable axis.
     //
@@ -190,7 +190,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
             gp_Pnt c; gp_Vec n;
             prop.Normal((u1 + u2) * 0.5, (v1 + v2) * 0.5, c, n);
             if (n.Magnitude() > 1e-10) {
-                // NO outward correction — BRepGProp_Face::Normal() already
+                // NO outward correction - BRepGProp_Face::Normal() already
                 // applies face orientation; this IS outward. MUST mirror
                 // PushPullOp::execute (see the war-story comment there).
                 gp_Vec dir = n;
@@ -234,7 +234,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
     m_st.inputFocus = true;
 
     // Dense bodies (a threaded rod has hundreds of helical faces) cannot
-    // afford a real boolean per drag frame — and since push/pull now
+    // afford a real boolean per drag frame - and since push/pull now
     // triggers the thread-last reflow, each preview frame would re-thread
     // the whole rod (Steve: drag "a no go, non-responsive ~10s"). Those
     // bodies get a GHOST preview (tinted tool volume) and run the real
@@ -251,7 +251,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
     }
     // Cut-intersecting push/pulls (a free-space sketch, or any drag that
     // goes negative mid-gesture) boolean into EVERY visible body in the
-    // tool's path — the source-body face count above never sees those. If
+    // tool's path - the source-body face count above never sees those. If
     // any visible body is threaded, the light path would run that boolean
     // over the thread's helicoid faces per preview frame ("stacked discs"
     // + not-responding, 2026-07-21). Ghost preview + one real boolean at
@@ -264,7 +264,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
     }
 
     // Push/Pull may edit several bodies at once, and a free-space one CREATES
-    // its body — there is no single body to snapshot. The live instance's own
+    // its body - there is no single body to snapshot. The live instance's own
     // undo() is the restore path.
     return kNoTargetBody;
 }
@@ -318,7 +318,7 @@ bool PushPullController::syncLiveOp(Operation& op) {
     return std::abs(m_st.distance) > 1e-6;
 }
 
-// Tinted, renderer-only tool volume for the heavy path — the swept prism, with
+// Tinted, renderer-only tool volume for the heavy path - the swept prism, with
 // no boolean and no Document body behind it.
 void PushPullController::updateGhost(const IopContext& ctx) const {
     if (!ctx.showGhost || !ctx.clearGhost) return;
@@ -349,7 +349,7 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
     // Snap the live distance to the corner-widget grid step before applying.
     // Mutating m_st.distance itself (rather than just the value handed to
     // setDistance) means the dim-arrow readout, the InputText field, and the
-    // stepper all reflect the snapped value — there's no "type 5.3, see 5.3 in
+    // stepper all reflect the snapped value - there's no "type 5.3, see 5.3 in
     // the field, body extrudes to 5.0" discrepancy. Toggling snap off mid-drag
     // immediately frees the distance to fine values on the next frame.
     if (applySnap && ctx.snapToGrid && ctx.gridStep > 0.0f) {
@@ -371,17 +371,17 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
 // Mark only what the push/pull actually touched. On a 100+ body project this
 // turns each preview frame from "re-tessellate every visible body" into
 // "re-tessellate 1-2 bodies", which is the difference between unusable and
-// smooth — and it keeps the full rebuild (which clears the renderer) away from
+// smooth - and it keeps the full rebuild (which clears the renderer) away from
 // the ghost slot.
 void PushPullController::markPreviewDirty(const IopContext& ctx) const {
     if (m_st.heavyPreview) return;   // nothing was previewed; the ghost stands
     if (!ctx.markBodyDirty) { ctx.markMeshesDirty(); return; }
     for (const auto& t : m_st.targets)
         if (t.sourceBodyId >= 0) ctx.markBodyDirty(t.sourceBodyId);
-    // Free-floating push/pull creates new bodies — mark them too so they
+    // Free-floating push/pull creates new bodies - mark them too so they
     // appear / refresh. Restrict to VISIBLE bodies: invisible ones never get a
     // renderer slot (full-rebuild skips them), so without the visibility check
-    // they'd be marked dirty every preview frame forever — pure waste.
+    // they'd be marked dirty every preview frame forever - pure waste.
     if (!ctx.bodyHasRenderSlot) return;
     for (int id : ctx.doc.getAllBodyIds()) {
         if (!ctx.doc.isBodyVisible(id)) continue;
@@ -400,7 +400,7 @@ std::unique_ptr<Operation> PushPullController::buildCommitOp(const IopContext& c
     if (m_st.heavyPreview) {
         // Ghost path: the document was never previewed, so hand the base a
         // real op to push. This is where the thread reflow runs for dense
-        // bodies — a single synchronous recompute instead of one per frame.
+        // bodies - a single synchronous recompute instead of one per frame.
         std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);
         return makeOp();
     }
@@ -409,7 +409,7 @@ std::unique_ptr<Operation> PushPullController::buildCommitOp(const IopContext& c
     // subtracts from them (each separately) instead of making an overlapping
     // new body; so does ANY cut-direction push/pull (it cuts the source body
     // AND every other visible body in its path). The preview always showed the
-    // new-body extrusion, so hand back a fresh cut-enabled op — the base undoes
+    // new-body extrusion, so hand back a fresh cut-enabled op - the base undoes
     // the preview before pushing it. The op itself falls back to a new body if
     // it hits nothing, so "no intersection" is still today's behaviour.
     if (allFreeSketchTargets() || m_st.distance < 0.0f) {
@@ -425,7 +425,7 @@ std::unique_ptr<Operation> PushPullController::buildCommitOp(const IopContext& c
 }
 
 void PushPullController::cancel(const IopContext& ctx) {
-    if (ctx.clearGhost) ctx.clearGhost();   // ghost only — nothing was pushed
+    if (ctx.clearGhost) ctx.clearGhost();   // ghost only - nothing was pushed
     InteractiveOpController::cancel(ctx);
 }
 
@@ -439,9 +439,9 @@ void PushPullController::applyDrag(const IopViewport& vp) {
     materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
 }
 
-// Drag the arrow: a one-finger drag in the viewport (touch — orbit is
+// Drag the arrow: a one-finger drag in the viewport (touch - orbit is
 // suppressed while push/pull is active) or a mouse left-drag. No handle to
-// latch — the whole viewport is the drag surface — so draggingHandle() stays
+// latch - the whole viewport is the drag surface - so draggingHandle() stays
 // false and the camera keeps its own claim (the dispatch loop skips this while
 // the camera is dragging).
 void PushPullController::onViewportInput(const IopViewport& vp,
@@ -457,7 +457,7 @@ void PushPullController::onViewportInput(const IopViewport& vp,
     // single click in the viewport flips the sticky flag; while sticky, every
     // frame's mouse delta feeds the arrow with no button held. Clicks consumed
     // by ImGui widgets don't count. Sticky is a DESKTOP-trackpad model (move
-    // the cursor with no button held) — vp.trackpadInput is already false under
+    // the cursor with no button held) - vp.trackpadInput is already false under
     // touch, where a tap would toggle it on and then feed BOTH it and the
     // direct drag above (double distance).
     // Toggle on a click that never became a drag -- the press frame is too
@@ -529,7 +529,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     bool doCommit = false, doCancel = false;
     if (imTouch) {
         // im-touch: the panel is the value well (+ the Symmetric toggle below
-        // when it applies) — no header, hint or steppers.
+        // when it applies) - no header, hint or steppers.
         if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowSign=*/!m_st.symmetric)) {
             m_st.distanceRaw = m_st.distance;
             materializr::formatLengthDigits(m_st.inputBuf, sizeof(m_st.inputBuf), m_st.distance);
@@ -549,7 +549,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             updatePushPull(ctx);
             doCommit = true;
         } else if (materializr::lengthBufferIsActive("##ppdist")) {
-            // Only while typing — see the shell controller for why.
+            // Only while typing - see the shell controller for why.
             float parsed = m_st.distance;
             if (materializr::parseLength(m_st.inputBuf, parsed) &&
                 std::abs(parsed - m_st.distance) > 0.01f) {
@@ -563,8 +563,8 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     }
 
     // Quick-nudge stepper (replaces the slider). Symmetric sweeps both ways, so
-    // a negative distance is meaningless there — drop the minus buttons and
-    // clamp positive while ticked. 0 clears the change. Desktop only —
+    // a negative distance is meaningless there - drop the minus buttons and
+    // clamp positive while ticked. 0 clears the change. Desktop only -
     // im-touch stays a single well.
     if (!imTouch &&
         materializr::lengthStepperRow("ppStep", &m_st.distance,
@@ -576,7 +576,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
     }
 
     // Symmetric: one prism swept the distance to BOTH sides of the sketch plane
-    // (plane sketches only — on a body face it would push into and out of the
+    // (plane sketches only - on a body face it would push into and out of the
     // body at once). Single body, no mid-plane seam.
     {
         bool allFree = !m_st.targets.empty();
@@ -604,7 +604,7 @@ void PushPullController::renderPushPullPanel(const IopContext& ctx) {
             doCancel = true;
     }
     ImGui::End();
-    // Commit/cancel AFTER End() — they tear the controller's state down, and
+    // Commit/cancel AFTER End() - they tear the controller's state down, and
     // the window has to be closed first. (The hand-written version called them
     // from inside; same fix Extrude got on extraction.)
     if (doCommit) commit(ctx);

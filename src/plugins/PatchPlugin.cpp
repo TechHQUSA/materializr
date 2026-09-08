@@ -2,12 +2,12 @@
 #include "../plugin/PluginContext.h"
 #include "../core/SelectionManager.h"
 
-// Patch — fit one surface across a ring of picked edges and, where those edges
+// Patch - fit one surface across a ring of picked edges and, where those edges
 // bound an opening in a body, sew it back in so the void is actually closed.
 //
 // The reason this is its own tool rather than a mode of Loft: a loft skins a
 // stack of sections along an axis and cares about their order and their vertex
-// correspondence. A patch has no sections and no order — it is a variational
+// correspondence. A patch has no sections and no order - it is a variational
 // fit to whatever boundary it is given, which is what "fill this hole" needs.
 //
 // Faces may be selected alongside the edges; they are read as explicit tangency

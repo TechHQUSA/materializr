@@ -22,14 +22,14 @@ class BRepTools_History;
 // gives an UNAMBIGUOUS antipodal verdict on a planar face: a point ε along
 // +normal is INSIDE the solid while a point ε along −normal is OUTSIDE. That
 // is the genuine "orientation inverted, normal points into material" case
-// (bug #5). Any other reading — the correct OUT/IN pair, both IN, both OUT,
-// ON, a thin-body overshoot, or a classifier throw — returns `normal`
+// (bug #5). Any other reading - the correct OUT/IN pair, both IN, both OUT,
+// ON, a thin-body overshoot, or a classifier throw - returns `normal`
 // UNCHANGED, so the cases the PushPullOp war story protects (pockets, cavity
 // walls, thin bodies, curved/axis faces) are provably untouched.
 //
 // `face` is the planar face being probed: the classifier samples a point that
 // genuinely lies on its MATERIAL, because a holed/annular face's parametric
-// centre can fall inside a hole — there both ±ε probes read OUTSIDE, the verdict
+// centre can fall inside a hole - there both ±ε probes read OUTSIDE, the verdict
 // is "ambiguous", and a reversed face would be left inverted (push/pull then
 // runs backwards on it). `center` is used as the probe point when it's on the
 // material, else a sampled interior point is used.
@@ -48,7 +48,7 @@ public:
 
     void setTargets(std::vector<Target> targets);
     void setDistance(double d); // signed: positive = extrude, negative = cut
-    // Symmetric: sweep ±distance about the profile plane as ONE prism —
+    // Symmetric: sweep ±distance about the profile plane as ONE prism -
     // both sides in a single body, no mid-plane seam (the fused-halves
     // union keeps a seam edge on spline walls; OCCT can't unify those).
     void setSymmetric(bool s) { m_symmetric = s; }
@@ -109,7 +109,7 @@ private:
     std::vector<int> m_reuseBodyIds;
     size_t m_reuseIdx = 0;
 
-    // Cascade plumbing — see setSketchSource() in the public section.
+    // Cascade plumbing - see setSketchSource() in the public section.
     std::vector<int> m_sketchSourceIds;     // sketch id per target (-1 = none)
     std::vector<int> m_sketchSourceRegions; // region index per target (-1 = first)
     // Reload support for FACE-driven targets: per-target ordinal index of the
@@ -119,7 +119,7 @@ private:
     // Per-target topological name of a FACE-driven target's profile (zip-aligned
     // with m_targets; empty for sketch/free targets). Minted on first execute,
     // re-resolved when the profile handle goes stale after an upstream edit
-    // rebuilt the source body — so a pushed/pulled face FOLLOWS the edit.
+    // rebuilt the source body - so a pushed/pulled face FOLLOWS the edit.
     // Serialized additively as per-target `tr<i>=`.
     std::vector<materializr::topo::Ref> m_targetRefs;
     // Capture/refresh face-driven target profiles against the current bodies.
@@ -127,7 +127,7 @@ private:
 
     // --- Face-lineage propagation (topological naming) --------------------
     // PushPull rebuilds bodies via BRepAlgoAPI booleans against a transient
-    // prism, then doc.updateBody — which CLEARS the body's FaceIdMap. Without
+    // prism, then doc.updateBody - which CLEARS the body's FaceIdMap. Without
     // re-publishing it, every downstream fillet/chamfer loses its edge lineage
     // and drifts onto the wrong edges on replay (Steve's body-412 gift-box
     // bug). Mirror BooleanOp: capture the boolean's face GenerationLedger,
@@ -135,7 +135,7 @@ private:
     // re-executes) for the prism's new faces. Keyed per body id because one
     // push/pull can rebuild several bodies (a free-space cut runs through all
     // it intersects). std::map (node-based) so an element's address is stable
-    // across later inserts — Document::setBodyLedger stores a bare pointer to
+    // across later inserts - Document::setBodyLedger stores a bare pointer to
     // one that must outlive the op (unordered_map would rehash and dangle it).
     std::map<int, materializr::topo::GenerationLedger> m_ledgers;
     std::unordered_map<int, materializr::topo::FaceIdMap> m_prevFaceIds; // undo + propagate input

@@ -1,6 +1,6 @@
 // Diagnostic probe (experiment/generative-edges): load a real project file,
 // rehydrate its ops the way Application::rebuildHistoryFromProject does, then
-// report — for every fillet/chamfer — how each selected edge classifies
+// report - for every fillet/chamfer - how each selected edge classifies
 // against EVERY sketch in the document. This is the ground-truth loop for
 // extending EdgeAnchor to cover real multi-sketch bodies.
 //
@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
     }
 
     // Replay the factory path from rebuildHistoryFromProject (simplified: no
-    // ReplayOp fallback, no legacy param synthesis — we only care about ops
+    // ReplayOp fallback, no legacy param synthesis - we only care about ops
     // that rehydrate for real).
     std::map<int, TopoDS_Shape> running;
     for (const auto& [id, shape] : hist.initialState) running[id] = shape;

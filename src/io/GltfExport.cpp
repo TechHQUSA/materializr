@@ -31,7 +31,7 @@ struct MeshBufferData {
 };
 
 static void tessellateMesh(const TopoDS_Shape& shape, MeshBufferData& out, float deflection) {
-    // Pass an angular deflection too — the single-arg ctor defaults it to 0.5rad
+    // Pass an angular deflection too - the single-arg ctor defaults it to 0.5rad
     // (~28°), which left small fillets visibly faceted/rippled.
     BRepMesh_IncrementalMesh meshGen(shape, deflection, false, 0.2);
     meshGen.Perform();

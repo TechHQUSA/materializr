@@ -70,7 +70,7 @@ void DefeatureOp::renderProperties() {
 
 std::string DefeatureOp::serializeParams() const {
     // Removed faces persist as ordinal indices into the INPUT shape's canonical
-    // face map (see SubShapeIndex.h) — same scheme as Shell/Fillet/Chamfer.
+    // face map (see SubShapeIndex.h) - same scheme as Shell/Fillet/Chamfer.
     std::string blob;
     char buf[64];
     std::snprintf(buf, sizeof(buf), "body=%d", m_bodyId);
@@ -111,7 +111,7 @@ bool DefeatureOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*
     if (m_previousShape.IsNull()) return false;
 
     // Re-resolve the removed faces against the reloaded input shape. No saved
-    // indices means nothing to remove — decline so it falls back to a baked op
+    // indices means nothing to remove - decline so it falls back to a baked op
     // rather than silently doing nothing.
     m_faces.Clear();
     if (m_faceIndices.empty()) return false;
