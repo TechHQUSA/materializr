@@ -5,6 +5,19 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hovering a body no longer burns a CPU core.** Every rendered frame with the
+  cursor over a body re-ran the OCCT mesher on it "to make sure it was
+  tessellated". The mesher rebuilds its whole data model on each call even when
+  it changes nothing: 9 ms on a 54-face part and 66 ms on a 1683-face part, per
+  frame, so a detailed part dragged the frame rate down just by being pointed
+  at. The picker now reuses the mesh the viewport already built (hover picks
+  measure 0.8 ms and 2.4 ms on the same parts), and the hit point is snapped
+  onto the exact surface so Measure is unaffected by mesh quality. At Low
+  quality the old path also re-meshed every body finer than the viewport asked
+  for on the first hover after each edit; that is gone too.
+
 ## [1.6.3] - 2026-08-28
 
 ### Added

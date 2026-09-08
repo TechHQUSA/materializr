@@ -101,6 +101,10 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/core/ThrowTrace.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/Unfold.cpp
     ${CMAKE_SOURCE_DIR}/src/viewport/SectionCap.cpp
+    # Picker + Camera are GL-free (pure OCCT + glm), so the hover-pick
+    # regression test (test_picker.cpp) can drive them headless.
+    ${CMAKE_SOURCE_DIR}/src/viewport/Picker.cpp
+    ${CMAKE_SOURCE_DIR}/src/viewport/Camera.cpp
     # Op editors call materializr::inputNumber (ui/NumField.h), whose touch
     # branch lands in touchui::numberField. Tests never take that branch -
     # touchMode() is off - but the symbol still has to resolve at link time,
@@ -286,6 +290,11 @@ add_test(NAME test_fillet_probe COMMAND test_fillet_probe)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
+
+# test_picker - hover picking reuses the renderer mesh, never re-runs the mesher
+add_executable(test_picker test_picker.cpp)
+target_link_libraries(test_picker PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_picker COMMAND test_picker)
 
 # test_history
 add_executable(test_history test_history.cpp)

@@ -143,9 +143,15 @@ int Picker::findNearestFace(const glm::vec3& origin, const glm::vec3& dir,
                             const TopoDS_Shape& shape, float& bestDist,
                             glm::vec3& hitPt, TopoDS_Shape& hitFace)
 {
-    // Ensure the shape is tessellated
-    BRepMesh_IncrementalMesh meshGen(shape, 0.1);
-    meshGen.Perform();
+    // Pick against the renderer's triangulation and NEVER run the mesher
+    // here. Every visible body is tessellated by rebuildMeshes before a pick
+    // can reach it, and a body the renderer could not mesh is not drawn, so
+    // it must not be pickable either. BRepMesh_IncrementalMesh on an already
+    // meshed shape rebuilds its whole data model per call even when it
+    // changes nothing (9 ms on a 54-face part, 66 ms on a 1683-face part),
+    // and this runs every rendered frame the cursor rests on a body; at Low
+    // quality it even re-meshed the body finer than the renderer asked for.
+    // A face without a triangulation is simply skipped below.
 
     int faceIndex = -1;
     int currentFace = 0;
@@ -469,6 +475,17 @@ PickResult Picker::pick(float screenX, float screenY,
                     if (proj.NbPoints() > 0) {
                         proj.LowerDistanceParameters(un, vn);
                         haveUV = true;
+                        // Snap the hit onto the exact surface. The pick mesh
+                        // is the renderer's (chords up to 0.5 mm at Low
+                        // quality) and the measure tool consumes this point.
+                        // The bound rejects a projection that wandered off
+                        // to a far sheet of the untrimmed surface.
+                        constexpr double kSnapMaxMm = 1.0;
+                        if (proj.LowerDistance() < kSnapMaxMm) {
+                            gp_Pnt on = proj.NearestPoint();
+                            faceHitPt = glm::vec3(on.X(), on.Y(), on.Z());
+                            result.hitPoint = faceHitPt;
+                        }
                     }
                 }
                 if (!haveUV) {
@@ -600,7 +617,9 @@ PickResult Picker::pick(float screenX, float screenY,
             // pixel of horizontal extent at depth d to world units via the
             // perspective frustum's half-width. Cheap and good enough for a
             // pickability band.
-            float fovRad = camera.getFov() * (float)M_PI / 180.0f;
+            // glm::radians, not M_PI: this file is also in materializr_core, which
+            // lacks the app target's _USE_MATH_DEFINES on MSVC.
+            float fovRad = glm::radians(camera.getFov());
             float pxPerWorldRef = viewportHeight / (2.0f * std::tan(fovRad * 0.5f));
             for (int aid : axisIds) {
                 if (!doc.isAxisVisible(aid)) continue;
