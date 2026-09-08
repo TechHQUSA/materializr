@@ -1,4 +1,5 @@
 #include "ui/LengthField.h"
+#include "core/Units.h"
 #include "../core/NumFormat.h"
 #include "ChamferOp.h"
 #include "BlendCut.h"
@@ -786,10 +787,10 @@ bool ChamferOp::undo(Document& doc) {
 
 std::string ChamferOp::description() const {
     if (m_distance2 > 0.0)
-        return "Chamfer D" + materializr::numStr(m_distance) + "/" +
-               materializr::numStr(m_distance2) + " on " +
+        return "Chamfer D" + materializr::fmtLength(m_distance) + "/" +
+               materializr::fmtLength(m_distance2) + " on " +
                std::to_string(m_edges.size()) + " edge(s)";
-    return "Chamfer D" + materializr::numStr(m_distance) + " on " +
+    return "Chamfer D" + materializr::fmtLength(m_distance) + " on " +
            std::to_string(m_edges.size()) + " edge(s)";
 }
 

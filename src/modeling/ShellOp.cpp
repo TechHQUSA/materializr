@@ -1,4 +1,5 @@
 #include "ui/LengthField.h"
+#include "core/Units.h"
 #include "ShellOp.h"
 #include "SubShapeIndex.h"
 #include <cstdio>
@@ -315,7 +316,7 @@ bool ShellOp::undo(Document& doc) {
 
 std::string ShellOp::description() const {
     int faceCount = m_facesToRemove.Size();
-    return "Shell thickness " + std::to_string(m_thickness) +
+    return "Shell thickness " + materializr::fmtLength(m_thickness) +
            " (" + std::to_string(faceCount) + " open face(s))";
 }
 

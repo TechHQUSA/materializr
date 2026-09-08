@@ -10,6 +10,7 @@
 // core/Units.h includes <cmath>. Put the core headers first and MSVC loses
 // M_PI for the inline bodies in gp_Vec.hxx / gp_Dir.hxx.
 #include "modeling/FaceTweakOp.h"
+#include "modeling/FilletOp.h"
 #include <gp_Ax1.hxx>
 #include <gp_Vec.hxx>
 #include <gp_Trsf.hxx>
@@ -331,5 +332,43 @@ TEST(Units, FaceTweakCaptionFollowsTheDisplayUnitButNotForAngles) {
         materializr::ScopedUnit in(materializr::LengthUnit::In);
         EXPECT_EQ("Tweak face 90.00 deg", op.description())
             << "an angle is not a length and must not follow the unit";
+    }
+}
+
+// One suffix, three converted numbers. A history caption gets little width, so
+// repeating "in" after every component reads as noise - but dropping the unit
+// entirely is what this whole feature exists to stop, and it is exactly what
+// the coordinate captions used to do (std::to_string on a raw millimetre).
+TEST(Units, FmtVec3ConvertsEveryComponentUnderOneSuffix) {
+    {
+        materializr::ScopedUnit mm(materializr::LengthUnit::Mm);
+        EXPECT_EQ("(25.40, 0.00, -12.70) mm", materializr::fmtVec3(25.4, 0.0, -12.7));
+    }
+    {
+        materializr::ScopedUnit in(materializr::LengthUnit::In);
+        EXPECT_EQ("(1.000, 0.000, -0.500) in", materializr::fmtVec3(25.4, 0.0, -12.7));
+    }
+    {
+        // Feet carry four decimals, so a half-inch offset still resolves.
+        materializr::ScopedUnit ft(materializr::LengthUnit::Ft);
+        EXPECT_EQ("(0.0833, 0.0000, -0.0417) ft", materializr::fmtVec3(25.4, 0.0, -12.7));
+    }
+}
+
+// The audit's third blind spot, as a test. "Fillet R2" carried no unit at all:
+// not a converted one, not even "mm" - so a reader in inches saw a raw model
+// number and no way to tell. numStr made it invisible to both the control scan
+// and the literal scan, which is why tools/units_audit.py now walks the
+// captions too.
+TEST(Units, FilletCaptionCarriesTheDisplayUnit) {
+    FilletOp op;
+    op.setRadius(25.4);
+    {
+        materializr::ScopedUnit mm(materializr::LengthUnit::Mm);
+        EXPECT_EQ("Fillet R25.40 mm on 0 edge(s)", op.description());
+    }
+    {
+        materializr::ScopedUnit in(materializr::LengthUnit::In);
+        EXPECT_EQ("Fillet R1.000 in on 0 edge(s)", op.description());
     }
 }

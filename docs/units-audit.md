@@ -159,14 +159,14 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/SplitController.cpp:171 | `materializr::amountLengthField("splitOffsetAmt", nullptr, &m_offset, /*allowSign=*/true, -lim, lim))` |
 | CONVERTED | src/core/LengthEdit.h:24 | `inline double lengthFieldCommit(double displayValue) { return toMm(displayValue); }` |
 | CONVERTED | src/core/LengthEdit.h:98 | `if (!parseLength(buf, mm) \|\| mm <= 0.0) return false;` |
-| CONVERTED | src/modeling/AlignOp.cpp:86 | `if (materializr::lengthField(materializr::tr("Src X"), &sx) \|\|` |
-| CONVERTED | src/modeling/AlignOp.cpp:87 | `materializr::lengthField(materializr::tr("Src Y"), &sy) \|\|` |
-| CONVERTED | src/modeling/AlignOp.cpp:88 | `materializr::lengthField(materializr::tr("Src Z"), &sz)) {` |
-| CONVERTED | src/modeling/AlignOp.cpp:93 | `if (materializr::lengthField(materializr::tr("Tgt X"), &tx) \|\|` |
-| CONVERTED | src/modeling/AlignOp.cpp:94 | `materializr::lengthField(materializr::tr("Tgt Y"), &ty) \|\|` |
-| CONVERTED | src/modeling/AlignOp.cpp:95 | `materializr::lengthField(materializr::tr("Tgt Z"), &tz)) {` |
-| CONVERTED | src/modeling/ChamferOp.cpp:800 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
-| CONVERTED | src/modeling/ChamferOp.cpp:805 | `materializr::lengthField(materializr::tr("Distance 2"), &m_distance2);` |
+| CONVERTED | src/modeling/AlignOp.cpp:84 | `if (materializr::lengthField(materializr::tr("Src X"), &sx) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:85 | `materializr::lengthField(materializr::tr("Src Y"), &sy) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:86 | `materializr::lengthField(materializr::tr("Src Z"), &sz)) {` |
+| CONVERTED | src/modeling/AlignOp.cpp:91 | `if (materializr::lengthField(materializr::tr("Tgt X"), &tx) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:92 | `materializr::lengthField(materializr::tr("Tgt Y"), &ty) \|\|` |
+| CONVERTED | src/modeling/AlignOp.cpp:93 | `materializr::lengthField(materializr::tr("Tgt Z"), &tz)) {` |
+| CONVERTED | src/modeling/ChamferOp.cpp:801 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/ChamferOp.cpp:806 | `materializr::lengthField(materializr::tr("Distance 2"), &m_distance2);` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:259 | `materializr::lengthField(materializr::tr("Offset Distance"), &m_offset);` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:269 | `if (ImGui::InputScalarN("Point 1", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat(` |
 | CONVERTED | src/modeling/ConstructionPlaneOp.cpp:273 | `if (ImGui::InputScalarN("Point 2", ImGuiDataType_Double, disp, 3, nullptr, nullptr, materializr::lengthFormat(` |
@@ -177,7 +177,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/CopyOp.cpp:81 | `materializr::lengthField("Z", &m_dz);` |
 | CONVERTED | src/modeling/ExtrudeOp.cpp:807 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
 | angle | src/modeling/ExtrudeOp.cpp:823 | `materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");` |
-| CONVERTED | src/modeling/FilletOp.cpp:675 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
+| CONVERTED | src/modeling/FilletOp.cpp:676 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
 | CONVERTED | src/modeling/PatternOp.cpp:226 | `materializr::lengthField(materializr::tr("Spacing X"), &m_spacingX);` |
 | CONVERTED | src/modeling/PatternOp.cpp:227 | `materializr::lengthField(materializr::tr("Spacing Y"), &m_spacingY);` |
 | CONVERTED | src/modeling/PatternOp.cpp:228 | `materializr::lengthField(materializr::tr("Spacing Z"), &m_spacingZ);` |
@@ -214,7 +214,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | percent | src/modeling/ScaleFaceOp.cpp:328 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
 | percent | src/modeling/ScaleFaceOp.cpp:329 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
 | CONVERTED | src/modeling/ScaleFaceOp.cpp:330 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
-| CONVERTED | src/modeling/ShellOp.cpp:326 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
+| CONVERTED | src/modeling/ShellOp.cpp:327 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:396 | `if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:408 | `if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/SketchEditOp.cpp:418 | `if (materializr::inputNumber(materializr::tr("Angle (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
@@ -403,19 +403,19 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/ios_storekit.h:6 | `// iOS StoreKit tip jar (implemented in ios_storekit.mm). One non-consumable` |
 | comment | src/mobile_files.h:9 | `//   iOS     — ios_files.mm (UIDocumentPickerViewController, UIActivityViewController` |
 | comment | src/modeling/BooleanOp.cpp:203 | `// values (it used to go to 0.1 mm) let OCCT snap distant entities` |
-| comment | src/modeling/ChamferOp.cpp:428 | `// face than the original session did, and a 11.4 mm setback aimed` |
-| comment | src/modeling/ChamferOp.cpp:429 | `// along a 2 mm face simply cannot build (!IsDone) — the "two-distance` |
-| comment | src/modeling/ChamferOp.cpp:537 | `// mask a dead middle: ChFi3d blended a few mm at each end` |
-| comment | src/modeling/FilletOp.cpp:389 | `// robot dog cover.mzr, body "Extrude", its 114 mm top edge:` |
-| comment | src/modeling/FilletOp.cpp:398 | `// was "I can't fillet beyond about 1.5 mm" on an edge where 2.5, 3, 5` |
-| comment | src/modeling/FilletOp.cpp:399 | `// and 8 mm all worked.` |
-| comment | src/modeling/FilletOp.cpp:487 | `// (Steve: a coffee-cup rim could only fillet to 1.5 mm on the` |
-| comment | src/modeling/FilletOp.cpp:495 | `// which inflated the result bbox by ~8 mm on a 100 mm cup and` |
-| comment | src/modeling/FilletOp.cpp:496 | `// tripped the growth gate even on 0.1 mm fillets.` |
-| allowed-by-hand | src/modeling/FilletOp.cpp:511 | `"%.2fx%.2fx%.2f -> %.2fx%.2fx%.2f mm.\n",` |
-| allowed-by-hand | src/modeling/FilletOp.cpp:523 | `"[Fillet] result volume ~= 0 (R=%.2f mm).\n",` |
-| comment | src/modeling/FilletOp.cpp:854 | `// ≈ m_radius. Matching on radius keeps a 3 mm fillet from ever claiming a` |
-| comment | src/modeling/FilletOp.cpp:855 | `// neighbouring 4 mm fillet's faces, and is invariant under rigid moves.` |
+| comment | src/modeling/ChamferOp.cpp:429 | `// face than the original session did, and a 11.4 mm setback aimed` |
+| comment | src/modeling/ChamferOp.cpp:430 | `// along a 2 mm face simply cannot build (!IsDone) — the "two-distance` |
+| comment | src/modeling/ChamferOp.cpp:538 | `// mask a dead middle: ChFi3d blended a few mm at each end` |
+| comment | src/modeling/FilletOp.cpp:390 | `// robot dog cover.mzr, body "Extrude", its 114 mm top edge:` |
+| comment | src/modeling/FilletOp.cpp:399 | `// was "I can't fillet beyond about 1.5 mm" on an edge where 2.5, 3, 5` |
+| comment | src/modeling/FilletOp.cpp:400 | `// and 8 mm all worked.` |
+| comment | src/modeling/FilletOp.cpp:488 | `// (Steve: a coffee-cup rim could only fillet to 1.5 mm on the` |
+| comment | src/modeling/FilletOp.cpp:496 | `// which inflated the result bbox by ~8 mm on a 100 mm cup and` |
+| comment | src/modeling/FilletOp.cpp:497 | `// tripped the growth gate even on 0.1 mm fillets.` |
+| allowed-by-hand | src/modeling/FilletOp.cpp:512 | `"%.2fx%.2fx%.2f -> %.2fx%.2fx%.2f mm.\n",` |
+| allowed-by-hand | src/modeling/FilletOp.cpp:524 | `"[Fillet] result volume ~= 0 (R=%.2f mm).\n",` |
+| comment | src/modeling/FilletOp.cpp:855 | `// ≈ m_radius. Matching on radius keeps a 3 mm fillet from ever claiming a` |
+| comment | src/modeling/FilletOp.cpp:856 | `// neighbouring 4 mm fillet's faces, and is invariant under rigid moves.` |
 | comment | src/modeling/FilletProbe.cpp:66 | `// Quantise the radius to 1e-6 mm so float noise in a dragged value doesn't` |
 | comment | src/modeling/LoftOp.cpp:91 | `// fractions. Worst case measured (robot dog cover.mzr, two ~2 mm-wide C-shaped` |
 | comment | src/modeling/LoftOp.cpp:98 | `//     arc-length resample + best seam    still folded (rms misfit 18.7 mm)` |
@@ -444,8 +444,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/ResizeCylindricalOp.cpp:536 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
 | comment | src/modeling/ScaleFaceOp.cpp:326 | `// they were converted display->mm on commit, so typing 100 under inches` |
 | allowed-by-hand | src/modeling/SewOp.cpp:199 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:210 | `"body (thickness %.3f mm).\n", m_thickness);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:288 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:211 | `"body (thickness %.3f mm).\n", m_thickness);` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:289 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
 | comment | src/modeling/Sketch.cpp:556 | `// these a later dimension (e.g. a 2 mm gap to another edge) lets the naive` |
 | comment | src/modeling/SketchConstraints.h:84 | `// dimension label rather than clicking it. Pixels rather than sketch mm because` |
 | comment | src/modeling/SketchEditOp.cpp:140 | `// "Add sketch element" into "Rectangle 80 × 45 mm", "Circle Ø20 mm", etc.,` |
@@ -558,3 +558,50 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/viewport/RefImageRenderer.cpp:211 | `// Lift the quad 0.05 mm off its plane: the ground grid renders BEFORE` |
 | comment | src/viewport/RefImageRenderer.cpp:214 | `// plane — the common case). 0.05 mm is invisible for tracing and the` |
 | comment | src/viewport/SketchRenderer.cpp:755 | `// Same mapping AirfoilImport::place uses: chord-normalised -> mm, rotated` |
+
+## `Operation::description()` captions
+
+- CONVERTED: 17
+- no-length: 22
+
+| verdict | file:line | class |
+|---|---|---|
+| CONVERTED | src/modeling/AlignOp.cpp:67 | `AlignOp` |
+| no-length | src/modeling/AxisTransformOp.cpp:23 | `AxisTransformOp` |
+| no-length | src/modeling/BooleanOp.cpp:309 | `BooleanOp` |
+| no-length | src/modeling/BoundaryFillOp.cpp:169 | `BoundaryFillOp` |
+| CONVERTED | src/modeling/ChamferOp.cpp:788 | `ChamferOp` |
+| no-length | src/modeling/CombineSketchesOp.cpp:98 | `CombineSketchesOp` |
+| no-length | src/modeling/ConstructionAxisOp.cpp:143 | `ConstructionAxisOp` |
+| CONVERTED | src/modeling/ConstructionPlaneOp.cpp:206 | `ConstructionPlaneOp` |
+| CONVERTED | src/modeling/CopyOp.cpp:67 | `CopyOp` |
+| no-length | src/modeling/DefeatureOp.cpp:60 | `DefeatureOp` |
+| no-length | src/modeling/DeleteOp.cpp:51 | `DeleteOp` |
+| no-length | src/modeling/DuplicateSketchOp.cpp:41 | `DuplicateSketchOp` |
+| CONVERTED | src/modeling/ExtrudeOp.cpp:792 | `ExtrudeOp` |
+| CONVERTED | src/modeling/FaceTweakOp.cpp:126 | `FaceTweakOp` |
+| CONVERTED | src/modeling/FilletOp.cpp:667 | `FilletOp` |
+| no-length | src/modeling/GuidedLoftOp.cpp:421 | `GuidedLoftOp` |
+| no-length | src/modeling/LoftOp.cpp:586 | `LoftOp` |
+| no-length | src/modeling/MergeFacesOp.cpp:548 | `MergeFacesOp` |
+| no-length | src/modeling/MirrorOp.cpp:102 | `MirrorOp` |
+| no-length | src/modeling/MoveFaceOp.cpp:571 | `MoveFaceOp` |
+| CONVERTED | src/modeling/MoveHoleOp.cpp:654 | `MoveHoleOp` |
+| no-length | src/modeling/PatchOp.cpp:375 | `PatchOp` |
+| no-length | src/modeling/PatternOp.cpp:140 | `PatternOp` |
+| no-length | src/modeling/PlaneTransformOp.cpp:26 | `PlaneTransformOp` |
+| CONVERTED | src/modeling/PrimitiveOp.cpp:116 | `PrimitiveOp` |
+| CONVERTED | src/modeling/ProjectSketchOp.cpp:526 | `ProjectSketchOp` |
+| CONVERTED | src/modeling/PushPullOp.cpp:630 | `PushPullOp` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:704 | `ResizeCylindricalOp` |
+| no-length | src/modeling/RevolveOp.cpp:263 | `RevolveOp` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:315 | `ScaleFaceOp` |
+| no-length | src/modeling/SeparateBodyOp.cpp:85 | `SeparateBodyOp` |
+| no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
+| CONVERTED | src/modeling/ShellOp.cpp:317 | `ShellOp` |
+| CONVERTED | src/modeling/SketchEditOp.cpp:59 | `SketchEditOp` |
+| no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
+| no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
+| no-length | src/modeling/TaperOp.cpp:133 | `TaperOp` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2097 | `ThreadOp` |
+| CONVERTED | src/modeling/TransformOp.cpp:242 | `TransformOp` |

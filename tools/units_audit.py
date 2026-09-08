@@ -58,6 +58,57 @@ OVERRIDE = [
     ("src/modeling/ConstructionPlaneOp.cpp", "disp, 3, nullptr", "CONVERTED"), ("src/ui/PropertiesPanel.cpp", "edit.buf, typed", "CONVERTED"),
 ]
 
+# Operation::description() is the audit's third surface, and it was a blind
+# spot: a caption builds a millimetre value with numStr/std::to_string, prints
+# no "mm" at all, and drives no numeric control - so neither of the two scans
+# above could see it. "Fillet R2" on a machine set to inches is a raw model
+# number wearing no unit. Each caption is therefore CONVERTED, a stored string,
+# or pinned here as carrying no length.
+DESC_NO_LENGTH = {
+    "AxisTransformOp": "axis ids", "BooleanOp": "body ids",
+    "BoundaryFillOp": "silhouette count", "CombineSketchesOp": "sketch count",
+    "DefeatureOp": "face count", "DeleteOp": "body id",
+    "GuidedLoftOp": "rail count", "LoftOp": "profile count",
+    "MergeFacesOp": "face counts", "PatchOp": "edge count",
+    "PatternOp": "copy count", "PlaneTransformOp": "plane ids",
+    "RevolveOp": "degrees", "SeparateBodyOp": "body ids",
+    "SplitBodyOp": "body id",
+}
+# These return a string captured earlier and stored, so they carry whatever
+# unit was live when it was made. The save path holds ScopedUnit(Mm), so that
+# is millimetres; they are legacy text, not a live readout.
+DESC_STORED = {"ReplayOp": "m_description", "BatchTransformOp": "m_desc"}
+
+def descriptions():
+    """(class, verdict, detail) for every Operation::description() in src/."""
+    out = []
+    for dirpath, _, names in os.walk(os.path.join(ROOT, "src")):
+        for name in sorted(names):
+            if not name.endswith(".cpp"):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, ROOT)
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            for m in re.finditer(r"^std::string\s+(\w+)::description\(\)\s*const\s*\{",
+                                 text, re.M):
+                cls = m.group(1)
+                end = text.find("\n}", m.end())
+                body = text[m.end():end if end > 0 else len(text)]
+                line = text[:m.start()].count("\n") + 1
+                if re.search(r"fmtLength\(|fmtVec3\(|fmtArea\(|fmtVolume\(", body):
+                    v = "CONVERTED"
+                elif cls in DESC_STORED:
+                    v = "stored-string"
+                elif cls in DESC_NO_LENGTH:
+                    v = "no-length"
+                elif re.search(r"numStr\(|std::to_string\(", body):
+                    v = "CAPTION?"
+                else:
+                    v = "no-length"
+                out.append((v, rel, line, cls))
+    return out
+
 def grep(pattern):
     out = subprocess.run(["grep", "-rnE", pattern, "src/", "--include=*.cpp", "--include=*.h"],
                          cwd=ROOT, capture_output=True, text=True).stdout
@@ -194,18 +245,26 @@ def main():
         for r in sorted(ctrl, key=lambda r: (r[0] != "LENGTH?", r[1], r[2])): o.write(row(*r))
         o.write("\n## `mm` literals by class\n\n" + "".join("- %s: %d\n" % kv for kv in sorted(lc.items())) + "\n| class | file:line | code |\n|---|---|---|\n")
         for r in sorted(lit, key=lambda r: (r[0] != "READOUT-LITERAL", r[1], r[2])): o.write(row(*r))
+        desc = descriptions()
+        dc = collections.Counter(r[0] for r in desc)
+        o.write("\n## `Operation::description()` captions\n\n"
+                + "".join("- %s: %d\n" % kv for kv in sorted(dc.items()))
+                + "\n| verdict | file:line | class |\n|---|---|---|\n")
+        for v, f, ln, cls in sorted(desc, key=lambda r: (r[0] != "CAPTION?", r[3])):
+            o.write("| %s | %s:%d | `%s` |\n" % (v, f, ln, cls))
     with open(os.path.join(ROOT, "docs/units-audit-allow.txt"), "w") as a:
         for d, f, ln, _ in lit:
             if d in ("comment", "export/import-format", "diagnostic", "platform-string", "identifier/other", "allowed-by-hand", "CONVERTED"):
                 a.write("%s:%d:\n" % (f, ln))
-    print("controls:", dict(cc)); print("literals:", dict(lc))
+    print("controls:", dict(cc)); print("literals:", dict(lc)); print("captions:", dict(dc))
 
     # A gate that always exits 0 is not a gate. LENGTH? and READOUT-LITERAL are
     # the unfinished-work classes this tool exists to surface, so their presence
     # is a failure, not a report. Nothing in CI runs this yet; wiring it up is
     # `python3 tools/units_audit.py && git diff --exit-code docs/units-audit*`,
     # which catches both new work rows and a regenerated-vs-committed drift.
-    open_rows = cc.get("LENGTH?", 0) + lc.get("READOUT-LITERAL", 0)
+    open_rows = (cc.get("LENGTH?", 0) + lc.get("READOUT-LITERAL", 0)
+                 + dc.get("CAPTION?", 0))
     if open_rows:
         print(f"FAIL: {open_rows} unclassified row(s) - see docs/units-audit.md")
         return 1

@@ -140,14 +140,6 @@ inline void reseedLengthBufferIfIdle(const char* label, char* buf, size_t n, dou
     if (!lengthBufferIsActive(label)) formatLengthDigits(buf, n, mm);
 }
 
-inline std::string fmtVec3(double xMm, double yMm, double zMm) {
-    const UnitInfo& u = unitInfo(currentUnit());
-    char b[96];
-    std::snprintf(b, sizeof b, "(%.*f, %.*f, %.*f) %s",
-                  u.decimals, toDisplay(xMm), u.decimals, toDisplay(yMm),
-                  u.decimals, toDisplay(zMm), u.suffix);
-    return b;
-}
 
 // One-quantity readout: lengthText("Length: %s", mm).
 inline void lengthText(const char* fmt, double mm) {

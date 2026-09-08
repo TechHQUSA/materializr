@@ -1,4 +1,5 @@
 #include "ui/LengthField.h"
+#include "core/Units.h"
 #include "TransformOp.h"
 #include "Sketch.h"
 #include <BRepBuilderAPI_Transform.hxx>
@@ -241,8 +242,7 @@ bool TransformOp::undo(Document& doc) {
 std::string TransformOp::description() const {
     switch (m_type) {
         case TransformType::Translate:
-            return "Translate (" + std::to_string(m_dx) + ", " +
-                   std::to_string(m_dy) + ", " + std::to_string(m_dz) + ")";
+            return "Translate " + materializr::fmtVec3(m_dx, m_dy, m_dz);
         case TransformType::Rotate:
             return "Rotate " + std::to_string(m_angle) + " deg around (" +
                    std::to_string(m_ax) + ", " + std::to_string(m_ay) + ", " +

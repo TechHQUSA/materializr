@@ -112,6 +112,18 @@ inline std::string fmtLength(double mm)  { return detail::fmtQuantity(toDisplay(
 inline std::string fmtArea(double mm2)   { return detail::fmtQuantity(areaToDisplay(mm2), "\xC2\xB2"); }
 inline std::string fmtVolume(double mm3) { return detail::fmtQuantity(volToDisplay(mm3), "\xC2\xB3"); }
 
+// "(12.70, 0.00, 3.81) in" - a point or an offset, three converted numbers
+// under ONE suffix. Repeating the unit on each component reads as noise at the
+// width a history caption gets.
+inline std::string fmtVec3(double xMm, double yMm, double zMm) {
+    const UnitInfo& u = unitInfo(currentUnit());
+    char b[128];
+    std::snprintf(b, sizeof b, "(%.*f, %.*f, %.*f) %s",
+                  u.decimals, toDisplay(xMm), u.decimals, toDisplay(yMm),
+                  u.decimals, toDisplay(zMm), u.suffix);
+    return b;
+}
+
 // printf format for a length in the current display unit, e.g. "%.3f". The
 // unit table picks decimals so every unit resolves to about 0.01 mm; a
 // hardcoded "%.3f" under metres or feet (4 decimals) instead snaps the value

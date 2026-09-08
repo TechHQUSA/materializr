@@ -1,4 +1,5 @@
 #include "ui/LengthField.h"
+#include "core/Units.h"
 #include "../core/NumFormat.h"
 #include "FilletOp.h"
 #include "BlendCut.h"
@@ -664,7 +665,7 @@ bool FilletOp::undo(Document& doc) {
 }
 
 std::string FilletOp::description() const {
-    return "Fillet R" + materializr::numStr(m_radius) + " on " +
+    return "Fillet R" + materializr::fmtLength(m_radius) + " on " +
            std::to_string(m_edges.size()) + " edge(s)";
 }
 
