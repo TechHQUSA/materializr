@@ -3342,23 +3342,22 @@ void Application::landMeshes() {
     float deflection, angularDeflection;
     meshQualityParams(deflection, angularDeflection);
     for (const MeshWorker::Result& r : m_meshWorker->collect()) {
-        auto p = m_meshPending.find(r.bodyId);
-        if (p != m_meshPending.end() && p->second.tshape == r.tshape &&
-            p->second.deflection == r.deflection &&
-            p->second.angularDeflection == r.angularDeflection)
-            m_meshPending.erase(p);
+        const MeshRequest req{r.tshape, r.deflection, r.angularDeflection};
         TopoDS_Shape cur;
         try { cur = m_document->getBody(r.bodyId); } catch (...) {}
         // Stale if the body was edited again or the quality changed meanwhile;
         // the newer request owns the body now.
-        if (cur.IsNull() || cur.TShape().get() != r.tshape ||
-            r.deflection != deflection || r.angularDeflection != angularDeflection)
-            continue;
-        MeshWorker::land(r);
-        m_meshMs[r.bodyId] = r.millis;
+        const bool current = !cur.IsNull() && cur.TShape().get() == r.tshape &&
+                             r.deflection == deflection && r.angularDeflection == angularDeflection;
+        m_meshDispatch.finished(r.bodyId, req, r.millis, current);
+        if (!current) continue;
+        const int landed = MeshWorker::land(r);
         // The tag records the faces the mesher left bare (if any), so
         // tessellate() reuses this mesh instead of Cleaning and re-meshing.
-        if (m_shapeRenderer)
+        // Nothing landed (every face bare): no tag, tessellate() meshes it in
+        // the frame as before the worker existed, and the dispatch will not
+        // ask the worker for this request again.
+        if (landed > 0 && m_shapeRenderer)
             m_shapeRenderer->notePreMeshed(cur, r.deflection, r.angularDeflection);
         m_dirtyBodyIds.insert(r.bodyId);
         m_sectionDirty = true; // the section overlay sliced unmeshed faces
@@ -3372,16 +3371,15 @@ bool Application::meshAsync(int bodyId, const TopoDS_Shape& shape, float deflect
     // Only when there is an old mesh to keep on screen: a body shown again
     // after being hidden has none, and would blink absent for a worker pass.
     if (!m_shapeRenderer->hasMeshFor(bodyId)) return false;
-    const void* ts = shape.TShape().get();
     if (m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection)) return false;
-    auto ms = m_meshMs.find(bodyId);
-    if (ms == m_meshMs.end() || ms->second < kAsyncMeshMs) return false;
-    auto p = m_meshPending.find(bodyId);
-    if (p != m_meshPending.end() && p->second.tshape == ts &&
-        p->second.deflection == deflection && p->second.angularDeflection == angularDeflection)
-        return true; // already in flight
+    const MeshRequest req{shape.TShape().get(), deflection, angularDeflection};
+    switch (m_meshDispatch.decide(bodyId, req)) {
+    case MeshPath::InFrame: return false;
+    case MeshPath::Pending: return true; // already in flight: keep the old mesh
+    case MeshPath::Worker: break;
+    }
     m_meshWorker->request(bodyId, shape, deflection, angularDeflection);
-    m_meshPending[bodyId] = {ts, deflection, angularDeflection};
+    m_meshDispatch.requested(bodyId, req);
     return true;
 }
 
@@ -3423,7 +3421,7 @@ void Application::rebuildMeshes() {
             int idx = m_shapeRenderer->setBodyMesh(id, shape, deflection,
                                                    angularDeflection);
             if (m_shapeRenderer->lastMeshMillis() >= 0.0)
-                m_meshMs[id] = m_shapeRenderer->lastMeshMillis();
+                m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
             if (idx >= 0) {
                 m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
                 if (m_extrudeCtl.active() &&
@@ -3470,7 +3468,7 @@ void Application::rebuildMeshes() {
         if (!exists || !m_document->isBodyVisible(id)) {
             m_shapeRenderer->removeBody(id);
             m_edgeRenderer->removeBody(id);
-            if (!exists) { m_meshMs.erase(id); m_meshPending.erase(id); }
+            if (!exists) m_meshDispatch.forget(id);
             continue;
         }
         const TopoDS_Shape& shape = m_document->getBody(id);
@@ -3479,7 +3477,7 @@ void Application::rebuildMeshes() {
         int idx = m_shapeRenderer->setBodyMesh(id, shape, deflection,
                                                angularDeflection);
         if (m_shapeRenderer->lastMeshMillis() >= 0.0)
-            m_meshMs[id] = m_shapeRenderer->lastMeshMillis();
+            m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
         if (idx >= 0) {
             m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
             if (m_extrudeCtl.active() &&
@@ -7173,7 +7171,7 @@ void Application::run() {
             if (m_deferredHeavyTask || m_showUpdatePopup || !m_toastText.empty())
                 return true;
             if (!m_threadRecuts.empty()) return true; // async re-cut in flight
-            if (!m_meshPending.empty()) return true;  // off-thread mesh in flight: land it when it finishes
+            if (m_meshDispatch.anyPending()) return true; // off-thread mesh in flight: land it when it finishes
             if (PluginRegistry::instance().activeTool()) return true;
             // Interactive manipulation states (sketch + every live preview/op)
             // are INPUT-driven: they only need continuous frames while the user

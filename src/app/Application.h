@@ -18,6 +18,7 @@
 #include "io/ImageDecode.h"   // DecodedImage - thumbnail peek results
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
+#include "viewport/MeshDispatch.h"
 #include <gp_Trsf.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
@@ -700,17 +701,7 @@ private:
     std::unique_ptr<Picker> m_picker;
     // Off-thread meshing of heavy bodies (see rebuildMeshes / meshAsync).
     std::unique_ptr<MeshWorker> m_meshWorker;
-    struct PendingMesh {
-        const void* tshape = nullptr;
-        float deflection = 0.0f;
-        float angularDeflection = 0.0f;
-    };
-    std::unordered_map<int, PendingMesh> m_meshPending; // body id -> job in flight
-    std::unordered_map<int, double> m_meshMs;           // body id -> last mesher time
-    // A body whose last mesh took at least this long is meshed off-thread
-    // while its previous mesh stays on screen; anything quicker is meshed in
-    // the frame, where a worker round trip would only add a frame of latency.
-    static constexpr double kAsyncMeshMs = 20.0;
+    MeshDispatch m_meshDispatch; // which bodies go to the worker, what is in flight
     void landMeshes(); // adopt finished worker meshes; call before the dirty check
     bool meshAsync(int bodyId, const TopoDS_Shape& shape, float deflection,
                    float angularDeflection);

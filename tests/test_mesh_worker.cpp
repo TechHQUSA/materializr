@@ -155,6 +155,17 @@ TEST(MeshWorker, LandsOnAMovedBody) {
     for (int n : triangleCounts(box)) EXPECT_EQ(n, 2); // the unmoved handle sees the same TShape
 }
 
+TEST(MeshWorker, AResultWithEveryFaceBareLandsNothing) {
+    // The caller must then fall back to the in-frame path; see MeshDispatch.
+    MeshWorker worker;
+    worker.request(4, bowtieFace(), kDefl, kAng);
+    std::vector<MeshWorker::Result> results = waitAll(worker);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].faces.size(), 1u);
+    EXPECT_EQ(results[0].unmeshedFaces, 1);
+    EXPECT_EQ(MeshWorker::land(results[0]), 0);
+}
+
 TEST(MeshWorker, NewestRequestForABodyWins) {
     // Keep the worker busy on body 1 (a 300-hole plate, about 50 ms) while
     // three requests for body 2 arrive within a millisecond: only the last
