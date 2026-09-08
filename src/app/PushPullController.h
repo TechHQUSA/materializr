@@ -1,12 +1,18 @@
 #pragma once
 #include "InteractiveOpController.h"
+#include "PushPullDispatch.h"
 #include "PushPullState.h"
+#include "core/BodyChanges.h"
+
+#include <atomic>
 #include <glm/glm.hpp>
 #include <memory>
 
 class PushPullOp;
 
 namespace materializr {
+struct PreviewResult;
+class PreviewJob;
 
 // Interactive Push/Pull: take the selected sketch regions and/or flat body
 // faces and sweep them along the face normal - positive extrudes (fuse),
@@ -60,6 +66,11 @@ public:
     // Trackpad click-move-click drag is engaged - the viewport suppresses
     // camera orbit while it is (gizmoOwnsDrag).
     bool sticky() const { return m_st.sticky; }
+    // Off-thread preview (see PushPullDispatch): once one inline preview of
+    // this gesture took kAsyncPreviewMs or more, later frames draw the ghost
+    // and run the boolean on a worker. Application polls once per frame.
+    void pollPreview(const IopContext& ctx);
+    bool previewPending() const; // a worker job is running: keep frames coming
 
     // Public because the base's is: the generic Esc chain and single-flight
     // cancellation call it. Overridden only to drop the ghost mesh first -
@@ -103,7 +114,14 @@ private:
     // Fold a viewport drag delta into the unsnapped accumulator.
     void applyDrag(const IopViewport& vp);
 
+    // Async preview: start a worker job at the current distance if the
+    // dispatch says so.
+    void launchPreviewIfWanted(const IopContext& ctx);
     PushPullState m_st;
+    PushPullDispatch m_dispatch;
+    BodySnapshot m_originals; // bodies as they were when the gesture began
+    struct PreviewRun;
+    std::shared_ptr<PreviewRun> m_run; // the job in flight, if any
 };
 
 } // namespace materializr

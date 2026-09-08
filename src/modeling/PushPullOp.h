@@ -9,6 +9,7 @@
 #include <gp_Vec.hxx>
 #include <gp_Pnt.hxx>
 #include <Standard_Handle.hxx>
+#include <utility>
 #include <vector>
 #include <string>
 #include <map>
@@ -93,9 +94,25 @@ public:
     bool deserializeParams(const std::string& blob) override;
     bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
 
+    // A preview result computed off-thread on copies of the bodies (see
+    // app/PushPullPreview.h). The next execute() applies it as-is instead of
+    // running the booleans: each body is replaced, each created shape becomes
+    // a new body through the reuse pool, undo() restores as always. One-shot.
+    // No face lineage is published, so a preview that used this must be
+    // committed by re-running a fresh op (PushPullController::buildCommitOp).
+    struct Precomputed {
+        std::vector<std::pair<int, TopoDS_Shape>> bodies; // body id -> new shape
+        std::vector<TopoDS_Shape> created;                // new bodies, in order
+    };
+    void setPrecomputed(Precomputed p);
+    bool usedPrecomputed() const { return m_usedPrecomputed; }
+
 private:
     std::vector<Target> m_targets;
     double m_distance = 1.0;
+    Precomputed m_precomputed;
+    bool m_hasPrecomputed = false;
+    bool m_usedPrecomputed = false;
     bool m_cutIntersecting = false; // free-space prism cuts intersecting visible bodies
 
     // Undo state

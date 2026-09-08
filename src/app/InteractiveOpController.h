@@ -240,13 +240,8 @@ protected:
     virtual void panelBody(const IopContext& ctx, bool& changed) = 0;
     virtual void onCleanup() {}
     virtual float panelWidth() const { return 260.0f; }
-    // How a finished preview frame invalidates meshes. Default: mark
-    // EVERYTHING, which triggers a full clear + re-tessellate of every visible
-    // body. That is correct for an op that edits one known body, and wrong two
-    // ways for Push/Pull - it re-tessellates 100+ untouched bodies per drag
-    // frame, and the clear() wipes renderer-only slots (the ghost tool volume
-    // has no Document body behind it, so nothing puts it back).
-    // Default: nothing extra. updateLive() holds a BodyChangeScope that marks
+    // How a finished preview frame invalidates meshes beyond the per-body
+    // diff. Default: nothing extra. updateLive() holds a BodyChangeScope that marks
     // every body the preview changed; overrides add what a diff cannot see
     // (Push/Pull's renderer-only ghost slot).
     virtual void markPreviewDirty(const IopContext&) const {}

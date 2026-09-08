@@ -7,6 +7,18 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Push/Pull stays responsive while dragging on a heavy body.** The live
+  preview ran the real boolean on the main thread on every drag frame; on a
+  plate with 300 holes that was 1.3 s per frame, so the drag froze. Once one
+  preview frame of a gesture takes 30 ms or more, the rest of the gesture
+  draws the tinted tool volume at the arrow immediately and computes the
+  preview on a worker thread from copies of the bodies, landing each result
+  when it is ready and asking again if the arrow moved meanwhile. The body
+  therefore trails the arrow at the worker's pace instead of stalling the
+  app. Committing such a gesture runs the operation once at the final
+  distance, as the dense-body ghost path always did. Small bodies preview
+  exactly as before. The ghost tool volume is also meshed coarser (it is a
+  tint), which halves its per-frame cost on large profiles.
 - **Interactive previews no longer re-tessellate every body on a many-body
   project.** Pattern, loft, boundary fill, patch, extrude, revolve and the
   other live previews raised the full-rebuild flag on every frame, so the

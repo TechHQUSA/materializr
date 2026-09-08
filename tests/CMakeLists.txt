@@ -114,6 +114,7 @@ add_library(materializr_core STATIC
     # and pan, so the invariant needs a test (see test_iop_latch.cpp). Pulls in
     # only Document / History / SelectionManager / Operation + imgui.
     ${CMAKE_SOURCE_DIR}/src/app/InteractiveOpController.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/PushPullPreview.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/TouchWidgets.cpp
     # Installs OCCT's signal handler for every test binary - see the file for
     # why tests must run in the app's signal environment.
@@ -291,6 +292,16 @@ add_test(NAME test_fillet_probe COMMAND test_fillet_probe)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
+
+# test_pushpull_preview - the off-thread preview equals a direct execute and never touches the live document
+add_executable(test_pushpull_preview test_pushpull_preview.cpp)
+target_link_libraries(test_pushpull_preview PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_pushpull_preview COMMAND test_pushpull_preview)
+
+# test_pushpull_dispatch - inline until slow, one job at a time, land then relaunch when the arrow moved
+add_executable(test_pushpull_dispatch test_pushpull_dispatch.cpp)
+target_link_libraries(test_pushpull_dispatch PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_pushpull_dispatch COMMAND test_pushpull_dispatch)
 
 # test_body_changes - which bodies an edit changed, so a preview re-tessellates only those
 add_executable(test_body_changes test_body_changes.cpp)

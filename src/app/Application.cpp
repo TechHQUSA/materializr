@@ -1152,7 +1152,10 @@ materializr::IopContext Application::iopContext() {
         },
         [this](const TopoDS_Shape& tool, bool cut) {
             if (!m_shapeRenderer) return;
-            int slot = m_shapeRenderer->setBodyMesh(kGhostPreviewId, tool);
+            // The ghost is a translucent tint rebuilt every drag frame: mesh
+            // it with a coarse angular deflection. On a 300-hole profile the
+            // default 0.2 rad took 46 ms per frame, 0.5 rad takes 26.
+            int slot = m_shapeRenderer->setBodyMesh(kGhostPreviewId, tool, 0.1f, 0.5f);
             if (slot < 0) return;
             m_shapeRenderer->setSubtractPreview(slot, cut);
             m_shapeRenderer->setColor(slot, glm::vec3(0.55f, 0.75f, 1.0f));
@@ -7160,6 +7163,8 @@ void Application::run() {
         }
         // Apply/discard any landed async thread re-cuts before this frame.
         pollThreadRecuts();
+        // Land a finished off-thread push/pull preview, or relaunch it.
+        if (m_ppCtl.active()) m_ppCtl.pollPreview(iopContext());
 
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
@@ -7172,6 +7177,10 @@ void Application::run() {
                 return true;
             if (!m_threadRecuts.empty()) return true; // async re-cut in flight
             if (m_meshDispatch.anyPending()) return true; // off-thread mesh in flight: land it when it finishes
+            if (m_ppCtl.previewPending()) return true;  // off-thread push/pull preview in flight
+            // A rebuild is waiting for a frame (a landed worker result marked
+            // its body dirty): render it rather than idle on the stale mesh.
+            if (m_meshesDirty || !m_dirtyBodyIds.empty()) return true;
             if (PluginRegistry::instance().activeTool()) return true;
             // Interactive manipulation states (sketch + every live preview/op)
             // are INPUT-driven: they only need continuous frames while the user

@@ -126,6 +126,11 @@ void PushPullOp::setTargets(std::vector<Target> targets) {
     m_sketchSourceRegions.assign(m_targets.size(), -1);
 }
 
+void PushPullOp::setPrecomputed(Precomputed p) {
+    m_precomputed = std::move(p);
+    m_hasPrecomputed = true;
+}
+
 void PushPullOp::setDistance(double d) {
     m_distance = d;
 }
@@ -309,6 +314,32 @@ bool PushPullOp::execute(Document& doc) {
     m_prevFaceIds.clear();
     m_reuseIdx = 0; // walks m_reuseBodyIds as each free-floating output is emitted
     if (m_targets.empty() || std::abs(m_distance) < 1e-6) return false;
+
+    // A result the preview worker computed on copies of these bodies: apply
+    // it as-is (see setPrecomputed). Bodies the op may touch but the worker
+    // left unchanged are simply not in the list.
+    m_usedPrecomputed = false;
+    if (m_hasPrecomputed) {
+        m_hasPrecomputed = false;
+        m_usedPrecomputed = true;
+        bool any = false;
+        for (const auto& [id, shape] : m_precomputed.bodies) {
+            TopoDS_Shape current;
+            try { current = doc.getBody(id); } catch (...) { continue; }
+            m_previousBodies.emplace_back(id, current);
+            doc.updateBody(id, shape);
+            any = true;
+        }
+        for (const TopoDS_Shape& shape : m_precomputed.created) {
+            int id = m_reuseIdx < m_reuseBodyIds.size() ? m_reuseBodyIds[m_reuseIdx] : -1;
+            doc.addOrPutBody(id, shape, m_distance > 0 ? "Push" : "Pull");
+            m_createdBodyIds.push_back(id);
+            ++m_reuseIdx;
+            any = true;
+        }
+        m_precomputed = Precomputed{};
+        return any;
+    }
 
     // Follow upstream edits: re-resolve any face-driven target whose profile
     // handle has gone stale on a rebuilt source body (sketch targets rebuild
