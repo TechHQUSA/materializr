@@ -7,6 +7,13 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Meshing a body with many holes no longer takes a second.** OCCT's default
+  triangulator slows down sharply on a face with many curved inner wires, which
+  is what hole patterns and SVG outlines produce: a 400-hole plate took 1.1 s to
+  mesh after every edit and on every project load. Every mesh call now uses
+  OCCT's Delabella kernel (84 ms for the same plate, never slower elsewhere,
+  same triangle counts), and the mesher no longer runs a second, redundant pass
+  over each body (25 ms more on that plate).
 - **Hovering a body no longer burns a CPU core.** Every rendered frame with the
   cursor over a body re-ran the OCCT mesher on it "to make sure it was
   tessellated". The mesher rebuilds its whole data model on each call even when

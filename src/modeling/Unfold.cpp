@@ -19,6 +19,7 @@
 #include <GeomAbs_SurfaceType.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <BRepBuilderAPI_Copy.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
@@ -469,8 +470,7 @@ FlatPattern unfoldFaces(const std::vector<TopoDS_Face>& faces,
         // viewport, which BRepMesh would keep instead of re-meshing coarser - so
         // the bevel slider would have no effect. A copy starts with none.
         TopoDS_Face face = TopoDS::Face(BRepBuilderAPI_Copy(srcFace).Shape());
-        BRepMesh_IncrementalMesh mesher(face, linDefl, Standard_False, angRad, Standard_True);
-        mesher.Perform();
+        BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(linDefl, angRad, true));
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
         if (tri.IsNull()) continue;
@@ -774,8 +774,7 @@ FaceNet unrollOneFace(const TopoDS_Face& srcFace, int faceIndex,
     const double angRad = std::max(0.5, maxBevelDeg) * M_PI / 180.0;
 
     TopoDS_Face face = TopoDS::Face(BRepBuilderAPI_Copy(srcFace).Shape());
-    BRepMesh_IncrementalMesh mesher(face, linDefl, Standard_False, angRad, Standard_True);
-    mesher.Perform();
+    BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(linDefl, angRad, true));
     TopLoc_Location loc;
     Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
     if (tri.IsNull()) return fn;
@@ -1287,8 +1286,7 @@ void buildTriMesh(const std::vector<TopoDS_Face>& faces, double maxBevelDeg,
     };
     for (const TopoDS_Face& srcFace : faces) {
         TopoDS_Face face = TopoDS::Face(BRepBuilderAPI_Copy(srcFace).Shape());
-        BRepMesh_IncrementalMesh mesher(face, linDefl, Standard_False, angRad, Standard_True);
-        mesher.Perform();
+        BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(linDefl, angRad, true));
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
         if (tri.IsNull()) continue;

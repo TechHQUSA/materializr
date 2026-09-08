@@ -14,6 +14,7 @@
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <TopoDS_Edge.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
@@ -248,8 +249,7 @@ int Picker::pickMeshBody(const glm::vec3& origin, const glm::vec3& dir,
         // only for hit-testing, and a mesh body's facets are already the limit.
         MeshCacheEntry entry;
         entry.shape = shape;
-        BRepMesh_IncrementalMesh meshGen(shape, 0.5);
-        meshGen.Perform();
+        BRepMesh_IncrementalMesh meshGen(shape, materializr::meshParams(0.5, 0.5, false));
         int faceIdx = 0;
         for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), ++faceIdx) {
             TopoDS_Face face = TopoDS::Face(ex.Current());

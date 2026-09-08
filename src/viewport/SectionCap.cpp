@@ -4,6 +4,7 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepAdaptor_Surface.hxx>
@@ -73,8 +74,7 @@ bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
         const TopoDS_Shape& capped = common.Shape();
         if (capped.IsNull()) return false;
 
-        BRepMesh_IncrementalMesh mesher(capped, 0.1);
-        mesher.Perform();
+        BRepMesh_IncrementalMesh mesher(capped, materializr::meshParams(0.1, 0.5, false));
 
         const double planeTol = 1.0e-3;
         for (TopExp_Explorer fexp(capped, TopAbs_FACE); fexp.More(); fexp.Next()) {

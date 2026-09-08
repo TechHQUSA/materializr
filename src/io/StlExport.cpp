@@ -2,6 +2,7 @@
 #include "../core/Document.h"
 
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <StlAPI_Writer.hxx>
 #include <gp_Trsf.hxx>
@@ -95,9 +96,8 @@ StlExportResult StlExport::exportShape(const std::string& filePath, const TopoDS
                                                   Standard_True).Shape();
 
     // Tessellate the shape
-    BRepMesh_IncrementalMesh mesh(shape, options.linearDeflection, Standard_False,
-                                  options.angularDeflection);
-    mesh.Perform();
+    BRepMesh_IncrementalMesh mesh(
+        shape, materializr::meshParams(options.linearDeflection, options.angularDeflection, false));
 
     if (!mesh.IsDone()) {
         result.errorMessage = "Tessellation failed.";

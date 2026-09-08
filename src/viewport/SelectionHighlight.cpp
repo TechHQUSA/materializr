@@ -13,6 +13,7 @@
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <BRepAdaptor_Curve.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
 
@@ -257,8 +258,7 @@ void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::ma
         TopLoc_Location location;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, location);
         if (tri.IsNull()) {
-            BRepMesh_IncrementalMesh mesh(faceShape, 0.1);
-            mesh.Perform();
+            BRepMesh_IncrementalMesh mesh(faceShape, materializr::meshParams(0.1, 0.5, false));
             tri = BRep_Tool::Triangulation(face, location);
             if (tri.IsNull()) return;
         }

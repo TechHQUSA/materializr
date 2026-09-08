@@ -15,6 +15,7 @@
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRep_Tool.hxx>
@@ -43,8 +44,7 @@ constexpr float kH = 600.0f;
 
 // Mesh the way the renderer does at Low quality (0.5 mm linear deflection).
 void meshLikeRendererLow(const TopoDS_Shape& s) {
-    BRepMesh_IncrementalMesh m(s, 0.5, Standard_False, 0.5, Standard_True);
-    m.Perform();
+    BRepMesh_IncrementalMesh m(s, materializr::meshParams(0.5, 0.5, true));
 }
 
 // One entry per face: the Poly_Triangulation it carries (null if none).

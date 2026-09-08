@@ -3,6 +3,7 @@
 #include "../viewport/ShapeRenderer.h"
 
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <BRepBuilderAPI_Copy.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
@@ -34,8 +35,7 @@ struct MeshBufferData {
 static void tessellateMesh(const TopoDS_Shape& shape, MeshBufferData& out, float deflection) {
     // Pass an angular deflection too - the single-arg ctor defaults it to 0.5rad
     // (~28°), which left small fillets visibly faceted/rippled.
-    BRepMesh_IncrementalMesh meshGen(shape, deflection, false, 0.2);
-    meshGen.Perform();
+    BRepMesh_IncrementalMesh meshGen(shape, materializr::meshParams(deflection, 0.2, false));
 
     for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
         const TopoDS_Face& face = TopoDS::Face(explorer.Current());

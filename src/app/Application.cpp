@@ -151,6 +151,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Poly_Triangle.hxx>
 #include <TopLoc_Location.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
@@ -5087,8 +5088,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
         if (tri.IsNull()) {
-            BRepMesh_IncrementalMesh mesher(face, 0.1);
-            mesher.Perform();
+            BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(0.1, 0.5, false));
             tri = BRep_Tool::Triangulation(face, loc);
         }
         if (!tri.IsNull() && tri->NbTriangles() > 0) {

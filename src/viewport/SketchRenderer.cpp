@@ -14,6 +14,7 @@
 #include <Geom_Curve.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
@@ -1272,7 +1273,7 @@ void SketchRenderer::renderRegionFill(const Sketch* sketch, int regionIndex,
     Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
     if (tri.IsNull()) {
         try {
-            BRepMesh_IncrementalMesh mesher(face, 0.2);
+            BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(0.2, 0.5, false));
             tri = BRep_Tool::Triangulation(face, loc);
         } catch (...) {}
         if (tri.IsNull()) return;

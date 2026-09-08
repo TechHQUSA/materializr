@@ -6,6 +6,7 @@
 
 #include <TopoDS_Shape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -259,9 +260,8 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
         // surfaces by normal angle, so rounded edges/holes get more facets
         // (smoother) while flat faces stay cheap. Run in parallel to absorb
         // the extra triangles.
-        BRepMesh_IncrementalMesh meshGen(shape, deflection, Standard_False,
-                                         angularDeflection, Standard_True);
-        meshGen.Perform();
+        BRepMesh_IncrementalMesh meshGen(
+            shape, materializr::meshParams(deflection, angularDeflection, true));
         m_meshedAt[key] = {deflection, angularDeflection};
     }
 

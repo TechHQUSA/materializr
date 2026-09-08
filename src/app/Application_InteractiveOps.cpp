@@ -34,6 +34,7 @@
 #include "modeling/ResizeCylindricalOp.h"
 #include "modeling/ThreadOp.h"
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <future>
 #include "modeling/PatternOp.h"
 #include "modeling/LoftOp.h"
@@ -283,9 +284,7 @@ void Application::commitThread() {
             TopoDS_Shape r = worker->buildResult(body);
             if (!r.IsNull()) {
                 try {
-                    BRepMesh_IncrementalMesh mesh(r, mdefl, Standard_False,
-                                                  meshAng, Standard_True);
-                    mesh.Perform();
+                    BRepMesh_IncrementalMesh mesh(r, materializr::meshParams(mdefl, meshAng, true));
                 } catch (...) {}
             }
             return r;
@@ -2517,9 +2516,7 @@ bool Application::launchThreadRecut(ThreadOp& op, int attempts) {
                            if (!r.IsNull()) {
                                try {
                                    BRepMesh_IncrementalMesh mesh(
-                                       r, rdefl, Standard_False,
-                                       recutAng, Standard_True);
-                                   mesh.Perform();
+                                       r, materializr::meshParams(rdefl, recutAng, true));
                                } catch (...) {}
                            }
                            const double secs =
