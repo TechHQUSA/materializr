@@ -33,8 +33,12 @@ public:
     /// Render all edge meshes as dark lines.
     void render(const glm::mat4& view, const glm::mat4& projection);
 
-    /// Remove all edge meshes.
+    /// Remove all edge meshes and free their GPU buffers.
     void clear();
+    /// Start of a full rebuild: drop every slot but keep its GPU buffers, so
+    /// the setBodyEdges calls that follow can hand them straight back to
+    /// bodies whose shape did not change (see m_retired).
+    void retireAll();
 
     /// Slot index of `bodyId`'s edge mesh, or -1 if not present. Lets
     /// callers pair the edges' per-body model matrix with the shape
@@ -54,12 +58,28 @@ private:
         int vertexCount = 0;
         int bodyId = -1;
         glm::mat4 modelMatrix = glm::mat4(1.0f);
+        // What the vertices were built from and at what deflection, so a
+        // retired slot can be reclaimed (see m_retired). IsSame covers the
+        // location the baked world-space vertices depend on; orientation
+        // does not move them.
+        TopoDS_Shape shape;
+        float deflection = 0.0f;
     };
 
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
+    void freeRetired();
 
     std::vector<EdgeMesh> m_meshes;
     std::map<int, int> m_bodyToSlot;
+    // Slots retireAll() kept instead of destroying. A full rebuild re-runs
+    // setBodyEdges for every visible body, not just the ones the last
+    // operation touched, and discretizing a body's edges costs 0.6-2 ms; so
+    // setBodyEdges first reclaims a retired slot whose shape IsSame at the
+    // same deflection, and whatever is still retired at the next retireAll()
+    // or clear() is freed then. Same retire/reclaim generations as
+    // ShapeRenderer::m_meshedAt (that one is a keyed map; a linear scan is
+    // fine at CAD body counts).
+    std::vector<EdgeMesh> m_retired;
     unsigned int m_program = 0;
     int m_locModel = -1;
     int m_locView = -1;

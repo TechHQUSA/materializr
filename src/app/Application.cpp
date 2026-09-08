@@ -3347,7 +3347,7 @@ void Application::rebuildMeshes() {
         // Full rebuild - clear everything and re-tessellate every visible
         // body. Used on project load, mesh-quality change, theme switch.
         m_shapeRenderer->clear();
-        m_edgeRenderer->clear();
+        m_edgeRenderer->retireAll();
         auto ids = m_document->getAllBodyIds();
         int meshN = static_cast<int>(ids.size()), meshI = 0;
         for (int id : ids) {
