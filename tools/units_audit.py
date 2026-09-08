@@ -77,37 +77,98 @@ DESC_NO_LENGTH = {
 # These return a string captured earlier and stored, so they carry whatever
 # unit was live when it was made. The save path holds ScopedUnit(Mm), so that
 # is millimetres; they are legacy text, not a live readout.
-DESC_STORED = {"ReplayOp": "m_description", "BatchTransformOp": "m_desc"}
+DESC_STORED = {"ReplayOp": "m_description", "BatchTransformOp": "m_desc",
+               "SketchTransformOp": "m_description"}
+
+def _body_at(text, brace_pos):
+    """The text between the { at brace_pos and its matching }, by counting."""
+    depth = 0
+    for i in range(brace_pos, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_pos + 1:i]
+    return text[brace_pos + 1:]
+
+def _enclosing_class(text, pos):
+    """Nearest class/struct declared above pos. An inline body carries no Cls::
+    qualifier, so the name has to come from the scope around it."""
+    last = None
+    for m in re.finditer(r"^(?:class|struct)\s+(\w+)", text[:pos], re.M):
+        last = m.group(1)
+    return last
 
 def descriptions():
-    """(class, verdict, detail) for every Operation::description() in src/."""
-    out = []
+    """(verdict, file, line, class) for every Operation::description() in src/.
+
+    DECLARATION-driven, not definition-driven, and that distinction is the
+    point. Scanning .cpp files for "Cls::description() {" silently missed the
+    three subclasses that define it INLINE in their header (BatchTransformOp,
+    ReplayOp, SketchTransformOp) - and missed them so quietly that two
+    DESC_STORED pins written for those very classes never fired and nothing
+    said so. A tool whose blind spot is itself invisible is the same failure it
+    exists to catch. So: enumerate every DECLARATION, then go find its body,
+    and report a declaration whose body cannot be located as open work rather
+    than passing silently over it.
+    """
+    files = {}
     for dirpath, _, names in os.walk(os.path.join(ROOT, "src")):
         for name in sorted(names):
-            if not name.endswith(".cpp"):
+            if name.endswith((".h", ".hpp", ".cpp")):
+                path = os.path.join(dirpath, name)
+                with open(path, encoding="utf-8") as fh:
+                    files[os.path.relpath(path, ROOT)] = fh.read()
+
+    decls = []
+    for rel in sorted(files):
+        if not rel.endswith((".h", ".hpp")):
+            continue
+        text = files[rel]
+        for m in re.finditer(
+                r"std::string\s+description\(\)\s*const\s*(?:override\s*)?(;|\{)", text):
+            cls = _enclosing_class(text, m.start())
+            if not cls:
                 continue
-            path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, ROOT)
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-            for m in re.finditer(r"^std::string\s+(\w+)::description\(\)\s*const\s*\{",
-                                 text, re.M):
-                cls = m.group(1)
-                end = text.find("\n}", m.end())
-                body = text[m.end():end if end > 0 else len(text)]
-                line = text[:m.start()].count("\n") + 1
-                if re.search(r"fmtLength\(|fmtVec3\(|fmtArea\(|fmtVolume\(", body):
-                    v = "CONVERTED"
-                elif cls in DESC_STORED:
-                    v = "stored-string"
-                elif cls in DESC_NO_LENGTH:
-                    v = "no-length"
-                elif re.search(r"numStr\(|std::to_string\(", body):
-                    v = "CAPTION?"
-                else:
-                    v = "no-length"
-                out.append((v, rel, line, cls))
+            decls.append((cls, rel, text[:m.start()].count("\n") + 1,
+                          _body_at(text, m.end() - 1) if m.group(1) == "{" else None))
+
+    out = []
+    for cls, where, ln, body in decls:
+        if body is None:
+            for rel in sorted(files):
+                if not rel.endswith(".cpp"):
+                    continue
+                m = re.search(r"std::string\s+%s::description\(\)\s*const\s*\{"
+                              % re.escape(cls), files[rel])
+                if m:
+                    where, ln = rel, files[rel][:m.start()].count("\n") + 1
+                    body = _body_at(files[rel], m.end() - 1)
+                    break
+        if body is None:
+            v, cls = "CAPTION?", cls + " (no body found)"
+        elif re.search(r"fmtLength\(|fmtVec3\(|fmtArea\(|fmtVolume\(", body):
+            v = "CONVERTED"
+        elif cls in DESC_STORED and not re.search(r"numStr\(|std::to_string\(", body):
+            # The pin says this returns a string captured earlier. If the body
+            # ever formats a number itself the pin is stale, and the EVIDENCE
+            # wins - same rule as "the widget outranks the pin" for controls.
+            # Without this a stored-string pin would hide a raw length forever,
+            # which is what it did the first time this scan was written.
+            v = "stored-string"
+        elif cls in DESC_NO_LENGTH:
+            # This pin is a statement ABOUT the to_string: it says the number
+            # is a count or an id, not a length. So it does stand over the
+            # evidence - that is the whole reason it is written down.
+            v = "no-length"
+        elif re.search(r"numStr\(|std::to_string\(", body):
+            v = "CAPTION?"
+        else:
+            v = "no-length"
+        out.append((v, where, ln, cls))
     return out
+
 
 def grep(pattern):
     out = subprocess.run(["grep", "-rnE", pattern, "src/", "--include=*.cpp", "--include=*.h"],

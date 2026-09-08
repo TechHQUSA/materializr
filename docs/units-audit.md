@@ -563,11 +563,13 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 
 - CONVERTED: 17
 - no-length: 22
+- stored-string: 3
 
 | verdict | file:line | class |
 |---|---|---|
 | CONVERTED | src/modeling/AlignOp.cpp:67 | `AlignOp` |
 | no-length | src/modeling/AxisTransformOp.cpp:23 | `AxisTransformOp` |
+| stored-string | src/modeling/BatchTransformOp.h:34 | `BatchTransformOp` |
 | no-length | src/modeling/BooleanOp.cpp:309 | `BooleanOp` |
 | no-length | src/modeling/BoundaryFillOp.cpp:169 | `BoundaryFillOp` |
 | CONVERTED | src/modeling/ChamferOp.cpp:788 | `ChamferOp` |
@@ -593,6 +595,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/PrimitiveOp.cpp:116 | `PrimitiveOp` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:526 | `ProjectSketchOp` |
 | CONVERTED | src/modeling/PushPullOp.cpp:630 | `PushPullOp` |
+| stored-string | src/modeling/ReplayOp.h:29 | `ReplayOp` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:704 | `ResizeCylindricalOp` |
 | no-length | src/modeling/RevolveOp.cpp:263 | `RevolveOp` |
 | CONVERTED | src/modeling/ScaleFaceOp.cpp:315 | `ScaleFaceOp` |
@@ -600,6 +603,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
 | CONVERTED | src/modeling/ShellOp.cpp:317 | `ShellOp` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:59 | `SketchEditOp` |
+| stored-string | src/modeling/SketchTransformOp.h:31 | `SketchTransformOp` |
 | no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
 | no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
 | no-length | src/modeling/TaperOp.cpp:133 | `TaperOp` |
