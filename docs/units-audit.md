@@ -558,8 +558,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/viewport/RefImageRenderer.cpp:194 | `// zoom (bias shrinks with depth precision, the 0.05 mm lift doesn't).` |
 | comment | src/viewport/RefImageRenderer.cpp:211 | `// Lift the quad 0.05 mm off its plane: the ground grid renders BEFORE` |
 | comment | src/viewport/RefImageRenderer.cpp:214 | `// plane - the common case). 0.05 mm is invisible for tracing and the` |
-| comment | src/viewport/SectionCap.cpp:36 | `// Endpoints closer than this (in mm, in the plane) are one vertex. Crossings` |
-| comment | src/viewport/SectionCap.cpp:38 | `// mesh feature the app produces is the 0.01 mm Ultra deflection.` |
+| comment | src/viewport/SectionCap.cpp:37 | `// Endpoints closer than this (in mm, in the plane) are one vertex. Crossings` |
+| comment | src/viewport/SectionCap.cpp:39 | `// mesh feature the app produces is the 0.01 mm Ultra deflection.` |
 | comment | src/viewport/SketchRenderer.cpp:756 | `// Same mapping AirfoilImport::place uses: chord-normalised -> mm, rotated` |
 
 ## `Operation::description()` captions

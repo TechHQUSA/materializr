@@ -294,6 +294,6 @@ src/viewport/Picker.cpp:581:
 src/viewport/RefImageRenderer.cpp:194:
 src/viewport/RefImageRenderer.cpp:211:
 src/viewport/RefImageRenderer.cpp:214:
-src/viewport/SectionCap.cpp:36:
-src/viewport/SectionCap.cpp:38:
+src/viewport/SectionCap.cpp:37:
+src/viewport/SectionCap.cpp:39:
 src/viewport/SketchRenderer.cpp:756:
