@@ -8,7 +8,7 @@ pinned in OVERRIDE. Anything left LENGTH? or READOUT-LITERAL is work.
 
     python3 tools/units_audit.py
 """
-import collections, os, re, subprocess, sys
+import collections, os, re, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # Every spelling of "a numeric control". The length widgets this feature added
@@ -17,7 +17,13 @@ CONTROLS = (r'InputFloat\(|InputDouble\(|InputScalar|SliderFloat\(|DragFloat\(|i
             r'amountField\(|parseFinite\(|stepperRow\(|numberField\(|SliderInt\(|DragScalar|'
             r'lengthField\(|lengthSlider\(|amountLengthField\(|lengthStepperRow\(|parseLength\(|'
             r'lengthFieldCommit\(')
-LITERALS = r'\bmm\b'
+# Explicit ASCII boundaries rather than \b. The two are NOT the same on "mm3"
+# with a superscript: BSD grep ends the word at the superscript and matches,
+# Python's Unicode-aware \b treats it as a digit and does not. That is four
+# volume literals appearing or vanishing depending on the machine. Spell the
+# boundary out so every engine agrees, and keep the mm2/mm3 forms matching -
+# they are unit literals, and inventorying them is the point.
+LITERALS = r'(?<![A-Za-z0-9_])mm(?![A-Za-z0-9_])'
 SKIP_CTRL = ("src/ui/NumField.h", "src/ui/LengthField.h", "src/core/NumParse.h", "src/ui/TouchWidgets", "src/core/Units.h", "src/ui/StepperRow.h")
 SKIP_LIT  = ("src/core/Units.h", "src/core/LengthEdit.h", "src/ui/LengthField.h", "i18n_catalogue.h")
 
@@ -171,11 +177,30 @@ def descriptions():
 
 
 def grep(pattern):
-    out = subprocess.run(["grep", "-rnE", pattern, "src/", "--include=*.cpp", "--include=*.h"],
-                         cwd=ROOT, capture_output=True, text=True).stdout
-    for l in out.splitlines():
-        f, ln, code = l.split(":", 2)
-        yield f, int(ln), code
+    """Matching lines under src/, in Python rather than by shelling out.
+
+    This used to run the system grep, which made the tool's OUTPUT depend on
+    which grep was installed: `\\b` in the `mm` literal pattern is a GNU
+    extension, and the docs/ inventory is generated on macOS (BSD grep) but
+    would be checked in CI on Linux (GNU grep). A gate whose expected output
+    differs by platform is red on arrival and teaches everyone to ignore it.
+    Python's `re` is the same engine everywhere, and it is what the classifiers
+    below already use.
+    """
+    rx = re.compile(pattern)
+    src = os.path.join(ROOT, "src")
+    for dirpath, dirnames, names in os.walk(src):
+        dirnames.sort()
+        for name in sorted(names):
+            if not name.endswith((".cpp", ".h")):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, ROOT)
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for n, line in enumerate(fh, 1):
+                    line = line.rstrip("\n")
+                    if rx.search(line):
+                        yield rel, n, line
 
 def is_comment(code):
     c = code.strip(); return c.startswith("//") or c.startswith("*") or c.startswith("/*")
@@ -196,6 +221,12 @@ LITERAL_ALLOW = [
     ("src/modeling/ShellOp.cpp",        "(thickness %.3f mm)",  "stderr diagnostic"),
     ("src/modeling/ShellOp.cpp",        "failed at thickness",  "stderr diagnostic"),
     ("src/plugins/SvgImportPlugin.cpp", "on the ground plane",  "stderr diagnostic (continuation line)"),
+    # Surfaced once the mm2/mm3 forms started matching at all - they had been
+    # slipping through as "comment" because Python's \b does not end a word at
+    # a superscript. Same shape as the three above: a printf continuation line
+    # whose fprintf/stderr keyword sits on the line before it.
+    ("src/modeling/ResizeCylindricalOp.cpp", "cap-following fill built", "stderr diagnostic (continuation line)"),
+    ("src/modeling/ResizeCylindricalOp.cpp", "fuse: bodyVol",            "stderr diagnostic (continuation line)"),
     # Numerical solver tolerances and fit residuals, NOT model dimensions.
     # Their useful range is roughly 1e-5..1e-1 mm, and the unit table's FIXED
     # decimals cannot show that in ft (4 dp) or m (4 dp) - every one of them
