@@ -706,7 +706,7 @@ void Application::renderViewport() {
             }
             m_sectionView->setEnabled(true);
             if (m_sectionPending && !m_sectionFut.valid() &&
-                nowMs - m_sectionRestMs >= 250) {
+                nowMs - m_sectionRestMs >= 100) {
                 gp_Pln cutting = pl;
                 {
                     gp_Pnt o2 = cutting.Location();
@@ -720,8 +720,11 @@ void Application::renderViewport() {
                     try {
                         const TopoDS_Shape& s = m_document->getBody(id);
                         if (s.IsNull()) continue;
-                        bodies.emplace_back(BRepBuilderAPI_Copy(s).Shape(),
-                                            m_document->getBodyColor(id));
+                        // Copy the triangulation too: the cap is sliced from
+                        // the mesh the viewport draws (see SectionCap.h).
+                        bodies.emplace_back(
+                            BRepBuilderAPI_Copy(s, Standard_True, Standard_True).Shape(),
+                            m_document->getBodyColor(id));
                     } catch (...) { continue; }
                 }
                 m_sectionCancel = std::make_shared<std::atomic<bool>>(false);

@@ -7,6 +7,14 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **The Section View cap arrives in milliseconds.** The filled cross-section
+  came from a half-space boolean on each body, re-meshed: 735 ms on a 1683-face
+  plate and 210 ms on a fused part per plane change, and far longer on swept
+  surfaces. It is now sliced from the mesh the viewport already draws (0.2 to
+  5 ms on the same parts; a cut through all 400 holes of a plate at once, the
+  worst case, takes 210 ms instead of 690), so the cap lands exactly on the
+  clipped mesh, and the overlay now waits 100 ms after the plane stops instead
+  of 250. A face the mesher could not triangulate gets no cap through it.
 - **Meshing a body with many holes no longer takes a second.** OCCT's default
   triangulator slows down sharply on a face with many curved inner wires, which
   is what hole patterns and SVG outlines produce: a 400-hole plate took 1.1 s to
