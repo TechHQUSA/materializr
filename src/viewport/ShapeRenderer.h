@@ -99,6 +99,15 @@ public:
 
     /// Remove all meshes.
     void clear();
+    /// Start of a full rebuild: drop every slot but keep its GPU buffers, so
+    /// the setBodyMesh calls that follow can hand them straight back to
+    /// bodies whose shape did not change (see m_retired).
+    void retireAll();
+    /// Free every buffer retireAll() kept that was not reclaimed since. The
+    /// full rebuild calls this after visiting every visible body, so nothing
+    /// still retired can be live (a quality change retires a whole
+    /// generation at once; do not let it sit until the next commit).
+    void freeRetired();
 
     /// Diagnostic: print every slot (bodyId, vertex count, flags) to
     /// stderr - used by the click-miss diagnostic to expose phantom slots
@@ -118,6 +127,13 @@ private:
         glm::vec3 color = glm::vec3(0.7f, 0.7f, 0.7f);
         bool selected = false;
         bool subtractPreview = false;
+        // What the vertices were built from and at what quality, so a
+        // retired slot can be reclaimed (see m_retired). IsEqual, not
+        // IsSame: the baked vertices carry the Location AND the normals
+        // flip with face orientation.
+        TopoDS_Shape shape;
+        float deflection = 0.0f;
+        float angularDeflection = 0.0f;
     };
 
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
@@ -129,9 +145,17 @@ private:
     // bodyId → slot index in m_meshes. Lets setBodyMesh / removeBody resolve
     // by body id without scanning the vector.
     std::map<int, int> m_bodyToSlot;
+    // Slots retireAll() kept instead of destroying. A full rebuild re-runs
+    // setBodyMesh for every visible body, not just the ones the last
+    // operation touched; setBodyMesh first reclaims a retired slot whose
+    // shape IsEqual at the same quality (skipping vertex collection and the
+    // VBO upload too, not just the mesher), and whatever is still retired at
+    // the next retireAll() or clear() is freed then. Same retire/reclaim
+    // generations as EdgeRenderer::m_retired.
+    std::vector<MeshData> m_retired;
     // TShape -> requested (linear, angular) deflection it was last meshed
     // for (see tessellate). Both, because callers do vary them independently
-    // (the ghost preview uses the default angular value). clear() - the
+    // (the ghost preview uses the default angular value). retireAll() - the
     // start of every full rebuild - retires the map to m_meshedAtPrev, and
     // tessellate carries an entry back only when it is looked up again, so
     // the map holds what the last full rebuild visited plus previews since

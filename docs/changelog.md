@@ -21,12 +21,12 @@ All notable changes to Materializr are documented here. Format loosely follows
   to skip bodies that were already tessellated at the current quality compared
   the requested deflection against the value OCCT stores on the mesh, which is
   the *achieved* deflection (0 on a plane), so it never matched. Bodies the
-  last operation did not touch now keep their mesh and their edge lines (the
-  edge renderer hands back the buffers it built last time instead of
-  re-discretizing every edge), and a thread cut on a worker thread is no
-  longer meshed a second time on the main thread. glTF export now meshes a
-  copy of each body, so an export can no longer leave the viewport holding an
-  export-quality mesh.
+  last operation did not touch now keep their mesh and their edge lines (both
+  renderers hand back the GPU buffers they built last time instead of
+  re-tessellating, re-discretizing and re-uploading), and a thread cut on a
+  worker thread is no longer meshed a second time on the main thread. glTF
+  export now meshes a copy of each body, so an export can no longer leave the
+  viewport holding an export-quality mesh.
 
 ## [1.6.3] - 2026-08-28
 

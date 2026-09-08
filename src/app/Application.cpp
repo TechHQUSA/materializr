@@ -3346,7 +3346,7 @@ void Application::rebuildMeshes() {
     if (m_meshesDirty) {
         // Full rebuild - clear everything and re-tessellate every visible
         // body. Used on project load, mesh-quality change, theme switch.
-        m_shapeRenderer->clear();
+        m_shapeRenderer->retireAll();
         m_edgeRenderer->retireAll();
         auto ids = m_document->getAllBodyIds();
         int meshN = static_cast<int>(ids.size()), meshI = 0;
@@ -3380,6 +3380,10 @@ void Application::rebuildMeshes() {
                 m_edgeRenderer->setBodyEdges(id, shape, deflection);
         }
         m_dirtyBodyIds.clear();
+        // Every visible body has been visited, so whatever the renderers still
+        // hold retired is dead: free it now rather than at the next commit.
+        m_shapeRenderer->freeRetired();
+        m_edgeRenderer->freeRetired();
         if (rmWasFull) {
             const uint32_t took = SDL_GetTicks() - rmStart;
             if (took > 500)

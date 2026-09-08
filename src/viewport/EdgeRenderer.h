@@ -39,6 +39,11 @@ public:
     /// the setBodyEdges calls that follow can hand them straight back to
     /// bodies whose shape did not change (see m_retired).
     void retireAll();
+    /// Free every buffer retireAll() kept that was not reclaimed since. The
+    /// full rebuild calls this after visiting every visible body, so nothing
+    /// still retired can be live (a quality change retires a whole
+    /// generation at once; do not let it sit until the next commit).
+    void freeRetired();
 
     /// Slot index of `bodyId`'s edge mesh, or -1 if not present. Lets
     /// callers pair the edges' per-body model matrix with the shape
@@ -67,7 +72,6 @@ private:
     };
 
     bool compileShader(unsigned int& shader, unsigned int type, const char* source);
-    void freeRetired();
 
     std::vector<EdgeMesh> m_meshes;
     std::map<int, int> m_bodyToSlot;

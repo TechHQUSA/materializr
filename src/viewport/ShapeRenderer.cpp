@@ -354,6 +354,9 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
     // Upload to GPU
     MeshData mesh;
     mesh.vertexCount = static_cast<int>(vertices.size() / 6); // 6 floats per vertex
+    mesh.shape = shape;
+    mesh.deflection = deflection;
+    mesh.angularDeflection = angularDeflection;
 
     glGenVertexArrays(1, &mesh.vao);
     glGenBuffers(1, &mesh.vbo);
@@ -384,9 +387,36 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
 int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
                                float deflection, float angularDeflection)
 {
-    // Tessellate first so we don't free the old slot's GL resources unless
-    // the new tessellation actually succeeds.
-    int appendedSlot = tessellate(shape, deflection, angularDeflection);
+    // Reclaim the slot retireAll() kept for this exact shape at this quality,
+    // if any: no mesher, no vertex collection, no upload. It comes back as a
+    // fresh slot (default colour / flags / matrix), exactly like a new
+    // tessellation would; the caller re-applies colour and previews.
+    int appendedSlot = -1;
+    for (size_t i = 0; i < m_retired.size(); ++i) {
+        const MeshData& r = m_retired[i];
+        if (r.vao && r.deflection == deflection &&
+            r.angularDeflection == angularDeflection && r.shape.IsEqual(shape)) {
+            MeshData fresh;
+            fresh.vao = r.vao;
+            fresh.vbo = r.vbo;
+            fresh.vertexCount = r.vertexCount;
+            fresh.shape = r.shape;
+            fresh.deflection = r.deflection;
+            fresh.angularDeflection = r.angularDeflection;
+            appendedSlot = static_cast<int>(m_meshes.size());
+            m_meshes.push_back(fresh);
+            m_retired[i] = m_retired.back();
+            m_retired.pop_back();
+            // The tag stays authoritative for this TShape even though
+            // tessellate() did not run.
+            m_meshedAt[shape.TShape().get()] = {deflection, angularDeflection};
+            break;
+        }
+    }
+    // Otherwise tessellate first so we don't free the old slot's GL resources
+    // unless the new tessellation actually succeeds.
+    if (appendedSlot < 0)
+        appendedSlot = tessellate(shape, deflection, angularDeflection);
     if (appendedSlot < 0) {
         // Failed - leave the existing slot (if any) in place. LOUDLY: a
         // kept stale slot means the screen shows geometry the document no
@@ -446,6 +476,7 @@ void ShapeRenderer::removeBody(int bodyId)
     if (m.vao) glDeleteVertexArrays(1, &m.vao);
     if (m.vbo) glDeleteBuffers(1, &m.vbo);
     m.vao = 0; m.vbo = 0; m.vertexCount = 0; m.bodyId = -1;
+    m.shape.Nullify(); // do not pin a deleted body's geometry through m_retired
     // Slot stays in the vector so other slots' indices don't shift.
     // render() skips slots with vertexCount==0.
 }
@@ -613,16 +644,32 @@ void ShapeRenderer::setSubtractPreview(int meshIndex, bool subtractPreview)
     }
 }
 
-void ShapeRenderer::clear()
+void ShapeRenderer::retireAll()
 {
-    for (auto& mesh : m_meshes) {
-        if (mesh.vao) glDeleteVertexArrays(1, &mesh.vao);
-        if (mesh.vbo) glDeleteBuffers(1, &mesh.vbo);
-    }
+    // Keep the buffers: the full rebuild that follows may hand the same
+    // shapes straight back (see setBodyMesh). Anything retired last time
+    // and never reclaimed dies here.
+    freeRetired();
+    m_retired.swap(m_meshes);
     m_meshes.clear();
     m_bodyToSlot.clear();
     m_meshedAtPrev.swap(m_meshedAt);
     m_meshedAt.clear();
+}
+
+void ShapeRenderer::clear()
+{
+    retireAll();
+    freeRetired();
+}
+
+void ShapeRenderer::freeRetired()
+{
+    for (auto& mesh : m_retired) {
+        if (mesh.vao) glDeleteVertexArrays(1, &mesh.vao);
+        if (mesh.vbo) glDeleteBuffers(1, &mesh.vbo);
+    }
+    m_retired.clear();
 }
 
 void ShapeRenderer::debugDumpSlots() const
