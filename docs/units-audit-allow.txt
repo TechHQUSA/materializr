@@ -288,9 +288,9 @@ src/viewport/GridScale.h:9:
 src/viewport/GridScale.h:21:
 src/viewport/GridScale.h:53:
 src/viewport/GridScale.h:65:
-src/viewport/Picker.cpp:332:
-src/viewport/Picker.cpp:333:
-src/viewport/Picker.cpp:501:
+src/viewport/Picker.cpp:352:
+src/viewport/Picker.cpp:353:
+src/viewport/Picker.cpp:520:
 src/viewport/RefImageRenderer.cpp:194:
 src/viewport/RefImageRenderer.cpp:211:
 src/viewport/RefImageRenderer.cpp:214:

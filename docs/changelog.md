@@ -13,8 +13,9 @@ All notable changes to Materializr are documented here. Format loosely follows
   it changes nothing: 9 ms on a 54-face part and 66 ms on a 1683-face part, per
   frame, so a detailed part dragged the frame rate down just by being pointed
   at. The picker now reuses the mesh the viewport already built and keeps
-  each body's edge polylines between frames instead of re-discretizing every
-  edge per hover (hover picks measure 0.2 ms and 0.6 ms on the same parts),
+  each body's bounding box and edge polylines between frames instead of
+  recomputing them per hover (hover picks measure 0.14 ms and 0.33 ms on the
+  same parts, and a pick that misses everything costs nothing measurable),
   and the hit point is snapped onto the exact surface so Measure is
   unaffected by mesh quality. At Low
   quality the old path also re-meshed every body finer than the viewport asked

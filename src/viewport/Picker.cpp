@@ -59,9 +59,20 @@ void Picker::screenToRay(float sx, float sy, float vpW, float vpH,
 bool Picker::rayIntersectsBBox(const glm::vec3& origin, const glm::vec3& dir,
                                const TopoDS_Shape& shape, float& tMin)
 {
-    Bnd_Box bbox;
-    BRepBndLib::Add(shape, bbox);
-
+    // The box is built once per body and reused until the body's shape or
+    // location changes (bodyCache() re-validates with IsSame), so it must stay
+    // valid when the renderer later re-meshes the body at another quality.
+    // OCCT's triangulation box is enlarged by each face's achieved deflection
+    // plus tolerance, so it contains the exact surface and therefore every
+    // mesh the shape can have (a sphere of radius 10 meshed at Low reports
+    // nodes out to 9.93 and a box out to 10.55). Faces with no triangulation
+    // fall back to the geometry box, which is exact as well.
+    BodyCacheEntry& entry = bodyCache(shape);
+    if (!entry.haveBox) {
+        BRepBndLib::Add(shape, entry.box);
+        entry.haveBox = true;
+    }
+    const Bnd_Box& bbox = entry.box;
     if (bbox.IsVoid()) return false;
 
     double xMin, yMin, zMin, xMax, yMax, zMax;
@@ -278,15 +289,23 @@ int Picker::pickMeshBody(const glm::vec3& origin, const glm::vec3& dir,
     return hitFaceIdx;
 }
 
-const Picker::EdgeCacheEntry& Picker::edgePolylines(const TopoDS_Shape& shape)
+Picker::BodyCacheEntry& Picker::bodyCache(const TopoDS_Shape& shape)
 {
     const void* key = shape.TShape().get();
-    auto it = m_edgeCache.find(key);
-    if (it != m_edgeCache.end() && it->second.shape.IsSame(shape))
-        return it->second;
+    auto it = m_bodyCache.find(key);
+    if (it == m_bodyCache.end() || !it->second.shape.IsSame(shape)) {
+        BodyCacheEntry fresh;
+        fresh.shape = shape;
+        it = m_bodyCache.insert_or_assign(key, std::move(fresh)).first;
+    }
+    return it->second;
+}
 
-    EdgeCacheEntry entry;
-    entry.shape = shape;
+const std::vector<Picker::EdgePolyline>&
+Picker::edgePolylines(const TopoDS_Shape& shape)
+{
+    BodyCacheEntry& entry = bodyCache(shape);
+    if (entry.haveEdges) return entry.edges;
     for (TopExp_Explorer exp(shape, TopAbs_EDGE); exp.More(); exp.Next()) {
         EdgePolyline pl;
         pl.edge = TopoDS::Edge(exp.Current());
@@ -306,7 +325,8 @@ const Picker::EdgeCacheEntry& Picker::edgePolylines(const TopoDS_Shape& shape)
         }
         if (pl.pts.size() >= 2) entry.edges.push_back(std::move(pl));
     }
-    return m_edgeCache.insert_or_assign(key, std::move(entry)).first->second;
+    entry.haveEdges = true;
+    return entry.edges;
 }
 
 void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
@@ -336,8 +356,7 @@ void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
     glm::vec3 planeN = havePlaneCheck ? glm::normalize(facePlaneNormal) : glm::vec3(0.0f);
     const float planeTol = 0.3f;
 
-    const EdgeCacheEntry& cache = edgePolylines(shape);
-    for (const EdgePolyline& pl : cache.edges) {
+    for (const EdgePolyline& pl : edgePolylines(shape)) {
         for (size_t i = 0; i + 1 < pl.pts.size(); ++i) {
             const glm::vec3& w1 = pl.pts[i];
             const glm::vec3& w2 = pl.pts[i + 1];
@@ -386,7 +405,7 @@ PickResult Picker::pick(float screenX, float screenY,
     // (delete, transform-copy, decimate, boolean). Without this the caches
     // would pin every edited body's shape + triangle / polyline lists alive
     // for the whole session. Cheap: one pointer per body.
-    if (!m_meshCache.empty() || !m_edgeCache.empty()) {
+    if (!m_meshCache.empty() || !m_bodyCache.empty()) {
         std::unordered_set<const void*> live;
         for (int id : bodyIds) {
             const TopoDS_Shape& s = doc.getBody(id);
@@ -394,8 +413,8 @@ PickResult Picker::pick(float screenX, float screenY,
         }
         for (auto it = m_meshCache.begin(); it != m_meshCache.end();)
             it = live.count(it->first) ? std::next(it) : m_meshCache.erase(it);
-        for (auto it = m_edgeCache.begin(); it != m_edgeCache.end();)
-            it = live.count(it->first) ? std::next(it) : m_edgeCache.erase(it);
+        for (auto it = m_bodyCache.begin(); it != m_bodyCache.end();)
+            it = live.count(it->first) ? std::next(it) : m_bodyCache.erase(it);
     }
 
     for (int bodyId : bodyIds) {

@@ -149,6 +149,29 @@ TEST(Picker, NearestEdgeFollowsABodyThatMoved) {
     EXPECT_GE(zMin, 19.9);
 }
 
+TEST(Picker, BodyMovedIntoViewIsHit) {
+    // Same TShape, new Location far from the old one, camera re-framed on
+    // the new position. A bounding box cached on the TShape alone would
+    // still describe the old position, cull the ray and report a miss.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(100.0, 60.0, 10.0).Shape();
+    meshLikeRendererLow(box);
+    Document doc;
+    const int id = doc.addBody(box, "plate");
+    Picker picker;
+    PickResult a = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, framing(box), doc);
+    ASSERT_TRUE(a.hit);
+
+    gp_Trsf t;
+    t.SetTranslation(gp_Vec(1000.0, 0.0, 0.0));
+    TopoDS_Shape moved = BRepBuilderAPI_Transform(box, t, /*copy=*/false).Shape();
+    ASSERT_TRUE(moved.IsPartner(box));
+    doc.updateBody(id, moved);
+
+    PickResult b = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, framing(moved), doc);
+    EXPECT_TRUE(b.hit);
+    EXPECT_GE(b.hitPoint.x, 999.0f);
+}
+
 TEST(Picker, HitPointIsSnappedToTheExactSurface) {
     // A sphere: every hit lands on a curved face, where a 0.5 mm chord mesh
     // puts the ray/triangle intersection visibly off the true surface. The
