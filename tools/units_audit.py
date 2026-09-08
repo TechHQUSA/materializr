@@ -246,7 +246,15 @@ def classify_literal(f, code, ln=None):
     if "fprintf" in code or "stderr" in code or "cerr" in code: return "diagnostic"
     if "ios_" in f or "mobile_files" in f: return "platform-string"
     if any(k in code for k in ("fmtLength", "fmtArea", "fmtVolume", "fmtVec3", "unitSuffix", "trFormat", "lengthText")): return "CONVERTED"
-    if re.search(r'"[^"]*\bmm\b[^"]*"', before_comment(code)): return "READOUT-LITERAL"
+    # DERIVED from LITERALS, never spelled again. These two must agree: the
+    # scan decides which lines are looked at, this decides which of them are
+    # OPEN WORK, and READOUT-LITERAL is the class that fails the gate. When the
+    # scan said "(?<![A-Za-z0-9_])mm" and this still said \bmm\b, an
+    # unconverted "Volume: %.2f mm3" readout was scanned in and then filed as
+    # identifier/other - a passing class. Widening one without the other is
+    # worse than leaving both narrow: the tool covers the case on paper while
+    # the failure path does not.
+    if re.search('"[^"]*' + LITERALS + '[^"]*"', before_comment(code)): return "READOUT-LITERAL"
     return "identifier/other"
 
 def classify_control(f, ln, code):
