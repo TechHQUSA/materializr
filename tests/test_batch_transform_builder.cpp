@@ -85,9 +85,9 @@ TEST(BatchTransformBuilder, RigidMoveKeepsAnalyticSurfaces) {
     // The whole point: a move relocates, it does not rebuild. NurbsConvert
     // would have turned all seven of these into B-spline faces.
     EXPECT_EQ(countOfType(f.doc.getBody(f.box), GeomAbs_Plane), 6)
-        << "the box's planes were rebuilt — the move went through GTransform";
+        << "the box's planes were rebuilt - the move went through GTransform";
     EXPECT_EQ(countOfType(f.doc.getBody(f.cyl), GeomAbs_Cylinder), 1)
-        << "the cylinder was rebuilt — the move went through GTransform";
+        << "the cylinder was rebuilt - the move went through GTransform";
     EXPECT_EQ(countOfType(f.doc.getBody(f.box), GeomAbs_BSplineSurface), 0);
 }
 

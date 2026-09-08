@@ -18,7 +18,7 @@ REGISTER_PLUGIN(BoundaryFill, [](materializr::PluginContext& ctx) {
         "Build a solid from silhouette sketches. Select two or more closed "
         "sketches on different planes (e.g. top + front + side outlines of "
         "the part) and click: each sketch is extruded through the others and "
-        "the result is their intersection — the solid that matches every "
+        "the result is their intersection - the solid that matches every "
         "outline. Order doesn't matter.\n\n"
         "Classic use: a base footprint plus curved front/side profiles gives "
         "a tapered body with rounded sides. Also the way to reconstruct an "

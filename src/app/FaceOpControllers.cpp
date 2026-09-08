@@ -298,7 +298,7 @@ void TaperController::panelBody(const IopContext& ctx, bool& changed) {
     ImGui::TextDisabled(materializr::tr("%zu face(s) tilt about the body's base."),
                         m_faces.size());
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled("%s", materializr::tr("Tip: pick SIDE walls — a cylinder wall becomes a cone, box sides become a pyramid."));
+    ImGui::TextDisabled("%s", materializr::tr("Tip: pick SIDE walls - a cylinder wall becomes a cone, box sides become a pyramid."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
 
@@ -370,7 +370,7 @@ std::unique_ptr<Operation> DefeatureController::buildOp(const IopContext&) {
 
 void DefeatureController::panelBody(const IopContext&, bool&) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-    ImGui::TextDisabled("%s", materializr::tr("Removes the selected face(s) and heals the surrounding faces back together — e.g. take a baked fillet back to a sharp edge so you can re-fillet it."));
+    ImGui::TextDisabled("%s", materializr::tr("Removes the selected face(s) and heals the surrounding faces back together - e.g. take a baked fillet back to a sharp edge so you can re-fillet it."));
     ImGui::PopTextWrapPos();
     ImGui::Separator();
     ImGui::Text(materializr::tr("%zu face(s) selected"), m_faces.size());
@@ -379,7 +379,7 @@ void DefeatureController::panelBody(const IopContext&, bool&) {
         ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "%s", materializr::tr("Previewing removal"));
     } else {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 240.0f);
-        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "%s", materializr::tr("Can't remove: the neighbouring faces can't be extended to close the gap. Try a different face — a single fillet / round usually works."));
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.4f, 1.0f), "%s", materializr::tr("Can't remove: the neighbouring faces can't be extended to close the gap. Try a different face - a single fillet / round usually works."));
         ImGui::PopTextWrapPos();
     }
 }
@@ -446,7 +446,7 @@ std::unique_ptr<Operation> ProjectSketchController::buildOp(
 void ProjectSketchController::panelBody(const IopContext& ctx,
                                         bool& changed) {
     ImGui::TextDisabled("%s", materializr::tr("Projects the sketch onto this face along the\nsketch's normal, then cuts in or raises out."));
-    ImGui::TextWrapped("%s", materializr::tr("Click the sketch elements you want projected — click each to add or remove. Use Select all / Clear below."));
+    ImGui::TextWrapped("%s", materializr::tr("Click the sketch elements you want projected - click each to add or remove. Use Select all / Clear below."));
 
     // Live region scoping: clicking sketch regions in the viewport while this
     // panel is open narrows the projection to just those (each click toggles —
@@ -933,17 +933,17 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
     const char* what = bothEnds       ? "Both ends"
                      : m_pick.editBottom ? "Bottom end"
                                          : "Top end";
-    ImGui::TextDisabled("%s \xE2\x80\x94 %s", what,
+    ImGui::TextDisabled("%s - %s", what,
                         m_pick.isHole ? "hole" : "outer face");
 
     if (bothEnds) {
         ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
     } else if (m_pick.editBottom) {
         ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.bottomR * 2.0)).c_str());
-        ImGui::TextDisabled("%s", materializr::trFormat("Top stays at %s — drag this end to make a cone.", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
+        ImGui::TextDisabled("%s", materializr::trFormat("Top stays at %s - drag this end to make a cone.", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
     } else {
         ImGui::TextUnformatted(materializr::trFormat("Original: %s", materializr::fmtLength(m_pick.topR * 2.0)).c_str());
-        ImGui::TextDisabled("%s", materializr::trFormat("Bottom stays at %s — drag this end to make a cone.", materializr::fmtLength(m_pick.bottomR * 2.0)).c_str());
+        ImGui::TextDisabled("%s", materializr::trFormat("Bottom stays at %s - drag this end to make a cone.", materializr::fmtLength(m_pick.bottomR * 2.0)).c_str());
     }
 
     if (m_inputFocus) {
@@ -1001,10 +1001,10 @@ void ResizeCylindricalController::panelBody(const IopContext& ctx,
     // failed preview — so at the untouched original this warned about an
     // invalid diameter before anything had been typed.
     if (!previewOk() && !m_deferred && changedFromOriginal()) {
-        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.35f, 1.0f), "%s", materializr::tr("Invalid diameter for this feature —\na hole can't exceed the surrounding wall."));
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.35f, 1.0f), "%s", materializr::tr("Invalid diameter for this feature -\na hole can't exceed the surrounding wall."));
     }
     if (m_deferred) {
-        ImGui::TextDisabled("%s", materializr::tr("Threaded body — applies on OK,\nthen the thread re-cuts in background."));
+        ImGui::TextDisabled("%s", materializr::tr("Threaded body - applies on OK,\nthen the thread re-cuts in background."));
     }
 }
 
@@ -1235,7 +1235,7 @@ void MoveFaceController::beginMoveFace(const IopContext& ctx, FaceXform kind) {
             // whole-hole slide above, because for them buildVoid SUCCEEDS.
             if (pocket && !faceIsPlanar(wall)) {
                 ctx.toast("Only simple through-holes can be moved for now "
-                          "\xE2\x80\x94 not pockets, countersunk, or stepped holes.");
+                          "- not pockets, countersunk, or stepped holes.");
                 return;
             }
         }
@@ -1439,7 +1439,7 @@ void MoveFaceController::beginMoveFace(const IopContext& ctx, FaceXform kind) {
     // commit reflows beneath the Shell and lands correctly. Say so up front
     // instead of looking broken.
     if (ctx.history.isBodyShelled(m_st.moveFaceBodyId))
-        ctx.toast("Hollow body: the preview stays put \xE2\x80\x94 the change "
+        ctx.toast("Hollow body: the preview stays put - the change "
                   "applies when you release (re-shelled automatically).");
 
     m_st.moveFaceActive = true;
@@ -2104,7 +2104,7 @@ void MoveFaceController::renderMoveFacePanel(const IopContext& ctx,
         }
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.80f, 0.35f, 1.0f));
         ImGui::PushTextWrapPos(230.0f);
-        ImGui::TextWrapped("%s", materializr::tr("Tilt and Twist are separate ops — one gesture does either a tilt OR a twist, not both. For a tapered-and-twisted face, commit one then the other."));
+        ImGui::TextWrapped("%s", materializr::tr("Tilt and Twist are separate ops - one gesture does either a tilt OR a twist, not both. For a tapered-and-twisted face, commit one then the other."));
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
 

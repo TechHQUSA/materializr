@@ -370,7 +370,7 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
         // longer has (phantom bodies, "unclickable" faces).
         auto it = m_bodyToSlot.find(bodyId);
         std::fprintf(stderr,
-                     "[Mesh] tessellation FAILED for body %d — %s\n", bodyId,
+                     "[Mesh] tessellation FAILED for body %d - %s\n", bodyId,
                      (it == m_bodyToSlot.end())
                          ? "no previous mesh, body will not render"
                          : "KEEPING STALE MESH (render != document!)");

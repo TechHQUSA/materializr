@@ -298,8 +298,8 @@ TEST(ThreadReflow, ExternalThreadOnUnionedBoltGrafts) {
     // valley (void). A plain cylinder would be fully solid there.
     const double zMid = zEnd0 + endLen * 0.5, rMid = rEnd - 0.25;
     const int hits = ringHits(res, 0.0, 0.0, rMid, zMid);
-    EXPECT_GT(hits, 0) << "no crest material — end not threaded";
-    EXPECT_LT(hits, 16) << "no groove voids — end not threaded";
+    EXPECT_GT(hits, 0) << "no crest material - end not threaded";
+    EXPECT_LT(hits, 16) << "no groove voids - end not threaded";
     // The threaded end must not have vanished or ballooned.
     EXPECT_GT(vol(res), 0.6 * vol(bolt));
     EXPECT_LT(vol(res), 1.1 * vol(bolt));
@@ -353,7 +353,7 @@ TEST(ThreadReflow, ThreadRunsThroughEndChamfer) {
     // below the surface, so a ring at r=4.6 would be all-solid).
     const int taper = ringHits(res, 0.0, 0.0, 4.6, 21.0);
     EXPECT_GT(taper, 0) << "no crest on the taper";
-    EXPECT_LT(taper, 16) << "no grooves on the taper — thread stopped at the edge";
+    EXPECT_LT(taper, 16) << "no grooves on the taper - thread stopped at the edge";
     // The cylinder body below is still fully threaded.
     const int barrel = ringHits(res, 0.0, 0.0, rCyl - 0.5 * depth, 10.0);
     EXPECT_GT(barrel, 0);
@@ -526,7 +526,7 @@ TEST(ThreadFollows, ResizeCylinderRethreadsAtNewRadius) {
     // buried inside the fatter rod).
     const int near10 = ringHits(body, 0.0, 0.0, 9.9, 10.0);
     EXPECT_GT(near10, 0) << "crest material at the new radius";
-    EXPECT_LT(near10, 16) << "groove openings at the new surface — a full "
+    EXPECT_LT(near10, 16) << "groove openings at the new surface - a full "
                              "ring means the thread is buried (stale r=8)";
     EXPECT_EQ(ringHits(body, 0.0, 0.0, 10.15, 10.0), 0)
         << "nothing past the new radius";

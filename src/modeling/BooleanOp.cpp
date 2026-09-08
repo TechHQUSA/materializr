@@ -216,7 +216,7 @@ bool BooleanOp::execute(Document& doc) {
         }
         if (resultShape.IsNull()) {
             std::fprintf(stderr, "[Boolean] %s failed (target=%d tool=%d) even "
-                         "with fuzzy — bodies may not overlap, or the geometry is "
+                         "with fuzzy - bodies may not overlap, or the geometry is "
                          "too degenerate.\n",
                          m_mode == BooleanMode::Subtract ? "Cut" :
                          m_mode == BooleanMode::Union ? "Fuse" : "Common",

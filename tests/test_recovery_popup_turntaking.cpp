@@ -155,7 +155,7 @@ TEST_F(ImGuiHeadlessTest, UngatedCompetingPopupsDeadlockHiddenForever) {
     // "just reset, nothing measured yet" floor size — not the real ~478x92
     // content size — even though m_pendingSketchRecovery is STILL true (the
     // user can never see or click the buttons that would clear it).
-    EXPECT_TRUE(sketchPending) << "prompt can never be dismissed — its buttons never render";
+    EXPECT_TRUE(sketchPending) << "prompt can never be dismissed - its buttons never render";
     EXPECT_TRUE(a->Hidden);
     EXPECT_TRUE(b->Hidden);
     EXPECT_LT(b->Size.x, 50.0f) << "stuck at the degenerate floor size, never the real content size";

@@ -187,7 +187,7 @@ TEST(Unfold, ConeLateralUnrollsToOneSectorNotShards) {
     EXPECT_EQ(fp.piecesPlaced, 1) << "cone seam must stay open → one sector";
     EXPECT_LT(fp.curvatureDeg, 5.0);   // developable
     ASSERT_EQ(fp.faces.size(), 1u);
-    EXPECT_EQ(fp.faces[0].loops.size(), 1u) << "apex must collapse — no spurious tip hole";
+    EXPECT_EQ(fp.faces[0].loops.size(), 1u) << "apex must collapse - no spurious tip hole";
 
     // Unrolled area ≈ cone lateral area π·R·slant (within tessellation error).
     const double slant = std::sqrt(H * H + R * R);

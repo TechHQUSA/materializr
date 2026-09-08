@@ -108,8 +108,8 @@ TEST(TiltOp, TopRimMovesAndBottomRimStaysPut) {
                 "  top new (32,20,19) now hole : %d\n",
                 (int)botStillHole, (int)topOldSolid, (int)topNewHole);
 
-    EXPECT_TRUE(botStillHole) << "the pinned rim moved — the bottom closed up";
-    EXPECT_TRUE(topOldSolid)  << "the near rim did not move — old spot still open";
+    EXPECT_TRUE(botStillHole) << "the pinned rim moved - the bottom closed up";
+    EXPECT_TRUE(topOldSolid)  << "the near rim did not move - old spot still open";
     EXPECT_TRUE(topNewHole)   << "no opening where the rim was moved to";
 }
 
@@ -191,7 +191,7 @@ TEST(TiltOp, SquareHoleTilts) {
     EXPECT_TRUE(valid);
     // A twisted loft changes the swept volume; an honest lean does not.
     EXPECT_NEAR(volumeOf(out), before, 1.0)
-        << "volume changed — the loft probably twisted between corners";
+        << "volume changed - the loft probably twisted between corners";
 
     // Square hole 10 wide moved 12: old opening x[15..25], new x[27..37].
     EXPECT_FALSE(insideSolid(out, 20, 20, 1))  << "pinned rim moved";
@@ -243,7 +243,7 @@ TEST(TiltOp, EdgeMoveWidensASquareHole) {
     EXPECT_LT(volumeOf(out), before - 100.0) << "nothing was removed";
 
     // Bottom keeps its 10 mm square; the top now reaches past x=25.
-    EXPECT_TRUE(insideSolid(out, 28, 20, 1))   << "bottom widened — it shouldn't";
+    EXPECT_TRUE(insideSolid(out, 28, 20, 1))   << "bottom widened - it shouldn't";
     EXPECT_FALSE(insideSolid(out, 28, 20, 19)) << "top did not widen";
 }
 
@@ -369,7 +369,7 @@ TEST(HoleEdgePick, EitherRimCanBeTheGrabbedOne) {
     EXPECT_EQ(pTop.mode, MoveHoleOp::Mode::Tilt);
     EXPECT_EQ(pBot.mode, MoveHoleOp::Mode::Tilt);
     EXPECT_NE(pTop.nearIsEntry, pBot.nearIsEntry)
-        << "both rims resolved to the same mouth — tilt would pin the wrong end";
+        << "both rims resolved to the same mouth - tilt would pin the wrong end";
 }
 
 // An ordinary edge is not a rim: offer nothing (never a surprise body move).

@@ -73,7 +73,7 @@ void Document::putBody(int id, const TopoDS_Shape& shape, const std::string& nam
     // a non-existent body was serialized into a project's history.
     if (id < 0) {
         std::fprintf(stderr,
-                     "[doc] putBody id=%d — rejected (negative id).\n", id);
+                     "[doc] putBody id=%d - rejected (negative id).\n", id);
         return;
     }
     int idx = findBodyIndex(id);

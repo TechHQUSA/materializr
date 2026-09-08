@@ -120,7 +120,7 @@ TEST(ThreadProfiles, MultiStartExternalValid) {
         TopoDS_Shape diff = BRepAlgoAPI_Cut(one, three).Shape();
         ASSERT_FALSE(diff.IsNull());
         EXPECT_GT(vol(diff), 1e-2)
-            << "3-start result identical to single start — starts ignored?";
+            << "3-start result identical to single start - starts ignored?";
     }
 }
 

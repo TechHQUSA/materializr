@@ -358,7 +358,7 @@ FlatPattern unfoldPlanarFaces(const std::vector<TopoDS_Face>& faces) {
     if (out.piecesPlaced < planarCount)
         out.warning = "Some faces weren't connected to the main piece.";
     if (out.hasOverlap)
-        out.warning = "The flattened net overlaps itself — it may need to be cut into pieces.";
+        out.warning = "The flattened net overlaps itself - it may need to be cut into pieces.";
 
     out.ok = out.piecesPlaced > 0;
     return out;
@@ -724,7 +724,7 @@ FlatPattern unfoldFaces(const std::vector<TopoDS_Face>& faces,
     out.ok = !out.faces.empty();
     if (nPieces > 1)
         out.warning = "Split into " + std::to_string(nPieces) +
-                      " flat pieces — cut each and join along matching edges.";
+                      " flat pieces - cut each and join along matching edges.";
     return out;
 }
 
@@ -1251,9 +1251,9 @@ FlatPattern unfoldDevelopableNet(const std::vector<TopoDS_Face>& faces,
     out.ok = !out.faces.empty();
     if (nPieces > 1)
         out.warning = "Split into " + std::to_string(nPieces) +
-                      " pieces — cut each and join along matching edges.";
+                      " pieces - cut each and join along matching edges.";
     else if (nonDev > 0)
-        out.warning = "Some faces are doubly-curved — score/fold lines approximate the curvature.";
+        out.warning = "Some faces are doubly-curved - score/fold lines approximate the curvature.";
     return out;
 }
 
@@ -1735,7 +1735,7 @@ FlatPattern unfoldConformal(const std::vector<TopoDS_Face>& faces,
     out.piecesPlaced = 1;
     out.ok = !out.faces.empty();
     if (out.ok)
-        out.warning = "Conformal flatten — one stretchy piece, up to " +
+        out.warning = "Conformal flatten - one stretchy piece, up to " +
                       std::to_string(int(out.distortionPct + 0.5)) + "% area stretch.";
     return out;
 }

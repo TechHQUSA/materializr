@@ -99,7 +99,7 @@ TEST(Shell, OverThickWallFailsFastNotHang) {
                      std::chrono::steady_clock::now() - t0).count();
 
     EXPECT_FALSE(ok) << "an impossible wall thickness must fail";
-    EXPECT_LT(sec, 10.0) << "must fail FAST — a multi-second run means the "
+    EXPECT_LT(sec, 10.0) << "must fail FAST - a multi-second run means the "
                             "intersection-join hang wasn't avoided";
     // The body must be untouched on failure (execute must not commit garbage).
     EXPECT_NEAR(vol(doc.getBody(body)), vol(solid), 1e-6);

@@ -193,7 +193,7 @@ void expandSvgUses(std::string& svg) {
     for (int it = 0; it < maxIter; ++it) {
         if (svg.size() > maxOutput) {
             std::fprintf(stderr,
-                "[SVG] <use> expansion exceeded %zu-byte cap — aborting\n",
+                "[SVG] <use> expansion exceeded %zu-byte cap - aborting\n",
                 maxOutput);
             return;
         }
@@ -365,7 +365,7 @@ void inlineSvgCss(std::string& svg) {
         // O(input^2). Stop once the output crosses an absolute ceiling and copy
         // the remainder verbatim.
         if (out.size() > 256u * 1024 * 1024) {
-            std::fprintf(stderr, "[SVG] inlineSvgCss exceeded byte budget — stopping\n");
+            std::fprintf(stderr, "[SVG] inlineSvgCss exceeded byte budget - stopping\n");
             out.append(svg, k, std::string::npos);
             break;
         }
@@ -519,13 +519,13 @@ void expandSvgText(std::string& svg) {
         content = cssTrim(content);
         if (content.empty()) continue; // nothing to render
         if (rendered >= kMaxTextElems) {
-            std::fprintf(stderr, "[SVG] <text> element cap (%d) hit — "
+            std::fprintf(stderr, "[SVG] <text> element cap (%d) hit - "
                          "dropping the rest\n", kMaxTextElems);
             continue;
         }
         if (content.size() > kMaxTextChars) {
             std::fprintf(stderr, "[SVG] <text> content %zu chars exceeds "
-                         "%zu-char cap — truncating\n",
+                         "%zu-char cap - truncating\n",
                          content.size(), kMaxTextChars);
             content.resize(kMaxTextChars);
         }
@@ -695,7 +695,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     // oversized one before the (amplifying) preprocessing stages run, so the
     // input N that drives their expansion/O(N^2) behaviour is itself bounded.
     if (text.size() > 32u * 1024 * 1024) {
-        std::fprintf(stderr, "[SVG] file too large (%zu bytes) — refusing\n", text.size());
+        std::fprintf(stderr, "[SVG] file too large (%zu bytes) - refusing\n", text.size());
         return false;
     }
     inlineSvgCss(text);   // resolve <style> class fills → presentation attrs
@@ -711,7 +711,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     // Reject non-finite image dimensions: a crafted SVG can make nanosvg's number
     // parser yield inf/NaN, which would poison `ref`, the bounds, and the scale.
     if (!std::isfinite(img->width) || !std::isfinite(img->height)) {
-        std::fprintf(stderr, "[SVG] non-finite image dimensions — refusing\n");
+        std::fprintf(stderr, "[SVG] non-finite image dimensions - refusing\n");
         nsvgDelete(img);
         return false;
     }
@@ -803,7 +803,7 @@ bool SvgImport::load(const std::string& path, SvgPaths& out) {
     nsvgDelete(img);
 
     if (overBudget) {
-        std::fprintf(stderr, "[SVG] '%s' exceeds the %zu-vertex budget — "
+        std::fprintf(stderr, "[SVG] '%s' exceeds the %zu-vertex budget - "
                      "too complex, refusing\n", path.c_str(), kMaxTotalPts);
         return false;
     }

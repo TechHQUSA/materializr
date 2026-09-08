@@ -397,7 +397,7 @@ TEST(TopoContract, ProjectSketchTargetFace_FollowsSketchResize) {
         break;
     }
     EXPECT_TRUE(floorAt14)
-        << "pocket floor must sit 1mm under the MOVED top (z=14) — a stale "
+        << "pocket floor must sit 1mm under the MOVED top (z=14) - a stale "
            "target handle stamps at the old z=10 plane instead";
 }
 

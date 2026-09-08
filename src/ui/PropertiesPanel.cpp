@@ -925,7 +925,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
 
     if (!anyDim) {
         ImGui::Spacing();
-        ImGui::TextWrapped("%s", materializr::tr("This sketch has no dimensional constraints — only Horizontal / Parallel / etc., which have nothing to tune."));
+        ImGui::TextWrapped("%s", materializr::tr("This sketch has no dimensional constraints - only Horizontal / Parallel / etc., which have nothing to tune."));
     } else {
         ImGui::Spacing();
         ImGui::TextDisabled("%s", materializr::tr("Press Enter or click elsewhere to commit a value."));

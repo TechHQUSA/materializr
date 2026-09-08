@@ -429,7 +429,7 @@ bool MoveFaceOp::execute(Document& doc) {
 
         TopoDS_Shape newFeature = isTwist ? buildTwistFeature(true) : buildFeature(true);
         if (newFeature.IsNull()) {
-            std::fprintf(stderr, "[MoveFace] feature loft failed — refusing\n");
+            std::fprintf(stderr, "[MoveFace] feature loft failed - refusing\n");
             return false;
         }
 
@@ -460,14 +460,14 @@ bool MoveFaceOp::execute(Document& doc) {
                     f.Build(); if (f.IsDone()) result = f.Shape();
                 } catch (...) {}
                 if (result.IsNull()) {
-                    std::fprintf(stderr, "[MoveFace] feature fuse failed — refusing\n");
+                    std::fprintf(stderr, "[MoveFace] feature fuse failed - refusing\n");
                     return false;
                 }
             }
         }
 
         if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
-            std::fprintf(stderr, "[MoveFace] result invalid — refusing\n");
+            std::fprintf(stderr, "[MoveFace] result invalid - refusing\n");
             return false;
         }
         int nsolids = 0;
@@ -485,7 +485,7 @@ bool MoveFaceOp::execute(Document& doc) {
             BRepGProp::VolumeProperties(result, gOut);
             const double vIn = gIn.Mass(), vOut = gOut.Mass();
             if (!(vOut > 1e-9)) {
-                std::fprintf(stderr, "[MoveFace] result volume %.3f — inside-out/"
+                std::fprintf(stderr, "[MoveFace] result volume %.3f - inside-out/"
                              "degenerate, refusing\n", vOut);
                 return false;
             }
@@ -495,7 +495,7 @@ bool MoveFaceOp::execute(Document& doc) {
             for (TopExp_Explorer e(result, TopAbs_SHELL); e.More(); e.Next()) ++shOut;
             if (shOut < shIn) {
                 std::fprintf(stderr, "[MoveFace] would destroy the internal "
-                             "cavity (%d -> %d shells) — refusing\n", shIn, shOut);
+                             "cavity (%d -> %d shells) - refusing\n", shIn, shOut);
                 return false;
             }
             // A slide is a volume-preserving shear and a tilt is bounded; a
@@ -507,7 +507,7 @@ bool MoveFaceOp::execute(Document& doc) {
               : (m_kind == Kind::Rotate)    ? (ratio > 0.40 && ratio < 1.60)
               : true;   // Scale legitimately rescales volume; Twist self-checks
             if (!volumeSane) {
-                std::fprintf(stderr, "[MoveFace] volume %.1f -> %.1f — the "
+                std::fprintf(stderr, "[MoveFace] volume %.1f -> %.1f - the "
                              "rebuild lost the hollow interior, refusing\n",
                              vIn, vOut);
                 return false;

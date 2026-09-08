@@ -4027,7 +4027,7 @@ void SketchTool::handleDimensionTool(glm::vec2 pos) {
             DimPick hit = hitTestDimEntity(pos);
             if (hit.kind != DimEntityKind::None) {
                 if (hit.kind == m_dimPickA.kind && hit.id == m_dimPickA.id) {
-                    m_dimRejectReason = "Same entity — pick a different one.";
+                    m_dimRejectReason = "Same entity - pick a different one.";
                     return;
                 }
                 PendingDimension pair = resolveDimension(*m_sketch, m_dimPickA, hit);
@@ -4044,7 +4044,7 @@ void SketchTool::handleDimensionTool(glm::vec2 pos) {
             // Empty space: places the tentative single-entity dim (line length).
             if (m_dimPending.valid) { m_dimLabelPos = pos; m_dimReady = true; return; }
             // Lone point + empty space: nothing to measure yet.
-            m_dimRejectReason = "A single point has no dimension — "
+            m_dimRejectReason = "A single point has no dimension - "
                                 "pick a second entity.";
             return;
         }

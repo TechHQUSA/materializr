@@ -78,7 +78,7 @@ TEST(ScaleFaceRange, PinchAbove100Grows) {
     const double v = volumeOf(f.doc.getBody(f.bodyId));
     std::printf("  pinch 150%%: %.1f -> %.1f\n", f.vol0, v);
     EXPECT_GT(v, f.vol0 + 1e-6)
-        << "pinch past 100% did nothing — the Common/Fuse switch regressed";
+        << "pinch past 100% did nothing - the Common/Fuse switch regressed";
 
     // ...and grew into the RIGHT shape, not just "bigger". A 20mm box whose
     // top face goes to 150% is a frustum 20 wide at the base, 30 at the top:

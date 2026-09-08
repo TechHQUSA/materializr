@@ -29,7 +29,7 @@ REGISTER_PLUGIN(Patch, [](materializr::PluginContext& ctx) {
         "crease where the patch meets them. Curvature matches how those faces "
         "are bending as well, for a blend that reads as one surface.\n\n"
         "Tangency needs something to be tangent TO: where the faces around the "
-        "opening stand square to it — a flat lid on vertical walls — there is "
+        "opening stand square to it - a flat lid on vertical walls - there is "
         "no tangent surface to find, and the panel says so rather than "
         "pretending. Slope those walls even a few degrees and it works.\n\n"
         "Select faces as well as edges to say which side a bridging patch "

@@ -216,7 +216,7 @@ bool MoveHoleOp::editRimWire(const TopoDS_Wire& rim, const TopoDS_Edge& edge,
         const TopoDS_Edge& e = wx.Current();
         BRepAdaptor_Curve c(e);
         if (c.GetType() != GeomAbs_Line)
-            return fail("this hole has a curved side — moving one edge of it "
+            return fail("this hole has a curved side - moving one edge of it "
                         "would have to move the curves too, which isn't "
                         "supported yet. Try the whole-hole move instead.");
         edges.push_back(e);
@@ -254,7 +254,7 @@ bool MoveHoleOp::editRimWire(const TopoDS_Wire& rim, const TopoDS_Edge& edge,
     gp_Pnt newA, newB;
     if (!intersect(pts[iPrev], pts[iA], mA, mB, newA) ||
         !intersect(pts[iNext], pts[iB], mB, mA, newB))
-        return fail("that side is parallel to the one next to it — there's no "
+        return fail("that side is parallel to the one next to it - there's no "
                     "corner for it to meet");
 
     // Refuse a move that turns the profile inside out or eats a whole side: each

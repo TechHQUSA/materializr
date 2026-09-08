@@ -357,7 +357,7 @@ bool ChamferOp::execute(Document& doc) {
             }
             if (uniq.size() != m_edges.size()) {
                 std::fprintf(stderr, "[Chamfer] %zu stored edges resolved to "
-                             "%zu distinct — fragmented topology was unified "
+                             "%zu distinct - fragmented topology was unified "
                              "upstream\n", m_edges.size(), uniq.size());
                 m_edges = std::move(uniq);
             }
@@ -471,7 +471,7 @@ bool ChamferOp::execute(Document& doc) {
                 c = tryBuild(m_distance2, m_distance);
                 if (!c.IsNull())
                     std::fprintf(stderr, "[Chamfer] asymmetric reference "
-                                 "flipped on this body — rebuilt with "
+                                 "flipped on this body - rebuilt with "
                                  "distances swapped (d=%.2f/%.2f)\n",
                                  m_distance, m_distance2);
             }
@@ -504,7 +504,7 @@ bool ChamferOp::execute(Document& doc) {
         if (!candidate.IsNull() && !BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
                 "[Chamfer] native result failed BRepCheck_Analyzer "
-                "(d=%.2f, %zu edges) — trying the cut/fill fallbacks.\n",
+                "(d=%.2f, %zu edges) - trying the cut/fill fallbacks.\n",
                 m_distance, m_edges.size());
             candidate.Nullify();
         }
@@ -575,7 +575,7 @@ bool ChamferOp::execute(Document& doc) {
             if (shortCoverage) {
                 std::fprintf(stderr,
                     "[Chamfer] native blend only covers part of the edge "
-                    "(partial taper) — trying the cut/fill fallbacks "
+                    "(partial taper) - trying the cut/fill fallbacks "
                     "(d=%.2f/%.2f).\n", m_distance, dB);
                 nativeBench = candidate;
                 candidate.Nullify();
@@ -598,7 +598,7 @@ bool ChamferOp::execute(Document& doc) {
                     m_ledger, cutRes, blends)) {
                 candidate = cutRes;
                 m_generatedFaces = std::move(blends);
-                std::fprintf(stderr, "[Chamfer] native blend failed — built "
+                std::fprintf(stderr, "[Chamfer] native blend failed - built "
                              "as a swept-wedge cut across the feature "
                              "(#55, d=%.2f/%.2f)\n", m_distance, dB);
             } else if (materializr::blendcut::fillChamfer(
@@ -614,7 +614,7 @@ bool ChamferOp::execute(Document& doc) {
                 // with the distances swapped, mirroring the native retry.
                 candidate = cutRes;
                 m_generatedFaces = std::move(blends);
-                std::fprintf(stderr, "[Chamfer] native blend failed — built "
+                std::fprintf(stderr, "[Chamfer] native blend failed - built "
                              "as a corner-fill ramp across the feature "
                              "(#57, d=%.2f/%.2f)\n", m_distance, dB);
             }
@@ -643,7 +643,7 @@ bool ChamferOp::execute(Document& doc) {
                 candidate = it->result;
                 m_generatedFaces = it->genFaces;
                 std::fprintf(stderr, "[Chamfer] rebuild failed at known-good "
-                             "params — adopting the stored result (same "
+                             "params - adopting the stored result (same "
                              "input body, same values, d=%.2f/%.2f)\n",
                              m_distance, m_distance2);
                 break;
@@ -669,7 +669,7 @@ bool ChamferOp::execute(Document& doc) {
         if (!BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
                 "[Chamfer] result failed BRepCheck_Analyzer (d=%.2f, %zu edges) "
-                "— invalid topology, refusing to commit.\n",
+                "- invalid topology, refusing to commit.\n",
                 m_distance, m_edges.size());
             return false;
         }

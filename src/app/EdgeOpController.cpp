@@ -514,7 +514,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
             if (ctx.toast)
                 ctx.toast(std::string(isFillet ? "This fillet" : "This chamfer")
                               .append(" can't be rebuilt on the current body "
-                                      "\xE2\x80\x94 its edges reference geometry "
+                                      "- its edges reference geometry "
                                       "that a later feature changed. Left as-is; "
                                       "delete it and re-apply the feature on the "
                                       "updated body.").c_str());
@@ -548,7 +548,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
             if (std::fabs(volAfter  - m_prePickedVol)  <= vtol &&
                 std::fabs(areaAfter - m_prePickedArea) <= atol && ctx.toast) {
                 ctx.toast("This fillet/chamfer is baked into the model "
-                          "\xE2\x80\x94 the geometry you clicked has no editable "
+                          "- the geometry you clicked has no editable "
                           "operation behind it. Re-apply it to make it "
                           "adjustable.");
             }
@@ -569,7 +569,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
         // size) and left the body untouched — say so instead of silently doing
         // nothing.
         ctx.toast(std::string(isFillet ? "Fillet" : "Chamfer")
-                      .append(" couldn't be built on those edges \xE2\x80\x94 the "
+                      .append(" couldn't be built on those edges - the "
                               "result wasn't valid geometry. Try a smaller size "
                               "or fewer edges.").c_str());
     }

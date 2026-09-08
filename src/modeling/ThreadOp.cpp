@@ -607,7 +607,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                         std::fprintf(stderr, "[Thread] swept-rod fast path\n");
                     return rod;
                 }
-                std::fprintf(stderr, "[Thread] swept-rod declined — falling "
+                std::fprintf(stderr, "[Thread] swept-rod declined - falling "
                                      "back to boolean cut\n");
             }
         }
@@ -1074,7 +1074,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
             double minRemoval = std::max(1e-2, bodyVol * 1e-4);
             if (v > bodyVol - minRemoval || v < 0.0) {
                 std::fprintf(stderr, "[Thread] cut removed nothing or grew "
-                                     "(%.2f vs body %.2f) — rejecting\n",
+                                     "(%.2f vs body %.2f) - rejecting\n",
                              v, bodyVol);
                 return {};
             }
@@ -1093,7 +1093,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                                        : (sc.good * 2 < sc.considered);
                 if (sc.considered >= 5 && gross) {
                     std::fprintf(stderr, "[Thread] cut imperfect at turn %d "
-                                         "(%d/%d probes) — demoting\n",
+                                         "(%d/%d probes) - demoting\n",
                                  t, sc.good, sc.considered);
                     return {};
                 }
@@ -1112,7 +1112,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
             // A CUT must shrink the body; a helical tool's classification can
             // invert on a partial body — retry with the reversed tool.
             if (!res.IsNull() && shapeVol(res) > bodyVol + 1e-3) {
-                std::fprintf(stderr, "[Thread] cut inverted (vol grew) — "
+                std::fprintf(stderr, "[Thread] cut inverted (vol grew) - "
                                      "retrying with reversed tool\n");
                 TopoDS_Shape rev = tool;
                 rev.Reverse();
@@ -1427,7 +1427,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                 }
                 if (!ok && !bestRes.IsNull()) {
                     std::fprintf(stderr, "[Thread] turn %d: best variant %d "
-                                         "imperfect (%d/%d probes) — "
+                                         "imperfect (%d/%d probes) - "
                                          "adopting\n",
                                  i, bestVar, bestScore, bestDen);
                     cur = bestRes;
@@ -1475,7 +1475,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                 // suspends the step instead of shipping the junk.
                 if (!BRepCheck_Analyzer(cur).IsValid()) {
                     std::fprintf(stderr, "[Thread] per-turn: result invalid "
-                                         "after heal — rejecting\n");
+                                         "after heal - rejecting\n");
                     return {};
                 }
             }
@@ -1661,14 +1661,14 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                             }
                             std::fprintf(stderr, "[Thread] slab splice at "
                                                  "%.0f turns/slab declined "
-                                                 "— retrying\n", slabTurns);
+                                                 "- retrying\n", slabTurns);
                         }
                     }
                 }
             } catch (...) { result.Nullify(); }
             if (result.IsNull())
                 std::fprintf(stderr, "[Thread] internal ring splice declined "
-                                     "(%s) — falling back to groove tools\n",
+                                     "(%s) - falling back to groove tools\n",
                              why);
             else if (materializr::isVerbose())
                 std::fprintf(stderr, "[Thread] internal ring splice OK\n");
@@ -1805,7 +1805,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
             } catch (...) { result.Nullify(); }
             if (result.IsNull())
                 std::fprintf(stderr, "[Thread] swept-common re-cut declined "
-                                     "(%s) — falling back to groove tools\n",
+                                     "(%s) - falling back to groove tools\n",
                              why);
             else if (materializr::isVerbose())
                 std::fprintf(stderr, "[Thread] swept-common re-cut OK\n");
@@ -1831,7 +1831,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
             // with per-turn validation instead — garbage can't pass it.
         }
         if (result.IsNull()) {
-            std::fprintf(stderr, "[Thread] %s — per-turn sequential cut\n",
+            std::fprintf(stderr, "[Thread] %s - per-turn sequential cut\n",
                          fullCylinder ? "compound cut failed"
                                       : "partial/interrupted cylinder");
             result = perTurnCut();
@@ -1851,7 +1851,7 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
         // becomes a clean cylinder — any tip chamfer on it is flattened.
         if (m_forceGraft) result.Nullify();   // test hook
         if (result.IsNull() && !m_isHole && m_allowGraft && m_length > 1e-3) {
-            std::fprintf(stderr, "[Thread] direct cut failed — GRAFT "
+            std::fprintf(stderr, "[Thread] direct cut failed - GRAFT "
                                  "(clean segment spliced at the shoulder)\n");
             try {
                 const bool botFree = vLo < -1e-9;
@@ -2044,12 +2044,12 @@ bool ThreadOp::execute(Document& doc) {
                 }
                 if (bestR > 1e-6 && bestD > 1e-6) {
                     std::fprintf(stderr, "[Thread] face ref did not resolve "
-                                         "— coaxial fallback adopts r=%.4f "
+                                         "- coaxial fallback adopts r=%.4f "
                                          "(was %.4f)\n", bestR, m_radius);
                     m_radius = bestR;
                 } else if (bestR <= 1e-6) {
                     std::fprintf(stderr, "[Thread] face ref did NOT resolve "
-                                         "and no coaxial cylinder — keeping "
+                                         "and no coaxial cylinder - keeping "
                                          "stored axis/radius %.4f\n",
                                  m_radius);
                 }
@@ -2144,7 +2144,7 @@ void ThreadOp::renderProperties() {
         materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_clearance);
         if (m_clearance < 0.0) m_clearance = 0.0;
         ImGui::SetItemTooltip("%s", materializr::tr("Radial gap so a PRINTED thread fits its mate (0.2\xE2\x80\x93""0.4mm typical). 0 = geometrically exact."));
-        ImGui::TextDisabled("%s", materializr::tr("Non-Standard profiles cut per-turn \xE2\x80\x94 a long thread can take a while."));
+        ImGui::TextDisabled("%s", materializr::tr("Non-Standard profiles cut per-turn - a long thread can take a while."));
     }
     bool rh = m_rightHanded;
     if (ImGui::Checkbox(materializr::tr("Right-handed"), &rh)) m_rightHanded = rh;

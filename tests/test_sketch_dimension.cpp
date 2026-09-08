@@ -306,7 +306,7 @@ TEST(RadiusConstraint, SolverDrivesArcRadius) {
     // The bug: converged == true while r is still 5.0.
     EXPECT_NEAR(r, 8.0, 1e-2) << "arc radius not driven (solve returned "
                               << (converged ? "true" : "false")
-                              << ") — label would read 16.00 mm on a 10.00 mm arc";
+                              << ") - label would read 16.00 mm on a 10.00 mm arc";
 }
 
 TEST(DistancePointLine, DegenerateLineDoesNotNaN) {

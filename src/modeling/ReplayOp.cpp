@@ -78,6 +78,6 @@ void ReplayOp::renderProperties() {
         ImGui::TextWrapped("%s", materializr::tr("Loaded from a saved project. Undo/redo work, but the parameters of a reloaded step can't be edited."));
     } else {
         ImGui::Spacing();
-        ImGui::TextWrapped("%s", materializr::tr("Batched transform — undo/redo restores the whole set at once."));
+        ImGui::TextWrapped("%s", materializr::tr("Batched transform - undo/redo restores the whole set at once."));
     }
 }

@@ -213,7 +213,7 @@ bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
             double aKeep = areaOf(keep), aOrig = areaOf(m_recoveredProfile);
             if (aOrig > 1e-9 && aKeep > aOrig * 1.5) {
                 std::fprintf(stderr, "[Extrude] matched region area %.0f far "
-                             "exceeds the original footprint %.0f — using the "
+                             "exceeds the original footprint %.0f - using the "
                              "saved footprint profile\n", aKeep, aOrig);
                 m_profile = m_recoveredProfile;
                 return true;
@@ -222,7 +222,7 @@ bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
         if (kept > 0 && matched < m_regionPts.size() &&
             !m_recoveredProfile.IsNull()) {
             std::fprintf(stderr, "[Extrude] only %zu/%zu recorded region "
-                         "points found — using the saved footprint profile\n",
+                         "points found - using the saved footprint profile\n",
                          matched, m_regionPts.size());
             m_profile = m_recoveredProfile;
             return true;
@@ -237,18 +237,18 @@ bool ExtrudeOp::rebuildProfileFromSketch(Document& doc) {
             // moved). Sweep the historically-correct footprint instead of
             // every region the sketch now has.
             std::fprintf(stderr, "[Extrude] recorded regions missing from the "
-                         "sketch — using the saved footprint profile\n");
+                         "sketch - using the saved footprint profile\n");
             m_profile = m_recoveredProfile;
             return true;
         }
         std::fprintf(stderr, "[Extrude] recorded regions not found in the "
-                     "sketch's current shape — falling back to ALL regions\n");
+                     "sketch's current shape - falling back to ALL regions\n");
     } else if (!m_recoveredProfile.IsNull()) {
         // No recorded points at all (old file whose footprint faces were
         // recovered but couldn't be point-sampled) — the recovered faces are
         // still the exact historical profile; sweep them, never ALL regions.
         m_profile = m_recoveredProfile;
-        std::fprintf(stderr, "[Extrude] no region points — using the saved "
+        std::fprintf(stderr, "[Extrude] no region points - using the saved "
                      "footprint profile directly\n");
         return true;
     }

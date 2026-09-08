@@ -30,12 +30,12 @@ std::string meshRefusalMessage(const char* opName, size_t meshCount,
     // An import is a reference, so say what it IS good for in the same breath —
     // otherwise the refusal reads as a missing feature rather than a boundary.
     if (meshCount >= total) {
-        return op + " needs solid geometry, and this is an imported mesh \xE2\x80\x94 "
+        return op + " needs solid geometry, and this is an imported mesh - "
                     "a reference body. Sketch on it and snap to it all you like, "
                     "then model the part alongside it.";
     }
     return op + " needs solid geometry, and one of the selected bodies is an "
-                "imported mesh \xE2\x80\x94 a reference body. Leave the import "
+                "imported mesh - a reference body. Leave the import "
                 "out of the selection.";
 }
 

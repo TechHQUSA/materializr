@@ -795,7 +795,7 @@ bool PushPullOp::rehydrateFromReload(const ReloadState& state, Document& doc) {
         std::fprintf(stderr,
             "[pushpull] rehydrateFromReload DECLINED: state.created and "
             "state.modifiedBefore are BOTH EMPTY (dist=%.3f). This step has "
-            "NO body-tracking data in the file — will fall back to ReplayOp.\n",
+            "NO body-tracking data in the file - will fall back to ReplayOp.\n",
             m_distance);
         return false;
     }

@@ -701,7 +701,7 @@ TEST(SketchOffsetTool, ClickRequestsTheCommitButDoesNotMutate) {
 
     EXPECT_TRUE(tool.offsetReadyToCommit());
     EXPECT_EQ(sk.getLines().size(), linesBefore)
-        << "the click must not mutate — the app commits inside recordSketchMutation";
+        << "the click must not mutate - the app commits inside recordSketchMutation";
 
     std::set<int> pts, els;
     tool.commitOffset(pts, els);

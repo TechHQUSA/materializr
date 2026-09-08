@@ -335,7 +335,7 @@ bool FilletOp::execute(Document& doc) {
                 if (!topoOk) {
                     std::fprintf(stderr,
                         "[Fillet] rebindEdges + anchors + topo refs failed "
-                        "(R=%.2f, %zu edges) — selected edge isn't in the "
+                        "(R=%.2f, %zu edges) - selected edge isn't in the "
                         "current body's edge map.\n",
                         m_radius, m_edges.size());
                     return false;
@@ -355,7 +355,7 @@ bool FilletOp::execute(Document& doc) {
             }
             if (uniq.size() != m_edges.size()) {
                 std::fprintf(stderr, "[Fillet] %zu stored edges resolved to %zu "
-                             "distinct — deduped\n", m_edges.size(), uniq.size());
+                             "distinct - deduped\n", m_edges.size(), uniq.size());
                 m_edges = std::move(uniq);
             }
         }
@@ -417,7 +417,7 @@ bool FilletOp::execute(Document& doc) {
             const double left = ladderBudget - spent;
             if (left <= 0.0) {
                 std::fprintf(stderr,
-                    "[Fillet] %.1fs budget spent across %zu radii — giving up "
+                    "[Fillet] %.1fs budget spent across %zu radii - giving up "
                     "rather than stalling further.\n",
                     ladderBudget, m_edges.size());
                 break;
@@ -436,7 +436,7 @@ bool FilletOp::execute(Document& doc) {
             if (!attempt->IsDone()) {
                 std::fprintf(stderr,
                     "[Fillet] BRepFilletAPI.IsDone() returned false (R=%.4f)%s\n",
-                    r, rel == 0.0 ? " — retrying just off that radius." : "");
+                    r, rel == 0.0 ? " - retrying just off that radius." : "");
                 continue;
             }
             const TopoDS_Shape built = attempt->Shape();
@@ -449,7 +449,7 @@ bool FilletOp::execute(Document& doc) {
             fillet = std::move(attempt);
             if (rel != 0.0)
                 std::fprintf(stderr,
-                    "[Fillet] R=%.4f failed, R=%.4f built cleanly — using it "
+                    "[Fillet] R=%.4f failed, R=%.4f built cleanly - using it "
                     "(OCCT degenerates at isolated radii; difference %.1f micron).\n",
                     m_radius, r, std::fabs(r - m_radius) * 1000.0);
             break;
@@ -467,7 +467,7 @@ bool FilletOp::execute(Document& doc) {
         if (!candidate.IsNull() && !BRepCheck_Analyzer(candidate).IsValid()) {
             std::fprintf(stderr,
                 "[Fillet] result failed BRepCheck_Analyzer (R=%.4f, %zu edges) "
-                "— invalid topology, refusing to commit.\n",
+                "- invalid topology, refusing to commit.\n",
                 usedRadius, m_edges.size());
             candidate.Nullify();
         }
@@ -569,7 +569,7 @@ bool FilletOp::execute(Document& doc) {
                     m_radius, m_ledger, cutRes, blends)) {
                 candidate = cutRes;
                 m_generatedFaces = std::move(blends);
-                std::fprintf(stderr, "[Fillet] native blend failed — built "
+                std::fprintf(stderr, "[Fillet] native blend failed - built "
                              "as a swept-arc cut across the feature "
                              "(#55, R=%.2f)\n", m_radius);
             }
@@ -587,7 +587,7 @@ bool FilletOp::execute(Document& doc) {
                 candidate = it->result;
                 m_generatedFaces = it->genFaces;
                 std::fprintf(stderr, "[Fillet] rebuild failed at known-good "
-                             "params — adopting the stored result (same "
+                             "params - adopting the stored result (same "
                              "input body, R=%.2f)\n", m_radius);
                 break;
             }

@@ -125,16 +125,16 @@ TEST(GridSnap, PlacedPointsLandOnTheLattice) {
         // honoured diagonal guide puts the other coordinate between lines.
         EXPECT_LE(std::min(dx, dy), 1e-4)
             << "point " << pt.id << " (" << pt.pos.x << ", " << pt.pos.y
-            << ") is off the " << step << "mm grid on BOTH axes — that is the "
+            << ") is off the " << step << "mm grid on BOTH axes - that is the "
                "free-floating drift this test exists to catch";
         if (std::max(dx, dy) <= 1e-4) ++onCrossing;
     }
-    EXPECT_GT(placed, 0) << "the chain committed no points — test drew nothing";
+    EXPECT_GT(placed, 0) << "the chain committed no points - test drew nothing";
     // Honouring a diagonal guide is the exception, not the rule: a chain drawn
     // around axis-aligned geometry should still land mostly on crossings.
     EXPECT_GE(onCrossing * 2, placed)
         << "only " << onCrossing << " of " << placed << " points landed on a "
-           "lattice crossing — the grid has stopped being the default";
+           "lattice crossing - the grid has stopped being the default";
 }
 
 // A point landing ON an existing edge stays on that edge. The lattice may

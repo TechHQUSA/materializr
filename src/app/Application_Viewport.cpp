@@ -1686,7 +1686,7 @@ void Application::renderViewport() {
                         };
                         head(b,  1.0f);
                         head(a, -1.0f);
-                        const std::string hintS = materializr::fmtLength(0.0) + " — drag"; const char* hint = hintS.c_str();
+                        const std::string hintS = materializr::fmtLength(0.0) + " - drag"; const char* hint = hintS.c_str();
                         ImVec2 ts = ImGui::CalcTextSize(hint);
                         ImVec2 tp(so.x + perp.x * 18.0f * s3 - ts.x * 0.5f,
                                   so.y + perp.y * 18.0f * s3 - ts.y * 0.5f);
@@ -7220,7 +7220,7 @@ void Application::renderViewport() {
                 dimHint  = materializr::touchMode()
                   ? "Type Width and Height, then Apply."
                   : (m_sketchTool->getRectDimStage() == 0
-                       ? "Type width and Enter to lock horizontal — cursor still "
+                       ? "Type width and Enter to lock horizontal - cursor still "
                          "drives height. Or click for both at once."
                        : "Type height and Enter to commit the rectangle.");
                 break;
@@ -7231,7 +7231,7 @@ void Application::renderViewport() {
                 if (m_sketchTool->getClickCount() == 1) {
                     dimLabel = "Chord (%s)";
                     dimHint  = "Type the straight-line distance between the arc's "
-                               "two ends and press Enter — or just click the end.";
+                               "two ends and press Enter - or just click the end.";
                 } else if (m_sketchTool->getClickCount() == 2) {
                     const bool sweep = m_sketchTool->getArcDimMode() ==
                                        SketchTool::ArcDimMode::Sweep;

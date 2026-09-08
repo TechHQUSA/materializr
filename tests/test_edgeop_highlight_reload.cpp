@@ -74,7 +74,7 @@ TEST(EdgeOpHighlightReload, ChamferRecoversFacesWithoutGenIndices) {
     // The geometric fallback must have recovered the bevel face(s) so the
     // history-hover highlight has something to draw.
     EXPECT_FALSE(reloaded.getGeneratedFaces().empty())
-        << "bevel faces not recovered without gen= indices — highlight blank";
+        << "bevel faces not recovered without gen= indices - highlight blank";
 }
 
 namespace {
@@ -146,5 +146,5 @@ TEST(EdgeOpHighlightReload, AdjacentChamferDoesNotRecoverEarlierBevel) {
     // Only the second bevel — not the trimmed first one.
     EXPECT_EQ(reloaded.getGeneratedFaces().size(), realGen)
         << "fallback recovered " << reloaded.getGeneratedFaces().size()
-        << " faces vs " << realGen << " truly generated — earlier bevel lit up";
+        << " faces vs " << realGen << " truly generated - earlier bevel lit up";
 }

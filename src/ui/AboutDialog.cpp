@@ -71,9 +71,9 @@ void AboutDialog::render() {
 
         ImGui::Spacing();
         ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Credits"));
-        ImGui::BulletText("%s", materializr::tr("R4stl1n — original project"));
-        ImGui::BulletText("%s", materializr::tr("stevebushwa — design, testing, direction"));
-        ImGui::BulletText("%s", materializr::tr("Claude (Anthropic) — pair-coding collaborator"));
+        ImGui::BulletText("%s", materializr::tr("R4stl1n - original project"));
+        ImGui::BulletText("%s", materializr::tr("stevebushwa - design, testing, direction"));
+        ImGui::BulletText("%s", materializr::tr("Claude (Anthropic) - pair-coding collaborator"));
 
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "%s", materializr::tr("Built with OpenCASCADE, Dear ImGui, SDL2, GLM, libcurl."));

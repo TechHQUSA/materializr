@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     std::vector<FaceAnchor::SketchRef> refs;
     for (int sid : doc.getAllSketchIds())
         if (auto sk = doc.getSketch(sid)) refs.push_back({ sid, sk.get() });
-    if (refs.empty()) { std::printf("no sketches — nothing to attribute\n"); return 0; }
+    if (refs.empty()) { std::printf("no sketches - nothing to attribute\n"); return 0; }
 
     int grandTot = 0, grandNamed = 0;
     for (int bid : doc.getAllBodyIds()) {

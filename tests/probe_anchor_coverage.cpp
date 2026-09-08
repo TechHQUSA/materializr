@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
         if (st.typeId != "fillet" && st.typeId != "chamfer") continue;
         std::printf("\n=== step %d: %s '%s' (%s) ===\n", stepIdx,
                     st.typeId.c_str(), st.name.c_str(), st.description.c_str());
-        if (st.params.empty()) { std::printf("  (no params — baked)\n"); continue; }
+        if (st.params.empty()) { std::printf("  (no params - baked)\n"); continue; }
 
         std::unique_ptr<Operation> op;
         if (st.typeId == "fillet") op = std::make_unique<FilletOp>();

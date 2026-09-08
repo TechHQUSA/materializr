@@ -285,7 +285,7 @@ bool ShellOp::execute(Document& doc) {
             if (arc == Threw ||
                 tryShell(Standard_True, GeomAbs_Intersection, result) != Ok) {
                 std::fprintf(stderr,
-                    "[Shell] failed at thickness %.3f mm — the wall is too thick, "
+                    "[Shell] failed at thickness %.3f mm - the wall is too thick, "
                     "or the opened face is ringed by fillets (shell BEFORE adding "
                     "fillets: OCCT can't open a fillet-bordered face).\n",
                     m_thickness);

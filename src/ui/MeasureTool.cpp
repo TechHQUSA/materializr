@@ -198,7 +198,7 @@ void MeasureTool::renderPanel() {
             ImGui::TextWrapped("%s", materializr::tr("Pick a measurement mode above."));
             break;
         case MeasureMode::Object:
-            ImGui::TextWrapped("%s", materializr::tr("Click a body in the viewport — clicking a face counts. Ctrl+click to add more bodies, or use box-select."));
+            ImGui::TextWrapped("%s", materializr::tr("Click a body in the viewport - clicking a face counts. Ctrl+click to add more bodies, or use box-select."));
             ImGui::Spacing();
             ImGui::TextColored(materializr::accentText(),
                                materializr::tr("Selected: %d %s"), bodyIds, bodyIds == 1 ? "body" : "bodies");

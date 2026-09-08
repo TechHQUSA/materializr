@@ -140,7 +140,7 @@ void Application::beginThread(const materializr::CylindricalPick& p) {
     if (!p.ok) return;
     // Threads need a true cylinder — a cone's helix would leave the surface.
     if (std::abs(p.bottomR - p.topR) > 1e-5) {
-        std::fprintf(stderr, "[Thread] picked face is conical — thread needs "
+        std::fprintf(stderr, "[Thread] picked face is conical - thread needs "
                              "a cylinder\n");
         return;
     }
@@ -240,7 +240,7 @@ void Application::commitThread() {
         // Assigning a new std::async future while the old one is in flight
         // BLOCKS until it finishes — exactly the "app frozen and punishing
         // the CPU" failure. One compute at a time.
-        std::fprintf(stderr, "[Thread] Apply ignored — still computing\n");
+        std::fprintf(stderr, "[Thread] Apply ignored - still computing\n");
         return;
     }
     std::fprintf(stderr, "[Thread] Apply: launching worker\n");
@@ -923,7 +923,7 @@ void Application::beginLoft() {
         // Plain section loft; open sketches (if any) don't participate.
         if (!m_loftRails.empty())
             showToast(std::to_string(m_loftRails.size()) +
-                      " open sketch(es) ignored — rails need exactly ONE "
+                      " open sketch(es) ignored - rails need exactly ONE "
                       "closed base profile.");
         m_loftRails.clear();
     } else {
@@ -1118,7 +1118,7 @@ void Application::relinkSketch(bool isBody, int id) {
     if (changed) {
         markDirty();
         m_meshesDirty = true;
-        showToast("Sketch re-linked — editing it will drive the body again.");
+        showToast("Sketch re-linked - editing it will drive the body again.");
     }
 }
 
@@ -1143,9 +1143,9 @@ std::string Application::linkHintFor(bool isBody, int id) const {
         if (live.empty() && detached.empty()) return "";
         if (!live.empty())
             return std::string(materializr::tr("Built from ")) + nameList(live, false) +
-                   materializr::tr(" — editing it updates this body.");
+                   materializr::tr(" - editing it updates this body.");
         return std::string(materializr::tr("Detached from ")) + nameList(detached, false) +
-               materializr::tr(" — moved independently; sketch edits won't update this body.");
+               materializr::tr(" - moved independently; sketch edits won't update this body.");
     }
     // Sketch: what body it drives + whether it's detached.
     auto it = links.find(id);
@@ -1153,10 +1153,10 @@ std::string Application::linkHintFor(bool isBody, int id) const {
     auto sk = m_document->getSketch(id);
     std::string bodies = nameList(it->second, true);
     if (sk && sk->isDetachedFromBody())
-        return std::string(materializr::tr("Detached — moved independently; edits won't update ")) +
+        return std::string(materializr::tr("Detached - moved independently; edits won't update ")) +
                bodies + ".";
     return std::string(materializr::tr("Drives ")) + bodies +
-           materializr::tr(" — editing this sketch updates it.");
+           materializr::tr(" - editing this sketch updates it.");
 }
 
 void Application::cascadeFromSketchEdit(int sketchId) {
@@ -1200,7 +1200,7 @@ void Application::cascadeFromSketchEdit(int sketchId) {
             // re-derived from the new geometry — tell the user instead of
             // silently leaving the sketch changed and the body stale.
             showToast("Updated the sketch, but the body built from it couldn't "
-                      "rebuild from the new shape \xE2\x80\x94 the model is unchanged.");
+                      "rebuild from the new shape - the model is unchanged.");
         }
         // matched == 0: nothing in the model is built from this sketch (e.g.
         // editing a freshly-duplicated sketch before it's extruded). That's the
@@ -1270,7 +1270,7 @@ void Application::cascadeFromSketchEdit(int sketchId) {
                           std::to_string(m_history->lastEditFailStep() + 1) +
                           ": " + op->description() + ")";
         }
-        showToast("Couldn't update the model for that sketch change \xE2\x80\x94 a "
+        showToast("Couldn't update the model for that sketch change - a "
                   "downstream feature" + culprit + " couldn't follow it, so "
                   "the model was left unchanged.");
     } else if (!disabledSteps.empty()) {
@@ -1281,9 +1281,9 @@ void Application::cascadeFromSketchEdit(int sketchId) {
                      std::to_string(disabledSteps[i] + 1) +
                      (op ? " (" + op->description() + ")" : "");
         }
-        showToast("Model updated \xE2\x80\x94 but " + names +
+        showToast("Model updated - but " + names +
                   " couldn't follow the change and was DISABLED. Its edge/face "
-                  "picks no longer exist on the new shape \xE2\x80\x94 delete "
+                  "picks no longer exist on the new shape - delete "
                   "it and re-apply the feature (re-enabling would retry the "
                   "old picks).", 9.0);
     }
@@ -1347,7 +1347,7 @@ void Application::beginBoundaryFill() {
         prof.outer = outermostRegionWire(sk.get(), prof.holes, &fromRegion);
         if (prof.outer.IsNull() || !fromRegion) {
             std::fprintf(stderr,
-                "[BoundaryFill] sketch %d has no closed region — skipped.\n", id);
+                "[BoundaryFill] sketch %d has no closed region - skipped.\n", id);
             continue;
         }
         prof.plane = sk->getPlane();
@@ -2596,10 +2596,10 @@ void Application::pollThreadRecuts() {
             // New geometry can't take the thread — suspend the step with the
             // standard explainer banner instead of silently no-opping.
             m_history->suspendStep(stepIdx);
-            showToast("Thread couldn't re-cut on the new geometry \xE2\x80\x94 "
+            showToast("Thread couldn't re-cut on the new geometry - "
                       "check the Thread step.");
         } else {
-            std::fprintf(stderr, "[Thread] recut landed — applying to body "
+            std::fprintf(stderr, "[Thread] recut landed - applying to body "
                                  "%d\n", p.bodyId);
             m_document->updateBody(p.bodyId, result);
             m_meshesDirty = true;
@@ -2623,7 +2623,7 @@ void Application::cancelThreadRecuts() {
     }
     m_threadRecuts.clear();
     m_meshesDirty = true;
-    showToast("Thread re-cut cancelled \xE2\x80\x94 the Thread step is "
+    showToast("Thread re-cut cancelled - the Thread step is "
               "suspended; re-enable it in History to re-cut.");
 }
 

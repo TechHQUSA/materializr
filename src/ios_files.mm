@@ -134,7 +134,7 @@ UIViewController* topViewController() {
         g_pick.value = "";
         g_pick.ready = true;
     } else {
-        std::fprintf(stderr, "ios_files: export cancelled — file not saved\n");
+        std::fprintf(stderr, "ios_files: export cancelled - file not saved\n");
         g_pick.mode = PickMode::None;
     }
 }

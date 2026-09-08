@@ -177,7 +177,7 @@ bool probe(const TopoDS_Shape& shape, const std::vector<TopoDS_Edge>& edges,
         // Out of threads — every previously abandoned probe still holds one.
         // Refuse rather than propagate: the caller's only guard wraps Build().
         std::fprintf(stderr, "[Fillet] could not start probe worker (%d already "
-                             "abandoned) — refusing the build.\n",
+                             "abandoned) - refusing the build.\n",
                      g_abandoned.load());
         return false;
     }
@@ -195,7 +195,7 @@ bool probe(const TopoDS_Shape& shape, const std::vector<TopoDS_Edge>& edges,
             slot->done = true;
             g_abandoned.fetch_add(1);
             std::fprintf(stderr,
-                "[Fillet] probe exceeded %.1fs at R=%.4f — refusing the build "
+                "[Fillet] probe exceeded %.1fs at R=%.4f - refusing the build "
                 "(OCCT's blend cannot be interrupted; worker abandoned).\n",
                 budget, radius);
         }

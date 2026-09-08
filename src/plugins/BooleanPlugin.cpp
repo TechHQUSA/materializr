@@ -75,7 +75,7 @@ void runChainedBoolean(materializr::PluginContext& ctx,
         // failures here; Union and Intersect run the same path and said nothing.
         ctx.events().publish(materializr::ToastEvent{
             std::string(mode == BooleanMode::Union ? "Union" : "Intersect") +
-            " couldn't make a valid solid from these bodies \xE2\x80\x94 they "
+            " couldn't make a valid solid from these bodies - they "
             "may not overlap, share a coincident face, or the geometry is too "
             "degenerate.", 5.0});
     }
@@ -112,7 +112,7 @@ void runSubtractMulti(materializr::PluginContext& ctx,
     else {
         std::fprintf(stderr, "Subtract failed\n");
         ctx.events().publish(materializr::ToastEvent{
-            "Subtract couldn't make a valid solid from these bodies \xE2\x80\x94 "
+            "Subtract couldn't make a valid solid from these bodies - "
             "they may not overlap, share a coincident face, or the geometry is "
             "too degenerate.", 5.0});
     }
@@ -172,7 +172,7 @@ REGISTER_PLUGIN(Boolean, [](materializr::PluginContext& ctx) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal("Subtract##boolpick", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextUnformatted(materializr::tr("Tick the cutters \xE2\x80\x94 they're subtracted"));
+            ImGui::TextUnformatted(materializr::tr("Tick the cutters - they're subtracted"));
             ImGui::TextUnformatted(materializr::tr("from the unticked bodies, which remain."));
             ImGui::Separator();
             for (int id : g_subtractBodies) {

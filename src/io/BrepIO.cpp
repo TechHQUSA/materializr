@@ -96,7 +96,7 @@ bool brepHeaderCountsSane(const std::string& filePath, std::string& why) {
     if (endPos < 0) return true; // unseekable — nothing to pre-scan, let OCCT try
     const std::uintmax_t size = static_cast<std::uintmax_t>(endPos);
     if (size > kMaxBytes) {
-        why = "BREP file too large (> 512 MB) — refusing to load";
+        why = "BREP file too large (> 512 MB) - refusing to load";
         return false;
     }
 
@@ -149,7 +149,7 @@ bool brepHeaderCountsSane(const std::string& filePath, std::string& why) {
             if (!(ls >> count)) break; // not a count line for this keyword
             if (count > size) {
                 why = std::string("BREP header declares an impossible ") + kw +
-                      " count — refusing (likely a malformed/hostile file)";
+                      " count - refusing (likely a malformed/hostile file)";
                 return false;
             }
             if (count > 0) declared.push_back({kw, count, lineNo});
@@ -165,7 +165,7 @@ bool brepHeaderCountsSane(const std::string& filePath, std::string& why) {
             why = std::string("BREP file is truncated: the header declares ") +
                   std::to_string(d.count) + " " + d.keyword +
                   " but only " + std::to_string(remaining) +
-                  " lines follow — refusing";
+                  " lines follow - refusing";
             return false;
         }
     }

@@ -330,7 +330,7 @@ TEST(BlendCut, EditFeatureCrossedChamferRebuildsNotStrands) {
     const auto* c = dynamic_cast<const ChamferOp*>(hist.getStep(0));
     ASSERT_NE(c, nullptr);
     EXPECT_FALSE(c->getGeneratedFaces().empty())
-        << "no blend face after edit — collapsed to a planar face";
+        << "no blend face after edit - collapsed to a planar face";
 }
 
 // Fillet flavour of the core contract: hole first, then cutFillet over the
@@ -561,7 +561,7 @@ TEST(BlendCut, FillRampMitersIntoNeighbourBevel) {
         gp_Pnt probe(4.0, 7.5, 2.3); // neighbour plane 2.5, own slope 4.25
         BRepClass3d_SolidClassifier sc(out, probe, 1e-7);
         EXPECT_EQ(sc.State(), TopAbs_IN)
-            << "hip region is hollow — ramp didn't reach the corner";
+            << "hip region is hollow - ramp didn't reach the corner";
     }
 }
 
@@ -693,7 +693,7 @@ TEST(BlendCut, OutsideCornerGetsFan) {
         gp_Pnt probe(20.5, 20.5, 2.3);
         BRepClass3d_SolidClassifier sc(out, probe, 1e-7);
         EXPECT_EQ(sc.State(), TopAbs_IN)
-            << "outside corner has no fan — abrupt end walls";
+            << "outside corner has no fan - abrupt end walls";
     }
     EXPECT_EQ(coplanarSeamPairs(out), 0)
         << "ramp fragmented into coplanar facets (visible fan of seams)";

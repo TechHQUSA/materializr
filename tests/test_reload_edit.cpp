@@ -150,7 +150,7 @@ TEST(ReloadEdit, EditingFilletUpstreamOfReloadedBooleanPropagates) {
     ASSERT_NE(f, nullptr) << "fillet step must reload as a real, editable FilletOp";
     f->setRadius(3.0);
     ASSERT_TRUE(H.editStep(0, doc))
-        << "editStep must succeed — re-running the fillet and the downstream union";
+        << "editStep must succeed - re-running the fillet and the downstream union";
 
     const double vAfter = volume(doc, A);
 
@@ -223,7 +223,7 @@ TEST(ReloadEdit, FilletSurvivesRealFileRoundTrip) {
     rs.modifiedBefore = {{B, B0r}};
     rs.modifiedAfter  = {{B, Bfr}};
     ASSERT_TRUE(op->rehydrateFromReload(rs, doc))
-        << "reloaded fillet failed to rehydrate — edge identity lost across save";
+        << "reloaded fillet failed to rehydrate - edge identity lost across save";
 
     // 6. Edit flow mirrors History::editStep: roll the body back to its
     //    pre-fillet state, then re-run. With the SAME radius it must rebuild the
@@ -234,7 +234,7 @@ TEST(ReloadEdit, FilletSurvivesRealFileRoundTrip) {
     ASSERT_TRUE(op->execute(doc))
         << "reloaded fillet couldn't re-execute against its pre-fillet body";
     EXPECT_NEAR(volume(doc, B), vSaved, 1e-6)
-        << "reloaded fillet rebuilt a DIFFERENT shape — wrong edge resolved from file";
+        << "reloaded fillet rebuilt a DIFFERENT shape - wrong edge resolved from file";
 
     // And it's genuinely editable: a bigger radius removes more material.
     doc.updateBody(B, B0r);
@@ -315,7 +315,7 @@ TEST(ReloadEdit, MoveHoleSurvivesRealFileRoundTrip) {
     rs.modifiedBefore = {{B, B0r}};
     rs.modifiedAfter  = {{B, loaded.steps[0].changed[0].second}};
     ASSERT_TRUE(op->rehydrateFromReload(rs, doc))
-        << "reloaded move-hole failed to rehydrate — seed wall lost across save";
+        << "reloaded move-hole failed to rehydrate - seed wall lost across save";
 
     // 4. Re-run against the rolled-back body (what editStep does); the hole must
     //    land in the SAME place — proving the seed wall + vector survived.

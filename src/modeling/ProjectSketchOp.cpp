@@ -89,7 +89,7 @@ TopoDS_Wire projectNearest(const TopoDS_Wire& w, const TopoDS_Face& f,
     if (best.IsNull()) {
         std::fprintf(stderr,
             "[ProjectSketch]   projection produced %d wire(s), %d closed "
-            "— need at least one closed wire to stamp.\n",
+            "- need at least one closed wire to stamp.\n",
             total, closedCount);
     }
     return best;
@@ -398,7 +398,7 @@ bool ProjectSketchOp::execute(Document& doc) {
         if (tools.IsEmpty()) {
             std::fprintf(stderr,
                          "[ProjectSketch] no region projected cleanly onto "
-                         "the face — the sketch must land fully inside it\n");
+                         "the face - the sketch must land fully inside it\n");
             return false;
         }
         if (skipped > 0) {
@@ -451,7 +451,7 @@ bool ProjectSketchOp::execute(Document& doc) {
                     // batches, then per-tool, so only the genuinely-degenerate
                     // tools drop — "Select all" survives a few bad regions.
                     std::fprintf(stderr,
-                        "[ProjectSketch] combined boolean failed — batching\n");
+                        "[ProjectSketch] combined boolean failed - batching\n");
                     std::vector<TopoDS_Shape> tv;
                     for (TopTools_ListIteratorOfListOfShape it(tools); it.More(); it.Next())
                         tv.push_back(it.Value());
@@ -502,7 +502,7 @@ bool ProjectSketchOp::execute(Document& doc) {
         if (delta < -1e-6 || delta > toolVolume * 1.5 + 1e-6) {
             std::fprintf(stderr,
                          "[ProjectSketch] boolean produced a suspicious "
-                         "volume change (%.3f of %.3f tool) — refusing\n",
+                         "volume change (%.3f of %.3f tool) - refusing\n",
                          delta, toolVolume);
             return false;
         }

@@ -692,7 +692,7 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
                           ImVec2(nameW > 1.0f ? nameW : 0.0f, 0.0f));
     if (isMesh) ImGui::PopStyleColor();
     if (isMesh && ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", materializr::tr("Imported mesh \xE2\x80\x94 a reference body.\nSketch on it and snap to it; modelling operations (booleans, fillets, push/pull) decline it."));
+        ImGui::SetTooltip("%s", materializr::tr("Imported mesh - a reference body.\nSketch on it and snap to it; modelling operations (booleans, fillets, push/pull) decline it."));
     }
     if (rowClicked) {
         if (m_selection) {
@@ -878,15 +878,15 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
             for (int t : targets) {
                 if (m_document->getBodyFolder(t) >= 0) { anyInFolder = true; break; }
             }
-            const char* moveLabel = multi ? "(root — no folder) — all selected"
-                                          : "(root — no folder)";
+            const char* moveLabel = multi ? "(root - no folder) - all selected"
+                                          : "(root - no folder)";
             if (anyInFolder && ImGui::MenuItem(moveLabel)) {
                 for (int t : targets) m_document->setBodyFolder(t, -1);
                 if (m_markDirty) m_markDirty();
             }
             for (int fid : m_document->getAllFolderIds()) {
                 std::string label = m_document->getFolderName(fid);
-                if (multi) label += " — all selected";
+                if (multi) label += " - all selected";
                 if (ImGui::MenuItem(label.c_str())) {
                     for (int t : targets) m_document->setBodyFolder(t, fid);
                     if (m_markDirty) m_markDirty();

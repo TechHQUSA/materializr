@@ -142,7 +142,7 @@ bool BoundaryFillOp::execute(Document& doc) {
         if (acc.IsNull() || vol(acc) < 1e-9) {
             std::fprintf(stderr,
                 "[BoundaryFill] the silhouettes don't enclose a common "
-                "volume — nothing to fill.\n");
+                "volume - nothing to fill.\n");
             return false;
         }
         if (!BRepCheck_Analyzer(acc).IsValid()) {

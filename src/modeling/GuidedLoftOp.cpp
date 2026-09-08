@@ -189,7 +189,7 @@ bool GuidedLoftOp::execute(Document& doc) {
             if (!buildAll()) {
                 std::fprintf(stderr,
                     "[GuidedLoft] rails don't rise off the base plane (or "
-                    "start on the profile's centre) — can't derive a height "
+                    "start on the profile's centre) - can't derive a height "
                     "law.\n");
                 return false;
             }
@@ -214,7 +214,7 @@ bool GuidedLoftOp::execute(Document& doc) {
             if (std::abs(d) < 0.2) {
                 std::fprintf(stderr,
                     "[GuidedLoft] the two rails sit on nearly the same "
-                    "direction — draw them roughly 90 degrees apart around "
+                    "direction - draw them roughly 90 degrees apart around "
                     "the base.\n");
                 return false;
             }
@@ -397,7 +397,7 @@ bool GuidedLoftOp::execute(Document& doc) {
 
         thru.Build();
         if (!thru.IsDone() || thru.Shape().IsNull()) {
-            std::fprintf(stderr, "[GuidedLoft] skinning failed — try simpler "
+            std::fprintf(stderr, "[GuidedLoft] skinning failed - try simpler "
                                  "rails or fewer samples.\n");
             return false;
         }

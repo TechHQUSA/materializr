@@ -64,7 +64,7 @@ TEST(MoveFaceHollow, SlideRefusesInsteadOfInvertingShell) {
     mv.setKind(MoveFaceOp::Kind::Translate);
     mv.setMoveVector(gp_Vec(0, 2, 0));                      // in-plane slide
     EXPECT_FALSE(mv.execute(doc))
-        << "sliding a hollow body's wall produced garbage before the guard — "
+        << "sliding a hollow body's wall produced garbage before the guard - "
            "it must refuse until the loft engine handles cavities";
     EXPECT_NEAR(vol(doc.getBody(body)), hollowV, 1e-6)
         << "a refusal must leave the hollow body untouched";
@@ -82,7 +82,7 @@ TEST(MoveFaceHollow, TiltRefusesInsteadOfFillingCavity) {
     mv.setRotation(gp_Dir(0, 1, 0), 0.17);                  // ~10 degrees
     EXPECT_FALSE(mv.execute(doc))
         << "tilting a hollow body's wall silently re-solidified it before the "
-           "guard — it must refuse until the loft engine handles cavities";
+           "guard - it must refuse until the loft engine handles cavities";
     EXPECT_NEAR(vol(doc.getBody(body)), hollowV, 1e-6)
         << "a refusal must leave the hollow body untouched";
 }
@@ -144,7 +144,7 @@ TEST(MoveFaceHollow, TiltReflowsBeneathShellThroughHistory) {
     ASSERT_TRUE(hist.pushOperation(std::move(mv), doc))
         << "the tilt must reflow beneath the shell and land";
     EXPECT_LT(vol(doc.getBody(body)), 2000.0 * 0.6)
-        << "tilted body must STILL be hollow — no silently filled cavity";
+        << "tilted body must STILL be hollow - no silently filled cavity";
     ASSERT_EQ(hist.stepCount(), 2);
     EXPECT_EQ(hist.getStep(0)->typeId(), "moveface");
     EXPECT_EQ(hist.getStep(1)->typeId(), "shell");

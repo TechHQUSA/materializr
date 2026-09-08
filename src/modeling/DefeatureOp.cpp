@@ -30,7 +30,7 @@ bool DefeatureOp::execute(Document& doc) {
 
         if (df.HasErrors() || df.Shape().IsNull()) {
             std::fprintf(stderr,
-                "[Defeature] couldn't remove %d face(s) — the surrounding faces "
+                "[Defeature] couldn't remove %d face(s) - the surrounding faces "
                 "can't be extended to close the gap.\n", m_faces.Size());
             return false;
         }

@@ -383,7 +383,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
     // If no system file-dialog helper exists, Open/Save/Export would otherwise
     // do nothing at all — surface that instead of failing silently.
     FileDialogs::setUnavailableNotifier([this]() {
-        showToast("No file-dialog program found \xE2\x80\x94 install 'zenity' "
+        showToast("No file-dialog program found - install 'zenity' "
                   "(GNOME) or 'kdialog' (KDE) to Open / Save / Export.", 8.0);
     });
 
@@ -551,7 +551,7 @@ bool Application::focusExistingProject(const std::string& ref) {
     if (!switchToSession(idx)) return false;   // refused (mid-sketch) — it toasted
     if (dropScratch && m_sessions.size() > 1) closeSession(scratchIdx);
     if (m_landingPage) m_landingPage->setVisible(false);
-    showToast("That project is already open \xE2\x80\x94 switched to its tab.");
+    showToast("That project is already open - switched to its tab.");
     return true;
 }
 
@@ -1551,7 +1551,7 @@ void Application::renderSmallScreenWarning() {
     if (ImGui::BeginPopupModal("Small screen", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(uiW(440));
-        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach - a tablet or larger is strongly recommended."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         static bool dontShow = false;
@@ -2724,24 +2724,24 @@ void Application::handleToolAction(int action) {
                     const char* msg = nullptr;
                     switch (why) {
                         case MergeFacesOp::Refusal::OppositeNormals:
-                            msg = "Those faces point in opposite directions \xE2\x80\x94 they "
+                            msg = "Those faces point in opposite directions - they "
                                   "lie in the same plane, but the material is on opposite "
                                   "sides, so they are different surfaces of the part rather "
                                   "than two halves of one. Merging can't join them, and "
                                   "wouldn't add material to either.";
                             break;
                         case MergeFacesOp::Refusal::NotAdjacent:
-                            msg = "Those faces don't touch \xE2\x80\x94 merging dissolves the "
+                            msg = "Those faces don't touch - merging dissolves the "
                                   "edge between two faces, and there isn't one. If a small "
                                   "step separates them, level it first, then merge.";
                             break;
                         case MergeFacesOp::Refusal::Unsafe:
                             msg = "That merge would have moved material, so it was refused "
-                                  "\xE2\x80\x94 the faces are one surface, but joining them "
+                                  "- the faces are one surface, but joining them "
                                   "would reshape the part rather than tidy it.";
                             break;
                         case MergeFacesOp::Refusal::FacesNotFound:
-                            msg = "Couldn't find those faces on the body any more \xE2\x80\x94 "
+                            msg = "Couldn't find those faces on the body any more - "
                                   "they may already have been merged.";
                             break;
                         default: break;   // NotSameSurface and friends: the tolerance text below is right
@@ -2749,7 +2749,7 @@ void Application::handleToolAction(int action) {
                     showToast(attempted == 0
                         ? "Pick two or more faces on the SAME body to merge them."
                         : (msg ? msg
-                               : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                               : "Couldn't merge those - they aren't close enough "
                                  "to one surface, or the merge wouldn't hold together."));
                 }
             } else {
@@ -2764,7 +2764,7 @@ void Application::handleToolAction(int action) {
                 // the user at the face-picking route rather than implying the
                 // part is as merged as it can get.
                 if (merged == 0)
-                    showToast("Nothing exactly coplanar left to merge \xE2\x80\x94 pick "
+                    showToast("Nothing exactly coplanar left to merge - pick "
                               "the faces either side of a seam and try again.");
             }
             // The picked faces are gone — they were replaced by the face they
@@ -3888,7 +3888,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         ++stepNo;
         if (totalSteps > 1) {
             char lbl[96];
-            std::snprintf(lbl, sizeof(lbl), "Rebuilding history \xE2\x80\x94 step %d of %d",
+            std::snprintf(lbl, sizeof(lbl), "Rebuilding history - step %d of %d",
                           static_cast<int>(stepNo), static_cast<int>(totalSteps));
             m_heavyProgressLabel = lbl;
             m_heavyProgressFrac =
@@ -4087,7 +4087,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         std::string msg =
             "This project was saved in an older format: " + std::to_string(n) + " " +
             what + " are frozen and can't be edited by value. The shapes are intact "
-            "\xE2\x80\x94 to change a baked round/chamfer, select its face and use "
+            "- to change a baked round/chamfer, select its face and use "
             "Remove Feature to restore the sharp edge, then redo it. New saves "
             "won't have this.";
         showToast(msg, 9.0);
@@ -4745,7 +4745,7 @@ void Application::exportBodiesAs(const std::vector<int>& bodyIds,
         scratch->setBodyColor(nid, m_document->getBodyColor(id));
     }
     if (scratch->getAllBodyIds().empty()) {
-        showToast("Nothing to export — those bodies have no geometry.");
+        showToast("Nothing to export - those bodies have no geometry.");
         return;
     }
 
@@ -4944,7 +4944,7 @@ void Application::duplicateSketch(int sketchId) {
         m_meshesDirty = true;
         std::fprintf(stdout, "Duplicated sketch %d -> %d\n",
                      sketchId, raw->newSketchId());
-        showToast("Duplicated \"" + base + "\" \xE2\x80\x94 edit the copy freely "
+        showToast("Duplicated \"" + base + "\" - edit the copy freely "
                   "(e.g. resize holes); the original is untouched.");
     }
 }
@@ -5037,7 +5037,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             }
             if (sourceBodyId >= 0) break;
         }
-        std::fprintf(stderr, "[Sketch] on-face pick had no body id — "
+        std::fprintf(stderr, "[Sketch] on-face pick had no body id - "
                              "recovered body=%d\n", sourceBodyId);
     }
     // Sketching needs a FLAT face. A curved face (cylinder / sphere / fillet)
@@ -5065,7 +5065,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             }
         }
         if (!planar) {
-            showToast("Can't sketch on a curved face \xE2\x80\x94 use Add "
+            showToast("Can't sketch on a curved face - use Add "
                       "Plane\xE2\x80\xA6 to place a construction plane.");
             return;
         }
@@ -6929,7 +6929,7 @@ void Application::renderProjectRecoveryPrompt() {
         // describes the newest; all of them come back, a tab each.
         const int nOrphans = materializr::projectRecoveryOrphanCount();
         if (nOrphans > 1)
-            ImGui::TextDisabled(materializr::tr("%d projects in total — each reopens in its own tab."), nOrphans);
+            ImGui::TextDisabled(materializr::tr("%d projects in total - each reopens in its own tab."), nOrphans);
         ImGui::Spacing();
         if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
                           materializr::uiSz(140, 0))) {
@@ -7763,7 +7763,7 @@ void Application::run() {
                     bool open = true;
                     if (ImGui::Begin("Pick more sketches", &open, flags)) {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f), "%s", materializr::tr("Loft needs at least two profiles."));
-                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
+                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order - as many as you like - then click Loft again."));
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;
@@ -7969,7 +7969,7 @@ void Application::run() {
         }
         std::fprintf(stderr,
                      "[Recovered] exception escaped a frame: %s\n"
-                     "[Recovered]   this is a BUG — the frame was abandoned and "
+                     "[Recovered]   this is a BUG - the frame was abandoned and "
                      "the session kept alive; fix it at the throw site.\n",
                      e.what());
         // The stack is already unwound here, so this is the trace captured AT

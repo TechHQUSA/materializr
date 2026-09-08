@@ -189,7 +189,7 @@ std::string gunzipInflate(const std::string& src) {
         ret = inflate(&zs, Z_NO_FLUSH);
         out.append(buf, sizeof(buf) - zs.avail_out);
         if (out.size() > maxOutput) {
-            std::fprintf(stderr, "[ProjectIO] inflated size exceeded %zu bytes — refusing\n", maxOutput);
+            std::fprintf(stderr, "[ProjectIO] inflated size exceeded %zu bytes - refusing\n", maxOutput);
             inflateEnd(&zs);
             return {};
         }
@@ -847,7 +847,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
     std::streampos rawSize = raw.tellg();
     raw.seekg(0, std::ios::beg);
     if (rawSize > static_cast<std::streampos>(512LL * 1024 * 1024)) {
-        result.errorMessage = "Project file too large (> 512 MB) — refusing to load";
+        result.errorMessage = "Project file too large (> 512 MB) - refusing to load";
         return result;
     }
     std::ostringstream slurp;
@@ -1375,7 +1375,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                 continue;
             std::fprintf(stderr,
                          "[ProjectIO] sketch %d was anchored to body %d, which "
-                         "no longer exists — treating it as free-floating.\n",
+                         "no longer exists - treating it as free-floating.\n",
                          sid, host);
             sk->setSourceBody(-1);
         }

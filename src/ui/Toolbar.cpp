@@ -338,7 +338,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             "Draft angle for moulding or printing: tilt the selected face(s) "
             "by an angle about a fixed neutral plane. Unlike Rotate it takes "
             "SEVERAL faces at one angle (all four walls of a box) and works on "
-            "curved faces too \xE2\x80\x94 a cylinder drafts into a cone.");
+            "curved faces too - a cylinder drafts into a cone.");
         // Named for what it does. It was "Repair Geometry", which promises a
         // general fixer and delivers one specific act: delete the picked face
         // and heal the neighbours over the gap — which is how you take a baked
@@ -354,7 +354,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             add(MZ_ICON_CIRCLE, "Diameter", ToolAction::EditDiameter, false,
                 "Set the hole or boss to an exact diameter.");
             add(MZ_ICON_THREAD, "Thread", ToolAction::Thread, false,
-                "Cut a helical screw thread into the picked cylindrical face — "
+                "Cut a helical screw thread into the picked cylindrical face - "
                 "external on a boss, internal in a hole.");
         }
         // "Edit Fillet / Chamfer" when the picked face was produced by one —
@@ -393,14 +393,14 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
             add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
                 "Move the face (its feature follows).");
             add(MZ_ICON_ROTATE, "Rotate", ToolAction::Rotate, false,
-                "Tilt the face — or twist it with the ring about its normal.");
+                "Tilt the face - or twist it with the ring about its normal.");
             // No "Scale" here: it did the same thing as Scale Face above.
         } else if (m_selFaceIsHoleWall) {
             // The one curved face #28 shouldn't hide Move on: a hole's bore.
             // Clicking the inside wall means the whole hole (both rims travel
             // together); grabbing a rim EDGE is how you move just one side.
             add(MZ_ICON_MOVE,   "Move",   ToolAction::Move, false,
-                "Slide the whole hole across the face it pierces \xE2\x80\x94 "
+                "Slide the whole hole across the face it pierces - "
                 "select a rim edge instead to tilt or reshape one end.");
         }
         // Two or more picked faces is the user asserting "these are one face",
@@ -408,7 +408,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         if (m_selection->selectedFaceCount() >= 2)
             add(MZ_ICON_REPAIR, "Merge Faces", ToolAction::MergeFaces, false,
                 "Merge the selected faces into one. Use this on the seam lines "
-                "across a flat face that an imported STEP part arrives with \xE2\x80\x94 "
+                "across a flat face that an imported STEP part arrives with - "
                 "they also confuse Unfold and sketch-on-face. Refuses if the "
                 "faces aren't really one surface.");
         add(MZ_ICON_UNFOLD, "Unfold", ToolAction::Unfold, false,
@@ -424,7 +424,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         add(MZ_ICON_MIRROR, "Mirror", ToolAction::Mirror, false,
             "Mirror the body across a plane you'll place next.");
         add(MZ_ICON_SPLIT, "Split", ToolAction::Split, false,
-            "Cut the body in two. Pick the axis and slide the cut off centre — "
+            "Cut the body in two. Pick the axis and slide the cut off centre - "
             "a ghost plane shows where it lands before you commit.");
         add(MZ_ICON_LATHE,  "Revolve", ToolAction::Revolve, false,
             "Rotate the body around an axis (watch a fan spin or a hinge open).");
@@ -434,7 +434,7 @@ std::vector<Toolbar::RailTool> Toolbar::railTools() const {
         add(MZ_ICON_REPAIR, "Merge Faces", ToolAction::MergeFaces, false,
             "Sweep the body for faces that are exactly coplanar and merge them. "
             "Imported STEP parts arrive with flat surfaces split into pieces "
-            "\xE2\x80\x94 the seam lines across an otherwise flat face, which also "
+            "- the seam lines across an otherwise flat face, which also "
             "confuse Unfold and sketch-on-face. For a seam this leaves behind, "
             "select the two faces either side of it and merge those instead.");
         add(MZ_ICON_MEASURE, "Measure", ToolAction::Measure, false,
@@ -531,7 +531,7 @@ void Toolbar::renderPrimitivesMenu() {
     if (!m_pluginCtx) return;
     if (ImGui::Button(materializr::tr("Primitives..."), ImVec2(-1, bh(30))))
         ImGui::OpenPopup("PrimitivesMenu");
-    tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens its parameter popup — defaults land a 10 mm / R5 mm shape at the world origin."));
+    tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens its parameter popup - defaults land a 10 mm / R5 mm shape at the world origin."));
     if (ImGui::BeginPopup("PrimitivesMenu")) {
         if (ImGui::MenuItem(materializr::tr("Box")))
             m_pluginCtx->requestInteractiveOp(InteractiveOp::PrimitiveBox);
@@ -816,7 +816,7 @@ ToolAction Toolbar::renderSketchTools() {
     tip(materializr::tr("Leave sketch mode and return to the 3D viewport. Keeps the sketch."));
     if (ImGui::Button(materializr::tr("Exit Sketch"), ImVec2(-1, bh(30))))
         action = ToolAction::ExitSketchDiscard;
-    tip(materializr::tr("Discard the current sketch entirely and leave sketch mode. Rewinds history to before the sketch was entered; the body returns to its pre-sketch state. Useful when you've started a sketch you don't want to keep — Esc-while-placing only cancels the in-progress shape, this clears everything."));
+    tip(materializr::tr("Discard the current sketch entirely and leave sketch mode. Rewinds history to before the sketch was entered; the body returns to its pre-sketch state. Useful when you've started a sketch you don't want to keep - Esc-while-placing only cancels the in-progress shape, this clears everything."));
 
     // Plugin buttons for InSketchMode context
     renderPluginButtons(1 << static_cast<int>(SelectionContext::InSketchMode));
@@ -975,13 +975,13 @@ ToolAction Toolbar::renderFaceTools() {
     btn(ToolAction::Shell, "Shell",
         "Hollow the body, removing the picked face. Wall thickness in the popup.");
     btn(ToolAction::ScaleFace, "Scale Face",
-        "Re-slope the side walls toward a scaled copy of this face \xE2\x80\x94 under "
+        "Re-slope the side walls toward a scaled copy of this face - under "
         "100% tapers it in, over 100% flares it out. Blend length in the popup.");
     btn(ToolAction::Taper, "Draft",
         "Draft angle for moulding or printing: tilt the picked face(s) by an "
         "angle about a fixed neutral plane. Unlike Rotate it takes SEVERAL "
         "faces at one angle (all four walls of a box) and works on cylindrical "
-        "and conical faces too \xE2\x80\x94 a cylinder drafts into a cone.");
+        "and conical faces too - a cylinder drafts into a cone.");
     btn(ToolAction::ProjectSketch, "Projection",
         "Project a sketch onto this face along the sketch's normal, then "
         "engrave (cut in) or emboss (raise out) to a depth - wrap a logo "
@@ -990,13 +990,13 @@ ToolAction Toolbar::renderFaceTools() {
     btn(ToolAction::EditDiameter, "Edit Diameter",
         "Resize a cylindrical hole / pin to an exact diameter.");
     btn(ToolAction::Thread, "Thread",
-        "Cut a helical screw thread into the picked cylindrical face \xE2\x80\x94 "
+        "Cut a helical screw thread into the picked cylindrical face - "
         "external on a boss, internal in a hole. Pitch / depth / handedness "
         "in the popup.");
     btn(ToolAction::Unfold, "Unfold Faces",
         "Flatten the SELECTED faces into a 2D pattern (cut + fold lines) for a "
         "laser/CNC/printed template. Pick the faces of one panel (e.g. a skin) "
-        "\xE2\x80\x94 unfolding a whole closed body rarely makes sense.");
+        "- unfolding a whole closed body rarely makes sense.");
     // "Edit Fillet / Chamfer" - the catalogue already ran the ownsFaceScore
     // probe that decides whether the picked face came from one, and which.
     // Classic used to run a second, identical probe of its own.
@@ -1025,11 +1025,11 @@ ToolAction Toolbar::renderFaceTools() {
         ImGui::Separator();
         btn(ToolAction::RemoveFace, "Remove Feature",
             "Delete the picked face(s) and heal the surrounding faces back "
-            "together \xE2\x80\x94 take a baked fillet/chamfer back to a sharp edge so "
+            "together - take a baked fillet/chamfer back to a sharp edge so "
             "it can be re-applied, or clean a round/hole off an imported part.");
         btn(ToolAction::MergeFaces, "Merge Faces",
             "Merge faces that are really one surface into one face. Imported "
-            "STEP parts arrive with flat surfaces split into pieces \xE2\x80\x94 the seam "
+            "STEP parts arrive with flat surfaces split into pieces - the seam "
             "lines across an otherwise flat face, which also confuse Unfold and "
             "sketch-on-face.");
     }
@@ -1086,7 +1086,7 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     if (catalogOffers(ToolAction::PushPull)) {
         if (ImGui::Button(materializr::tr("Push / Pull"), ImVec2(-1, bh(30))))
             action = ToolAction::PushPull;
-        tip(materializr::tr("Drag the arrow to push the sketch's regions into the body beneath them, or pull them out of it. Modifies that body in place — use Extrude From for a separate body."));
+        tip(materializr::tr("Drag the arrow to push the sketch's regions into the body beneath them, or pull them out of it. Modifies that body in place - use Extrude From for a separate body."));
     }
     if (catalogOffers(ToolAction::ExtrudeSketch) &&
         ImGui::Button(materializr::tr("Extrude From"), ImVec2(-1, bh(30))))
@@ -1095,7 +1095,7 @@ ToolAction Toolbar::renderSketchSelectedTools() {
     if (catalogOffers(ToolAction::SubtractSketch)) {
         if (ImGui::Button(materializr::tr("Subtract Sketch"), ImVec2(-1, bh(30))))
             action = ToolAction::SubtractSketch;
-        tip(materializr::tr("Extrude the sketch's regions and cut the result out of the body they\nrun into \xE2\x80\x94 the host body when the sketch sits on one, otherwise\nwhichever body the sweep reaches."));
+        tip(materializr::tr("Extrude the sketch's regions and cut the result out of the body they\nrun into - the host body when the sketch sits on one, otherwise\nwhichever body the sweep reaches."));
     }
     ImGui::TextWrapped("%s", materializr::tr("Subtract sweeps the profile like Extrude, then cuts that volume out of the body it reaches."));
 
@@ -1133,7 +1133,7 @@ ToolAction Toolbar::renderPlaneSelectedTools() {
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Sketch on this Plane"), ImVec2(-1, bh(30))))
         action = ToolAction::SketchOnFace; // dispatched on Plane in handler
-    tip(materializr::tr("Start a new sketch lying on this construction plane — same workflow as Sketch on Face, just with the plane as the host."));
+    tip(materializr::tr("Start a new sketch lying on this construction plane - same workflow as Sketch on Face, just with the plane as the host."));
 
     ImGui::Separator();
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));
@@ -1158,7 +1158,7 @@ ToolAction Toolbar::renderAxisSelectedTools() {
     ToolAction action = ToolAction::None;
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Construction Axis"));
     ImGui::Separator();
-    ImGui::TextWrapped("%s", materializr::tr("Axes are 1-D primitives — they'll feed Revolve and future Pattern-Around-Axis ops. For now you can move them; rotate isn't meaningful on a line."));
+    ImGui::TextWrapped("%s", materializr::tr("Axes are 1-D primitives - they'll feed Revolve and future Pattern-Around-Axis ops. For now you can move them; rotate isn't meaningful on a line."));
 
     ImGui::Separator();
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Transform"));

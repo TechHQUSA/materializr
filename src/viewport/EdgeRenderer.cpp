@@ -20,12 +20,12 @@ static const char* s_edgeVertSource = R"(
 #version 330 core
 layout(location = 0) in vec3 a_position;
 // Same three matrices as the SURFACE shader, multiplied in the SAME order, and
-// gl_Position declared invariant in both — so an edge vertex produces the
+// gl_Position declared invariant in both - so an edge vertex produces the
 // bit-identical depth value its face produced. The old path premultiplied one
 // MVP on the CPU while faces multiplied P*V*M on the GPU; float32 rounds the
 // two differently, and the divergence is view-dependent. With no working line
 // bias (POLYGON_OFFSET_LINE never applies to GL_LINES), edges landed a hair in
-// front of or behind their own surface depending on camera angle — "sinking"
+// front of or behind their own surface depending on camera angle - "sinking"
 // into bodies, and popping through thin walls when the error exceeded the
 // wall's depth footprint (the corvus see-through bug). Invariance kills the
 // mismatch at the root; the edge pass then draws with GL_LEQUAL so equal

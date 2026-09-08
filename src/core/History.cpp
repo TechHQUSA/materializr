@@ -132,7 +132,7 @@ bool History::undo(Document& doc) {
                      idx, op->name().c_str(), op->typeId().c_str(),
                      op->isReloaded() ? 1 : 0, op->isEnabled() ? 1 : 0);
     if (!op->undo(doc)) {
-        std::fprintf(stderr, "[History] undo FAILED at step %d '%s' — op->undo() "
+        std::fprintf(stderr, "[History] undo FAILED at step %d '%s' - op->undo() "
                              "returned false; staying at this step\n",
                      idx, op->name().c_str());
         return false;
@@ -392,7 +392,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
             if (!preSet.count(id)) {
                 std::fprintf(stderr,
                     "[editStep] orphan body %d removed (appeared during replay, "
-                    "not in pre-edit set of %zu) — likely a push/pull op with "
+                    "not in pre-edit set of %zu) - likely a push/pull op with "
                     "lost body-ID state from a mid-undo save.\n",
                     id, preSet.size());
                 doc.removeBody(id);

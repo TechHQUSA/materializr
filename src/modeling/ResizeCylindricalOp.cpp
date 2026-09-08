@@ -566,7 +566,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         // restores the original and flags an error, exactly as Scale
         // Face does.
         if (!BRepCheck_Analyzer(result).IsValid()) {
-            MZLOG("[Resize] result invalid — refusing\n");
+            MZLOG("[Resize] result invalid - refusing\n");
             return false;
         }
         int nsolids = 0;
@@ -576,7 +576,7 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         BRepGProp::VolumeProperties(result, gpR);
         BRepGProp::VolumeProperties(m_previousShape, gpO);
         if (nsolids < 1 || gpR.Mass() < gpO.Mass() * 0.001) {
-            MZLOG("[Resize] result collapsed (solids=%d vol=%.3f) — "
+            MZLOG("[Resize] result collapsed (solids=%d vol=%.3f) - "
                   "refusing\n", nsolids, gpR.Mass());
             return false;
         }

@@ -112,7 +112,7 @@ bool ExtrudeController::beginExtrude(const IopContext& ctx,
         Handle(Geom_Surface) s = BRep_Tool::Surface(TopoDS::Face(profile));
         if (s.IsNull() || !s->IsKind(STANDARD_TYPE(Geom_Plane))) {
             if (ctx.toast)
-                ctx.toast("Can't extrude a curved face \xE2\x80\x94 extrude "
+                ctx.toast("Can't extrude a curved face - extrude "
                           "works on flat faces only.");
             return false;
         }
@@ -204,7 +204,7 @@ void ExtrudeController::commit(const IopContext& ctx) {
             const std::vector<int> targets = resolveAllCutTargets(ctx);
             if (targets.empty()) {
                 if (ctx.toast)
-                    ctx.toast("Subtract: this profile doesn't reach any body \xE2\x80\x94 "
+                    ctx.toast("Subtract: this profile doesn't reach any body - "
                               "nothing to cut. Extrude it further, or drag the other way.");
                 return;
             }
@@ -214,7 +214,7 @@ void ExtrudeController::commit(const IopContext& ctx) {
         const int target = resolveCutTarget(ctx);
         if (target < 0) {
             if (ctx.toast)
-                ctx.toast("Subtract: this profile doesn't reach any body \xE2\x80\x94 "
+                ctx.toast("Subtract: this profile doesn't reach any body - "
                           "nothing to cut. Extrude it further, or drag the other way.");
             return;
         }
@@ -262,7 +262,7 @@ void ExtrudeController::commitCutAll(const IopContext& ctx,
     if (done < static_cast<int>(targets.size()) && ctx.toast) {
         char msg[160];
         std::snprintf(msg, sizeof(msg),
-                      "Cut %d of %zu bodies \xE2\x80\x94 the rest couldn't make a "
+                      "Cut %d of %zu bodies - the rest couldn't make a "
                       "valid solid and were left alone.",
                       done, targets.size());
         ctx.toast(msg);
@@ -455,7 +455,7 @@ void ExtrudeController::renderExtrudePanel(const IopContext& ctx) {
         } else {
             ImGui::Checkbox(materializr::tr("Cut every body it reaches"), &m_cutAllBodies);
         }
-        ImGui::SetItemTooltip("%s", materializr::tr("Off: cut ONE body \xE2\x80\x94 the one the sketch sits on when it has a host, otherwise whichever the sweep reaches most of.\nOn: cut every body the swept profile reaches, each as its own undoable step."));
+        ImGui::SetItemTooltip("%s", materializr::tr("Off: cut ONE body - the one the sketch sits on when it has a host, otherwise whichever the sweep reaches most of.\nOn: cut every body the swept profile reaches, each as its own undoable step."));
     }
 
     if (!ctx.cornerCommitUi) {   // im-touch: corner ✓/✗ FABs instead
