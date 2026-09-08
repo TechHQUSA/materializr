@@ -26,10 +26,23 @@ FORMS = (_EM,
          "".join("\\x%02X" % b for b in _EM.encode("utf-8")),   # upper-case escapes
          "".join("\\x%02x" % b for b in _EM.encode("utf-8")))   # lower-case escapes
 
+# Vendored third-party sources. The rule is about how WE write, and this code
+# is not ours: rewriting its punctuation is diff noise against the upstream we
+# pull fixes from, and the first sweep silently rewrote a copyright line in
+# portable-file-dialogs.h. A gate that demands edits to code the project does
+# not own is asking for the wrong thing. Both files DO carry local patches, and
+# those patches keep the vendor's punctuation - the file is read as theirs.
+VENDORED = ("src/third_party/", "src/io/portable-file-dialogs.h")
+
+def is_vendored(rel):
+    return any(rel == v or rel.startswith(v) for v in VENDORED)
+
 def main():
     files = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).split("\n")
     bad = []
     for rel in filter(None, files):
+        if is_vendored(rel):
+            continue
         path = os.path.join(ROOT, rel)
         try:
             text = io.open(path, encoding="utf-8").read()

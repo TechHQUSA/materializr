@@ -1,7 +1,7 @@
 //
 //  Portable File Dialogs
 //
-//  Copyright © 2018-2020 Sam Hocevar <sam@hocevar.net>
+//  Copyright © 2018—2020 Sam Hocevar <sam@hocevar.net>
 //
 //  This library is free software. It comes without any warranty, to
 //  the extent permitted by applicable law. You can redistribute it
@@ -1052,17 +1052,17 @@ inline internal::file_dialog::file_dialog(type in_type,
         // ---- LOCAL PATCH (materializr, issue #74) -------------------------
         // Two upstream bugs, both of which end the same way: osascript errors
         // out, result() returns an empty string, and an empty string is
-        // indistinguishable from the user cancelling - so the app appears to
+        // indistinguishable from the user cancelling — so the app appears to
         // do nothing at all, with no dialog and no error.
         //
         //  1. `default location` takes an ALIAS. AppleScript will not coerce a
         //     bare quoted POSIX path, which is all upstream ever passed, so it
         //     has to be wrapped: POSIX file "..." as alias. (Apple's "Prompt
         //     for a File Name" guide spells this out.) The caller must have
-        //     checked the directory exists - `as alias` fails on one that
+        //     checked the directory exists — `as alias` fails on one that
         //     doesn't; FileDialogs does that on our side.
         //
-        //  2. A Save dialog's default path is "<dir>/<name.ext>" - a file that
+        //  2. A Save dialog's default path is "<dir>/<name.ext>" — a file that
         //     does not exist yet, and not a location at all. Split it: folder
         //     to `default location`, filename to `default name`, which upstream
         //     never emitted, so the suggested name was dropped even when the
@@ -1070,7 +1070,7 @@ inline internal::file_dialog::file_dialog(type in_type,
         //
         // Between them, macOS could not Save or Export at all, and Open would
         // have broken too the moment the app remembered a folder to reopen in.
-        // Inert everywhere else - this branch is osascript-only.
+        // Inert everywhere else — this branch is osascript-only.
         {
             std::string location = default_path, savename;
             if (in_type == type::save)
@@ -1197,7 +1197,7 @@ inline std::string internal::file_dialog::string_result()
 #if _WIN32
     return m_async->result();
 #else
-    // Strip the newline character. (Local patch: guard ret.back() - a cancelled
+    // Strip the newline character. (Local patch: guard ret.back() — a cancelled
     // dialog returns an empty string, and back() on it is undefined behaviour.)
     auto ret = m_async->result();
     return (!ret.empty() && ret.back() == '\n') ? ret.substr(0, ret.size() - 1) : ret;

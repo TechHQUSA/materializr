@@ -734,7 +734,7 @@ static void nsvg__addPoint(NSVGparser* p, float x, float y)
 	if (p->npts+1 > p->cpts) {
 		// Local patch: realloc into a temp and only advance cpts on success. The
 		// original advanced cpts first, so on realloc failure it left pts=NULL with
-		// a stale (already-doubled) cpts - a later addPoint would then skip the grow
+		// a stale (already-doubled) cpts — a later addPoint would then skip the grow
 		// and write through the NULL pointer (and the old buffer leaked).
 		int newcpts = p->cpts ? p->cpts*2 : 8;
 		float* np = (float*)realloc(p->pts, newcpts*2*sizeof(float));
