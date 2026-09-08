@@ -9,9 +9,12 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
@@ -125,6 +128,48 @@ TEST(SectionCap, MovedBodyIsCutWhereItStands) {
     EXPECT_NEAR(capArea(pos), 400.0, 1e-6);
     for (size_t i = 0; i < pos.size(); i += 3) EXPECT_GE(pos[i], 99.9f);
     EXPECT_FALSE(computeSectionCap(moved, gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), pos));
+}
+
+TEST(SectionCap, VerticesInOneSnapCellStayDistinct) {
+    // Two boxes whose facing corners are 0.8 snap cells apart on both axes:
+    // the corners share a grid cell yet sit 1.13 tolerances apart, so each
+    // must keep its own id. A grid that held one vertex per cell dropped the
+    // second corner, that box's loop broke where it recurred, and only one
+    // rectangle was filled.
+    TopoDS_Shape a = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), gp_Pnt(5.00001, 3.00001, 20)).Shape();
+    TopoDS_Shape b = BRepPrimAPI_MakeBox(gp_Pnt(5.00009, 3.00009, 0), gp_Pnt(10, 6, 20)).Shape();
+    TopoDS_Compound both;
+    BRep_Builder bb;
+    bb.MakeCompound(both);
+    bb.Add(both, a);
+    bb.Add(both, b);
+    meshLikeRenderer(both);
+    std::vector<float> pos;
+    ASSERT_TRUE(computeSectionCap(both, gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), pos));
+    EXPECT_NEAR(capArea(pos), 5.00001 * 3.00001 + (10 - 5.00009) * (6 - 3.00009), 1e-6);
+}
+
+TEST(SectionCap, SubToleranceSegmentsKeepTheLoopClosed) {
+    // A prism whose outline has an edge 1.13 tolerances long. Its sliver side
+    // face is two triangles, so the plane crosses it as two half-segments of
+    // 0.56 tolerances each. Dropping those by length before snapping left the
+    // loop open at that edge and the cap vanished.
+    const double xy[6][2] = {{0, 0}, {10, 0}, {10, 3}, {4.99999, 2.99999}, {4.99991, 2.99991}, {0, 3}};
+    BRepBuilderAPI_MakePolygon poly;
+    double twiceArea = 0.0;
+    for (int i = 0; i < 6; ++i) {
+        poly.Add(gp_Pnt(xy[i][0], xy[i][1], 0.0));
+        const int j = (i + 1) % 6;
+        twiceArea += xy[i][0] * xy[j][1] - xy[j][0] * xy[i][1];
+    }
+    poly.Close();
+    TopoDS_Shape prism = BRepPrimAPI_MakePrism(BRepBuilderAPI_MakeFace(poly.Wire()).Face(), gp_Vec(0, 0, 20)).Shape();
+    meshLikeRenderer(prism);
+    std::vector<float> pos;
+    ASSERT_TRUE(computeSectionCap(prism, gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), pos));
+    // The notch is a tenth of the snap tolerance deep, so the collinear merge
+    // may flatten it: the area is the outline's to within that notch.
+    EXPECT_NEAR(capArea(pos), 0.5 * twiceArea, 1e-3);
 }
 
 TEST(SectionCap, UnmeshedShapeGivesNoCap) {

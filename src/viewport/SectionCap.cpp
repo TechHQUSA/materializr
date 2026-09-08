@@ -25,6 +25,7 @@
 #include <gp_Vec.hxx>
 #include <gp_XYZ.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
@@ -39,23 +40,31 @@ namespace {
 constexpr double kSnapMm = 1e-4;
 
 struct Slice {
-    std::vector<gp_Pnt2d> pts;                  // unique vertices, plane coords
-    std::vector<std::pair<int, int>> segs;      // vertex index pairs
-    std::unordered_map<int64_t, int> cells;     // snap grid cell -> vertex
+    std::vector<gp_Pnt2d> pts;                          // unique vertices, plane coords
+    std::vector<std::pair<int, int>> segs;              // vertex index pairs
+    // Snap grid: every vertex in each kSnapMm cell. A cell can hold several
+    // vertices farther apart than the tolerance, and a hash collision only
+    // adds candidates, so the distance check is what decides.
+    std::unordered_map<uint64_t, std::vector<int>> cells;
 
-    static int64_t key(int64_t ix, int64_t iy) { return (ix << 32) ^ (iy & 0xffffffffLL); }
+    static uint64_t key(int64_t ix, int64_t iy)
+    {
+        return (static_cast<uint64_t>(ix) << 32) ^ (static_cast<uint64_t>(iy) & 0xffffffffULL);
+    }
 
-    int vertex(const gp_Pnt2d& p) {
+    int vertex(const gp_Pnt2d& p)
+    {
         const int64_t ix = static_cast<int64_t>(std::floor(p.X() / kSnapMm));
         const int64_t iy = static_cast<int64_t>(std::floor(p.Y() / kSnapMm));
         for (int64_t dx = -1; dx <= 1; ++dx)
             for (int64_t dy = -1; dy <= 1; ++dy) {
                 auto it = cells.find(key(ix + dx, iy + dy));
-                if (it != cells.end() && pts[it->second].Distance(p) <= kSnapMm)
-                    return it->second;
+                if (it == cells.end()) continue;
+                for (int v : it->second)
+                    if (pts[v].Distance(p) <= kSnapMm) return v;
             }
         pts.push_back(p);
-        cells.emplace(key(ix, iy), static_cast<int>(pts.size()) - 1);
+        cells[key(ix, iy)].push_back(static_cast<int>(pts.size()) - 1);
         return static_cast<int>(pts.size()) - 1;
     }
 };
@@ -99,8 +108,12 @@ void sliceTriangulation(const TopoDS_Shape& shape, const gp_Ax3& frame, Slice& o
                 const double s = d[a] / (d[a] - d[k]);
                 q[qi++] = to2d(gp_Pnt(p[a].XYZ() + (p[k].XYZ() - p[a].XYZ()) * s));
             }
-            if (q[0].Distance(q[1]) <= kSnapMm) continue; // degenerate sliver
-            out.segs.emplace_back(out.vertex(q[0]), out.vertex(q[1]));
+            // Snap first, then drop only a segment whose ends are one vertex.
+            // Dropping by raw length instead left a hole where a crossing of
+            // one to two tolerances was split in half by a triangle diagonal.
+            const int a0 = out.vertex(q[0]);
+            const int a1 = out.vertex(q[1]);
+            if (a0 != a1) out.segs.emplace_back(a0, a1);
         }
     }
 }
