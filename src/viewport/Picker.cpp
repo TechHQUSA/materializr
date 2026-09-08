@@ -26,6 +26,7 @@
 #include <iterator>
 #include <limits>
 #include <unordered_set>
+#include <utility>
 
 namespace materializr {
 
@@ -388,11 +389,71 @@ void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
     }
 }
 
+void Picker::gatherInputs(PickInputs& out, float sx, float sy, float vpW, float vpH,
+                          const Camera& camera, const Document& doc)
+{
+    out.sx = sx; out.sy = sy; out.vpW = vpW; out.vpH = vpH;
+    out.view = camera.getViewMatrix();
+    out.proj = camera.getProjectionMatrix();
+    out.bodies.clear();
+    for (int id : doc.getAllBodyIds()) {
+        if (!doc.isBodyVisible(id)) continue;
+        out.bodies.emplace_back(id, doc.getBody(id));
+    }
+    out.datums.clear();
+    for (int id : doc.getAllPlaneIds()) {
+        const auto* e = doc.getPlane(id);
+        if (!e || !doc.isPlaneVisible(id)) continue;
+        const gp_Ax3& ax = e->plane.Position();
+        const gp_Pnt& o = ax.Location();
+        const gp_Dir& n = ax.Direction();
+        const gp_Dir& x = ax.XDirection();
+        out.datums.insert(out.datums.end(),
+                          {double(id), o.X(), o.Y(), o.Z(), n.X(), n.Y(), n.Z(),
+                           x.X(), x.Y(), x.Z(), e->halfSize});
+    }
+    for (int id : doc.getAllAxisIds()) {
+        const auto* e = doc.getAxis(id);
+        if (!e || !doc.isAxisVisible(id)) continue;
+        out.datums.insert(out.datums.end(),
+                          {double(id), e->origin.X(), e->origin.Y(), e->origin.Z(),
+                           e->direction.X(), e->direction.Y(), e->direction.Z(),
+                           e->halfLength});
+    }
+}
+
+bool Picker::sameInputs(const PickInputs& a, const PickInputs& b)
+{
+    if (a.sx != b.sx || a.sy != b.sy || a.vpW != b.vpW || a.vpH != b.vpH) return false;
+    if (a.view != b.view || a.proj != b.proj) return false;
+    if (a.datums != b.datums || a.bodies.size() != b.bodies.size()) return false;
+    for (size_t i = 0; i < a.bodies.size(); ++i) {
+        if (a.bodies[i].first != b.bodies[i].first ||
+            !a.bodies[i].second.IsSame(b.bodies[i].second))
+            return false;
+    }
+    return true;
+}
+
 PickResult Picker::pick(float screenX, float screenY,
                         float viewportWidth, float viewportHeight,
                         const Camera& camera, const Document& doc)
 {
     PickResult result;
+
+    // Unchanged frame: answer from the previous result. The verbose
+    // diagnostic re-pick exists for its per-body prints, so it always runs.
+    m_lastCached = false;
+    if (!s_verbose) {
+        gatherInputs(m_nextInputs, screenX, screenY, viewportWidth, viewportHeight,
+                     camera, doc);
+        if (m_lastValid && sameInputs(m_nextInputs, m_lastInputs)) {
+            m_lastCached = true;
+            return m_lastResult;
+        }
+        std::swap(m_lastInputs, m_nextInputs);
+    }
+    m_lastValid = false; // set again once the walk below completes
 
     glm::vec3 rayOrigin, rayDir;
     screenToRay(screenX, screenY, viewportWidth, viewportHeight, camera, rayOrigin, rayDir);
@@ -711,6 +772,10 @@ PickResult Picker::pick(float screenX, float screenY,
         }
     }
 
+    if (!s_verbose) {
+        m_lastResult = result;
+        m_lastValid = true;
+    }
     return result;
 }
 

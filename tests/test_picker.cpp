@@ -22,6 +22,9 @@
 #include <Poly_Triangulation.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
@@ -184,4 +187,71 @@ TEST(Picker, HitPointIsSnappedToTheExactSurface) {
     PickResult r = pickCentre(sphere, doc);
     ASSERT_TRUE(r.hit);
     EXPECT_NEAR(glm::length(r.hitPoint), 10.0f, 1e-3f);
+}
+
+TEST(Picker, UnchangedInputsAreAnsweredFromTheLastResult) {
+    // Hover calls pick() every rendered frame; an idle cursor must not walk
+    // the document again, and any input pick() reads changing must.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(100.0, 60.0, 10.0).Shape();
+    meshLikeRendererLow(box);
+    Document doc;
+    doc.addBody(box, "plate");
+    Camera cam = framing(box);
+    Picker picker;
+    PickResult a = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, cam, doc);
+    ASSERT_TRUE(a.hit);
+    EXPECT_FALSE(picker.lastPickWasCached());
+    PickResult b = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, cam, doc);
+    EXPECT_TRUE(picker.lastPickWasCached());
+    EXPECT_EQ(a.bodyId, b.bodyId);
+    EXPECT_EQ(a.faceIndex, b.faceIndex);
+    EXPECT_EQ(a.hitPoint, b.hitPoint);
+
+    picker.pick(kW * 0.5f + 1.0f, kH * 0.5f, kW, kH, cam, doc);
+    EXPECT_FALSE(picker.lastPickWasCached()); // cursor moved
+    picker.pick(kW * 0.5f + 1.0f, kH * 0.5f, kW, kH, cam, doc);
+    EXPECT_TRUE(picker.lastPickWasCached());
+    cam.orbit(5.0f, 0.0f);
+    picker.pick(kW * 0.5f + 1.0f, kH * 0.5f, kW, kH, cam, doc);
+    EXPECT_FALSE(picker.lastPickWasCached()); // camera moved
+    picker.invalidate();
+    picker.pick(kW * 0.5f + 1.0f, kH * 0.5f, kW, kH, cam, doc);
+    EXPECT_FALSE(picker.lastPickWasCached()); // re-mesh reported by the app
+}
+
+TEST(Picker, DocumentChangesRunThePickAgain) {
+    // Hiding, showing or moving a body, or adding a construction plane,
+    // changes what pick() reads, so the previous result must not be reused.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(100.0, 60.0, 10.0).Shape();
+    meshLikeRendererLow(box);
+    Document doc;
+    const int id = doc.addBody(box, "plate");
+    Camera cam = framing(box);
+    Picker picker;
+    auto pick = [&] { return picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, cam, doc); };
+    ASSERT_TRUE(pick().hit);
+    pick();
+    ASSERT_TRUE(picker.lastPickWasCached());
+
+    doc.setBodyVisible(id, false);
+    EXPECT_FALSE(pick().hit);
+    EXPECT_FALSE(picker.lastPickWasCached());
+    doc.setBodyVisible(id, true);
+    EXPECT_TRUE(pick().hit);
+    EXPECT_FALSE(picker.lastPickWasCached());
+
+    gp_Trsf t;
+    t.SetTranslation(gp_Vec(0.0, 0.0, 20.0));
+    doc.updateBody(id, BRepBuilderAPI_Transform(box, t, false).Shape());
+    pick();
+    EXPECT_FALSE(picker.lastPickWasCached());
+    pick();
+    ASSERT_TRUE(picker.lastPickWasCached());
+
+    const int pid = doc.addPlane(gp_Pln(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(0.0, 0.0, 1.0)), "p");
+    pick();
+    EXPECT_FALSE(picker.lastPickWasCached());
+    doc.setPlaneVisible(pid, false);
+    pick();
+    EXPECT_FALSE(picker.lastPickWasCached());
 }

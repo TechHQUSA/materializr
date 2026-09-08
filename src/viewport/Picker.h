@@ -60,6 +60,16 @@ public:
                     float viewportWidth, float viewportHeight,
                     const Camera& camera, const Document& doc);
 
+    // Hover calls pick() every rendered frame. When nothing it reads has
+    // changed since the previous call (cursor, viewport, camera, and the
+    // document's visible bodies, planes and axes) it returns the previous
+    // result without touching any geometry. A body re-meshed in place keeps
+    // its TShape, which this cannot see: Application::rebuildMeshes calls
+    // invalidate() so the next pick runs in full.
+    void invalidate() { m_lastValid = false; }
+    // Whether the last pick() was answered from the previous result.
+    bool lastPickWasCached() const { return m_lastCached; }
+
 private:
     // Unproject screen point to world ray
     void screenToRay(float sx, float sy, float vpW, float vpH,
@@ -117,6 +127,26 @@ private:
     std::unordered_map<const void*, BodyCacheEntry> m_bodyCache;
     BodyCacheEntry& bodyCache(const TopoDS_Shape& shape);
     const std::vector<EdgePolyline>& edgePolylines(const TopoDS_Shape& shape);
+
+    // Everything pick() reads, captured so an unchanged frame can answer
+    // from m_lastResult. Bodies compare with IsSame (TShape + Location),
+    // planes and axes by value; hidden entries are left out so a change to
+    // something hidden cannot force a re-pick.
+    struct PickInputs {
+        float sx = 0.0f, sy = 0.0f, vpW = 0.0f, vpH = 0.0f;
+        glm::mat4 view{1.0f};
+        glm::mat4 proj{1.0f};
+        std::vector<std::pair<int, TopoDS_Shape>> bodies;
+        std::vector<double> datums;
+    };
+    static void gatherInputs(PickInputs& out, float sx, float sy, float vpW, float vpH,
+                             const Camera& camera, const Document& doc);
+    static bool sameInputs(const PickInputs& a, const PickInputs& b);
+    PickInputs m_lastInputs;
+    PickInputs m_nextInputs; // scratch; swapped into m_lastInputs on a miss
+    PickResult m_lastResult;
+    bool m_lastValid = false;
+    bool m_lastCached = false;
 
     // Find the nearest edge to a world-space point, return screen distance.
     // `facePlaneNormal` is the outward (camera-facing) normal of the picked

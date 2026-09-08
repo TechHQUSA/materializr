@@ -3346,6 +3346,7 @@ void Application::rebuildMeshes() {
     if (m_meshesDirty) {
         // Full rebuild - clear everything and re-tessellate every visible
         // body. Used on project load, mesh-quality change, theme switch.
+        if (m_picker) m_picker->invalidate(); // meshes change under the same TShapes
         m_shapeRenderer->retireAll();
         m_edgeRenderer->retireAll();
         auto ids = m_document->getAllBodyIds();
@@ -3403,6 +3404,7 @@ void Application::rebuildMeshes() {
     // to iterate a snapshot.
     std::vector<int> ids(m_dirtyBodyIds.begin(), m_dirtyBodyIds.end());
     m_dirtyBodyIds.clear();
+    if (m_picker) m_picker->invalidate();
     for (int id : ids) {
         bool exists = false;
         try { (void)m_document->getBody(id); exists = true; } catch (...) {}

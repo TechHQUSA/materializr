@@ -19,7 +19,9 @@ All notable changes to Materializr are documented here. Format loosely follows
   and the hit point is snapped onto the exact surface so Measure is
   unaffected by mesh quality. At Low
   quality the old path also re-meshed every body finer than the viewport asked
-  for on the first hover after each edit; that is gone too.
+  for on the first hover after each edit; that is gone too. An idle cursor no
+  longer picks at all: a frame whose cursor, camera and visible bodies, planes
+  and axes are unchanged answers from the previous pick.
 - **The viewport re-meshed every body after every operation.** The check meant
   to skip bodies that were already tessellated at the current quality compared
   the requested deflection against the value OCCT stores on the mesh, which is
