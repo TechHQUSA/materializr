@@ -260,11 +260,7 @@ void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::ma
         if (tri.IsNull()) {
             BRepMesh_IncrementalMesh mesh(faceShape, materializr::meshParams(0.1, 0.5, false));
             tri = BRep_Tool::Triangulation(face, location);
-            if (tri.IsNull()) return;
         }
-
-        const gp_Trsf& trsf = location.Transformation();
-        bool hasXform = !location.IsIdentity();
 
         if (it == m_faceCache.end() && m_faceCache.size() >= kCacheCap)
             freeCacheGL(m_faceCache); // flush orphans; live entries rebuild next frame
@@ -272,6 +268,16 @@ void SelectionHighlight::renderFace(const TopoDS_Shape& faceShape, const glm::ma
         entry.shape = faceShape;
         entry.loc = faceShape.Location();
         std::vector<float> verts;
+        // A face the mesher cannot triangulate (a self-intersecting wire, some
+        // fused tangent surfaces) gets an EMPTY entry, so the mesher is not
+        // re-run on every frame it stays selected; the entry draws nothing.
+        if (tri.IsNull()) {
+            uploadEntry(entry, verts);
+            return;
+        }
+
+        const gp_Trsf& trsf = location.Transformation();
+        bool hasXform = !location.IsIdentity();
         verts.reserve(tri->NbTriangles() * 9);
         for (int i = 1; i <= tri->NbTriangles(); i++) {
             int n1, n2, n3;

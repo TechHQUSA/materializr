@@ -7,6 +7,11 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Selecting a face the mesher cannot triangulate no longer re-runs the mesher
+  on every frame.** The selection tint meshes a face on demand when it has no
+  triangulation, and a face that cannot be meshed failed that attempt again on
+  every frame it stayed selected. The failure is now remembered and the face
+  draws no tint.
 - **A body with a face the mesher cannot triangulate is no longer re-meshed on
   every rebuild.** Some faces (a self-intersecting wire, some fused tangent
   surfaces) never get a triangulation. The renderer used to take that as a sign
