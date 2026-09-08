@@ -1165,6 +1165,13 @@ materializr::IopContext Application::iopContext() {
             for (const auto& [sid, bodies] : sketchBodyLinks())
                 if (bodies.count(bid)) return sid;
             return -1;
+        },
+        [this](const std::vector<float>& verts, bool cut) {
+            if (!m_shapeRenderer) return;
+            int slot = m_shapeRenderer->setBodyVertices(kGhostPreviewId, verts);
+            if (slot < 0) return;
+            m_shapeRenderer->setSubtractPreview(slot, cut);
+            m_shapeRenderer->setColor(slot, glm::vec3(0.55f, 0.75f, 1.0f));
         }};
 }
 

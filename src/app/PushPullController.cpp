@@ -1,6 +1,7 @@
 #include "ui/LengthField.h"
 #include "PushPullController.h"
 #include "PushPullPreview.h"
+#include "GhostMesh.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/NumParse.h"
@@ -339,6 +340,20 @@ void PushPullController::updateGhost(const IopContext& ctx) const {
     if (std::abs(m_st.distance) > 1e-6) {
         gp_Vec pv(m_st.normal.x, m_st.normal.y, m_st.normal.z);
         pv *= static_cast<double>(m_st.distance);
+        // Preferred: triangles straight from each profile's own triangulation
+        // (no mesher; the mesher paid per side wall, 26 ms on a 300-hole
+        // profile). Every target must manage it, else the whole ghost goes
+        // the shape way below.
+        if (ctx.showGhostMesh) {
+            std::vector<float> verts;
+            bool all = !m_st.targets.empty();
+            for (const auto& t : m_st.targets)
+                if (t.profile.IsNull() || !ghostPrismMesh(t.profile, pv, verts)) { all = false; break; }
+            if (all && !verts.empty()) {
+                ctx.showGhostMesh(verts, m_st.distance < 0.0f);
+                return;
+            }
+        }
         for (const auto& t : m_st.targets) {
             if (t.profile.IsNull()) continue;
             try {

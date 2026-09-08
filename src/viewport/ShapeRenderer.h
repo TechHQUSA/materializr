@@ -39,6 +39,12 @@ public:
     /// `angularDeflection` (radians) controls faceting of curved surfaces - a
     /// tighter angle makes fillets/holes/cylinders visibly smoother while adding
     /// almost no triangles to flat faces.
+    // Upload `vertices` as a new slot at the tail of m_meshes; -1 if empty.
+    int appendVertices(const std::vector<float>& vertices);
+    // Give the appended tail slot to `bodyId`: a new body keeps the slot, an
+    // existing body has its GL data replaced in place (slot index and
+    // cosmetic state kept). Returns the slot the body ends up in.
+    int placeSlot(int bodyId, int appendedSlot);
     int tessellate(const TopoDS_Shape& shape, float deflection = 0.1f,
                    float angularDeflection = 0.2f);
 
@@ -50,6 +56,11 @@ public:
     /// avoid re-tessellating every body on every preview frame.
     int setBodyMesh(int bodyId, const TopoDS_Shape& shape,
                     float deflection = 0.1f, float angularDeflection = 0.2f);
+    /// Same slot semantics as setBodyMesh, but the caller supplies the
+    /// triangles: six floats per vertex (position, normal), three vertices
+    /// per triangle. No shape, no mesher. Used for the push/pull ghost, whose
+    /// tool volume is built from the profile's own triangulation.
+    int setBodyVertices(int bodyId, const std::vector<float>& vertices);
     /// A worker thread meshed `shape` off the main thread well enough for a
     /// tessellate(shape, deflection, angularDeflection) request: remember
     /// that so tessellate() reuses it. Pass the pair the renderer WILL ask

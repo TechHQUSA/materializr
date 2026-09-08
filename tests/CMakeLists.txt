@@ -115,6 +115,7 @@ add_library(materializr_core STATIC
     # only Document / History / SelectionManager / Operation + imgui.
     ${CMAKE_SOURCE_DIR}/src/app/InteractiveOpController.cpp
     ${CMAKE_SOURCE_DIR}/src/app/PushPullPreview.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/GhostMesh.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/TouchWidgets.cpp
     # Installs OCCT's signal handler for every test binary - see the file for
     # why tests must run in the app's signal environment.
@@ -292,6 +293,11 @@ add_test(NAME test_fillet_probe COMMAND test_fillet_probe)
 add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
+
+# test_ghost_mesh - the push/pull ghost is built from the profile's triangulation, never the mesher
+add_executable(test_ghost_mesh test_ghost_mesh.cpp)
+target_link_libraries(test_ghost_mesh PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_ghost_mesh COMMAND test_ghost_mesh)
 
 # test_pushpull_preview - the off-thread preview equals a direct execute and never touches the live document
 add_executable(test_pushpull_preview test_pushpull_preview.cpp)

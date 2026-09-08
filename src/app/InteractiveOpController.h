@@ -1,6 +1,7 @@
 #pragma once
 #include "IopViewport.h"
 #include <functional>
+#include <vector>
 #include <memory>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -99,6 +100,12 @@ struct IopContext {
     // The sketch that drives this body, or -1. Generative anchoring: a fillet
     // records it so a filleted corner can follow a later dimension edit.
     std::function<int(int bodyId)> sketchForBody;
+
+    // showGhost with the triangles already built (six floats per vertex,
+    // position and normal): the controller derives the tool volume from the
+    // profile's own triangulation (GhostMesh.h) and no mesher runs. Optional;
+    // a controller falls back to showGhost when it is not wired.
+    std::function<void(const std::vector<float>& vertices, bool cut)> showGhostMesh;
 };
 
 // Base for "popup with live preview" modeling operations (Shell, Taper,

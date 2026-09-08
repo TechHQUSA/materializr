@@ -346,6 +346,17 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
         }
     }
 
+    const int slot = appendVertices(vertices);
+    if (slot >= 0) {
+        m_meshes[slot].shape = shape;
+        m_meshes[slot].deflection = deflection;
+        m_meshes[slot].angularDeflection = angularDeflection;
+    }
+    return slot;
+}
+
+int ShapeRenderer::appendVertices(const std::vector<float>& vertices)
+{
     if (vertices.empty()) {
         return -1;
     }
@@ -353,9 +364,6 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
     // Upload to GPU
     MeshData mesh;
     mesh.vertexCount = static_cast<int>(vertices.size() / 6); // 6 floats per vertex
-    mesh.shape = shape;
-    mesh.deflection = deflection;
-    mesh.angularDeflection = angularDeflection;
 
     glGenVertexArrays(1, &mesh.vao);
     glGenBuffers(1, &mesh.vbo);
@@ -469,6 +477,22 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
                          : "KEEPING STALE MESH (render != document!)");
         return (it == m_bodyToSlot.end()) ? -1 : it->second;
     }
+    return placeSlot(bodyId, appendedSlot);
+}
+
+int ShapeRenderer::setBodyVertices(int bodyId, const std::vector<float>& vertices)
+{
+    m_lastMeshMs = -1.0;
+    const int appendedSlot = appendVertices(vertices);
+    if (appendedSlot < 0) {
+        auto it = m_bodyToSlot.find(bodyId);
+        return (it == m_bodyToSlot.end()) ? -1 : it->second;
+    }
+    return placeSlot(bodyId, appendedSlot);
+}
+
+int ShapeRenderer::placeSlot(int bodyId, int appendedSlot)
+{
     auto it = m_bodyToSlot.find(bodyId);
     if (it == m_bodyToSlot.end()) {
         // New body; the appended slot is its home.

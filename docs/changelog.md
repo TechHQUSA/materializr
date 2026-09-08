@@ -17,8 +17,10 @@ All notable changes to Materializr are documented here. Format loosely follows
   therefore trails the arrow at the worker's pace instead of stalling the
   app. Committing such a gesture runs the operation once at the final
   distance, as the dense-body ghost path always did. Small bodies preview
-  exactly as before. The ghost tool volume is also meshed coarser (it is a
-  tint), which halves its per-frame cost on large profiles.
+  exactly as before. The ghost tool volume is now built from the profile's
+  own triangulation instead of being meshed each frame (32 ms per frame on a
+  300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
+  milliseconds.
 - **Interactive previews no longer re-tessellate every body on a many-body
   project.** Pattern, loft, boundary fill, patch, extrude, revolve and the
   other live previews raised the full-rebuild flag on every frame, so the
