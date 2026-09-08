@@ -13,7 +13,6 @@
 #include <string>
 #include <set>
 #include <unordered_map>
-#include <unordered_set>
 #include <map>
 #include <glm/glm.hpp>
 #include "io/ImageDecode.h"   // DecodedImage - thumbnail peek results
@@ -708,7 +707,6 @@ private:
     };
     std::unordered_map<int, PendingMesh> m_meshPending; // body id -> job in flight
     std::unordered_map<int, double> m_meshMs;           // body id -> last mesher time
-    std::unordered_set<const void*> m_meshSyncOnly;     // TShapes the worker left partly unmeshed
     // A body whose last mesh took at least this long is meshed off-thread
     // while its previous mesh stays on screen; anything quicker is meshed in
     // the frame, where a worker round trip would only add a frame of latency.

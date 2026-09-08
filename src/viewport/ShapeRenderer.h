@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <TopoDS_Shape.hxx>
+#include "MeshTag.h"
 
 #include <map>
 #include <unordered_map>
@@ -171,17 +172,19 @@ private:
     // the next retireAll() or clear() is freed then. Same retire/reclaim
     // generations as EdgeRenderer::m_retired.
     std::vector<MeshData> m_retired;
-    // TShape -> requested (linear, angular) deflection it was last meshed
-    // for (see tessellate). Both, because callers do vary them independently
-    // (the ghost preview uses the default angular value). retireAll() - the
-    // start of every full rebuild - retires the map to m_meshedAtPrev, and
-    // tessellate carries an entry back only when it is looked up again, so
-    // the map holds what the last full rebuild visited plus previews since
-    // (a long drag makes a fresh TShape per frame). A recycled address is
-    // harmless because tessellate also requires every face to carry a
-    // triangulation before it trusts the tag.
-    std::unordered_map<const void*, std::pair<float, float>> m_meshedAt;
-    std::unordered_map<const void*, std::pair<float, float>> m_meshedAtPrev;
+    // TShape -> what the mesher achieved on it for which requested (linear,
+    // angular) deflection (see tessellate and MeshTag.h). Both parameters,
+    // because callers do vary them independently (the ghost preview uses the
+    // default angular value). retireAll() - the start of every full rebuild -
+    // retires the map to m_meshedAtPrev, and tessellate carries an entry back
+    // only when it is looked up again, so the map holds what the last full
+    // rebuild visited plus previews since (a long drag makes a fresh TShape
+    // per frame). A recycled address is harmless because meshTagCovers()
+    // never trusts a tag on a shape whose every face is bare, and a face the
+    // mesher could not triangulate is expected bare rather than forcing a
+    // re-mesh on every rebuild.
+    std::unordered_map<const void*, MeshTag> m_meshedAt;
+    std::unordered_map<const void*, MeshTag> m_meshedAtPrev;
     double m_lastMeshMs = -1.0;
 
     // Mesh shader program

@@ -212,8 +212,8 @@ void ShapeRenderer::notePreMeshed(const TopoDS_Shape& shape,
                                   float requestedDeflection,
                                   float requestedAngularDeflection) {
     if (!shape.IsNull())
-        m_meshedAt[shape.TShape().get()] = {requestedDeflection,
-                                            requestedAngularDeflection};
+        m_meshedAt[shape.TShape().get()] =
+            materializr::makeMeshTag(shape, requestedDeflection, requestedAngularDeflection);
 }
 
 int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
@@ -231,24 +231,19 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
     // re-meshed every time. The quality slider still takes effect in BOTH
     // directions: a different value never matches, so a finer-than-requested
     // mesh cannot survive a quality lowering (that was a real bug once).
-    // Every face must also still carry a triangulation - that is what makes a
-    // stale tag on a recycled TShape address harmless.
-    constexpr float kSameDeflection = 1e-6f; // exact match, not "close enough"
+    // The tag also records which faces the mesher left bare, so a body with
+    // a face it cannot triangulate is not Cleaned and re-meshed on every
+    // rebuild, while a fresh shape at a recycled address (every face bare)
+    // is never trusted - see meshTagCovers().
     const void* key = shape.TShape().get();
     auto tag = m_meshedAt.find(key);
     if (tag == m_meshedAt.end()) {
         auto prev = m_meshedAtPrev.find(key);
         if (prev != m_meshedAtPrev.end()) tag = m_meshedAt.insert(*prev).first;
     }
-    bool preMeshed = tag != m_meshedAt.end() &&
-                     std::abs(tag->second.first - deflection) < kSameDeflection &&
-                     std::abs(tag->second.second - angularDeflection) < kSameDeflection;
-    for (TopExp_Explorer fx(shape, TopAbs_FACE); fx.More() && preMeshed;
-         fx.Next()) {
-        TopLoc_Location l;
-        if (BRep_Tool::Triangulation(TopoDS::Face(fx.Current()), l).IsNull())
-            preMeshed = false;
-    }
+    const bool preMeshed = tag != m_meshedAt.end() &&
+                           materializr::meshTagCovers(tag->second, deflection,
+                                                      angularDeflection, shape);
     if (!preMeshed) {
         // Drop any cached triangulation first. BRepMesh_IncrementalMesh only
         // ever refines an existing mesh, so without this a previously finer
@@ -266,7 +261,7 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
             shape, materializr::meshParams(deflection, angularDeflection, true));
         m_lastMeshMs = std::chrono::duration<double, std::milli>(
                            std::chrono::steady_clock::now() - t0).count();
-        m_meshedAt[key] = {deflection, angularDeflection};
+        m_meshedAt[key] = materializr::makeMeshTag(shape, deflection, angularDeflection);
     }
 
     // Collect all triangle vertices (position + normal)
@@ -392,16 +387,14 @@ bool ShapeRenderer::isPreMeshed(const TopoDS_Shape& shape, float deflection,
                                 float angularDeflection) const
 {
     // Same rule as tessellate(): the tag for this TShape, in either map, must
-    // name exactly these parameters.
-    constexpr float kSameDeflection = 1e-6f;
+    // still cover the shape at exactly these parameters.
     const void* key = shape.TShape().get();
     auto tag = m_meshedAt.find(key);
     if (tag == m_meshedAt.end()) {
         tag = m_meshedAtPrev.find(key);
         if (tag == m_meshedAtPrev.end()) return false;
     }
-    return std::abs(tag->second.first - deflection) < kSameDeflection &&
-           std::abs(tag->second.second - angularDeflection) < kSameDeflection;
+    return materializr::meshTagCovers(tag->second, deflection, angularDeflection, shape);
 }
 
 bool ShapeRenderer::reclaimStale(int bodyId)
@@ -454,8 +447,9 @@ int ShapeRenderer::setBodyMesh(int bodyId, const TopoDS_Shape& shape,
             m_retired[i] = m_retired.back();
             m_retired.pop_back();
             // The tag stays authoritative for this TShape even though
-            // tessellate() did not run.
-            m_meshedAt[shape.TShape().get()] = {deflection, angularDeflection};
+            // tessellate() did not run; recount what is bare on the live shape.
+            m_meshedAt[shape.TShape().get()] =
+                materializr::makeMeshTag(shape, deflection, angularDeflection);
             break;
         }
     }

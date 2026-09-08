@@ -3356,13 +3356,10 @@ void Application::landMeshes() {
             continue;
         MeshWorker::land(r);
         m_meshMs[r.bodyId] = r.millis;
-        if (r.unmeshedFaces > 0) {
-            // tessellate() will Clean and mesh this one in the frame anyway;
-            // do not send it round again.
-            m_meshSyncOnly.insert(r.tshape);
-        } else if (m_shapeRenderer) {
+        // The tag records the faces the mesher left bare (if any), so
+        // tessellate() reuses this mesh instead of Cleaning and re-meshing.
+        if (m_shapeRenderer)
             m_shapeRenderer->notePreMeshed(cur, r.deflection, r.angularDeflection);
-        }
         m_dirtyBodyIds.insert(r.bodyId);
         m_sectionDirty = true; // the section overlay sliced unmeshed faces
     }
@@ -3376,7 +3373,6 @@ bool Application::meshAsync(int bodyId, const TopoDS_Shape& shape, float deflect
     // after being hidden has none, and would blink absent for a worker pass.
     if (!m_shapeRenderer->hasMeshFor(bodyId)) return false;
     const void* ts = shape.TShape().get();
-    if (m_meshSyncOnly.count(ts)) return false;
     if (m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection)) return false;
     auto ms = m_meshMs.find(bodyId);
     if (ms == m_meshMs.end() || ms->second < kAsyncMeshMs) return false;

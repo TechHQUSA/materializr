@@ -7,6 +7,13 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **A body with a face the mesher cannot triangulate is no longer re-meshed on
+  every rebuild.** Some faces (a self-intersecting wire, some fused tangent
+  surfaces) never get a triangulation. The renderer used to take that as a sign
+  the whole body was unmeshed and ran the mesher over it again on every
+  rebuild, so any operation on such a model stalled by the body's full mesh
+  time. It now remembers which faces came out bare and re-meshes only when the
+  quality changes or the geometry does.
 - **Editing a heavy body no longer freezes the viewport while it re-meshes.**
   After every operation the changed body was re-meshed on the main thread
   before the next frame could draw; on a body that takes long to mesh the app

@@ -292,6 +292,11 @@ add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
 
+# test_mesh_tag - when the renderer may skip the mesher, including bodies with a face it cannot triangulate
+add_executable(test_mesh_tag test_mesh_tag.cpp)
+target_link_libraries(test_mesh_tag PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_mesh_tag COMMAND test_mesh_tag)
+
 # test_mesh_worker - off-thread meshing lands the same triangulation as a direct run
 add_executable(test_mesh_worker test_mesh_worker.cpp)
 target_link_libraries(test_mesh_worker PRIVATE materializr_core gtest gtest_main Threads::Threads)
