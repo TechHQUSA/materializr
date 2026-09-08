@@ -1,5 +1,6 @@
 #include "ui/UiTheme.h"
 #include "InteractiveOpController.h"
+#include "core/BodyChanges.h"
 #include "touch_mode.h"
 #include "../core/Document.h"
 #include "../core/History.h"
@@ -52,27 +53,25 @@ void InteractiveOpController::update(const IopContext& ctx) {
     // HistoryEdit controllers override update/commit/cancel outright - the
     // policy is entirely op-specific. Reaching the base here means one forgot.
     if (previewModel() == PreviewModel::HistoryEdit) return;
-    if (previewModel() == PreviewModel::LiveOp) { updateLive(ctx); return; }
+    if (previewModel() == PreviewModel::LiveOp) { updateLive(ctx); return; } // updateLive tracks its own changes
     if (m_bodyId < 0) return;
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (!wantsLivePreview(ctx)) {
         // Live preview suppressed (recomputing it per change would freeze the
         // UI). Keep the snapshot shown and mark preview "ok" so Confirm still
         // computes + pushes the op once. pushOperation re-runs execute() and
         // refuses on failure, so a heavy commit that fails just does nothing.
         ctx.doc.updateBody(m_bodyId, m_snapshot);
-        ctx.markMeshesDirty();
         m_previewOk = true;
         return;
     }
     // Reset to the snapshot, then run a fresh op against it so the live
     // preview tracks the current values exactly without compounding edits.
     ctx.doc.updateBody(m_bodyId, m_snapshot);
-    ctx.markMeshesDirty();
     m_previewOk = false;
     try {
         std::unique_ptr<Operation> op = buildOp(ctx);
         if (op && op->execute(ctx.doc)) {
-            ctx.markMeshesDirty();
             m_previewOk = true;
         } else {
             ctx.doc.updateBody(m_bodyId, m_snapshot);
@@ -87,6 +86,7 @@ void InteractiveOpController::update(const IopContext& ctx) {
 // not involved until commit - and because it is the same instance every
 // frame, any body it creates keeps the same id (the whole point).
 void InteractiveOpController::updateLive(const IopContext& ctx) {
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (m_liveApplied && m_liveOp) {
         try { m_liveOp->undo(ctx.doc); } catch (...) {}
         m_liveApplied = false;
@@ -108,6 +108,7 @@ void InteractiveOpController::updateLive(const IopContext& ctx) {
 
 void InteractiveOpController::commit(const IopContext& ctx) {
     if (!m_active) return;
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (previewModel() == PreviewModel::HistoryEdit) { cleanup(); return; }
     if (previewModel() == PreviewModel::LiveOp) {
         // A different op to record? Undo the preview and push it properly,
@@ -128,7 +129,6 @@ void InteractiveOpController::commit(const IopContext& ctx) {
         // Anything else (nothing applied - a zero-distance gesture) records
         // nothing, which is right: the document is already untouched.
         ctx.selection.clear();
-        ctx.markMeshesDirty();
         cleanup();
         return;
     }
@@ -161,11 +161,11 @@ void InteractiveOpController::commit(const IopContext& ctx) {
         }
     }
     ctx.selection.clear();
-    ctx.markMeshesDirty();
     cleanup();
 }
 
 void InteractiveOpController::cancel(const IopContext& ctx) {
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (previewModel() == PreviewModel::HistoryEdit) { cleanup(); return; }
     if (previewModel() == PreviewModel::LiveOp) {
         if (m_liveApplied && m_liveOp) {
@@ -174,7 +174,6 @@ void InteractiveOpController::cancel(const IopContext& ctx) {
     } else if (m_bodyId >= 0 && !m_snapshot.IsNull()) {
         ctx.doc.updateBody(m_bodyId, m_snapshot);
     }
-    ctx.markMeshesDirty();
     cleanup();
 }
 

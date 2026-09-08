@@ -332,12 +332,10 @@ void Application::updateInteractiveExtrude(bool applySnap) {
 void Application::commitInteractiveExtrude() {
     m_extrudeCtl.commit(iopContext());
     markDirty();
-    m_meshesDirty = true;
 }
 
 void Application::cancelInteractiveExtrude() {
     m_extrudeCtl.cancel(iopContext());
-    m_meshesDirty = true;
 }
 
 // ─── Sketch region picking ──────────────────────────────────────────────────
@@ -653,6 +651,7 @@ void Application::beginPattern(PatternKind kind) {
 
 void Application::updatePattern() {
     if (!m_patternActive || m_patternBodyId < 0) return;
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
 
     // Retract the applied preview so the new parameters land on a clean
     // document. NOT a history undo: the preview never reaches History (see
@@ -662,7 +661,6 @@ void Application::updatePattern() {
     m_patternPreview.retract(*m_document);
     if (m_patternCount < 2) {
         // Nothing to preview at count=1 (a pattern of 1 is just the source).
-        m_meshesDirty = true;
         return;
     }
     if (!m_patternPreview.op())
@@ -701,10 +699,10 @@ void Application::updatePattern() {
         op->setTotalAngle(m_patternAngle);
     }
     m_patternPreview.apply(*m_document);
-    m_meshesDirty = true;
 }
 
 void Application::commitPattern() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     // The previewed instance IS the final op - record it without re-running
     // it. (It used to already BE a history step by this point, which is what
     // made the preview undoable mid-gesture.)
@@ -712,15 +710,14 @@ void Application::commitPattern() {
     m_patternActive        = false;
     m_patternPickingOrigin = false;
     m_patternBodyId        = -1;
-    m_meshesDirty = true;
 }
 
 void Application::cancelPattern() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_patternPreview.clear(*m_document);
     m_patternActive        = false;
     m_patternPickingOrigin = false;
     m_patternBodyId        = -1;
-    m_meshesDirty = true;
 }
 
 // ─── Loft (interactive popup) ──────────────────────────────────────────────
@@ -955,6 +952,7 @@ void Application::beginLoft() {
 
 void Application::updateLoft() {
     if (!m_loftActive || !m_history || !m_document) return;
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     if (m_loftRailsMode ? m_loftSections.empty() : m_loftSections.size() < 2)
         return;
 
@@ -979,7 +977,6 @@ void Application::updateLoft() {
         if (!m_loftPreview.apply(*m_document))
             showToast("Guided loft failed - rails must rise away from the "
                       "base profile's plane.");
-        m_meshesDirty = true;
         return;
     }
 
@@ -1010,17 +1007,16 @@ void Application::updateLoft() {
     if (m_loftBridgeBodyId >= 0)
         op->setBridge(m_loftBridgeBodyId, m_loftBridgeFaces);
     m_loftPreview.apply(*m_document);
-    m_meshesDirty = true;
 }
 
 void Application::commitLoft() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     // Record the already-applied instance without re-running it.
     m_loftPreview.commit(*m_history);
     m_loftActive = false;
     m_loftSections.clear();
     m_loftRails.clear();
     m_loftRailsMode = false;
-    m_meshesDirty = true;
 }
 
 // ─── Cascade: re-execute Extrudes that consumed a just-edited sketch ───────
@@ -1118,7 +1114,6 @@ void Application::relinkSketch(bool isBody, int id) {
         }
     if (changed) {
         markDirty();
-        m_meshesDirty = true;
         showToast("Sketch re-linked - editing it will drive the body again.");
     }
 }
@@ -1206,7 +1201,6 @@ void Application::cascadeFromSketchEdit(int sketchId) {
         // matched == 0: nothing in the model is built from this sketch (e.g.
         // editing a freshly-duplicated sketch before it's extruded). That's the
         // normal case while sketching - stay silent, just refresh.
-        m_meshesDirty = true;
         return;
     }
 
@@ -1305,12 +1299,12 @@ void Application::cascadeFromSketchEdit(int sketchId) {
 }
 
 void Application::cancelLoft() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_loftPreview.clear(*m_document);
     m_loftActive = false;
     m_loftSections.clear();
     m_loftRails.clear();
     m_loftRailsMode = false;
-    m_meshesDirty = true;
 }
 
 
@@ -1368,6 +1362,7 @@ void Application::beginBoundaryFill() {
 
 void Application::updateBoundaryFill() {
     if (!m_bfillActive || !m_history || !m_document) return;
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     if (m_bfillProfiles.size() < 2) return;
 
     // Retract the applied preview, re-sync the SAME instance, re-execute.
@@ -1383,21 +1378,20 @@ void Application::updateBoundaryFill() {
     if (!m_bfillPreview.apply(*m_document))
         showToast("Boundary Fill: the silhouettes don't enclose a common "
                   "volume - make sure they overlap in space.");
-    m_meshesDirty = true;
 }
 
 void Application::commitBoundaryFill() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_bfillPreview.commit(*m_history);   // record the applied instance as-is
     m_bfillActive = false;
     m_bfillProfiles.clear();
-    m_meshesDirty = true;
 }
 
 void Application::cancelBoundaryFill() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_bfillPreview.clear(*m_document);
     m_bfillActive = false;
     m_bfillProfiles.clear();
-    m_meshesDirty = true;
 }
 
 // ─── Patch (interactive popup) ──────────────────────────────────────────────
@@ -1458,6 +1452,7 @@ void Application::beginPatch() {
 
 void Application::updatePatch() {
     if (!m_patchActive || !m_history || !m_document) return;
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     if (m_patchEdges.empty()) return;
 
     // Retract the applied preview, re-sync the SAME instance, re-execute -
@@ -1487,23 +1482,22 @@ void Application::updatePatch() {
     if (!m_patchPreview.apply(*m_document))
         showToast("Patch: no surface fits these edges. They need to form one "
                   "closed ring around the opening.");
-    m_meshesDirty = true;
 }
 
 void Application::commitPatch() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_patchPreview.commit(*m_history);   // record the applied instance as-is
     m_patchActive = false;
     m_patchEdges.clear();
     m_patchSupports.clear();
-    m_meshesDirty = true;
 }
 
 void Application::cancelPatch() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     m_patchPreview.clear(*m_document);
     m_patchActive = false;
     m_patchEdges.clear();
     m_patchSupports.clear();
-    m_meshesDirty = true;
 }
 
 // ─── Sew (one-shot) ─────────────────────────────────────────────────────────
@@ -1511,6 +1505,7 @@ void Application::cancelPatch() {
 void Application::beginSew() {
     if (refuseMeshSelection("Sew")) return;
     if (!m_selection || !m_document || !m_history) return;
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
 
     std::vector<int> ids;
     for (const auto& e : m_selection->getSelection()) {
@@ -1548,7 +1543,6 @@ void Application::beginSew() {
     // The consumed bodies are gone; a selection naming them would resolve to
     // nothing.
     m_selection->clear();
-    m_meshesDirty = true;
 }
 
 // ─── Construction Plane (interactive popup) ────────────────────────────────
@@ -1779,7 +1773,8 @@ void Application::updateConstructionPlane() {
     // nudged the offset.
     applyPlaneOpRotation();
     reattachPlaneOpRefImage();
-    m_meshesDirty = true;
+    // Datums draw from the document every frame and the picker keys on them
+    // directly: no body changed, so no mesh rebuild.
 }
 
 // Re-apply the ABSOLUTE rotation to the freshly rebuilt preview plane. Applied
@@ -1819,7 +1814,6 @@ void Application::reattachPlaneOpRefImage() {
     const auto ids = m_document->getAllPlaneIds();
     if (ids.empty()) return;
     m_document->setRefImage(ids.back(), m_planeOpPendingImage);
-    m_meshesDirty = true;
 }
 
 // Choose the file for a plane being created. Attaching immediately is the
@@ -1851,7 +1845,6 @@ void Application::commitConstructionPlane() {
     m_planeOpRotX = m_planeOpRotY = m_planeOpRotZ = 0.0f;
     m_planeOpPreview.commit(*m_history);
     m_planeOpActive = false;
-    m_meshesDirty = true;
 
     // The plane now exists and previewApply auto-selected it, so the id is the
     // most recent one. Attaching here (rather than inside the op) keeps the
@@ -1866,7 +1859,6 @@ void Application::cancelConstructionPlane() {
     m_planeOpPendingImage = RefImageEntry{};
     m_planeOpPreview.clear(*m_document);
     m_planeOpActive = false;
-    m_meshesDirty = true;
 }
 
 void Application::beginPrimitivePopup(int kindIdx) {
@@ -1906,6 +1898,7 @@ void Application::beginPrimitivePopup(int kindIdx) {
 }
 
 void Application::commitPrimitivePopup() {
+    auto trackBodies = trackBodyChanges(); // marks what this edit changed
     using K = materializr::PrimitiveOp::Kind;
     auto op = std::make_unique<materializr::PrimitiveOp>();
     K kind = K::Box;
@@ -1935,7 +1928,6 @@ void Application::commitPrimitivePopup() {
             e.bodyId = ids.back();
             m_selection->select(e);
         }
-        m_meshesDirty = true;
     }
     m_primitivePopupActive = false;
 }
@@ -2220,19 +2212,18 @@ void Application::updateConstructionAxis() {
             m_selection->select(e);
         }
     }
-    m_meshesDirty = true;
+    // Datums draw from the document every frame: no body changed, so no
+    // mesh rebuild.
 }
 
 void Application::commitConstructionAxis() {
     m_axisOpPreview.commit(*m_history);
     m_axisOpActive = false;
-    m_meshesDirty = true;
 }
 
 void Application::cancelConstructionAxis() {
     m_axisOpPreview.clear(*m_document);
     m_axisOpActive = false;
-    m_meshesDirty = true;
 }
 
 // ─── Sketch-mode Pattern (Linear / Radial) ─────────────────────────────────
@@ -2605,7 +2596,7 @@ void Application::pollThreadRecuts() {
             if (m_shapeRenderer)
                 m_shapeRenderer->notePreMeshed(result, p.meshDefl, p.meshAng);
             m_document->updateBody(p.bodyId, result);
-            m_meshesDirty = true;
+            markBodyDirty(p.bodyId);
         }
         m_threadRecuts.erase(m_threadRecuts.begin() + i);
     }

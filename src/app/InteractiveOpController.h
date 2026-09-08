@@ -246,9 +246,10 @@ protected:
     // ways for Push/Pull - it re-tessellates 100+ untouched bodies per drag
     // frame, and the clear() wipes renderer-only slots (the ghost tool volume
     // has no Document body behind it, so nothing puts it back).
-    virtual void markPreviewDirty(const IopContext& ctx) const {
-        ctx.markMeshesDirty();
-    }
+    // Default: nothing extra. updateLive() holds a BodyChangeScope that marks
+    // every body the preview changed; overrides add what a diff cannot see
+    // (Push/Pull's renderer-only ghost slot).
+    virtual void markPreviewDirty(const IopContext&) const {}
     // Override to suppress the per-change live preview when recomputing it would
     // freeze the UI (e.g. projecting a sketch with hundreds of regions). Commit
     // still builds + runs the op once. Default: always preview.

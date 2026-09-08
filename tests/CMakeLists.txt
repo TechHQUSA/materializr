@@ -292,6 +292,11 @@ add_executable(test_section_cap test_section_cap.cpp)
 target_link_libraries(test_section_cap PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_section_cap COMMAND test_section_cap)
 
+# test_body_changes - which bodies an edit changed, so a preview re-tessellates only those
+add_executable(test_body_changes test_body_changes.cpp)
+target_link_libraries(test_body_changes PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_body_changes COMMAND test_body_changes)
+
 # test_mesh_dispatch - in-frame, worker or wait: never asks the worker twice for one request
 add_executable(test_mesh_dispatch test_mesh_dispatch.cpp)
 target_link_libraries(test_mesh_dispatch PRIVATE materializr_core gtest gtest_main)

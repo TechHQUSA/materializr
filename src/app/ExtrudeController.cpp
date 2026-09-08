@@ -1,5 +1,6 @@
 #include "ui/LengthField.h"
 #include "ExtrudeController.h"
+#include "core/BodyChanges.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/Operation.h"
@@ -199,6 +200,7 @@ bool ExtrudeController::syncLiveOp(Operation& op) {
 // reaches (BRepAlgoAPI_Cut hands the body straight back, valid and unchanged).
 // Refusing leaves the op OPEN so the distance can be pushed further or reversed.
 void ExtrudeController::commit(const IopContext& ctx) {
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (active() && m_mode == ExtrudeMode::Subtract) {
         if (m_cutAllBodies) {
             const std::vector<int> targets = resolveAllCutTargets(ctx);
@@ -268,7 +270,6 @@ void ExtrudeController::commitCutAll(const IopContext& ctx,
         ctx.toast(msg);
     }
     ctx.selection.clear();
-    ctx.markMeshesDirty();
     teardown();
 }
 

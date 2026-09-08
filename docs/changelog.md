@@ -7,6 +7,12 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Interactive previews no longer re-tessellate every body on a many-body
+  project.** Pattern, loft, boundary fill, patch, extrude, revolve and the
+  other live previews raised the full-rebuild flag on every frame, so the
+  viewport walked every visible body, dropped the hover-pick cache and
+  re-sliced the whole Section View once per drag frame. Each edit now marks
+  only the bodies whose shape or visibility actually changed.
 - **Selecting a face the mesher cannot triangulate no longer re-runs the mesher
   on every frame.** The selection tint meshes a face on demand when it has no
   triangulation, and a face that cannot be meshed failed that attempt again on

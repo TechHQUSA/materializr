@@ -19,6 +19,7 @@
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
 #include "viewport/MeshDispatch.h"
+#include "core/BodyChanges.h"
 #include <gp_Trsf.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
@@ -549,6 +550,13 @@ private:
     // leaving the rest of the (potentially 100+) bodies untouched. Critical
     // for push/pull preview smoothness on complex projects.
     void markBodyDirty(int bodyId) { if (bodyId >= 0) m_dirtyBodyIds.insert(bodyId); }
+    // Marks dirty, when the returned scope closes, every body whose shape or
+    // visibility changed since it was created. Hold it for the whole edit:
+    //     auto trackBodies = trackBodyChanges();
+    // Replaces the blanket m_meshesDirty = true after an interactive op.
+    materializr::BodyChangeScope trackBodyChanges() {
+        return materializr::BodyChangeScope(*m_document, [this](int id) { markBodyDirty(id); });
+    }
 
     // If `sketchId`'s Sketch has a sourceBodyId but no sourceFace (typical
     // for a sketch reloaded from a project file), walk the source body's

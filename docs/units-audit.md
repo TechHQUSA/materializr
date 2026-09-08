@@ -108,20 +108,20 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/Application_Viewport.cpp:7375 | `return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;` |
 | CONVERTED | src/app/Application_Viewport.cpp:7410 | `const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)` |
 | angle | src/app/Application_Viewport.cpp:7411 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
-| CONVERTED | src/app/EdgeOpController.cpp:828 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
-| CONVERTED | src/app/EdgeOpController.cpp:841 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
-| CONVERTED | src/app/EdgeOpController.cpp:849 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
-| CONVERTED | src/app/EdgeOpController.cpp:863 | `materializr::lengthStepperRow("edgeStep", &m_value,` |
-| CONVERTED | src/app/EdgeOpController.cpp:886 | `if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, ` |
-| CONVERTED | src/app/EdgeOpController.cpp:895 | `(void)materializr::parseLength(m_inputBuf2, m_value2);` |
-| CONVERTED | src/app/EdgeOpController.cpp:900 | `if (materializr::parseLength(m_inputBuf2, p2) &&` |
-| CONVERTED | src/app/EdgeOpController.cpp:910 | `materializr::lengthStepperRow("edgeStep2", &m_value2,` |
-| CONVERTED | src/app/EdgeOpController.cpp:934 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
-| CONVERTED | src/app/ExtrudeController.cpp:396 | `if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {` |
-| CONVERTED | src/app/ExtrudeController.cpp:412 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
-| CONVERTED | src/app/ExtrudeController.cpp:419 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
-| CONVERTED | src/app/ExtrudeController.cpp:432 | `materializr::lengthStepperRow("extrudeStep", &m_distance,` |
-| CONVERTED | src/app/ExtrudeController.cpp:478 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
+| CONVERTED | src/app/EdgeOpController.cpp:812 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
+| CONVERTED | src/app/EdgeOpController.cpp:825 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/EdgeOpController.cpp:833 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:847 | `materializr::lengthStepperRow("edgeStep", &m_value,` |
+| CONVERTED | src/app/EdgeOpController.cpp:870 | `if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, ` |
+| CONVERTED | src/app/EdgeOpController.cpp:879 | `(void)materializr::parseLength(m_inputBuf2, m_value2);` |
+| CONVERTED | src/app/EdgeOpController.cpp:884 | `if (materializr::parseLength(m_inputBuf2, p2) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:894 | `materializr::lengthStepperRow("edgeStep2", &m_value2,` |
+| CONVERTED | src/app/EdgeOpController.cpp:918 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/ExtrudeController.cpp:397 | `if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {` |
+| CONVERTED | src/app/ExtrudeController.cpp:413 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
+| CONVERTED | src/app/ExtrudeController.cpp:420 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/ExtrudeController.cpp:433 | `materializr::lengthStepperRow("extrudeStep", &m_distance,` |
+| CONVERTED | src/app/ExtrudeController.cpp:479 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
 | CONVERTED | src/app/FaceOpControllers.cpp:124 | `if (materializr::amountLengthField("shellAmt", nullptr, &m_thickness, /*allowSign=*/false, 0.1f, 20.0f)) {` |
 | CONVERTED | src/app/FaceOpControllers.cpp:140 | `(void)materializr::parseLength(m_inputBuf, m_thickness);` |
 | CONVERTED | src/app/FaceOpControllers.cpp:147 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
@@ -281,20 +281,20 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application.cpp:6495 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
 | comment | src/app/Application.cpp:6555 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
 | comment | src/app/Application.cpp:6556 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
-| comment | src/app/Application.h:619 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
-| comment | src/app/Application.h:894 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
-| comment | src/app/Application.h:896 | `// 300 mm because it reads as a round number in the units that needed` |
-| comment | src/app/Application.h:898 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
-| comment | src/app/Application.h:901 | `// 40 mm and this never engages, so the common case does not move.` |
-| comment | src/app/Application.h:903 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
-| comment | src/app/Application.h:909 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
-| comment | src/app/Application.h:1107 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
-| comment | src/app/Application.h:1310 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
-| comment | src/app/Application.h:1316 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
-| comment | src/app/Application.h:1402 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
-| comment | src/app/Application.h:1404 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
-| comment | src/app/Application.h:1620 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
-| comment | src/app/Application.h:2075 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
+| comment | src/app/Application.h:627 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
+| comment | src/app/Application.h:902 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
+| comment | src/app/Application.h:904 | `// 300 mm because it reads as a round number in the units that needed` |
+| comment | src/app/Application.h:906 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
+| comment | src/app/Application.h:909 | `// 40 mm and this never engages, so the common case does not move.` |
+| comment | src/app/Application.h:911 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
+| comment | src/app/Application.h:917 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
+| comment | src/app/Application.h:1115 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
+| comment | src/app/Application.h:1318 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
+| comment | src/app/Application.h:1324 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
+| comment | src/app/Application.h:1410 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
+| comment | src/app/Application.h:1412 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
+| comment | src/app/Application.h:1628 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
+| comment | src/app/Application.h:2083 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
 | comment | src/app/Application_Dialogs.cpp:907 | `// mm mode only makes sense for a single body - multi-body scale needs a` |
 | comment | src/app/Application_Dialogs.cpp:913 | `// Resolve the (single-body) bbox now so mm-mode fields can pre-fill from` |
 | identifier/other | src/app/Application_Dialogs.cpp:952 | `const bool mm = (m_scaleUnitMode == ScaleUnitMode::Millimeter);` |
@@ -359,16 +359,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application_Viewport.cpp:6196 | `// user lands within 0.4 mm of the previous click -` |
 | comment | src/app/Application_Viewport.cpp:7372 | `// The pad edits in the display unit; the floor is mm.` |
 | comment | src/app/Application_Viewport.cpp:7406 | `// Converting those display->mm made a typed 180 deg arrive` |
-| diagnostic | src/app/EdgeOpController.cpp:556 | `std::fprintf(stdout, "%s edited to %.1f mm\n",` |
-| diagnostic | src/app/EdgeOpController.cpp:565 | `std::fprintf(stdout, "%s %.1f mm committed\n",` |
-| comment | src/app/EdgeOpController.cpp:602 | `// visible arrow length (1 mm single / 0.6 mm per chamfer arrow) keeps the hit` |
-| comment | src/app/EdgeOpController.cpp:679 | `// the edge grows the value (>= 0.1 mm); dragging back toward or` |
-| comment | src/app/EdgeOpController.cpp:683 | `// Quantise the drag to the displayed precision (0.1 mm): every` |
-| comment | src/app/EdgeOpController.cpp:687 | `m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm` |
-| comment | src/app/EdgeOpController.cpp:759 | `// Minimum 1 mm visible even at value 0 so the handle can be seen and` |
-| diagnostic | src/app/ExtrudeController.cpp:257 | `std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",` |
-| diagnostic | src/app/ExtrudeController.cpp:281 | `std::fprintf(stdout, "Extruded %.1f mm\n", m_distance);` |
-| diagnostic | src/app/ExtrudeController.cpp:290 | `std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",` |
+| diagnostic | src/app/EdgeOpController.cpp:540 | `std::fprintf(stdout, "%s edited to %.1f mm\n",` |
+| diagnostic | src/app/EdgeOpController.cpp:549 | `std::fprintf(stdout, "%s %.1f mm committed\n",` |
+| comment | src/app/EdgeOpController.cpp:586 | `// visible arrow length (1 mm single / 0.6 mm per chamfer arrow) keeps the hit` |
+| comment | src/app/EdgeOpController.cpp:663 | `// the edge grows the value (>= 0.1 mm); dragging back toward or` |
+| comment | src/app/EdgeOpController.cpp:667 | `// Quantise the drag to the displayed precision (0.1 mm): every` |
+| comment | src/app/EdgeOpController.cpp:671 | `m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm` |
+| comment | src/app/EdgeOpController.cpp:743 | `// Minimum 1 mm visible even at value 0 so the handle can be seen and` |
+| diagnostic | src/app/ExtrudeController.cpp:259 | `std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",` |
+| diagnostic | src/app/ExtrudeController.cpp:282 | `std::fprintf(stdout, "Extruded %.1f mm\n", m_distance);` |
+| diagnostic | src/app/ExtrudeController.cpp:291 | `std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",` |
 | comment | src/app/FaceOpControllers.cpp:159 | `// Snap to 0.1 mm - wall thicknesses are almost always in tenths, and a` |
 | comment | src/app/FaceOpControllers.cpp:160 | `// free-floating 3.47 mm slider value is just noise.` |
 | comment | src/app/FaceOpControllers.cpp:968 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |

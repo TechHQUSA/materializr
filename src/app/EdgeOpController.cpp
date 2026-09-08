@@ -1,5 +1,6 @@
 #include "ui/LengthField.h"
 #include "EdgeOpController.h"
+#include "core/BodyChanges.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/NumParse.h"
@@ -388,27 +389,10 @@ void EdgeOpController::update(const IopContext& ctx) {
     // editStep (the op snaps back to its last good parameters), so the preview
     // can never strand the model.
     if (m_value < 0.01f) return;   // don't preview "remove" mid-drag
-    std::map<int, TopoDS_Shape> before;
-    for (int id : ctx.doc.getAllBodyIds()) {
-        try { before[id] = ctx.doc.getBody(id); } catch (...) {}
-    }
+    // Partial remesh: re-tessellate only the bodies the replay changed.
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     writeEditedParams(ctx, m_value, m_twoDist ? m_value2 : -1.0f);
     setPreviewOk(m_editPreview.replay(m_editingIndex, ctx.doc, ctx.history));
-    // Partial remesh: re-tessellate only the bodies the replay changed.
-    if (ctx.markBodyDirty) {
-        std::set<int> now;
-        for (int id : ctx.doc.getAllBodyIds()) {
-            now.insert(id);
-            auto it = before.find(id);
-            TopoDS_Shape cur;
-            try { cur = ctx.doc.getBody(id); } catch (...) {}
-            if (it == before.end() || !it->second.IsEqual(cur))
-                ctx.markBodyDirty(id);
-        }
-        for (auto& [id, s] : before) if (!now.count(id)) ctx.markBodyDirty(id);
-    } else {
-        ctx.markMeshesDirty();
-    }
 }
 
 bool EdgeOpController::updateEdgeOp(const IopContext& ctx) {
