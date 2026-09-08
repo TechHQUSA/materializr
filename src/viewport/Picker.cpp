@@ -278,6 +278,37 @@ int Picker::pickMeshBody(const glm::vec3& origin, const glm::vec3& dir,
     return hitFaceIdx;
 }
 
+const Picker::EdgeCacheEntry& Picker::edgePolylines(const TopoDS_Shape& shape)
+{
+    const void* key = shape.TShape().get();
+    auto it = m_edgeCache.find(key);
+    if (it != m_edgeCache.end() && it->second.shape.IsSame(shape))
+        return it->second;
+
+    EdgeCacheEntry entry;
+    entry.shape = shape;
+    for (TopExp_Explorer exp(shape, TopAbs_EDGE); exp.More(); exp.Next()) {
+        EdgePolyline pl;
+        pl.edge = TopoDS::Edge(exp.Current());
+        try {
+            BRepAdaptor_Curve curve(pl.edge);
+            GCPnts_TangentialDeflection discretizer(curve, 0.1, 0.1);
+            const int nPts = discretizer.NbPoints();
+            pl.pts.reserve(nPts > 0 ? static_cast<size_t>(nPts) : 0);
+            for (int i = 1; i <= nPts; ++i) {
+                gp_Pnt p = discretizer.Value(i);
+                pl.pts.emplace_back(static_cast<float>(p.X()),
+                                    static_cast<float>(p.Y()),
+                                    static_cast<float>(p.Z()));
+            }
+        } catch (...) {
+            continue;
+        }
+        if (pl.pts.size() >= 2) entry.edges.push_back(std::move(pl));
+    }
+    return m_edgeCache.insert_or_assign(key, std::move(entry)).first->second;
+}
+
 void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
                              const glm::vec3& facePlaneNormal,
                              float screenX, float screenY, float vpW, float vpH,
@@ -305,45 +336,35 @@ void Picker::findNearestEdge(const TopoDS_Shape& shape, const glm::vec3& hitPt,
     glm::vec3 planeN = havePlaneCheck ? glm::normalize(facePlaneNormal) : glm::vec3(0.0f);
     const float planeTol = 0.3f;
 
-    for (TopExp_Explorer exp(shape, TopAbs_EDGE); exp.More(); exp.Next()) {
-        TopoDS_Edge edge = TopoDS::Edge(exp.Current());
-        try {
-            BRepAdaptor_Curve curve(edge);
-            GCPnts_TangentialDeflection discretizer(curve, 0.1, 0.1);
-            int nPts = discretizer.NbPoints();
+    const EdgeCacheEntry& cache = edgePolylines(shape);
+    for (const EdgePolyline& pl : cache.edges) {
+        for (size_t i = 0; i + 1 < pl.pts.size(); ++i) {
+            const glm::vec3& w1 = pl.pts[i];
+            const glm::vec3& w2 = pl.pts[i + 1];
 
-            for (int i = 1; i < nPts; i++) {
-                gp_Pnt p1 = discretizer.Value(i);
-                gp_Pnt p2 = discretizer.Value(i + 1);
-                glm::vec3 w1(p1.X(), p1.Y(), p1.Z());
-                glm::vec3 w2(p2.X(), p2.Y(), p2.Z());
+            glm::vec2 s1 = worldToScreen(w1);
+            glm::vec2 s2 = worldToScreen(w2);
 
-                glm::vec2 s1 = worldToScreen(w1);
-                glm::vec2 s2 = worldToScreen(w2);
-
-                glm::vec2 seg = s2 - s1;
-                float segLen2 = glm::dot(seg, seg);
-                float t = 0.0f;
-                float d;
-                if (segLen2 < 1e-6f) {
-                    d = glm::length(mouse - s1);
-                } else {
-                    t = glm::clamp(glm::dot(mouse - s1, seg) / segLen2, 0.0f, 1.0f);
-                    d = glm::length(mouse - (s1 + t * seg));
-                }
-
-                // Skip edge segments hidden behind the picked face's plane.
-                glm::vec3 wp = w1 + t * (w2 - w1);
-                if (havePlaneCheck &&
-                    glm::dot(wp - hitPt, planeN) < -planeTol) continue;
-
-                if (d < screenDist) {
-                    screenDist = d;
-                    nearestEdge = edge;
-                }
+            glm::vec2 seg = s2 - s1;
+            float segLen2 = glm::dot(seg, seg);
+            float t = 0.0f;
+            float d;
+            if (segLen2 < 1e-6f) {
+                d = glm::length(mouse - s1);
+            } else {
+                t = glm::clamp(glm::dot(mouse - s1, seg) / segLen2, 0.0f, 1.0f);
+                d = glm::length(mouse - (s1 + t * seg));
             }
-        } catch (...) {
-            continue;
+
+            // Skip edge segments hidden behind the picked face's plane.
+            glm::vec3 wp = w1 + t * (w2 - w1);
+            if (havePlaneCheck &&
+                glm::dot(wp - hitPt, planeN) < -planeTol) continue;
+
+            if (d < screenDist) {
+                screenDist = d;
+                nearestEdge = pl.edge;
+            }
         }
     }
 }
@@ -361,19 +382,20 @@ PickResult Picker::pick(float screenX, float screenY,
 
     std::vector<int> bodyIds = doc.getAllBodyIds();
 
-    // Drop mesh-pick cache entries whose body is gone or was rebuilt with a new
-    // TShape (delete, transform-copy, decimate, boolean). Without this the cache
-    // would pin every imported/edited mesh's shape + triangle list alive for the
-    // whole session. Cheap: there are only ever a handful of mesh bodies.
-    if (!m_meshCache.empty()) {
+    // Drop cache entries whose body is gone or was rebuilt with a new TShape
+    // (delete, transform-copy, decimate, boolean). Without this the caches
+    // would pin every edited body's shape + triangle / polyline lists alive
+    // for the whole session. Cheap: one pointer per body.
+    if (!m_meshCache.empty() || !m_edgeCache.empty()) {
         std::unordered_set<const void*> live;
         for (int id : bodyIds) {
-            if (!doc.isBodyMesh(id)) continue;
             const TopoDS_Shape& s = doc.getBody(id);
             if (!s.IsNull()) live.insert(s.TShape().get());
         }
         for (auto it = m_meshCache.begin(); it != m_meshCache.end();)
             it = live.count(it->first) ? std::next(it) : m_meshCache.erase(it);
+        for (auto it = m_edgeCache.begin(); it != m_edgeCache.end();)
+            it = live.count(it->first) ? std::next(it) : m_edgeCache.erase(it);
     }
 
     for (int bodyId : bodyIds) {

@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Edge.hxx>
 #include <array>
 #include <optional>
 #include <unordered_map>
@@ -89,6 +90,16 @@ private:
         std::vector<MeshTri> tris;
     };
     std::unordered_map<const void*, MeshCacheEntry> m_meshCache;
+
+    // World-space polylines of every edge of a body, so a hovered frame pays
+    // a screen projection per segment instead of GCPnts_TangentialDeflection
+    // over every edge (0.6-2 ms per frame on ordinary parts, far more on a
+    // thread's helices). Keyed by TShape; IsSame re-validates the Location
+    // the baked points depend on. Pruned in pick() alongside m_meshCache.
+    struct EdgePolyline { TopoDS_Edge edge; std::vector<glm::vec3> pts; };
+    struct EdgeCacheEntry { TopoDS_Shape shape; std::vector<EdgePolyline> edges; };
+    std::unordered_map<const void*, EdgeCacheEntry> m_edgeCache;
+    const EdgeCacheEntry& edgePolylines(const TopoDS_Shape& shape);
 
     // Find the nearest edge to a world-space point, return screen distance.
     // `facePlaneNormal` is the outward (camera-facing) normal of the picked

@@ -552,9 +552,9 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/viewport/GridScale.h:21 | `// 100 mm view with nothing to show.` |
 | comment | src/viewport/GridScale.h:53 | `// Framing a fixed count of DISPLAY units is right in spirit - 40 mm is a fine` |
 | comment | src/viewport/GridScale.h:65 | `// shows a sensible number of cells, but a 1 ft base makes it 12192 mm on its` |
-| comment | src/viewport/Picker.cpp:301 | `// plane is positive in front and negative behind. The 0.3 mm slack covers` |
-| comment | src/viewport/Picker.cpp:302 | `// tessellation noise on curved silhouettes while rejecting any wall ≥ 0.3 mm` |
-| comment | src/viewport/Picker.cpp:479 | `// is the renderer's (chords up to 0.5 mm at Low` |
+| comment | src/viewport/Picker.cpp:332 | `// plane is positive in front and negative behind. The 0.3 mm slack covers` |
+| comment | src/viewport/Picker.cpp:333 | `// tessellation noise on curved silhouettes while rejecting any wall ≥ 0.3 mm` |
+| comment | src/viewport/Picker.cpp:501 | `// is the renderer's (chords up to 0.5 mm at Low` |
 | comment | src/viewport/RefImageRenderer.cpp:194 | `// zoom (bias shrinks with depth precision, the 0.05 mm lift doesn't).` |
 | comment | src/viewport/RefImageRenderer.cpp:211 | `// Lift the quad 0.05 mm off its plane: the ground grid renders BEFORE` |
 | comment | src/viewport/RefImageRenderer.cpp:214 | `// plane - the common case). 0.05 mm is invisible for tracing and the` |

@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -21,6 +22,10 @@
 #include <Poly_Triangulation.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
+
+#include <algorithm>
 
 #include <vector>
 
@@ -97,6 +102,51 @@ TEST(Picker, DoesNotMeshABodyTheRendererNeverMeshed) {
     PickResult r = pickCentre(box, doc);
     EXPECT_FALSE(r.hit);
     for (const void* t : triangulations(box)) EXPECT_EQ(t, nullptr);
+}
+
+TEST(Picker, RepeatedHoverPicksAgree) {
+    // The hovered-frame path caches each body's edge polylines; a cache hit
+    // must return exactly what the cold pick returned.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(100.0, 60.0, 10.0).Shape();
+    meshLikeRendererLow(box);
+    Document doc;
+    doc.addBody(box, "plate");
+    Camera cam = framing(box);
+    Picker picker;
+    PickResult a = picker.pick(kW * 0.4f, kH * 0.45f, kW, kH, cam, doc);
+    PickResult b = picker.pick(kW * 0.4f, kH * 0.45f, kW, kH, cam, doc);
+    ASSERT_TRUE(a.hit);
+    ASSERT_FALSE(a.nearestEdge.IsNull());
+    EXPECT_TRUE(a.nearestEdge.IsSame(b.nearestEdge));
+    EXPECT_FLOAT_EQ(a.edgeScreenDist, b.edgeScreenDist);
+}
+
+TEST(Picker, NearestEdgeFollowsABodyThatMoved) {
+    // Same TShape, new Location: a polyline cache keyed on the TShape alone
+    // would keep reporting edges at the old position. The moved box spans
+    // z in [20, 30]; the original spans [0, 10].
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(100.0, 60.0, 10.0).Shape();
+    meshLikeRendererLow(box);
+    Document doc;
+    const int id = doc.addBody(box, "plate");
+    Picker picker;
+    PickResult a = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, framing(box), doc);
+    ASSERT_TRUE(a.hit);
+    ASSERT_FALSE(a.nearestEdge.IsNull());
+
+    gp_Trsf t;
+    t.SetTranslation(gp_Vec(0.0, 0.0, 20.0));
+    TopoDS_Shape moved = BRepBuilderAPI_Transform(box, t, /*copy=*/false).Shape();
+    ASSERT_TRUE(moved.IsPartner(box));
+    doc.updateBody(id, moved);
+
+    PickResult b = picker.pick(kW * 0.5f, kH * 0.5f, kW, kH, framing(moved), doc);
+    ASSERT_TRUE(b.hit);
+    ASSERT_FALSE(b.nearestEdge.IsNull());
+    double zMin = 1e9;
+    for (TopExp_Explorer v(b.nearestEdge, TopAbs_VERTEX); v.More(); v.Next())
+        zMin = std::min(zMin, BRep_Tool::Pnt(TopoDS::Vertex(v.Current())).Z());
+    EXPECT_GE(zMin, 19.9);
 }
 
 TEST(Picker, HitPointIsSnappedToTheExactSurface) {
