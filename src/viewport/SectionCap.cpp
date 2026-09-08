@@ -1,14 +1,13 @@
-// Section cap from the triangulation. The previous implementation intersected
-// the body with a half-space (BRepAlgoAPI_Common) and meshed the result: exact,
-// but 735 ms on a 1683-face plate and 210 ms on a 54-face fused part, per
-// recompute, and far worse on swept surfaces. Slicing the mesh the viewport
-// already draws is a few milliseconds and lands on the same pixels.
+// Section outline and cap from the triangulation. The previous implementation
+// ran two OCCT booleans per body: BRepAlgoAPI_Section for the outline and a
+// half-space BRepAlgoAPI_Common, re-meshed, for the cap (735 ms on a 1683-face
+// plate and 210 ms on a 54-face fused part per recompute, far worse on swept
+// surfaces). Slicing the mesh the viewport already draws gives both in a few
+// milliseconds and lands on the same pixels as the clipped body.
 #include "SectionCap.h"
 
-#include <BRepBndLib.hxx>
 #include <BRepMesh_Triangulator.hxx>
 #include <BRep_Tool.hxx>
-#include <Bnd_Box.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Vector.hxx>
 #include <Poly_Triangle.hxx>
@@ -27,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdint>
 #include <unordered_map>
 #include <utility>
@@ -70,30 +70,36 @@ struct Slice {
 };
 
 // Cut every triangle of every meshed face; each crossing yields one segment.
-void sliceTriangulation(const TopoDS_Shape& shape, const gp_Ax3& frame, Slice& out)
+// Also reports the signed-distance range of all nodes for the straddle check.
+void sliceTriangulation(const std::vector<FaceMesh>& faces, const gp_Ax3& frame, Slice& out,
+                        double& dLo, double& dHi)
 {
     const gp_Pnt o = frame.Location();
     const gp_Vec n(frame.Direction()), ex(frame.XDirection()), ey(frame.YDirection());
     auto to2d = [&](const gp_Pnt& p) { gp_Vec r(o, p); return gp_Pnt2d(r.Dot(ex), r.Dot(ey)); };
+    auto placed = [&](const FaceMesh& f, int idx) {
+        gp_Pnt p = f.tri->Node(idx);
+        if (f.moved) p.Transform(f.trsf);
+        return p;
+    };
 
-    for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
-        TopLoc_Location loc;
-        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(fe.Current()), loc);
-        if (tri.IsNull()) continue;
-        const gp_Trsf trsf = loc.Transformation();
-        const bool moved = loc.IsIdentity() == Standard_False;
-        for (int t = 1; t <= tri->NbTriangles(); ++t) {
+    std::vector<double> dist;
+    for (const FaceMesh& f : faces) {
+        if (f.tri.IsNull()) continue;
+        const int nbNodes = f.tri->NbNodes();
+        dist.assign(static_cast<size_t>(nbNodes) + 1, 0.0);
+        for (int k = 1; k <= nbNodes; ++k) {
+            dist[k] = gp_Vec(o, placed(f, k)).Dot(n);
+            dLo = std::min(dLo, dist[k]);
+            dHi = std::max(dHi, dist[k]);
+        }
+        for (int t = 1; t <= f.tri->NbTriangles(); ++t) {
             int idx[3];
-            tri->Triangle(t).Get(idx[0], idx[1], idx[2]);
-            gp_Pnt p[3];
-            double d[3];
+            f.tri->Triangle(t).Get(idx[0], idx[1], idx[2]);
             bool pos[3];
             int nPos = 0;
             for (int k = 0; k < 3; ++k) {
-                p[k] = tri->Node(idx[k]);
-                if (moved) p[k].Transform(trsf);
-                d[k] = gp_Vec(o, p[k]).Dot(n);
-                pos[k] = d[k] >= 0.0; // on the plane counts as the discarded side
+                pos[k] = dist[idx[k]] >= 0.0; // on the plane counts as the discarded side
                 nPos += pos[k] ? 1 : 0;
             }
             if (nPos == 0 || nPos == 3) continue;
@@ -101,12 +107,15 @@ void sliceTriangulation(const TopoDS_Shape& shape, const gp_Ax3& frame, Slice& o
             int a = 0;
             for (int k = 0; k < 3; ++k)
                 if ((nPos == 1) == pos[k]) a = k;
+            const gp_Pnt pa = placed(f, idx[a]);
+            const double da = dist[idx[a]];
             gp_Pnt2d q[2];
             int qi = 0;
             for (int k = 0; k < 3; ++k) {
                 if (k == a) continue;
-                const double s = d[a] / (d[a] - d[k]);
-                q[qi++] = to2d(gp_Pnt(p[a].XYZ() + (p[k].XYZ() - p[a].XYZ()) * s));
+                const gp_Pnt pk = placed(f, idx[k]);
+                const double s = da / (da - dist[idx[k]]);
+                q[qi++] = to2d(gp_Pnt(pa.XYZ() + (pk.XYZ() - pa.XYZ()) * s));
             }
             // Snap first, then drop only a segment whose ends are one vertex.
             // Dropping by raw length instead left a hole where a crossing of
@@ -118,10 +127,15 @@ void sliceTriangulation(const TopoDS_Shape& shape, const gp_Ax3& frame, Slice& o
     }
 }
 
-// Follow segments end to end. Loops that close are returned; chains that do
-// not (an unmeshed face, a non-manifold junction) are dropped: they cannot be
-// filled and no repair is attempted.
-std::vector<std::vector<int>> closedLoops(const Slice& sl)
+// Follow segments end to end. Loops that close are filled and outlined;
+// chains that do not (an unmeshed face, a non-manifold junction) are only
+// outlined. No repair is attempted.
+struct Chains {
+    std::vector<std::vector<int>> loops;
+    std::vector<std::vector<int>> open;
+};
+
+Chains followSegments(const Slice& sl)
 {
     std::vector<std::vector<int>> adj(sl.pts.size());
     for (size_t i = 0; i < sl.segs.size(); ++i) {
@@ -129,17 +143,17 @@ std::vector<std::vector<int>> closedLoops(const Slice& sl)
         adj[sl.segs[i].second].push_back(static_cast<int>(i));
     }
     std::vector<bool> used(sl.segs.size(), false);
-    std::vector<std::vector<int>> loops;
+    Chains out;
     for (size_t s0 = 0; s0 < sl.segs.size(); ++s0) {
         if (used[s0]) continue;
         used[s0] = true;
         const int start = sl.segs[s0].first;
         int cur = sl.segs[s0].second;
-        std::vector<int> loop{start};
+        std::vector<int> chain{start};
         bool closed = false;
         while (true) {
             if (cur == start) { closed = true; break; }
-            loop.push_back(cur);
+            chain.push_back(cur);
             int next = -1;
             for (int s : adj[cur])
                 if (!used[s]) { next = s; break; }
@@ -147,9 +161,10 @@ std::vector<std::vector<int>> closedLoops(const Slice& sl)
             used[next] = true;
             cur = sl.segs[next].first == cur ? sl.segs[next].second : sl.segs[next].first;
         }
-        if (closed && loop.size() >= 3) loops.push_back(std::move(loop));
+        if (closed && chain.size() >= 3) out.loops.push_back(std::move(chain));
+        else if (!closed && chain.size() >= 2) out.open.push_back(std::move(chain));
     }
-    return loops;
+    return out;
 }
 
 // Drop vertices that sit on the line through their neighbours. A plane that
@@ -249,38 +264,56 @@ void fillRegion(const std::vector<gp_Pnt2d>& pts, const std::vector<Ring>& rings
 
 } // namespace
 
-bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
-                       std::vector<float>& outPositions)
+std::vector<FaceMesh> faceMeshes(const TopoDS_Shape& shape)
 {
-    if (shape.IsNull()) return false;
-    const size_t startSize = outPositions.size();
-    try {
-        // The body must straddle the plane; a plane tangent to a face is no cut.
-        Bnd_Box bbox;
-        BRepBndLib::Add(shape, bbox);
-        if (bbox.IsVoid()) return false;
-        double xmin, ymin, zmin, xmax, ymax, zmax;
-        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-        const gp_Pnt loc = cuttingPlane.Location();
-        const gp_Vec n(cuttingPlane.Axis().Direction());
-        double dLo = 1e300, dHi = -1e300;
-        for (int c = 0; c < 8; ++c) {
-            const gp_Pnt corner((c & 1) ? xmax : xmin, (c & 2) ? ymax : ymin, (c & 4) ? zmax : zmin);
-            const double d = gp_Vec(loc, corner).Dot(n);
-            dLo = std::min(dLo, d);
-            dHi = std::max(dHi, d);
-        }
-        const double straddleEps = 1e-6;
-        if (!(dLo < -straddleEps && dHi > straddleEps)) return false;
+    std::vector<FaceMesh> out;
+    if (shape.IsNull()) return out;
+    for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(fe.Current()), loc);
+        if (tri.IsNull()) continue;
+        out.push_back({tri, loc.Transformation(), loc.IsIdentity() == Standard_False});
+    }
+    return out;
+}
 
+bool sliceSection(const std::vector<FaceMesh>& faces, const gp_Pln& cuttingPlane,
+                  SectionSlice& out)
+{
+    const size_t lines0 = out.lines.size(), cap0 = out.cap.size();
+    try {
         const gp_Ax3 frame = cuttingPlane.Position();
         Slice sl;
-        sliceTriangulation(shape, frame, sl);
+        double dLo = std::numeric_limits<double>::infinity();
+        double dHi = -std::numeric_limits<double>::infinity();
+        sliceTriangulation(faces, frame, sl, dLo, dHi);
+        // The body must straddle the plane; a plane tangent to a face is no cut.
+        const double straddleEps = 1e-6;
+        if (!(dLo < -straddleEps && dHi > straddleEps)) return false;
         if (sl.segs.empty()) return false;
-        std::vector<std::vector<int>> loops = closedLoops(sl);
-        if (loops.empty()) return false;
+        Chains ch = followSegments(sl);
+        std::vector<std::vector<int>>& loops = ch.loops;
         for (auto& loop : loops) mergeCollinear(sl.pts, loop);
 
+        // Outline: every loop edge, plus the open chains as they are.
+        const gp_Pnt o = frame.Location();
+        const gp_Vec ex(frame.XDirection()), ey(frame.YDirection());
+        auto emit = [&](const gp_Pnt2d& a, const gp_Pnt2d& b) {
+            for (const gp_Pnt2d* p : {&a, &b}) {
+                const gp_XYZ w = o.XYZ() + ex.XYZ() * p->X() + ey.XYZ() * p->Y();
+                out.lines.push_back(static_cast<float>(w.X()));
+                out.lines.push_back(static_cast<float>(w.Y()));
+                out.lines.push_back(static_cast<float>(w.Z()));
+            }
+        };
+        for (const auto& loop : loops)
+            for (size_t i = 0, n = loop.size(); i < n; ++i)
+                emit(sl.pts[loop[i]], sl.pts[loop[(i + 1) % n]]);
+        for (const auto& chain : ch.open)
+            for (size_t i = 0; i + 1 < chain.size(); ++i)
+                emit(sl.pts[chain[i]], sl.pts[chain[i + 1]]);
+
+        if (loops.empty()) return out.lines.size() > lines0;
         // Nesting: a loop inside an even number of others bounds material, an
         // odd number a hole; each hole belongs to the smallest loop around it.
         const size_t L = loops.size();
@@ -305,13 +338,23 @@ bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
             for (size_t h = 0; h < L; ++h)
                 if (depth[h] == depth[i] + 1 && parent[h] == static_cast<int>(i))
                     rings.push_back({&loops[h], area[h] > 0.0}); // holes clockwise
-            fillRegion(sl.pts, rings, frame, outPositions);
+            fillRegion(sl.pts, rings, frame, out.cap);
         }
     } catch (...) {
-        outPositions.resize(startSize);
+        out.lines.resize(lines0);
+        out.cap.resize(cap0);
         return false;
     }
-    return outPositions.size() > startSize;
+    return out.lines.size() > lines0 || out.cap.size() > cap0;
+}
+
+bool computeSectionCap(const TopoDS_Shape& shape, const gp_Pln& cuttingPlane,
+                       std::vector<float>& outPositions)
+{
+    SectionSlice slice;
+    if (!sliceSection(faceMeshes(shape), cuttingPlane, slice) || slice.cap.empty()) return false;
+    outPositions.insert(outPositions.end(), slice.cap.begin(), slice.cap.end());
+    return true;
 }
 
 } // namespace materializr

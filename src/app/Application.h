@@ -1450,8 +1450,7 @@ private:
     float  m_sectionOffset     = 0.0f;
     bool   m_sectionFlip       = false;
     bool   m_sectionDirty      = true; // recompute overlay curves next frame
-    bool   m_sectionPending    = false;   // overlay recompute waiting for rest
-    uint32_t m_sectionRestMs   = 0;       // last plane change (debounce clock)
+    bool   m_sectionPending    = false;   // overlay recompute waiting for a free worker
     // Async overlay compute (one recompute on a threaded body took 100s).
     std::future<SectionView::Result> m_sectionFut;
     std::shared_ptr<std::atomic<bool>> m_sectionCancel;

@@ -16,6 +16,11 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
+#include <Poly_Triangulation.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax2.hxx>
@@ -29,6 +34,9 @@
 #include <vector>
 
 using materializr::computeSectionCap;
+using materializr::faceMeshes;
+using materializr::SectionSlice;
+using materializr::sliceSection;
 
 namespace {
 
@@ -47,6 +55,15 @@ double capArea(const std::vector<float>& p) {
         area += 0.5 * std::sqrt(nx * nx + ny * ny + nz * nz);
     }
     return area;
+}
+
+double lineLength(const std::vector<float>& l) {
+    double len = 0.0;
+    for (size_t i = 0; i + 6 <= l.size(); i += 6) {
+        const double dx = l[i + 3] - l[i], dy = l[i + 4] - l[i + 1], dz = l[i + 5] - l[i + 2];
+        len += std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    return len;
 }
 
 // Every cap vertex lies on the plane z = height.
@@ -195,4 +212,35 @@ TEST(SectionCap, TangentPlaneNoCap) {
     EXPECT_TRUE(pos.empty());
     EXPECT_FALSE(computeSectionCap(box, gp_Pln(gp_Pnt(0, 0, 20), gp_Dir(0, 0, 1)), pos));
     EXPECT_TRUE(pos.empty());
+}
+
+TEST(SectionSlice, LinesFollowEveryLoop) {
+    // The outline is every edge of every loop: the square's four sides and
+    // the bore's polygon (a 21-gon at Medium, 31.3 mm around).
+    TopoDS_Shape hollow = boredBox();
+    meshLikeRenderer(hollow);
+    SectionSlice slice;
+    ASSERT_TRUE(sliceSection(faceMeshes(hollow), gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), slice));
+    ASSERT_FALSE(slice.cap.empty());
+    expectOnPlane(slice.lines, 10.0f);
+    EXPECT_NEAR(lineLength(slice.lines), 80.0 + 2.0 * M_PI * 5.0, 0.5);
+}
+
+TEST(SectionSlice, UnmeshedFaceStillDrawsTheRest) {
+    // Strip one side face's triangulation: the loop cannot close, so there is
+    // no cap, but the three meshed sides still draw their outline.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
+    meshLikeRenderer(box);
+    for (TopExp_Explorer e(box, TopAbs_FACE); e.More(); e.Next()) {
+        TopoDS_Face face = TopoDS::Face(e.Current());
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+        bool atXMax = true;
+        for (int i = 1; i <= tri->NbNodes(); ++i) atXMax = atXMax && tri->Node(i).X() > 19.9;
+        if (atXMax) BRep_Builder().UpdateFace(face, Handle(Poly_Triangulation)());
+    }
+    SectionSlice slice;
+    EXPECT_TRUE(sliceSection(faceMeshes(box), gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), slice));
+    EXPECT_TRUE(slice.cap.empty());
+    EXPECT_NEAR(lineLength(slice.lines), 60.0, 1e-6);
 }

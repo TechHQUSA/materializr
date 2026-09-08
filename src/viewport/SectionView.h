@@ -3,7 +3,7 @@
 #include <atomic>
 #include <glm/glm.hpp>
 #include <gp_Pln.hxx>
-#include <TopoDS_Shape.hxx>
+#include "SectionCap.h"
 #include <utility>
 #include <vector>
 
@@ -45,15 +45,19 @@ public:
     // Worker-safe computation over COPIED shapes (deep-copy the bodies -
     // live TShapes' lazy caches are touched by the render thread). `cancel`
     // aborts between bodies and mid-boolean (OCCT user-break).
-    static Result compute(
-        const std::vector<std::pair<TopoDS_Shape, glm::vec3>>& bodies,
-        const gp_Pln& cuttingPlane, const std::atomic<bool>* cancel);
+    // A body as the worker sees it: its faces' triangulations (see FaceMesh
+    // for why handles, not copies, are safe) and its colour.
+    struct BodyMesh {
+        std::vector<FaceMesh> faces;
+        glm::vec3 color;
+    };
+    static Result compute(const std::vector<BodyMesh>& bodies,
+                          const gp_Pln& cuttingPlane, const std::atomic<bool>* cancel);
     // Main thread: swap a landed result in.
     void apply(Result&& r);
 
     // Compute section curves synchronously (legacy path; the app uses
     // compute()+apply() via a worker).
-    void update();
 
     // Render section lines in viewport
     void render(const glm::mat4& view, const glm::mat4& projection);

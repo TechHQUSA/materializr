@@ -97,7 +97,6 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>
 #include <BRep_Tool.hxx>
@@ -678,26 +677,15 @@ void Application::renderViewport() {
                                              glm::vec3(n.X(), n.Y(), n.Z()));
             m_edgeRenderer->setSectionPlane(true, p,
                                             glm::vec3(n.X(), n.Y(), n.Z()));
-            // DEBOUNCED overlay recompute. The GPU clip planes above track
-            // the slider instantly; SectionView::update() runs a full OCCT
-            // plane-section + cap triangulation on the MAIN thread - on a
-            // swept-thread body (helicoid BSplines) that's seconds PER
-            // recompute, and firing it on every drag tick froze the app
-            // solid. Recompute only once the plane has RESTED for 250 ms
-            // (the overlay/cap pops in when the drag pauses).
-            // ASYNC overlay recompute. One recompute on a swept-thread body
-            // measured 100.78s - on the main thread that froze the whole
-            // app (Steve's section-view hang). The GPU clip planes above
-            // track the slider instantly; the overlay (curves + caps)
-            // computes on a WORKER from deep-copied shapes, debounced until
-            // the plane rests, newest-plane-wins (a superseded compute is
-            // user-break-cancelled mid-boolean).
-            const uint32_t nowMs = static_cast<uint32_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count());
+            // ASYNC overlay recompute. The GPU clip planes above track the
+            // slider instantly; the outline and cap are sliced from the
+            // bodies' triangulations on a WORKER (SectionCap.h), a few
+            // milliseconds per body, newest-plane-wins: a plane change while
+            // a compute is in flight cancels it and the next frame dispatches
+            // again, so the overlay follows the slider. The worker reads
+            // Handles to the faces' triangulations, not copies; see FaceMesh
+            // for why a re-mesh under it is safe.
             if (m_sectionDirty || geomChanged) {
-                m_sectionRestMs = nowMs;
                 m_sectionPending = true;
                 m_sectionDirty = false;
                 // Supersede an in-flight compute - its plane is stale.
@@ -705,8 +693,7 @@ void Application::renderViewport() {
                     m_sectionCancel->store(true);
             }
             m_sectionView->setEnabled(true);
-            if (m_sectionPending && !m_sectionFut.valid() &&
-                nowMs - m_sectionRestMs >= 100) {
+            if (m_sectionPending && !m_sectionFut.valid()) {
                 gp_Pln cutting = pl;
                 {
                     gp_Pnt o2 = cutting.Location();
@@ -714,17 +701,14 @@ void Application::renderViewport() {
                                  static_cast<double>(m_sectionOffset));
                     cutting.SetLocation(o2);
                 }
-                std::vector<std::pair<TopoDS_Shape, glm::vec3>> bodies;
+                std::vector<materializr::SectionView::BodyMesh> bodies;
                 for (int id : m_document->getAllBodyIds()) {
                     if (!m_document->isBodyVisible(id)) continue;
                     try {
                         const TopoDS_Shape& s = m_document->getBody(id);
                         if (s.IsNull()) continue;
-                        // Copy the triangulation too: the cap is sliced from
-                        // the mesh the viewport draws (see SectionCap.h).
-                        bodies.emplace_back(
-                            BRepBuilderAPI_Copy(s, Standard_True, Standard_True).Shape(),
-                            m_document->getBodyColor(id));
+                        bodies.push_back({materializr::faceMeshes(s),
+                                          m_document->getBodyColor(id)});
                     } catch (...) { continue; }
                 }
                 m_sectionCancel = std::make_shared<std::atomic<bool>>(false);
