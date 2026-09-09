@@ -567,6 +567,21 @@ size_t Application::createSession() {
     return m_sessions.size() - 1;
 }
 
+void Application::runPendingHeavyTasks() {
+    // Deferred tasks normally run at the top of the next frame. When the
+    // session that owns them is about to be swapped out or destroyed they
+    // have to run HERE instead: dropping one discards an operation the user
+    // confirmed, and letting one outlive its session would apply it to the
+    // wrong project or to a destroyed one. Each is taken out of the queue
+    // before it runs, so a throwing task costs only itself.
+    while (auto task = m_deferredHeavy.takeNext()) {
+        try {
+            task();
+        } catch (...) {
+        }
+    }
+}
+
 bool Application::switchToSession(size_t idx) {
     if (idx >= m_sessions.size()) return false;
     if (idx == m_activeSession) return true;
@@ -583,6 +598,10 @@ bool Application::switchToSession(size_t idx) {
         return false;
     }
     cancelAllInteractivePreviews();
+    // Anything queued for the between-frames slot belongs to the OUTGOING
+    // session and captured its document and history. Run it now, before the
+    // swap.
+    runPendingHeavyTasks();
     // The section cut is view state aimed at the OUTGOING project's geometry;
     // carried across it would carve the wrong model. Off on every switch.
     m_sectionEnabled = false;
@@ -600,14 +619,14 @@ bool Application::switchToSession(size_t idx) {
     if (m_sketchRenderer) m_sketchRenderer->clearCache();
     m_dirtyBodyIds.clear();
     m_meshesDirty = true;
-    // A queued heavy task holds raw Document*/History* pointers into the
-    // session being swapped out. Nothing may outlive it.
-    m_deferredHeavy.clear();
     return true;
 }
 
 void Application::closeSession(size_t idx) {
     if (idx >= m_sessions.size()) return;
+    // Before the erase below destroys a session: a queued task holds raw
+    // pointers into one, and running it late would dereference freed memory.
+    runPendingHeavyTasks();
     // The closing tab's snapshot is no longer unfinished work, and its
     // recovery index returns to the pool by virtue of the session vanishing.
     materializr::clearProjectRecovery(m_sessions[idx]->recoveryIndex);

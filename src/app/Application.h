@@ -551,6 +551,9 @@ private:
     // leaving the rest of the (potentially 100+) bodies untouched. Critical
     // for push/pull preview smoothness on complex projects.
     void markBodyDirty(int bodyId) { if (bodyId >= 0) m_dirtyBodyIds.insert(bodyId); }
+    // Drain the between-frames task queue now. Called before a session swap or
+    // close, since the queued tasks point into the session that is going away.
+    void runPendingHeavyTasks();
     // Marks dirty, when the returned scope closes, every body whose shape or
     // visibility changed since it was created. Hold it for the whole edit:
     //     auto trackBodies = trackBodyChanges();
