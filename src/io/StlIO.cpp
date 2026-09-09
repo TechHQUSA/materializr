@@ -3,6 +3,7 @@
 #include "../core/Document.h"
 
 #include <RWStl.hxx>
+
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
 
@@ -43,6 +44,9 @@
 #include <Standard_ErrorHandler.hxx>
 
 #include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <fstream>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -137,6 +141,105 @@ bool orientMeshConsistently(SimpleMesh& m) {
 
 } // namespace
 
+namespace {
+
+// What the FILE says it holds, and how that was determined.
+//
+// RWStl::ReadFile does not fail on a malformed ASCII facet: it writes a
+// complaint to the OCCT message channel, stops, and hands back whatever it
+// read. A file written by assimp puts a blank line between every endfacet and
+// the next facet, which that reader rejects - a 26988-facet model came back as
+// ONE triangle, was sewn into a zero-volume sliver, and reported success. The
+// viewport was empty and nothing said why.
+struct FacetCount {
+    int facets = -1;        // -1: could not be determined, so no cross-check
+    bool ascii = false;     // which detector produced it, for the advice text
+    bool bodyShort = false; // binary only: the header promises more than the
+                            // file physically carries
+};
+
+// Case-insensitive prefix test, shared by the format signature and the facet
+// token so the two cannot disagree about case.
+bool startsWithNoCase(const char* text, std::size_t len, std::size_t at,
+                      const char* word) {
+    const std::size_t n = std::strlen(word);
+    if (len - at < n) return false;
+    for (std::size_t k = 0; k < n; ++k)
+        if (std::tolower(static_cast<unsigned char>(text[at + k])) != word[k])
+            return false;
+    return true;
+}
+
+FacetCount declaredFacetCount(const std::string& path) {
+    FacetCount out;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return out;
+
+    f.seekg(0, std::ios::end);
+    const std::streamoff size = f.tellg();
+    if (size < 84) return out;
+
+    // Format detection, mirroring RWStl_Reader::IsAscii rather than testing
+    // for a "solid" prefix. OCCT's own header records why: a BINARY file may
+    // begin with those same bytes, and several writers emit exactly that. The
+    // reliable signal is that ASCII STL is printable text, so any byte above
+    // '~' early in the file means binary. Testing the prefix instead got it
+    // wrong in both directions - a binary file with a solid-ish header had the
+    // check silently skipped, and an upper-case ASCII file was read as binary.
+    f.seekg(0, std::ios::beg);
+    char probe[134] = {};
+    f.read(probe, sizeof(probe));
+    const std::streamsize probed = f.gcount();
+    out.ascii = probed > 0;
+    for (std::streamsize i = 0; i < probed; ++i)
+        if (static_cast<unsigned char>(probe[i]) > '~') { out.ascii = false; break; }
+
+    if (!out.ascii) {
+        // Binary. The body length is the ground truth for what the file
+        // CONTAINS; the header count says only what the writer intended, and
+        // OCCT's reader carries a comment that it is sometimes simply wrong.
+        // Trusting the header alone would reject a complete file with a stale
+        // count, so the two are compared and the smaller one is the claim.
+        const long long body = static_cast<long long>(size - 84) / 50;
+        f.clear();
+        f.seekg(80, std::ios::beg);
+        unsigned char n[4] = {};
+        f.read(reinterpret_cast<char*>(n), 4);
+        if (f.gcount() != 4) return out;
+        const long long header = static_cast<long long>(n[0]) |
+                                 (static_cast<long long>(n[1]) << 8) |
+                                 (static_cast<long long>(n[2]) << 16) |
+                                 (static_cast<long long>(n[3]) << 24);
+        if (body <= 0) return out;
+        out.bodyShort = header > body;
+        const long long claim = out.bodyShort ? body : header;
+        if (claim <= 0 || claim > 100000000LL) { out.facets = -1; return out; }
+        out.facets = static_cast<int>(claim);
+        return out;
+    }
+
+    // ASCII: count `facet` tokens, the same token the reader trips over.
+    // Skipped above a size where a second full pass would be felt; the check
+    // is a safety net, not worth seconds on a multi-gigabyte file.
+    constexpr std::streamoff kMaxScan = 256ll * 1024 * 1024;
+    if (size > kMaxScan) return out;
+    f.clear();
+    f.seekg(0, std::ios::beg);
+    int facets = 0;
+    std::string line;
+    while (std::getline(f, line)) {
+        std::size_t i = 0;
+        while (i < line.size() &&
+               std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+        if (i < line.size() &&
+            startsWithNoCase(line.data(), line.size(), i, "facet")) ++facets;
+    }
+    if (facets > 0) out.facets = facets;
+    return out;
+}
+
+} // namespace
+
 ImportResult StlIO::import(const std::string& filePath, Document& doc, double accuracy) {
     ImportResult result;
     accuracy = std::clamp(accuracy, 0.0, 1.0);
@@ -153,6 +256,37 @@ ImportResult StlIO::import(const std::string& filePath, Document& doc, double ac
     if (mesh.IsNull() || mesh->NbTriangles() == 0) {
         result.errorMessage = "Failed to read STL file (empty or unrecognized): " + filePath;
         return result;
+    }
+    // Cross-check against what the file itself claims. The reader stops at the
+    // first malformed facet WITHOUT failing, so its return value alone cannot
+    // tell a whole file from a truncated one - and a truncated import that
+    // reports success puts an invisible sliver on screen with no explanation.
+    if (const FacetCount claim = declaredFacetCount(filePath); claim.facets > 0) {
+        const int got = mesh->NbTriangles();
+        // Only a LARGE shortfall counts. The reader legitimately discards
+        // facets: measured, it drops zero-area triangles, so a file carrying
+        // many of them reads back short while parsing perfectly. What is being
+        // hunted is the catastrophic case - one triangle out of 26988 - and
+        // half separates that from anything the reader does on purpose.
+        const bool lostMost = static_cast<long long>(got) * 2 < claim.facets;
+        if (lostMost || claim.bodyShort) {
+            std::string msg = "STL is malformed: ";
+            if (claim.bodyShort) {
+                msg += "the file ends before the " +
+                       std::to_string(claim.facets) +
+                       " facets its header promises.";
+            } else {
+                msg += "read " + std::to_string(got) + " of " +
+                       std::to_string(claim.facets) + " facets.";
+                if (claim.ascii)
+                    msg += " The file may have blank lines between facets, "
+                           "which this reader rejects; re-exporting as binary "
+                           "STL usually fixes it.";
+            }
+            result.errorMessage = msg;
+            std::fprintf(stderr, "[STL] %s (%s)\n", msg.c_str(), filePath.c_str());
+            return result;
+        }
     }
     timer.mark("read");
 

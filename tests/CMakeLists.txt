@@ -315,6 +315,11 @@ add_executable(test_snapshot_preview test_snapshot_preview.cpp)
 target_link_libraries(test_snapshot_preview PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_snapshot_preview COMMAND test_snapshot_preview)
 
+# test_stl_truncation - an STL that only partly parses must fail, not import a fragment
+add_executable(test_stl_truncation test_stl_truncation.cpp)
+target_link_libraries(test_stl_truncation PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_stl_truncation COMMAND test_stl_truncation)
+
 # test_preview_adoption - adopting the preview worker's result at commit only when the body and selection still match
 add_executable(test_preview_adoption test_preview_adoption.cpp)
 target_link_libraries(test_preview_adoption PRIVATE materializr_core gtest gtest_main)
