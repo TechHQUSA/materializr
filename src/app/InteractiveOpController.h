@@ -293,6 +293,11 @@ protected:
     }
 
     void requestCommit() { m_commitRequested = true; }
+    // SnapshotBody + previewOffThread: this gesture proved the op slow and
+    // moved its previews to the worker. A controller with its own commit
+    // path uses it to decide on the deferred (progress window) commit the
+    // base's commit() would have chosen.
+    bool previewWentAsync() const { return m_dispatch.async(); }
     void setDraggingHandle(bool d) { m_draggingHandle = d; }
     // For a controller that runs its own preview (HistoryEdit) and has to
     // report whether the frame landed.
@@ -336,13 +341,18 @@ private:
     void cleanup();
     void updateLive(const IopContext& ctx);
     // SnapshotBody: restore the snapshot, build a fresh op, execute it here.
-    void updateSnapshotInline(const IopContext& ctx);
+    // Returns the op's key (serializeParams), empty when nothing ran.
+    std::string updateSnapshotInline(const IopContext& ctx);
     // SnapshotBody + previewOffThread: inline and timed until one frame is
     // slow, then one worker job at a time (see pollPreview).
     void updateSnapshotAsync(const IopContext& ctx);
     void launchSnapshotPreviewIfWanted(const IopContext& ctx);
     // The key of what the gesture asks for now: the fresh op's serialized
     // parameters, empty when there is nothing to preview (buildOp gave null).
+    // A fresh op serializes its body id and scalars only (sub-shape indices
+    // are resolved by execute), which suffices because every opted-in
+    // controller fixes its faces/edges in onBegin: within a gesture only the
+    // scalars move.
     std::string snapshotPreviewKey(const IopContext& ctx);
 
     bool m_active = false;
@@ -354,7 +364,9 @@ private:
     // LiveOp model only - see PreviewModel.
     std::unique_ptr<Operation> m_liveOp;
     bool m_liveApplied = false;
-    // SnapshotBody off-thread preview (previewOffThread).
+    // SnapshotBody off-thread preview (previewOffThread). Push/Pull (LiveOp)
+    // runs its own multi-body job (m_ppDispatch / m_ppJob) and never uses
+    // this pair.
     PreviewDispatch<std::string> m_dispatch;
     AsyncJob<SnapshotPreviewResult> m_job;
 };

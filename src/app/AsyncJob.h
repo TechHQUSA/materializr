@@ -35,7 +35,8 @@ public:
     }
 
     // Start `fn` on a worker. False when the system refused a thread: nothing
-    // is then pending. A job still in flight is parked (see abandon()).
+    // changes then (a job still in flight stays the running one). On success
+    // a job still in flight is parked (see abandon()).
     bool launch(std::function<Result()> fn)
     {
         reap();

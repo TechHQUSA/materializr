@@ -123,9 +123,9 @@ private:
     // dispatch says so.
     void launchPreviewIfWanted(const IopContext& ctx);
     PushPullState m_st;
-    PushPullDispatch m_dispatch;
+    PushPullDispatch m_ppDispatch;
     BodySnapshot m_originals; // bodies as they were when the gesture began
-    AsyncJob<PreviewResult> m_job; // the worker job in flight, if any
+    AsyncJob<PreviewResult> m_ppJob; // the worker job in flight, if any
 };
 
 } // namespace materializr

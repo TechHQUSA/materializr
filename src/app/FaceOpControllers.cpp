@@ -255,9 +255,17 @@ bool TaperController::resolveFrame(const IopContext& ctx, glm::vec3& dirOut,
     // Neutral plane: perpendicular to the pull direction, through the
     // body's extreme along it - the BASE stays fixed and the far end
     // tilts. Flip moves the fixed plane to the other extreme.
+    //
+    // Measured on the SNAPSHOT, not the live body: in an async gesture the
+    // live body shows the previous preview (the engine no longer restores the
+    // snapshot per frame), whose bounds already carry that tilt. Reading them
+    // would move the neutral plane from frame to frame and change the
+    // dispatch key without the slider moving, so every landed job would look
+    // stale and relaunch, and the commit (which runs on the restored
+    // snapshot) would build different geometry than the preview showed.
     try {
         Bnd_Box bb;
-        BRepBndLib::Add(ctx.doc.getBody(bodyId()), bb);
+        BRepBndLib::Add(snapshot().IsNull() ? ctx.doc.getBody(bodyId()) : snapshot(), bb);
         if (bb.IsVoid()) return false;
         double x0, y0, z0, x1, y1, z1;
         bb.Get(x0, y0, z0, x1, y1, z1);

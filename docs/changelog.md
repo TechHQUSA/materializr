@@ -21,8 +21,9 @@ All notable changes to Materializr are documented here. Format loosely follows
   own triangulation instead of being meshed each frame (32 ms per frame on a
   300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
   milliseconds.
-- **Shell, Draft, Scale Face, Fillet and Chamfer stay responsive while
-  dragging on a heavy body.** These previews execute the operation on the
+- **Shell, Draft, Scale Face, and Fillet and Chamfer when creating one, stay
+  responsive while dragging on a heavy body** (re-editing an existing fillet
+  or chamfer is unchanged). These previews execute the operation on the
   body on every slider change, on the main thread; on a plate with 300 holes
   a shell frame took 3 s, a scale-face frame 0.9 s and a fillet frame 0.2 s,
   so the drag froze. As with Push/Pull, once one preview frame of a gesture

@@ -274,8 +274,8 @@ int PushPullController::onBegin(const IopContext& ctx) {
     // before any preview touched them (the live document carries the previous
     // preview frame).
     m_originals = snapshotBodies(ctx.doc);
-    m_dispatch.reset();
-    m_job.abandon();
+    m_ppDispatch.reset();
+    m_ppJob.abandon();
 
     // Push/Pull may edit several bodies at once, and a free-space one CREATES
     // its body - there is no single body to snapshot. The live instance's own
@@ -405,13 +405,13 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
         updateGhost(ctx);
         return;
     }
-    if (m_dispatch.async()) {
+    if (m_ppDispatch.async()) {
         if (std::abs(m_st.distance) <= 1e-6) {
             // Back at zero: nothing to preview, and the last landed preview
             // must not stay on the body (no job runs for zero, so nothing
             // else would take it off).
             retractLivePreview(ctx);
-            m_dispatch.retracted(); // coming back to the old distance must ask again
+            m_ppDispatch.retracted(); // coming back to the old distance must ask again
             updateGhost(ctx); // clears it
             return;
         }
@@ -424,14 +424,14 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
     }
     const auto t0 = std::chrono::steady_clock::now();
     update(ctx);
-    m_dispatch.inlinePreviewTook(std::chrono::duration<double, std::milli>(
+    m_ppDispatch.inlinePreviewTook(std::chrono::duration<double, std::milli>(
                                      std::chrono::steady_clock::now() - t0).count());
 }
 
 void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
     const PushPullKey want{static_cast<double>(m_st.distance), m_st.symmetric};
     if (std::abs(m_st.distance) <= 1e-6) return; // a zero gesture previews nothing
-    if (!m_dispatch.shouldLaunch(want)) return;
+    if (!m_ppDispatch.shouldLaunch(want)) return;
     std::vector<PreviewTarget> targets;
     for (const auto& t : m_st.targets) {
         PreviewTarget pt;
@@ -451,7 +451,7 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
         // showing the previous one. The ghost stays, it is what is being
         // dragged. Not retried until the arrow moves.
         retractLivePreview(ctx);
-        m_dispatch.refused(want);
+        m_ppDispatch.refused(want);
         return;
     }
     // A refused thread is the same as a refused prepare(): nothing will be
@@ -459,21 +459,21 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
     // the body. A job still running is parked by the launch and reaped once
     // it finishes; nothing in a frame ever waits on it.
     std::shared_ptr<PreviewJob> shared = std::move(job);
-    if (!m_job.launch([shared] { return shared->run(); })) {
+    if (!m_ppJob.launch([shared] { return shared->run(); })) {
         retractLivePreview(ctx);
-        m_dispatch.refused(want);
+        m_ppDispatch.refused(want);
         return;
     }
-    m_dispatch.launched(want);
+    m_ppDispatch.launched(want);
 }
 
 void PushPullController::pollPreview(const IopContext& ctx) {
-    m_job.reap(); // abandoned jobs finish whether or not a gesture is active
+    m_ppJob.reap(); // abandoned jobs finish whether or not a gesture is active
     if (!active()) return;
-    std::optional<PreviewResult> result = m_job.take();
+    std::optional<PreviewResult> result = m_ppJob.take();
     if (!result) return;
     const PushPullKey now{static_cast<double>(m_st.distance), m_st.symmetric};
-    const bool current = m_dispatch.finished(now);
+    const bool current = m_ppDispatch.finished(now);
     if (current) {
         if (result->ok && liveOp()) {
             PushPullOp::Precomputed pre;
@@ -503,7 +503,7 @@ bool PushPullController::previewPending() const {
     // Abandoned jobs do NOT count: the loop keeps iterating at the idle floor
     // and polls every iteration, so they are reaped within a tick of
     // finishing without rendering frames for a preview nobody wants.
-    return m_job.running();
+    return m_ppJob.running();
 }
 
 // Mark only what the push/pull actually touched. On a 100+ body project this
@@ -532,7 +532,7 @@ std::unique_ptr<Operation> PushPullController::buildCommitOp(const IopContext& c
     // clears it.
     if (ctx.clearGhost) ctx.clearGhost();
 
-    if (m_dispatch.async()) {
+    if (m_ppDispatch.async()) {
         // Async path: the applied preview has no face lineage and may trail
         // the arrow by one job, so it is never what gets recorded; the base
         // undoes it and runs this fresh op once, at the arrow's distance.
@@ -580,8 +580,8 @@ void PushPullController::cancel(const IopContext& ctx) {
 
 void PushPullController::onCleanup() {
     m_st = PushPullState{};
-    m_dispatch.reset();
-    m_job.abandon(); // finishes on its own, reaped later
+    m_ppDispatch.reset();
+    m_ppJob.abandon(); // finishes on its own, reaped later
     m_originals.clear();
 }
 

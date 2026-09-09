@@ -103,6 +103,8 @@ TEST(IopAsyncPreview, FirstFrameIsInlineThenTheGestureGoesAsync) {
     EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // the inline frame landed
     EXPECT_TRUE(r.ctl.previewOk());
     EXPECT_FALSE(r.ctl.previewPending());
+    r.ctl.update(r.ctx()); // same value: the slow frame's result is already on screen
+    EXPECT_FALSE(r.ctl.previewPending());
 
     r.ctl.height = 15.0;
     r.ctl.update(r.ctx());

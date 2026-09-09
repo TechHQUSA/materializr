@@ -15,6 +15,10 @@
 namespace materializr {
 
 bool InteractiveOpController::begin(const IopContext& ctx) {
+    // A job from a previous gesture on the same body with the same scalars
+    // would carry the same key and land on this gesture: never inherit one.
+    m_dispatch.reset();
+    m_job.abandon();
     int body = onBegin(ctx);
     if (body == -1) return false;   // refused
     if (previewModel() == PreviewModel::HistoryEdit) {
@@ -72,13 +76,15 @@ void InteractiveOpController::update(const IopContext& ctx) {
     updateSnapshotInline(ctx);
 }
 
-void InteractiveOpController::updateSnapshotInline(const IopContext& ctx) {
+std::string InteractiveOpController::updateSnapshotInline(const IopContext& ctx) {
     // Reset to the snapshot, then run a fresh op against it so the live
     // preview tracks the current values exactly without compounding edits.
     ctx.doc.updateBody(m_bodyId, m_snapshot);
     m_previewOk = false;
+    std::string key;
     try {
         std::unique_ptr<Operation> op = buildOp(ctx);
+        if (op) key = op->serializeParams();
         if (op && op->execute(ctx.doc)) {
             m_previewOk = true;
         } else {
@@ -87,14 +93,22 @@ void InteractiveOpController::updateSnapshotInline(const IopContext& ctx) {
     } catch (...) {
         ctx.doc.updateBody(m_bodyId, m_snapshot);
     }
+    return key;
 }
 
 void InteractiveOpController::updateSnapshotAsync(const IopContext& ctx) {
     if (!m_dispatch.async()) {
         const auto t0 = std::chrono::steady_clock::now();
-        updateSnapshotInline(ctx);
+        const std::string key = updateSnapshotInline(ctx);
         m_dispatch.inlinePreviewTook(std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - t0).count());
+        if (m_dispatch.async() && !key.empty()) {
+            // The slow frame's result is on screen: record it as the applied
+            // key, or the first async frame at the same value would spend a
+            // whole job recomputing what is already shown.
+            m_dispatch.launched(key);
+            m_dispatch.finished(key);
+        }
         return;
     }
     // Async: the body keeps showing the last landed preview (or the snapshot)
@@ -142,7 +156,13 @@ void InteractiveOpController::launchSnapshotPreviewIfWanted(const IopContext& ct
 
 void InteractiveOpController::pollPreview(const IopContext& ctx) {
     m_job.reap(); // abandoned jobs finish whether or not a gesture is active
-    if (!m_active || previewModel() != PreviewModel::SnapshotBody || m_bodyId < 0) return;
+    if (!m_active) {
+        // Deactivated without cleanup() (setActive(false), a custom lifecycle):
+        // the run must not stay pending, or hasActiveWork renders forever.
+        m_job.abandon();
+        return;
+    }
+    if (previewModel() != PreviewModel::SnapshotBody || m_bodyId < 0) return;
     std::optional<SnapshotPreviewResult> result = m_job.take();
     if (!result) return;
     materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);

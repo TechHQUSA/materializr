@@ -4,6 +4,7 @@
 // the InteractiveOpController SnapshotBody engine.
 #include "app/SnapshotPreview.h"
 #include "core/Document.h"
+#include "modeling/ChamferOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ScaleFaceOp.h"
 #include "modeling/ShellOp.h"
@@ -20,7 +21,10 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopLoc_Location.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
+#include <gp_Vec.hxx>
 
 #include <cmath>
 #include <memory>
@@ -222,4 +226,36 @@ TEST(SnapshotPreview, ARefusedOpReportsNotOkAndLeavesTheSnapshot) {
     EXPECT_TRUE(r.shape.IsNull());
     EXPECT_NEAR(volume(box), 4000.0, 1e-9);
     EXPECT_EQ(faceCount(box), 6);
+}
+
+TEST(SnapshotPreview, ChamferOnALocatedBodyMatchesInline) {
+    // A body carrying a non-identity location: ModifiedShape must find the
+    // located edges, and the result must equal the inline execute.
+    gp_Trsf move;
+    move.SetTranslation(gp_Vec(100.0, -50.0, 30.0));
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(20, 20, 10).Shape().Moved(TopLoc_Location(move));
+    const TopoDS_Face top = topFace(box);
+    const std::vector<TopoDS_Edge> edges = edgesOf(top);
+    auto chamfer = [&](int id) -> std::unique_ptr<Operation> {
+        auto op = std::make_unique<ChamferOp>();
+        op->setBody(id);
+        op->setEdges(edges);
+        op->setDistance(1.5);
+        return op;
+    };
+    const TopoDS_Shape direct = inlineResult(box, chamfer);
+    ASSERT_FALSE(direct.IsNull());
+    auto job = SnapshotPreviewJob::prepare(9, box, chamfer(9));
+    ASSERT_TRUE(job);
+    EXPECT_EQ(job->params().size(), edges.size());
+    EXPECT_TRUE(disjoint(job->params(), box));
+    EXPECT_TRUE(allIn(job->params(), job->copy()));
+    SnapshotPreviewResult r = job->run();
+    ASSERT_TRUE(r.ok);
+    EXPECT_NEAR(volume(r.shape), volume(direct), 1e-6);
+    EXPECT_EQ(faceCount(r.shape), faceCount(direct));
+    EXPECT_LT(volume(r.shape), volume(box));
+    GProp_GProps g;
+    BRepGProp::VolumeProperties(r.shape, g);
+    EXPECT_NEAR(g.CentreOfMass().X(), 110.0, 0.5); // still where the body is
 }

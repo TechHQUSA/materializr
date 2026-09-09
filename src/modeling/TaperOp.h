@@ -40,7 +40,8 @@ public:
     std::vector<int> plannedBodyIds() const override { return {m_bodyId}; }
     std::vector<TopoDS_Shape*> shapeParams() override {
         std::vector<TopoDS_Shape*> out;
-        for (TopoDS_Shape& s : m_faces) out.push_back(&s);
+        for (TopTools_ListIteratorOfListOfShape it(m_faces); it.More(); it.Next())
+            out.push_back(&it.ChangeValue());
         return out;
     }
     std::string serializeParams() const override;

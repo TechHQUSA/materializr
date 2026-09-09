@@ -544,19 +544,38 @@ void EdgeOpController::commit(const IopContext& ctx) {
     }
 
     std::unique_ptr<Operation> op = buildOp(ctx);
-    const bool committed = op && ctx.history.pushOperation(std::move(op), ctx.doc);
-    if (committed) {
-        std::fprintf(stdout, "%s %.1f mm committed\n",
-                     isFillet ? "Fillet" : "Chamfer", m_value);
-    } else if (ctx.toast) {
-        // execute() rejected the result (invalid topology / unbuildable at this
-        // size) and left the body untouched - say so instead of silently doing
-        // nothing.
-        ctx.toast(std::string(isFillet ? "Fillet" : "Chamfer")
+    // execute() rejecting the result (invalid topology / unbuildable at this
+    // size) leaves the body untouched - say so instead of silently doing
+    // nothing.
+    const auto report = [isFillet, value = m_value, toast = ctx.toast](bool committed) {
+        if (committed) {
+            std::fprintf(stdout, "%s %.1f mm committed\n",
+                         isFillet ? "Fillet" : "Chamfer", value);
+        } else if (toast) {
+            toast(std::string(isFillet ? "Fillet" : "Chamfer")
                       .append(" couldn't be built on those edges - the "
                               "result wasn't valid geometry. Try a smaller size "
                               "or fewer edges.").c_str());
+        }
+    };
+    if (op && previewWentAsync() && ctx.progress && ctx.deferHeavy) {
+        // The gesture's previews ran on the worker because one frame was
+        // slow: run the commit between frames behind the progress window (as
+        // the base engine's commit does) instead of freezing on it here.
+        op->setProgressReporter(ctx.progress);
+        History* hist = &ctx.history;
+        Document* doc = &ctx.doc;
+        auto markDirty = ctx.markMeshesDirty;
+        Operation* raw = op.release();
+        ctx.deferHeavy([hist, doc, raw, markDirty, report]() {
+            std::unique_ptr<Operation> o(raw);
+            report(hist->pushOperation(std::move(o), *doc));
+            if (markDirty) markDirty();
+        });
+        finish(ctx);
+        return;
     }
+    report(op && ctx.history.pushOperation(std::move(op), ctx.doc));
     finish(ctx);
 }
 

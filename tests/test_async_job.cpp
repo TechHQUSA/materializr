@@ -23,6 +23,14 @@ struct Gate {
     void wait() { std::unique_lock<std::mutex> l(m); cv.wait(l, [&] { return open; }); }
 };
 
+// Opens a Gate when it goes out of scope: declared AFTER the AsyncJob so an
+// assertion that returns early still releases the workers the job's
+// destructor is about to join.
+struct ReleaseOnExit {
+    Gate& gate;
+    ~ReleaseOnExit() { gate.release(); }
+};
+
 template <class F>
 bool eventually(F f) {
     for (int i = 0; i < 2000; ++i) {
@@ -53,6 +61,7 @@ TEST(AsyncJob, ResultArrivesOnceAndEndsTheRun) {
 TEST(AsyncJob, TakeReturnsNothingWhileTheJobRuns) {
     Gate gate;
     AsyncJob<int> job;
+    ReleaseOnExit release{gate};
     ASSERT_TRUE(job.launch([&] { gate.wait(); return 7; }));
     EXPECT_FALSE(job.take().has_value());
     EXPECT_TRUE(job.running());
@@ -66,6 +75,7 @@ TEST(AsyncJob, TakeReturnsNothingWhileTheJobRuns) {
 TEST(AsyncJob, LaunchingOverARunningJobParksItUntilItFinishes) {
     Gate gate;
     AsyncJob<int> job;
+    ReleaseOnExit release{gate};
     ASSERT_TRUE(job.launch([&] { gate.wait(); return 1; }));
     ASSERT_TRUE(job.launch([] { return 2; }));
     EXPECT_EQ(job.abandonedCount(), 1u); // the first is parked, not dropped
@@ -100,6 +110,7 @@ TEST(AsyncJob, DestructorJoinsRunningAndAbandonedJobs) {
     Gate gate;
     {
         AsyncJob<int> job;
+        ReleaseOnExit release{gate};
         ASSERT_TRUE(job.launch([&] { gate.wait(); ++finished; return 1; }));
         ASSERT_TRUE(job.launch([&] { gate.wait(); ++finished; return 2; }));
         gate.release();
