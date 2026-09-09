@@ -3608,8 +3608,8 @@ void Application::renderViewport() {
                 // op's -- an empty-canvas drag orbits, a handle drag drives
                 // the value, exactly like default bindings where
                 // middle-orbit stays live during an op. Push/Pull and
-                // Extrude have no sub-region to test against — the whole
-                // viewport is the drag surface — so they claim on every
+                // Extrude have no sub-region to test against - the whole
+                // viewport is the drag surface - so they claim on every
                 // press instead and behave like the old blanket rule for
                 // just those two: no orbit while they're underway.
                 // Sketch mode keeps the blanket: the rubber-band preview
