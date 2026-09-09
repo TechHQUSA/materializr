@@ -5,6 +5,7 @@
 #include "app/PushPullPreview.h"
 #include "core/BodyChanges.h"
 #include "core/Document.h"
+#include "modeling/FaceLineage.h"
 #include "modeling/PushPullOp.h"
 
 #include <gtest/gtest.h>
@@ -159,6 +160,26 @@ TEST(PushPullPreview, ACutThroughTheModelReachesTheSecondBodyToo) {
     EXPECT_NEAR(volume(ref.getBody(rhid)), 10.0 * 10.0 * 15.0, 1e-6);
 }
 
+TEST(PushPullPreview, AMeshImportInTheToolsPathIsNotCopied) {
+    // Copying a 100k-face import costs more than the preview gains; the real
+    // op still cuts it, once, at commit.
+    Document live;
+    const int host = live.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "host");
+    const int import = live.addBody(BRepPrimAPI_MakeBox(gp_Pnt(5.0, 5.0, -10.0), 10.0, 10.0, 15.0).Shape(), "stl");
+    live.setBodyMesh(import, true);
+    const materializr::BodySnapshot originals = materializr::snapshotBodies(live);
+    EXPECT_TRUE(originals.at(import).mesh);
+    PreviewTarget t;
+    t.profile = topFace(live.getBody(host));
+    t.sourceBodyId = host;
+    PreviewParams p;
+    p.distance = -8.0;
+    p.cutIntersecting = true;
+    std::unique_ptr<PreviewJob> job = PreviewJob::prepare(originals, {t}, p);
+    ASSERT_TRUE(job);
+    EXPECT_EQ(job->copiedBodies(), 1u);
+}
+
 TEST(PushPullPreview, PrecomputedResultIsAppliedWithoutBooleansAndUndone) {
     Document doc;
     const int id = doc.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "block");
@@ -172,6 +193,13 @@ TEST(PushPullPreview, PrecomputedResultIsAppliedWithoutBooleansAndUndone) {
     t.sourceBodyId = id;
     op.setTargets({t});
     op.setDistance(5.0);
+    // The host carries face lineage; a landed-then-undone preview must give
+    // it back (updateBody drops it, the op snapshots it for undo).
+    materializr::topo::FaceIdMap ids;
+    for (TopExp_Explorer e(before, TopAbs_FACE); e.More(); e.Next())
+        ids.push_back({e.Current(), {100 + static_cast<int>(ids.size())}});
+    doc.setBodyFaceIds(id, ids);
+
     PushPullOp::Precomputed pre;
     pre.bodies.emplace_back(id, replacement);
     pre.created.push_back(extra);
@@ -186,6 +214,8 @@ TEST(PushPullPreview, PrecomputedResultIsAppliedWithoutBooleansAndUndone) {
     ASSERT_TRUE(op.undo(doc));
     EXPECT_TRUE(doc.getBody(id).IsEqual(before));
     EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
+    ASSERT_NE(doc.bodyFaceIds(id), nullptr);
+    EXPECT_EQ(doc.bodyFaceIds(id)->size(), 6u);
 
     // One-shot: the next execute runs the real booleans.
     ASSERT_TRUE(op.execute(doc));

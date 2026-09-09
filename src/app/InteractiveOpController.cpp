@@ -85,6 +85,15 @@ void InteractiveOpController::update(const IopContext& ctx) {
 // it currently has applied, push the new values in, run it again. History is
 // not involved until commit - and because it is the same instance every
 // frame, any body it creates keeps the same id (the whole point).
+void InteractiveOpController::retractLivePreview(const IopContext& ctx) {
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
+    if (m_liveApplied && m_liveOp) {
+        try { m_liveOp->undo(ctx.doc); } catch (...) {}
+    }
+    m_liveApplied = false;
+    m_previewOk = false;
+}
+
 void InteractiveOpController::updateLive(const IopContext& ctx) {
     materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (m_liveApplied && m_liveOp) {

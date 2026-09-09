@@ -50,6 +50,15 @@ TEST(PushPullDispatch, AStaleResultIsDroppedAndTheArrowReAsked) {
     EXPECT_TRUE(d.shouldLaunch({5.0, false})); // nothing was applied for 5 either
 }
 
+TEST(PushPullDispatch, ARefusedKeyIsNotAskedAgainUntilTheArrowMoves) {
+    PushPullDispatch d;
+    d.inlinePreviewTook(100.0);
+    d.refused({5.0, false});
+    EXPECT_FALSE(d.running());
+    EXPECT_FALSE(d.shouldLaunch({5.0, false})); // else prepare() would run every frame
+    EXPECT_TRUE(d.shouldLaunch({6.0, false}));
+}
+
 TEST(PushPullDispatch, ResetStartsTheNextGestureInline) {
     PushPullDispatch d;
     d.inlinePreviewTook(100.0);

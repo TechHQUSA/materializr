@@ -67,6 +67,9 @@ public:
 
 private:
     PreviewJob();
+    static std::unique_ptr<PreviewJob> prepareOrThrow(const BodySnapshot& originals,
+                                                      const std::vector<PreviewTarget>& targets,
+                                                      const PreviewParams& params);
     std::unique_ptr<Document> m_scratch;
     std::map<int, int> m_scratchToLive;
     std::unique_ptr<PushPullOp> m_op;

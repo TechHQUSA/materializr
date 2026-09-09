@@ -57,6 +57,15 @@ public:
         m_launched = k;
     }
 
+    // Nothing could be prepared for `k` (no usable target, a copy OCCT
+    // refused): treat it as answered so the next frame does not try again
+    // until the arrow moves.
+    void refused(const PushPullKey& k)
+    {
+        m_applied = k;
+        m_hasApplied = true;
+    }
+
     // The running job finished. True when its key is what the arrow shows
     // now, so the caller applies it; false means the arrow moved and the
     // result is stale (the caller then launches again at `now`). A current

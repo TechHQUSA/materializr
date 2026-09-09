@@ -22,6 +22,7 @@ namespace materializr {
 struct BodyState {
     TopoDS_Shape shape;
     bool visible = true;
+    bool mesh = false; // an imported tessellated body (Document::isBodyMesh)
 };
 using BodySnapshot = std::map<int, BodyState>;
 
@@ -30,7 +31,7 @@ inline BodySnapshot snapshotBodies(const Document& doc)
     BodySnapshot s;
     for (int id : doc.getAllBodyIds()) {
         try {
-            s[id] = {doc.getBody(id), doc.isBodyVisible(id)};
+            s[id] = {doc.getBody(id), doc.isBodyVisible(id), doc.isBodyMesh(id)};
         } catch (...) {}
     }
     return s;

@@ -20,6 +20,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
@@ -53,12 +54,19 @@ int expectedTriangles(const TopoDS_Face& f) {
     return n;
 }
 
-struct Stats { int tris = 0; double zmin = 1e9, zmax = -1e9; bool capNormalsRight = true; bool wallsHorizontal = true; };
+struct Stats { int tris = 0; double zmin = 1e9, zmax = -1e9; bool capNormalsRight = true; bool wallsHorizontal = true; bool windingAgrees = true; };
 // zNear is the profile's plane, zFar the swept one; the near cap must face
 // against the sweep and the far cap along it.
 Stats stats(const std::vector<float>& v, double zNear, double zFar, double sweepZ) {
     Stats s;
     s.tris = static_cast<int>(v.size() / 18);
+    // The shader flips the normal of a back-facing triangle, so each
+    // triangle's winding must agree with the normal it carries.
+    for (size_t i = 0; i + 17 < v.size(); i += 18) {
+        const gp_Pnt a(v[i], v[i + 1], v[i + 2]), b(v[i + 6], v[i + 7], v[i + 8]), c(v[i + 12], v[i + 13], v[i + 14]);
+        const gp_Vec n(v[i + 3], v[i + 4], v[i + 5]);
+        if (gp_Vec(a, b).Crossed(gp_Vec(a, c)).Dot(n) <= 0.0) s.windingAgrees = false;
+    }
     for (size_t i = 0; i + 5 < v.size(); i += 6) {
         const double z = v[i + 2], nz = v[i + 5];
         s.zmin = std::min(s.zmin, z);
@@ -88,6 +96,7 @@ TEST(GhostMesh, BoxTopFaceSweptUp) {
     EXPECT_NEAR(s.zmax, 15.0, 1e-6);
     EXPECT_TRUE(s.capNormalsRight);
     EXPECT_TRUE(s.wallsHorizontal);
+    EXPECT_TRUE(s.windingAgrees);
 }
 
 TEST(GhostMesh, NegativeSweepGoesTheOtherWay) {
@@ -99,6 +108,7 @@ TEST(GhostMesh, NegativeSweepGoesTheOtherWay) {
     EXPECT_NEAR(s.zmin, 6.0, 1e-6);
     EXPECT_NEAR(s.zmax, 10.0, 1e-6);
     EXPECT_TRUE(s.capNormalsRight); // the near cap (z=10) faces against the sweep, i.e. up
+    EXPECT_TRUE(s.windingAgrees);
 }
 
 TEST(GhostMesh, AProfileWithAHoleWallsTheHoleToo) {

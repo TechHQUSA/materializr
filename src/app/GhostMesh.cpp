@@ -26,6 +26,18 @@ void push(std::vector<float>& out, const gp_Pnt& p, const gp_Vec& n)
     out.push_back(static_cast<float>(n.Z()));
 }
 
+// One triangle wound so its geometric normal agrees with `n`: the shader
+// flips the normal of a back-facing triangle, so winding and normal must say
+// the same thing.
+void emitTri(std::vector<float>& out, const gp_Pnt& a, const gp_Pnt& b, const gp_Pnt& c,
+             const gp_Vec& n)
+{
+    const bool flip = gp_Vec(a, b).Crossed(gp_Vec(a, c)).Dot(n) < 0.0;
+    push(out, a, n);
+    push(out, flip ? c : b, n);
+    push(out, flip ? b : c, n);
+}
+
 } // namespace
 
 bool ghostPrismMesh(const TopoDS_Face& profile, const gp_Vec& sweep, std::vector<float>& out)
@@ -70,10 +82,8 @@ bool ghostPrismMesh(const TopoDS_Face& profile, const gp_Vec& sweep, std::vector
         const gp_Pnt& a = nodes[static_cast<size_t>(n1)];
         const gp_Pnt& b = nodes[static_cast<size_t>(n2)];
         const gp_Pnt& c = nodes[static_cast<size_t>(n3)];
-        push(out, a, down); push(out, c, down); push(out, b, down);
-        push(out, a.Translated(sweep), up);
-        push(out, b.Translated(sweep), up);
-        push(out, c.Translated(sweep), up);
+        emitTri(out, a, b, c, down);
+        emitTri(out, a.Translated(sweep), b.Translated(sweep), c.Translated(sweep), up);
     }
     // Walls: one quad per polygon segment, facing away from the profile's
     // centroid. Exact for the outer boundary; a hole's walls face outward
@@ -89,8 +99,8 @@ bool ghostPrismMesh(const TopoDS_Face& profile, const gp_Vec& sweep, std::vector
             const gp_XYZ mid = (a.XYZ() + b.XYZ()) * 0.5;
             if (n.XYZ().Dot(mid - centroid) < 0.0) n.Reverse();
             const gp_Pnt a2 = a.Translated(sweep), b2 = b.Translated(sweep);
-            push(out, a, n); push(out, b, n); push(out, b2, n);
-            push(out, a, n); push(out, b2, n); push(out, a2, n);
+            emitTri(out, a, b, b2, n);
+            emitTri(out, a, b2, a2, n);
         }
     }
     return true;

@@ -28,7 +28,9 @@
 #include <cmath>
 #include <limits>
 #include <cstdint>
+#include <cstddef>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace materializr {
@@ -46,6 +48,7 @@ struct Slice {
     // vertices farther apart than the tolerance, and a hash collision only
     // adds candidates, so the distance check is what decides.
     std::unordered_map<uint64_t, std::vector<int>> cells;
+    std::unordered_set<uint64_t> seen; // segments already taken, as sorted vertex pairs
 
     static uint64_t key(int64_t ix, int64_t iy)
     {
@@ -122,7 +125,12 @@ void sliceTriangulation(const std::vector<FaceMesh>& faces, const gp_Ax3& frame,
             // one to two tolerances was split in half by a triangle diagonal.
             const int a0 = out.vertex(q[0]);
             const int a1 = out.vertex(q[1]);
-            if (a0 != a1) out.segs.emplace_back(a0, a1);
+            // A mesh edge lying IN the plane is produced by both triangles on
+            // it; the second copy would close a two-vertex loop that is then
+            // dropped, and the edge with it. Keep each segment once.
+            if (a0 != a1 &&
+                out.seen.insert(Slice::key(std::min(a0, a1), std::max(a0, a1))).second)
+                out.segs.emplace_back(a0, a1);
         }
     }
 }
@@ -184,7 +192,7 @@ void mergeCollinear(const std::vector<gp_Pnt2d>& pts, std::vector<int>& loop)
             if (len <= kSnapMm) continue;
             const double dist = std::fabs(acx * (b.Y() - a.Y()) - acy * (b.X() - a.X())) / len;
             if (dist <= kSnapMm) {
-                loop.erase(loop.begin() + static_cast<long>(i));
+                loop.erase(loop.begin() + static_cast<std::ptrdiff_t>(i));
                 changed = true;
                 --i;
             }
@@ -252,8 +260,9 @@ void fillRegion(const std::vector<gp_Pnt2d>& pts, const std::vector<Ring>& rings
     for (NCollection_List<Poly_Triangle>::Iterator it(tris); it.More(); it.Next()) {
         int a = 0, b = 0, c = 0;
         it.Value().Get(a, b, c);
+        const auto valid = [&](int idx) { return idx >= 1 && idx <= xyz.Length(); };
+        if (!valid(a) || !valid(b) || !valid(c)) return; // before any vertex of it is out
         for (int idx : {a, b, c}) {
-            if (idx < 1 || idx > xyz.Length()) return;
             const gp_XYZ& p = xyz.Value(idx - 1);
             out.push_back(static_cast<float>(p.X()));
             out.push_back(static_cast<float>(p.Y()));
@@ -271,7 +280,8 @@ std::vector<FaceMesh> faceMeshes(const TopoDS_Shape& shape)
     for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(fe.Current()), loc);
-        if (tri.IsNull()) continue;
+        // A bare face stays in the list (null handle): the slice must know the
+        // body is incomplete, see sliceSection.
         out.push_back({tri, loc.Transformation(), loc.IsIdentity() == Standard_False});
     }
     return out;
@@ -287,6 +297,9 @@ bool sliceSection(const std::vector<FaceMesh>& faces, const gp_Pln& cuttingPlane
         double dLo = std::numeric_limits<double>::infinity();
         double dHi = -std::numeric_limits<double>::infinity();
         sliceTriangulation(faces, frame, sl, dLo, dHi);
+        bool complete = true;
+        for (const FaceMesh& f : faces)
+            if (f.tri.IsNull()) { complete = false; break; }
         // The body must straddle the plane; a plane tangent to a face is no cut.
         const double straddleEps = 1e-6;
         if (!(dLo < -straddleEps && dHi > straddleEps)) return false;
@@ -314,6 +327,11 @@ bool sliceSection(const std::vector<FaceMesh>& faces, const gp_Pln& cuttingPlane
                 emit(sl.pts[chain[i]], sl.pts[chain[i + 1]]);
 
         if (loops.empty()) return out.lines.size() > lines0;
+        // A face without a triangulation left a gap in the slice. A missing
+        // OUTER wall leaves the loop open and nothing fills; a missing INNER
+        // wall (a bore) leaves its loop out entirely, and the outer loop would
+        // be filled solid over the hole. Outline only until the body is whole.
+        if (!complete) return true;
         // Nesting: a loop inside an even number of others bounds material, an
         // odd number a hole; each hole belongs to the smallest loop around it.
         const size_t L = loops.size();

@@ -17,7 +17,11 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <Geom_Surface.hxx>
+#include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
+#include <gp_Trsf.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
@@ -224,6 +228,47 @@ TEST(SectionSlice, LinesFollowEveryLoop) {
     ASSERT_FALSE(slice.cap.empty());
     expectOnPlane(slice.lines, 10.0f);
     EXPECT_NEAR(lineLength(slice.lines), 80.0 + 2.0 * M_PI * 5.0, 0.5);
+}
+
+TEST(SectionSlice, ABareInnerWallGivesTheOutlineButNoCap) {
+    // Strip the bore's cylindrical wall: the outer loop still closes, and a
+    // fill would seal the bore solid. Outline only until the body is whole.
+    TopoDS_Shape hollow = boredBox();
+    meshLikeRenderer(hollow);
+    int stripped = 0;
+    for (TopExp_Explorer e(hollow, TopAbs_FACE); e.More(); e.Next()) {
+        TopoDS_Face face = TopoDS::Face(e.Current());
+        if (BRep_Tool::Surface(face)->IsKind(STANDARD_TYPE(Geom_CylindricalSurface))) {
+            BRep_Builder().UpdateFace(face, Handle(Poly_Triangulation)());
+            ++stripped;
+        }
+    }
+    ASSERT_EQ(stripped, 1);
+    SectionSlice slice;
+    EXPECT_TRUE(sliceSection(faceMeshes(hollow), gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), slice));
+    EXPECT_TRUE(slice.cap.empty());
+    EXPECT_NEAR(lineLength(slice.lines), 80.0, 1e-6); // the outer square only
+}
+
+TEST(SectionSlice, AMeshEdgeLyingInThePlaneIsDrawnOnce) {
+    // Two triangles share the edge AB, which lies in the cutting plane, both
+    // with their third node below it; a fifth node above makes the body
+    // straddle. Each triangle produces AB, and a duplicate would close a
+    // two-vertex "loop" that gets dropped, taking the edge with it.
+    Handle(Poly_Triangulation) tri = new Poly_Triangulation(5, 3, Standard_False);
+    tri->SetNode(1, gp_Pnt(0, 0, 0));
+    tri->SetNode(2, gp_Pnt(10, 0, 0));
+    tri->SetNode(3, gp_Pnt(5, 5, -5));
+    tri->SetNode(4, gp_Pnt(5, -5, -5));
+    tri->SetNode(5, gp_Pnt(5, 0, 5));
+    tri->SetTriangle(1, Poly_Triangle(1, 2, 3));
+    tri->SetTriangle(2, Poly_Triangle(2, 1, 4));
+    tri->SetTriangle(3, Poly_Triangle(1, 2, 5));
+    std::vector<materializr::FaceMesh> faces{{tri, gp_Trsf(), false}};
+    SectionSlice slice;
+    EXPECT_TRUE(sliceSection(faces, gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), slice));
+    EXPECT_NEAR(lineLength(slice.lines), 10.0, 1e-6);
+    EXPECT_TRUE(slice.cap.empty());
 }
 
 TEST(SectionSlice, UnmeshedFaceStillDrawsTheRest) {

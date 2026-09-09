@@ -593,6 +593,7 @@ bool Application::switchToSession(size_t idx) {
     // tab's full rebuild for the next frame. Same discipline as project load.
     if (m_shapeRenderer) m_shapeRenderer->clear();
     if (m_edgeRenderer) m_edgeRenderer->clear();
+    m_meshDispatch = materializr::MeshDispatch{}; // body ids restart with the document
     if (m_selectionHighlight) m_selectionHighlight->clearCaches();
     if (m_sketchRenderer) m_sketchRenderer->clearCache();
     m_dirtyBodyIds.clear();
@@ -622,6 +623,7 @@ void Application::closeSession(size_t idx) {
         applySessionState(std::min(idx, m_sessions.size() - 1));
         if (m_shapeRenderer) m_shapeRenderer->clear();
         if (m_edgeRenderer) m_edgeRenderer->clear();
+        m_meshDispatch = materializr::MeshDispatch{};
         if (m_selectionHighlight) m_selectionHighlight->clearCaches();
         if (m_sketchRenderer) m_sketchRenderer->clearCache();
         m_dirtyBodyIds.clear();
@@ -3369,6 +3371,9 @@ void Application::landMeshes() {
         // ask the worker for this request again.
         if (landed > 0 && m_shapeRenderer)
             m_shapeRenderer->notePreMeshed(cur, r.deflection, r.angularDeflection);
+        // A face selected while its body was pending was cached as "nothing
+        // to draw"; the cache keys on the face, not its triangulation.
+        if (landed > 0 && m_selectionHighlight) m_selectionHighlight->clearCaches();
         m_dirtyBodyIds.insert(r.bodyId);
         m_sectionDirty = true; // the section overlay sliced unmeshed faces
     }
@@ -3388,7 +3393,8 @@ bool Application::meshAsync(int bodyId, const TopoDS_Shape& shape, float deflect
     case MeshPath::Pending: return true; // already in flight: keep the old mesh
     case MeshPath::Worker: break;
     }
-    m_meshWorker->request(bodyId, shape, deflection, angularDeflection);
+    if (!m_meshWorker->request(bodyId, shape, deflection, angularDeflection))
+        return false; // the copy failed: mesh in the frame as before
     m_meshDispatch.requested(bodyId, req);
     return true;
 }
@@ -3434,11 +3440,13 @@ void Application::rebuildMeshes() {
                 m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
             if (idx >= 0) {
                 m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-                if (m_extrudeCtl.active() &&
-                    m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
-                    id == m_extrudeCtl.previewBodyId()) {
-                    m_shapeRenderer->setSubtractPreview(idx, true);
-                }
+                // Set, not only raised: the slot keeps its flags across a per-body
+                // rebuild, so a tint raised in Subtract must drop when the mode
+                // changes or the preview commits.
+                m_shapeRenderer->setSubtractPreview(
+                    idx, m_extrudeCtl.active() &&
+                             m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                             id == m_extrudeCtl.previewBodyId());
             }
             // Imported meshes have a facet edge per triangle; only draw that
             // wireframe when the user wants it (clean shaded body otherwise).
@@ -3490,11 +3498,13 @@ void Application::rebuildMeshes() {
             m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
         if (idx >= 0) {
             m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-            if (m_extrudeCtl.active() &&
-                m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
-                id == m_extrudeCtl.previewBodyId()) {
-                m_shapeRenderer->setSubtractPreview(idx, true);
-            }
+            // Set, not only raised: the slot keeps its flags across a per-body
+            // rebuild, so a tint raised in Subtract must drop when the mode
+            // changes or the preview commits.
+            m_shapeRenderer->setSubtractPreview(
+                idx, m_extrudeCtl.active() &&
+                         m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                         id == m_extrudeCtl.previewBodyId());
         }
         // See note above: skip the facet wireframe for imported meshes unless on.
         if (m_document->isBodyMesh(id) && !m_meshShowWireframe)

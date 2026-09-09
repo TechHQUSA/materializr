@@ -3,6 +3,8 @@
 #include "modeling/PushPullOp.h"
 
 #include <BRepBndLib.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <Bnd_Box.hxx>
 #include <TopExp_Explorer.hxx>
@@ -21,6 +23,19 @@ std::unique_ptr<PreviewJob> PreviewJob::prepare(const BodySnapshot& originals,
                                                 const std::vector<PreviewTarget>& targets,
                                                 const PreviewParams& params)
 {
+    // OCCT reports a refused copy or a stale sub-shape by throwing; a preview
+    // that cannot be prepared is simply not previewed off-thread.
+    try {
+        return prepareOrThrow(originals, targets, params);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+std::unique_ptr<PreviewJob> PreviewJob::prepareOrThrow(const BodySnapshot& originals,
+                                                       const std::vector<PreviewTarget>& targets,
+                                                       const PreviewParams& params)
+{
     if (targets.empty() || std::abs(params.distance) < 1e-6) return nullptr;
 
     // Which live bodies the op may touch: every host body, and, when the tool
@@ -37,6 +52,9 @@ std::unique_ptr<PreviewJob> PreviewJob::prepare(const BodySnapshot& originals,
         reach.Enlarge(std::abs(params.distance) * (params.symmetric ? 2.0 : 1.0));
         for (const auto& [id, st] : originals) {
             if (!st.visible || st.shape.IsNull()) continue;
+            // A mesh import (100k faces) costs more to copy than the op would
+            // gain from cutting it; the real op cuts it once, at commit.
+            if (st.mesh) continue;
             Bnd_Box bb;
             BRepBndLib::Add(st.shape, bb);
             if (!reach.IsOut(bb)) wanted.insert(id);
@@ -69,11 +87,18 @@ std::unique_ptr<PreviewJob> PreviewJob::prepare(const BodySnapshot& originals,
             ot.sourceBodyId = ls->second;
             // A face-driven target's profile is a face of the host; on the
             // copy it must be the copied face, or the op's liveness scan would
-            // swap in the nearest face of the copy.
+            // swap in the nearest face of the copy. ModifiedShape THROWS for a
+            // shape that is not a sub-shape of what was copied (a profile gone
+            // stale under a rebuilt host), so ask first; a stale profile is
+            // left as is and the op's own re-resolution handles it.
             if (t.sketchId < 0) {
-                const TopoDS_Shape mapped = copiers[t.sourceBodyId].ModifiedShape(t.profile);
-                if (!mapped.IsNull() && mapped.ShapeType() == TopAbs_FACE)
-                    ot.profile = TopoDS::Face(mapped);
+                TopTools_IndexedMapOfShape faces;
+                TopExp::MapShapes(originals.at(t.sourceBodyId).shape, TopAbs_FACE, faces);
+                if (faces.Contains(t.profile)) {
+                    const TopoDS_Shape mapped = copiers[t.sourceBodyId].ModifiedShape(t.profile);
+                    if (!mapped.IsNull() && mapped.ShapeType() == TopAbs_FACE)
+                        ot.profile = TopoDS::Face(mapped);
+                }
             }
         }
         if (t.sketchId >= 0) {

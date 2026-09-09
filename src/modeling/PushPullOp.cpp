@@ -327,6 +327,10 @@ bool PushPullOp::execute(Document& doc) {
             TopoDS_Shape current;
             try { current = doc.getBody(id); } catch (...) { continue; }
             m_previousBodies.emplace_back(id, current);
+            // updateBody drops the body's face lineage; keep it for undo(),
+            // as the boolean path does, or a landed-then-cancelled preview
+            // would strip the host of its ancestry for good.
+            snapshotLineage(doc, id);
             doc.updateBody(id, shape);
             any = true;
         }

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Standard_Handle.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 
@@ -36,9 +38,16 @@ public:
         const void* tshape = nullptr; // identity of the live shape that was copied
         float deflection = 0.0f;
         float angularDeflection = 0.0f;
-        // Live face and the triangulation built for it (null if the mesher
-        // produced none for that face).
-        std::vector<std::pair<TopoDS_Face, Handle(Poly_Triangulation)>> faces;
+        struct Face {
+            TopoDS_Face live;
+            Handle(Poly_Triangulation) tri; // null if the mesher produced none
+            // Each edge of the live face with its polygon on `tri`, so the
+            // landed face is as complete as a mesher pass leaves it: anything
+            // reading BRep_Tool::PolygonOnTriangulation (the push/pull ghost,
+            // GhostMesh.h) finds the edge polygons on the live edges.
+            std::vector<std::pair<TopoDS_Edge, Handle(Poly_PolygonOnTriangulation)>> edges;
+        };
+        std::vector<Face> faces;
         int unmeshedFaces = 0;
         double millis = 0.0; // mesher wall time on the worker
     };
@@ -47,8 +56,9 @@ public:
     ~MeshWorker();
 
     // Main thread. Copies `shape` and queues it, replacing a waiting job for
-    // the same body.
-    void request(int bodyId, const TopoDS_Shape& shape, float deflection,
+    // the same body. False when the copy failed (the caller meshes in the
+    // frame instead); nothing is queued then.
+    bool request(int bodyId, const TopoDS_Shape& shape, float deflection,
                  float angularDeflection);
 
     // Main thread. Results finished since the last call, oldest first.
@@ -61,6 +71,11 @@ public:
     // Jobs waiting or running.
     size_t pending() const;
 
+    // Hold the worker before it takes its next job, and let it go. For tests
+    // that need several requests queued before any of them runs.
+    void pause();
+    void resume();
+
 private:
     struct Job {
         int bodyId = -1;
@@ -68,7 +83,11 @@ private:
         float deflection = 0.0f;
         float angularDeflection = 0.0f;
         TopoDS_Shape copy;
-        std::vector<std::pair<TopoDS_Face, TopoDS_Face>> faces; // (live, copy)
+        struct Face {
+            TopoDS_Face live, copy;
+            std::vector<std::pair<TopoDS_Edge, TopoDS_Edge>> edges; // (live, copy)
+        };
+        std::vector<Face> faces;
     };
 
     void run();
@@ -79,6 +98,7 @@ private:
     std::vector<Result> m_done;
     size_t m_running = 0;
     bool m_stop = false;
+    bool m_paused = false;
     std::thread m_thread;
 };
 

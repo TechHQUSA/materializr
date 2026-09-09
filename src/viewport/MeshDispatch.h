@@ -61,7 +61,14 @@ public:
         m_millis[bodyId] = millis;
     }
 
-    void meshedInFrame(int bodyId, double millis) { m_millis[bodyId] = millis; }
+    // The mesher ran in the frame for this body: whatever the worker answered
+    // before is moot (and a recycled TShape address can make a new shape look
+    // answered; one in-frame mesh corrects that, not a lifetime of them).
+    void meshedInFrame(int bodyId, double millis)
+    {
+        m_millis[bodyId] = millis;
+        m_landed.erase(bodyId);
+    }
 
     void forget(int bodyId)
     {

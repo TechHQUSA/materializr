@@ -2,6 +2,7 @@
 // one triangulation per live face; land() moves them onto the live faces.
 // These tests check the result is the mesh a direct run would have produced.
 #include "viewport/MeshWorker.h"
+#include "app/GhostMesh.h"
 #include "core/MeshParams.h"
 
 #include <gtest/gtest.h>
@@ -15,7 +16,10 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
+#include <TopoDS_Edge.hxx>
+#include <gp_Vec.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS.hxx>
@@ -123,6 +127,38 @@ TEST(MeshWorker, LandsTheMeshADirectRunWouldProduce) {
     for (size_t i = 0; i < sums.size(); ++i) EXPECT_NEAR(sums[i], want[i], 1e-6) << "face " << i;
 }
 
+TEST(MeshWorker, LandsTheEdgePolygonsToo) {
+    // A mesher pass leaves every edge with a polygon on its faces'
+    // triangulations; a landed result must too, or anything reading
+    // BRep_Tool::PolygonOnTriangulation on the live shape (the push/pull
+    // ghost, for one) finds nothing and takes its slow path forever.
+    TopoDS_Shape shape = holePlate();
+    MeshWorker worker;
+    worker.request(9, shape, kDefl, kAng);
+    std::vector<MeshWorker::Result> results = waitAll(worker);
+    ASSERT_EQ(results.size(), 1u);
+    ASSERT_GT(MeshWorker::land(results[0]), 0);
+    int edgesChecked = 0;
+    for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
+        const TopoDS_Face face = TopoDS::Face(fe.Current());
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+        ASSERT_FALSE(tri.IsNull());
+        for (TopExp_Explorer ee(face, TopAbs_EDGE); ee.More(); ee.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(ee.Current());
+            if (BRep_Tool::Degenerated(edge)) continue;
+            EXPECT_FALSE(BRep_Tool::PolygonOnTriangulation(edge, tri, loc).IsNull());
+            ++edgesChecked;
+        }
+    }
+    EXPECT_GT(edgesChecked, 100);
+    // And the consumer that motivated it: the ghost builds from a landed face.
+    std::vector<float> ghost;
+    EXPECT_TRUE(materializr::ghostPrismMesh(TopoDS::Face(TopExp_Explorer(shape, TopAbs_FACE).Current()),
+                                            gp_Vec(0, 0, 5.0), ghost));
+    EXPECT_FALSE(ghost.empty());
+}
+
 TEST(MeshWorker, ReportsFacesTheMesherCouldNotTriangulate) {
     // The caller uses the count to keep such a body on the synchronous path
     // (tessellate() Cleans and re-meshes it in the frame anyway).
@@ -167,22 +203,22 @@ TEST(MeshWorker, AResultWithEveryFaceBareLandsNothing) {
 }
 
 TEST(MeshWorker, NewestRequestForABodyWins) {
-    // Keep the worker busy on body 1 (a 300-hole plate, about 50 ms) while
-    // three requests for body 2 arrive within a millisecond: only the last
-    // one should be meshed.
+    // Hold the worker while three requests for one body queue up: only the
+    // last one is meshed. pause() makes this deterministic; no mesh time is
+    // used as a barrier.
     TopoDS_Shape a = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
     TopoDS_Shape b = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
     TopoDS_Shape c = BRepPrimAPI_MakeBox(30.0, 30.0, 30.0).Shape();
     MeshWorker worker;
-    worker.request(1, holePlate(20, 15), kDefl, kAng);
+    worker.pause();
     worker.request(2, a, kDefl, kAng);
     worker.request(2, b, kDefl, kAng);
     worker.request(2, c, kDefl, kAng);
-    EXPECT_EQ(worker.pending(), 2u);
+    EXPECT_EQ(worker.pending(), 1u);
+    worker.resume();
     std::vector<MeshWorker::Result> results = waitAll(worker);
-    ASSERT_EQ(results.size(), 2u);
-    EXPECT_EQ(results[0].bodyId, 1);
-    EXPECT_EQ(results[1].bodyId, 2);
-    EXPECT_EQ(results[1].tshape, c.TShape().get());
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].bodyId, 2);
+    EXPECT_EQ(results[0].tshape, c.TShape().get());
     EXPECT_EQ(worker.pending(), 0u);
 }

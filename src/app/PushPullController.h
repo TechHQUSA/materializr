@@ -7,6 +7,7 @@
 #include <atomic>
 #include <glm/glm.hpp>
 #include <memory>
+#include <vector>
 
 class PushPullOp;
 
@@ -76,6 +77,9 @@ public:
     // cancellation call it. Overridden only to drop the ghost mesh first -
     // it is renderer-only, so nothing else would.
     void cancel(const IopContext& ctx) override;
+    // Joins every preview job, running or abandoned: a worker still inside
+    // OCCT while statics tear down was the one hazard detached threads had.
+    ~PushPullController();
 
 protected:
     const char* title() const override { return "Push / Pull"; }
@@ -122,6 +126,10 @@ private:
     BodySnapshot m_originals; // bodies as they were when the gesture began
     struct PreviewRun;
     std::shared_ptr<PreviewRun> m_run; // the job in flight, if any
+    // Jobs no longer wanted (cancel, commit, a newer gesture) whose thread
+    // has not been joined yet; reaped when done, joined in the destructor.
+    std::vector<std::shared_ptr<PreviewRun>> m_abandoned;
+    void reapAbandoned();
 };
 
 } // namespace materializr

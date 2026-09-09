@@ -304,6 +304,11 @@ protected:
     Operation* liveOp() const { return m_liveOp.get(); }
     // LiveOp: is the live instance currently APPLIED to the document?
     bool livePreviewApplied() const { return m_liveApplied; }
+    // LiveOp only: undo the applied live op without re-executing it, marking
+    // the bodies it gives back. For a gesture that returns to nothing to
+    // preview (zero distance, a refused result) while the engine's normal
+    // undo-then-execute cycle is not being run.
+    void retractLivePreview(const IopContext& ctx);
 
 private:
     void cleanup();

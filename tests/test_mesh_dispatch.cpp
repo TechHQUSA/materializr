@@ -63,6 +63,19 @@ TEST(MeshDispatch, AStaleResultClearsItsRequestAndNothingElse) {
     EXPECT_EQ(d.decide(1, reqA), MeshPath::Worker); // not answered, timing unchanged
 }
 
+TEST(MeshDispatch, AnInFrameMeshForgetsTheAnsweredRequest) {
+    // A recycled TShape address can make a new shape look already answered;
+    // the in-frame mesh that follows must clear that, so the body goes back
+    // to the worker on its next edit instead of stalling every frame.
+    MeshDispatch d;
+    d.meshedInFrame(1, 50.0);
+    d.requested(1, reqA);
+    d.finished(1, reqA, 50.0, true);
+    EXPECT_EQ(d.decide(1, reqA), MeshPath::InFrame);
+    d.meshedInFrame(1, 50.0);
+    EXPECT_EQ(d.decide(1, reqA), MeshPath::Worker);
+}
+
 TEST(MeshDispatch, AForgottenBodyStartsOver) {
     MeshDispatch d;
     d.meshedInFrame(1, 50.0);
