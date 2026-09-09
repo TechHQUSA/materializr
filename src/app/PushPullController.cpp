@@ -610,13 +610,25 @@ void PushPullController::applyDrag(const IopViewport& vp) {
 }
 
 // Drag the arrow: a one-finger drag in the viewport (touch - orbit is
-// suppressed while push/pull is active) or a mouse left-drag. No handle to
-// latch - the whole viewport is the drag surface - so draggingHandle() stays
-// false and the camera keeps its own claim (the dispatch loop skips this while
-// the camera is dragging).
+// suppressed while push/pull is active) or a mouse left-drag. No sub-region
+// to hit-test - the whole viewport is the drag surface - so, unlike the edge
+// ops' near-the-arrow test, claim the handle on EVERY press while the arrow
+// is showing. Without this, trackpad mode (orbit + pan both on Left) let the
+// camera claim the drag-threshold frame before vp.dragging ever turned true,
+// so a press-and-hold drag orbited instead of pushing/pulling (Steve: "it is
+// not letting me drag during a push/pull"). Release on button-up, same as
+// EdgeOpController. NOT gated on !vp.uiCaptured like the sticky toggle below:
+// this whole block only runs inside `if (viewportHovered)` (ImGui::IsItemHovered
+// on the viewport image), which is already false whenever a floating panel
+// occludes the cursor - io.WantCaptureMouse itself is true across the ENTIRE
+// viewport regardless of overlays (see ViewCube.cpp's note on the same
+// gotcha), so gating this claim on it made it dead code and the fix a no-op.
 void PushPullController::onViewportInput(const IopViewport& vp,
                                          const IopContext& ctx) {
     if (!active() || !m_st.hasArrow) return;
+
+    if (vp.clicked) setDraggingHandle(true);
+    else if (draggingHandle() && !vp.down) setDraggingHandle(false);
 
     if (vp.dragging) {
         applyDrag(vp);

@@ -312,12 +312,26 @@ int ExtrudeController::previewBodyId() const {
 }
 
 // Left-drag anywhere in the viewport moves the distance along the arrow's
-// normal. No handle to latch - the whole viewport is the drag surface - so
-// draggingHandle() stays false and the camera keeps its own claim (the
-// dispatch loop skips this while the camera is dragging).
+// normal. No sub-region to hit-test - the whole viewport is the drag
+// surface - so, unlike the edge ops' near-the-arrow test, claim the handle
+// on EVERY press while the op is active. Without this, trackpad mode (orbit
+// + pan both on Left) let the camera claim the drag-threshold frame before
+// vp.dragging ever turned true, so a press-and-hold drag orbited instead of
+// extruding (Steve: "it is not letting me drag ... during extrude"). Release
+// on button-up, same as EdgeOpController. NOT gated on !vp.uiCaptured like
+// the sticky toggle below: this whole block only runs inside
+// `if (viewportHovered)` (ImGui::IsItemHovered on the viewport image), which
+// is already false whenever a floating panel occludes the cursor -
+// io.WantCaptureMouse itself is true across the ENTIRE viewport regardless of
+// overlays (see ViewCube.cpp's note on the same gotcha), so gating this claim
+// on it made it dead code and the fix a no-op.
 void ExtrudeController::onViewportInput(const IopViewport& vp,
                                         const IopContext& ctx) {
     if (!active()) return;
+
+    if (vp.clicked) setDraggingHandle(true);
+    else if (draggingHandle() && !vp.down) setDraggingHandle(false);
+
     if (vp.dragging) {
         m_distance += vp.dragAlongAxis(m_origin, m_normal, vp.mouseDelta);
         materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_distance);

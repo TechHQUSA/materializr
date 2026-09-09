@@ -3602,12 +3602,16 @@ void Application::renderViewport() {
                 // Handle-aware, not blanket. The blanket version locked the
                 // camera for the WHOLE op, so in trackpad mode (orbit and pan
                 // both on Left) there was no way to orbit while a fillet /
-                // chamfer / push-pull was underway. The controllers hit-test
-                // on the press frame (edge arrows within 12 px, gizmo axes,
-                // push-pull sticky), so gizmoOwnsDrag already says whether
-                // THIS drag is the op's -- an empty-canvas drag orbits, a
-                // handle drag drives the value, exactly like default
-                // bindings where middle-orbit stays live during an op.
+                // chamfer was underway. The edge ops and gizmo axes hit-test
+                // on the press frame (edge arrows within 12 px, gizmo axes),
+                // so gizmoOwnsDrag already says whether THIS drag is the
+                // op's -- an empty-canvas drag orbits, a handle drag drives
+                // the value, exactly like default bindings where
+                // middle-orbit stays live during an op. Push/Pull and
+                // Extrude have no sub-region to test against — the whole
+                // viewport is the drag surface — so they claim on every
+                // press instead and behave like the old blanket rule for
+                // just those two: no orbit while they're underway.
                 // Sketch mode keeps the blanket: the rubber-band preview
                 // owns the cursor with no handle to test against.
                 if (leftIsCamera && !shiftPanGesture) {
