@@ -17,8 +17,7 @@
 #include <imgui.h>
 #include <chrono>
 #include <cstddef>
-#include <system_error>
-#include <thread>
+#include <optional>
 #include <BRep_Builder.hxx>
 #include <TopLoc_Location.hxx>
 #include <gp_Trsf.hxx>
@@ -276,7 +275,7 @@ int PushPullController::onBegin(const IopContext& ctx) {
     // preview frame).
     m_originals = snapshotBodies(ctx.doc);
     m_dispatch.reset();
-    if (m_run) m_abandoned.push_back(std::move(m_run));
+    m_job.abandon();
 
     // Push/Pull may edit several bodies at once, and a free-space one CREATES
     // its body - there is no single body to snapshot. The live instance's own
@@ -429,33 +428,7 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
                                      std::chrono::steady_clock::now() - t0).count());
 }
 
-struct PushPullController::PreviewRun {
-    std::unique_ptr<PreviewJob> job;
-    PushPullKey key;
-    PreviewResult result;
-    std::atomic<bool> done{false};
-    std::thread thread; // joined by the controller, never left running at exit
-};
-
-PushPullController::~PushPullController() {
-    if (m_run && m_run->thread.joinable()) m_run->thread.join();
-    for (auto& r : m_abandoned)
-        if (r->thread.joinable()) r->thread.join();
-}
-
-void PushPullController::reapAbandoned() {
-    for (size_t i = 0; i < m_abandoned.size();) {
-        if (m_abandoned[i]->done.load()) {
-            if (m_abandoned[i]->thread.joinable()) m_abandoned[i]->thread.join();
-            m_abandoned.erase(m_abandoned.begin() + static_cast<std::ptrdiff_t>(i));
-        } else {
-            ++i;
-        }
-    }
-}
-
 void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
-    reapAbandoned();
     const PushPullKey want{static_cast<double>(m_st.distance), m_st.symmetric};
     if (std::abs(m_st.distance) <= 1e-6) return; // a zero gesture previews nothing
     if (!m_dispatch.shouldLaunch(want)) return;
@@ -481,51 +454,31 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
         m_dispatch.refused(want);
         return;
     }
-    auto run = std::make_shared<PreviewRun>();
-    run->job = std::move(job);
-    run->key = want;
-    // Start the thread BEFORE publishing the run: a thread the system refuses
-    // must leave nothing pending, or the gesture would wait on it forever.
-    std::thread thread;
-    try {
-        thread = std::thread([run] {
-            // run() catches what the op throws; anything else must still end
-            // the job (an exception leaving a std::thread ends the process).
-            try {
-                run->result = run->job->run();
-            } catch (...) {
-                run->result = PreviewResult{};
-            }
-            run->done.store(true);
-        });
-    } catch (const std::system_error&) {
-        // Same as a refused prepare(): nothing will be previewed at this
-        // distance, so the previous preview must not stay on the body.
+    // A refused thread is the same as a refused prepare(): nothing will be
+    // previewed at this distance, so the previous preview must not stay on
+    // the body. A job still running is parked by the launch and reaped once
+    // it finishes; nothing in a frame ever waits on it.
+    std::shared_ptr<PreviewJob> shared = std::move(job);
+    if (!m_job.launch([shared] { return shared->run(); })) {
         retractLivePreview(ctx);
         m_dispatch.refused(want);
         return;
     }
-    // The thread lives in the run and the run lives in the controller until
-    // joined: an abandoned job (cancel, commit, a newer gesture) finishes on
-    // its own and is reaped later; nothing in a frame ever waits on it.
-    run->thread = std::move(thread);
     m_dispatch.launched(want);
-    if (m_run) m_abandoned.push_back(std::move(m_run)); // never drop a run: its thread must be joined
-    m_run = run;
 }
 
 void PushPullController::pollPreview(const IopContext& ctx) {
-    reapAbandoned();
-    if (!active() || !m_run || !m_run->done.load()) return;
-    std::shared_ptr<PreviewRun> run = std::move(m_run);
-    if (run->thread.joinable()) run->thread.join(); // done: returns at once
+    m_job.reap(); // abandoned jobs finish whether or not a gesture is active
+    if (!active()) return;
+    std::optional<PreviewResult> result = m_job.take();
+    if (!result) return;
     const PushPullKey now{static_cast<double>(m_st.distance), m_st.symmetric};
     const bool current = m_dispatch.finished(now);
     if (current) {
-        if (run->result.ok && liveOp()) {
+        if (result->ok && liveOp()) {
             PushPullOp::Precomputed pre;
-            pre.bodies = std::move(run->result.bodies);
-            pre.created = std::move(run->result.created);
+            pre.bodies = std::move(result->bodies);
+            pre.created = std::move(result->created);
             static_cast<PushPullOp*>(liveOp())->setPrecomputed(std::move(pre));
             // Base engine: undo the previous preview, sync, execute (which
             // applies the precomputed result), mark the changed bodies.
@@ -550,7 +503,7 @@ bool PushPullController::previewPending() const {
     // Abandoned jobs do NOT count: the loop keeps iterating at the idle floor
     // and polls every iteration, so they are reaped within a tick of
     // finishing without rendering frames for a preview nobody wants.
-    return m_run != nullptr;
+    return m_job.running();
 }
 
 // Mark only what the push/pull actually touched. On a 100+ body project this
@@ -628,7 +581,7 @@ void PushPullController::cancel(const IopContext& ctx) {
 void PushPullController::onCleanup() {
     m_st = PushPullState{};
     m_dispatch.reset();
-    if (m_run) m_abandoned.push_back(std::move(m_run)); // finishes on its own, reaped later
+    m_job.abandon(); // finishes on its own, reaped later
     m_originals.clear();
 }
 

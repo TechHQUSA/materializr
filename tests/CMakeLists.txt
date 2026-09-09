@@ -304,6 +304,11 @@ add_executable(test_pushpull_preview test_pushpull_preview.cpp)
 target_link_libraries(test_pushpull_preview PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_pushpull_preview COMMAND test_pushpull_preview)
 
+# test_async_job - one owned worker job at a time, parked when replaced, joined by the destructor
+add_executable(test_async_job test_async_job.cpp)
+target_link_libraries(test_async_job PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_async_job COMMAND test_async_job)
+
 # test_pushpull_dispatch - inline until slow, one job at a time, land then relaunch when the arrow moved
 add_executable(test_pushpull_dispatch test_pushpull_dispatch.cpp)
 target_link_libraries(test_pushpull_dispatch PRIVATE materializr_core gtest gtest_main)

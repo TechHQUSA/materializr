@@ -1,10 +1,11 @@
 #pragma once
 #include "InteractiveOpController.h"
+#include "AsyncJob.h"
 #include "PushPullDispatch.h"
+#include "PushPullPreview.h"
 #include "PushPullState.h"
 #include "core/BodyChanges.h"
 
-#include <atomic>
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -12,7 +13,6 @@
 class PushPullOp;
 
 namespace materializr {
-struct PreviewResult;
 class PreviewJob;
 
 // Interactive Push/Pull: take the selected sketch regions and/or flat body
@@ -77,9 +77,10 @@ public:
     // cancellation call it. Overridden only to drop the ghost mesh first -
     // it is renderer-only, so nothing else would.
     void cancel(const IopContext& ctx) override;
-    // Joins every preview job, running or abandoned: a worker still inside
-    // OCCT while statics tear down was the one hazard detached threads had.
-    ~PushPullController();
+    // The preview job (AsyncJob) joins every worker it started, running or
+    // abandoned: a worker still inside OCCT while statics tear down was the
+    // one hazard detached threads had.
+    ~PushPullController() = default;
 
 protected:
     const char* title() const override { return "Push / Pull"; }
@@ -124,12 +125,7 @@ private:
     PushPullState m_st;
     PushPullDispatch m_dispatch;
     BodySnapshot m_originals; // bodies as they were when the gesture began
-    struct PreviewRun;
-    std::shared_ptr<PreviewRun> m_run; // the job in flight, if any
-    // Jobs no longer wanted (cancel, commit, a newer gesture) whose thread
-    // has not been joined yet; reaped when done, joined in the destructor.
-    std::vector<std::shared_ptr<PreviewRun>> m_abandoned;
-    void reapAbandoned();
+    AsyncJob<PreviewResult> m_job; // the worker job in flight, if any
 };
 
 } // namespace materializr
