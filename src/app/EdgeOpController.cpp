@@ -449,7 +449,12 @@ void EdgeOpController::writeEditedParams(const IopContext& ctx, float v,
 void EdgeOpController::finish(const IopContext& ctx) {
     m_editPreview.clear();
     ctx.selection.clear();
-    ctx.markMeshesDirty();
+    // The body this gesture touched, not every visible one: commit() and
+    // cancel() hold a BodyChangeScope over the document edit, and a create
+    // gesture only ever changes its own body. An edit-mode replay marks its
+    // bodies through that scope too.
+    if (ctx.markBodyDirty && bodyId() >= 0) ctx.markBodyDirty(bodyId());
+    else if (ctx.markMeshesDirty) ctx.markMeshesDirty();
     // Base teardown clears active/dragging/snapshot and calls onCleanup(); it
     // deliberately does NOT touch the document, which commit/cancel have
     // already put where it belongs.
@@ -458,6 +463,7 @@ void EdgeOpController::finish(const IopContext& ctx) {
 
 void EdgeOpController::commit(const IopContext& ctx) {
     if (!active()) return;
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     const bool editing = m_editingIndex >= 0;
     const bool isFillet = m_kind == EdgeOpKind::Fillet;
 
@@ -558,19 +564,15 @@ void EdgeOpController::commit(const IopContext& ctx) {
                               "or fewer edges.").c_str());
         }
     };
-    // The gesture's previews ran on the worker because one frame was slow:
-    // run the commit between frames behind the progress window (as the base
-    // engine's commit does) instead of freezing on it here.
-    if (op && previewWentAsync() && deferCommit(ctx, op, report)) {
-        finish(ctx);
-        return;
-    }
+    // Pushed inline: see InteractiveOpController::commit's LiveOp branch for
+    // why a slow gesture is not on its own a reason to defer the commit.
     report(op && ctx.history.pushOperation(std::move(op), ctx.doc));
     finish(ctx);
 }
 
 void EdgeOpController::cancel(const IopContext& ctx) {
     if (!active()) { finish(ctx); return; }
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (m_editingIndex >= 0) {
         // The live preview mutated the real op - restore the parameter it had
         // when the edit began, then replay so the committed state (including

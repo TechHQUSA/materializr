@@ -39,7 +39,10 @@ inline BodySnapshot snapshotBodies(const Document& doc)
 
 // Bodies whose shape is no longer IsEqual to the snapshot (a move counts:
 // IsEqual is TShape plus Location plus Orientation), whose visibility
-// flipped, that appeared, or that vanished. Ascending id order.
+// flipped, whose imported-mesh flag flipped (it selects a different edge
+// rendering path), that appeared, or that vanished. Ascending id order.
+// NOT covered: metadata with no effect on the mesh, such as colour or name -
+// whoever changes those invalidates them their own way.
 inline std::vector<int> changedBodies(const BodySnapshot& before, const Document& now)
 {
     std::vector<int> out;
@@ -47,7 +50,7 @@ inline std::vector<int> changedBodies(const BodySnapshot& before, const Document
     for (const auto& [id, st] : after) {
         auto it = before.find(id);
         if (it == before.end() || it->second.visible != st.visible ||
-            !it->second.shape.IsEqual(st.shape))
+            it->second.mesh != st.mesh || !it->second.shape.IsEqual(st.shape))
             out.push_back(id);
     }
     for (const auto& [id, st] : before)
@@ -69,13 +72,21 @@ public:
     {
         if (m_markBody) m_before = snapshotBodies(doc);
     }
+    // Destructors are noexcept, and this one allocates (changedBodies builds
+    // a map) and calls a std::function - on a path that can be unwinding,
+    // since several call sites hold the scope inside a try block. A throw
+    // here would be std::terminate, so it stops at the boundary: a mark that
+    // could not be computed costs a stale mesh, not the process.
     ~BodyChangeScope()
     {
-        if (!m_markBody) {
-            if (m_markAll) m_markAll();
-            return;
+        try {
+            if (!m_markBody) {
+                if (m_markAll) m_markAll();
+                return;
+            }
+            for (int id : changedBodies(m_before, m_doc)) m_markBody(id);
+        } catch (...) {
         }
-        for (int id : changedBodies(m_before, m_doc)) m_markBody(id);
     }
     BodyChangeScope(const BodyChangeScope&) = delete;
     BodyChangeScope& operator=(const BodyChangeScope&) = delete;

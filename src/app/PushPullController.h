@@ -85,24 +85,14 @@ public:
 protected:
     const char* title() const override { return "Push / Pull"; }
     PreviewModel previewModel() const override { return PreviewModel::LiveOp; }
-    // This gesture's one real execute is the commit, and it is the expensive
-    // one: either the previews went to the worker (async) or there were none
-    // at all (the ghost path on a dense or threaded body). Both mean the
-    // base's commit should defer it behind the progress window.
-    bool previewWentAsync() const override {
-        return m_ppDispatch.async() || m_st.heavyPreview;
-    }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
     bool syncLiveOp(Operation& op) override;
     std::unique_ptr<Operation> buildCommitOp(const IopContext& ctx) override;
-    // Dense bodies draw a ghost instead of previewing for real, so the commit
-    // is the gesture's only real execute. previewWentAsync() above reports
-    // that path too, which is what makes the base run it between frames
-    // behind the progress window instead of freezing on it. (The LiveOp
-    // branch never consults wantsDeferredCommit; History still reflows this
-    // op beneath the Thread step and re-cuts the thread around it, now inside
-    // the deferred task.)
+    // Dense bodies draw a ghost instead of previewing for real. (The commit
+    // still runs inline - the LiveOp branch never consults
+    // wantsDeferredCommit, which is right here: History has to reflow this op
+    // beneath the Thread step and re-cut the thread around it.)
     bool wantsLivePreview(const IopContext&) const override {
         return !m_st.heavyPreview;
     }

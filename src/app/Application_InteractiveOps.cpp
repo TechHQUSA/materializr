@@ -2603,8 +2603,8 @@ void Application::pollThreadRecuts() {
 }
 
 void Application::cancelThreadRecuts() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (m_threadRecuts.empty()) return;
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     for (auto& p : m_threadRecuts) {
         if (p.cancel) p.cancel->store(true);
         // The body is sitting at its pre-thread state with the Thread step

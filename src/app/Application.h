@@ -630,8 +630,12 @@ private:
     void updatePushPull(bool applySnap = true) {
         m_ppCtl.updatePushPull(iopContext(), applySnap);
     }
-    void commitPushPull() { m_ppCtl.commit(iopContext()); m_meshesDirty = true; }
-    void cancelPushPull() { m_ppCtl.cancel(iopContext()); m_meshesDirty = true; }
+    // No full-rebuild flag: the controller's own BodyChangeScope marks what
+    // it changed, and Enter-to-confirm has always gone straight through the
+    // controller. Flagging here made the button route re-tessellate the whole
+    // document while the key route did not.
+    void commitPushPull() { m_ppCtl.commit(iopContext()); }
+    void cancelPushPull() { m_ppCtl.cancel(iopContext()); }
     // ── Move Face (face transform → body follows via loft; see MoveFaceOp) ──
     // The face transform this gesture applies (Move / Rotate / Scale share the
     // same loft engine + deferred silhouette; only the gizmo + drag math differ).
@@ -1355,14 +1359,8 @@ private:
         m_meshesDirty = true;
     }
     void updateInteractiveEdgeOp() { m_edgeCtl.updateEdgeOp(iopContext()); }
-    void commitInteractiveEdgeOp() {
-        m_edgeCtl.commit(iopContext());
-        m_meshesDirty = true;
-    }
-    void cancelInteractiveEdgeOp() {
-        m_edgeCtl.cancel(iopContext());
-        m_meshesDirty = true;
-    }
+    void commitInteractiveEdgeOp() { m_edgeCtl.commit(iopContext()); }
+    void cancelInteractiveEdgeOp() { m_edgeCtl.cancel(iopContext()); }
     // The body whose fillet/chamfer FACE was clicked to start an edit; handed
     // to the controller at begin so it can spot a baked (uneditable) feature.
     int m_edgeOpPickedBodyId = -1;

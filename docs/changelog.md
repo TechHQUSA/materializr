@@ -15,11 +15,9 @@ All notable changes to Materializr are documented here. Format loosely follows
   preview on a worker thread from copies of the bodies, landing each result
   when it is ready and asking again if the arrow moved meanwhile. The body
   therefore trails the arrow at the worker's pace instead of stalling the
-  app. Committing such a gesture runs the operation once at the final
-  distance, as the dense-body ghost path always did, and that one run now
-  happens between frames behind the cancellable progress window instead of
-  freezing the frame that confirmed it (1.3 s on the 300-hole plate). Small
-  bodies preview and commit exactly as before. The ghost tool volume is now built from the profile's
+  app. Committing such a gesture still runs the operation once at the final
+  distance, on the main thread, as the dense-body ghost path always did.
+  Small bodies preview exactly as before. The ghost tool volume is now built from the profile's
   own triangulation instead of being meshed each frame (32 ms per frame on a
   300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
   milliseconds.
@@ -32,9 +30,9 @@ All notable changes to Materializr are documented here. Format loosely follows
   which for a pure sketch edit is none (the bodies a sketch drives are
   re-derived by the cascade, which already marked exactly those). Project
   load, mesh-quality changes, imports and session switches still rebuild
-  everything, which is what they mean to do. A heavy commit run between
-  frames also marks per body now instead of flagging a full rebuild when it
-  lands.
+  everything, which is what they mean to do. A commit deferred between
+  frames (Project Sketch) also marks per body now instead of flagging a full
+  rebuild when it lands.
 - **Shell, Draft, Scale Face, and Fillet and Chamfer when creating one, stay
   responsive while dragging on a heavy body** (re-editing an existing fillet
   or chamfer is unchanged). These previews execute the operation on the
@@ -45,8 +43,8 @@ All notable changes to Materializr are documented here. Format loosely follows
   thread against a private copy of the body, landing each result when it is
   ready and asking again if the slider moved meanwhile; the body trails the
   slider instead of stalling the app (the frame pays about 4 ms to copy the
-  body). Confirming such a gesture runs the operation once behind the
-  progress window. Small bodies preview exactly as before.
+  body). Confirming still runs the operation once on the main thread. Small
+  bodies preview exactly as before.
 - **Interactive previews no longer re-tessellate every body on a many-body
   project.** Pattern, loft, boundary fill, patch, extrude, revolve and the
   other live previews raised the full-rebuild flag on every frame, so the

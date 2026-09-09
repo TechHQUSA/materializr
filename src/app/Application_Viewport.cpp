@@ -3261,10 +3261,11 @@ void Application::renderViewport() {
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                             });
                             markDirty();
-                            // No mesh flag: a sketch edit changes no body. The ones a sketch
-                            // DOES drive are re-derived by cascadeFromSketchEdit, which marks
-                            // exactly those. Flagging a full rebuild here re-tessellated every
-                            // visible body on every dimension keystroke.
+                            // No mesh flag: this path changes sketch geometry only and
+                            // never reaches a body (it neither publishes SketchEditedEvent
+                            // nor calls cascadeFromSketchEdit). The old flag re-tessellated
+                            // every visible body on every dimension keystroke to redraw
+                            // meshes that had not changed.
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
@@ -4996,7 +4997,7 @@ void Application::renderViewport() {
                                 TopoDS_Face face = TopoDS::Face(result.pickedShape);
                                 Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
                                 if (!surf.IsNull() && surf->IsKind(STANDARD_TYPE(Geom_Plane))) {
-                                    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+                         auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                                     gp_Pln pln = Handle(Geom_Plane)::DownCast(surf)->Pln();
                                     const gp_Ax3& ax = pln.Position();
                                     auto op = std::make_unique<MirrorOp>();
@@ -6810,10 +6811,11 @@ void Application::renderViewport() {
                 }
             }
             // Both actions change visibility flags, and the renderer only
-            // reflects those on a rebuild - m_meshesDirty is required or the
-            // menu item "doesn't seem to do anything" (markDirty() alone only
-            // flags the PROJECT as unsaved). The full rebuild skips invisible
-            // bodies, so post-isolate it re-tessellates just the one body.
+            // reflects those on a rebuild - without one the menu item
+            // "doesn't seem to do anything" (markDirty() alone only flags the
+            // PROJECT as unsaved). The scope marks exactly the bodies whose
+            // visibility flipped; the partial pass drops the ones now hidden
+            // and meshes the one left visible.
             if (ImGui::MenuItem(materializr::tr("Isolate"))) {
                 auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 for (int o : m_document->getAllBodyIds())

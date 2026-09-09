@@ -600,6 +600,9 @@ bool Application::switchToSession(size_t idx) {
     if (m_sketchRenderer) m_sketchRenderer->clearCache();
     m_dirtyBodyIds.clear();
     m_meshesDirty = true;
+    // A queued heavy task holds raw Document*/History* pointers into the
+    // session being swapped out. Nothing may outlive it.
+    m_deferredHeavy.clear();
     return true;
 }
 
@@ -2852,8 +2855,8 @@ void Application::handleShortcuts() {
     // ImGui has text input focus. Always false on Android (no modifier keys).
     bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
             // editor convention - and Steve's muscle memory); the next
             // Ctrl+Z then undoes committed elements as usual.
@@ -6153,14 +6156,13 @@ void Application::applyPendingDimension() {
                                        dimKind, dimIsArc, prefillValue);
         m_dimEditingFocus = true;
         m_dimOpenEditRequested = true; // viewport calls OpenPopup("##DimEdit") next frame
-        // No m_meshesDirty here: for a new dimension pd.measured is the
+        // Nothing to invalidate here: for a new dimension pd.measured is the
         // geometry's CURRENT value (resolveDimension reads it off the live
         // picks) so this commit never moves anything for the solver to
         // re-tessellate - same as applySketchConstraint's Distance/Angle
-        // path just above, which doesn't set it either. For a dedup match
-        // the value is untouched entirely. The ##DimEdit popup's own commit
-        // handler sets m_meshesDirty when a typed value actually changes
-        // geometry.
+        // path just above. For a dedup match the value is untouched
+        // entirely. Neither does the ##DimEdit popup's own commit handler:
+        // it edits sketch geometry, which no body mesh depends on.
         markDirty();
     }
 }
@@ -7366,6 +7368,11 @@ void Application::run() {
             // scoping it here is what lets the same ops call uiKeepAlive() from
             // an OCCT callback during a live drag preview and get a harmless
             // no-op. See core/UiKeepAlive.h.
+            // A new task starts uncancelled. The latch is otherwise only
+            // cleared by a reporter call with fraction==0, and this block
+            // starts indeterminate (-1), so one Cancel used to silence the
+            // progress window for every heavy task afterwards.
+            m_progressCancelled = false;
             m_heavyProgressFrac = -1.0f;
             m_heavyProgressLabel.clear();
             m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;

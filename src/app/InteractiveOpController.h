@@ -293,11 +293,6 @@ protected:
     }
 
     void requestCommit() { m_commitRequested = true; }
-    // This gesture proved the op slow and moved its previews to the worker,
-    // so its commit belongs behind the progress window too. Virtual because a
-    // controller running its own preview engine (Push/Pull) knows this from
-    // its own dispatch, not the base's.
-    virtual bool previewWentAsync() const { return m_dispatch.async(); }
     // Push `op` onto History BETWEEN frames, behind the cancellable progress
     // window, instead of freezing this frame on its execute. `onDone`, when
     // given, is called in that deferred task with pushOperation's result (a

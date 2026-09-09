@@ -825,8 +825,8 @@ void Application::renderMultiTransformPanel() {
 }
 
 void Application::applyMultiBodyRotation() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_selection || !m_document || !m_history) return;
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
 
     // Snapshot every selected body's current state.
     std::vector<std::pair<int, TopoDS_Shape>> bodies;
@@ -2662,11 +2662,11 @@ void Application::renderSketchMovePanel() {
 }
 
 void Application::applySketchMove() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_selection || !m_document || !m_history) {
         std::fprintf(stderr, "[SketchMove] missing selection/document/history\n");
         return;
     }
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     int sketchId = -1;
     for (const auto& e : m_selection->getSelection()) {
         if ((e.type == SelectionType::Sketch ||
@@ -3478,8 +3478,11 @@ bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
 }
 
 void Application::applyAlignPreview() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_alignActive || !m_document) return;
+    // Marked by id, not diffed: this runs again on every value edit while the
+    // popup is open, and it moves exactly one known body (the sketch branch
+    // moves no body at all), so a whole-document snapshot per edit would cost
+    // more than the move it is tracking.
     if (m_alignSketchId >= 0) {
         auto sk = m_document->getSketch(m_alignSketchId);
         if (!sk) return;
@@ -3499,6 +3502,7 @@ void Application::applyAlignPreview() {
     gp_Trsf R, T; gp_Pnt c; bool nr, nm;
     if (!computeAlignTransform(R, T, c, nr, nm)) {
         m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+        markBodyDirty(m_alignBodyId);
         return;
     }
     gp_Trsf full;
@@ -3508,17 +3512,25 @@ void Application::applyAlignPreview() {
     try {
         const TopoDS_Shape moved =
             BRepBuilderAPI_Transform(m_alignSnapshot, full, Standard_True).Shape();
-        if (!moved.IsNull()) m_document->updateBody(m_alignBodyId, moved);
+        if (!moved.IsNull()) {
+            m_document->updateBody(m_alignBodyId, moved);
+            markBodyDirty(m_alignBodyId);
+        }
     } catch (...) {}
 }
 
 void Application::cancelAlignFace() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
-    if (m_document && m_alignBodyId >= 0 && !m_alignSnapshot.IsNull())
-        m_document->updateBody(m_alignBodyId, m_alignSnapshot);
-    if (m_document && m_alignSketchId >= 0)
-        if (auto sk = m_document->getSketch(m_alignSketchId))
-            sk->setPlane(m_alignSketchPlaneBefore);
+    // The scope lives inside the null check, like every use below it: it
+    // takes a Document reference, so constructing it first would dereference
+    // the very pointer this function is careful about.
+    if (m_document) {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+        if (m_alignBodyId >= 0 && !m_alignSnapshot.IsNull())
+            m_document->updateBody(m_alignBodyId, m_alignSnapshot);
+        if (m_alignSketchId >= 0)
+            if (auto sk = m_document->getSketch(m_alignSketchId))
+                sk->setPlane(m_alignSketchPlaneBefore);
+    }
     m_alignSketchId = -1;
     m_alignActive = false;
     m_alignFace.Nullify(); m_alignSnapshot.Nullify();
@@ -3882,8 +3894,8 @@ void Application::revolveLiveRestore() {
 }
 
 void Application::applyRevolve() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_history || !m_document) return;
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
 
     // Resolve the axis once - both flows use the same picker.
     gp_Pnt axisOrigin(0, 0, 0);
@@ -4875,7 +4887,7 @@ void Application::commitStlImport() {
     // Defer the import: decimate + build + UnifySameDomain can take a few seconds
     // at high accuracy, so run it in the between-frames slot where it can paint a
     // progress frame instead of freezing the window (same path as project load).
-    m_deferredHeavy.replaceAll([this, path, acc]() {
+    m_deferredHeavy.queue([this, path, acc]() {
         renderProgressFrame(-1.0f, "Importing STL\xE2\x80\xA6");
         auto result = materializr::StlIO::import(path, *m_document, acc);
         if (result.success) {

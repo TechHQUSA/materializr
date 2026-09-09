@@ -79,11 +79,8 @@ public:
     int target = -1;
     double height = 12.0;     // what the preview applied
     double commitHeight = 15.0;
-    bool wentAsync = true;
-    using InteractiveOpController::livePreviewApplied;
 protected:
     PreviewModel previewModel() const override { return PreviewModel::LiveOp; }
-    bool previewWentAsync() const override { return wentAsync; }
     const char* title() const override { return "Live"; }
     int onBegin(const IopContext&) override { return target; }
     std::unique_ptr<Operation> buildOp(const IopContext&) override {
@@ -231,7 +228,10 @@ TEST(IopAsyncPreview, CommitWithOnlyARefusedPreviewLandedStillRecordsTheOp) {
     EXPECT_FALSE(r.ctl.active());
 }
 
-TEST(IopAsyncPreview, CommitAfterAnAsyncGestureIsDeferredWhenTheAppCan) {
+TEST(IopAsyncPreview, AnAsyncGestureStillCommitsInTheFrame) {
+    // Going async says the OPERATION is slow, which is not on its own a reason
+    // to defer the commit: these ops report no progress and pump no events, so
+    // a deferred commit would be the same freeze one frame later.
     Rig r;
     ASSERT_TRUE(r.ctl.begin(r.ctx()));
     r.ctl.height = 15.0;
@@ -242,12 +242,41 @@ TEST(IopAsyncPreview, CommitAfterAnAsyncGestureIsDeferredWhenTheAppCan) {
     c.progress = [](float, const char*) { return false; };
     c.deferHeavy = [&](std::function<void()> fn) { deferred = std::move(fn); };
     r.ctl.commit(c);
-    ASSERT_TRUE(deferred) << "a gesture that went async proved the op slow: commit behind the progress window";
+    EXPECT_FALSE(deferred);
+    ASSERT_EQ(r.history.operations().size(), 1u);
+    EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+namespace {
+// The shape that DOES defer: an op whose live preview is off because it is
+// slow (Project Sketch), and which reports progress so the window can paint.
+class DeferringController : public AsyncController {
+protected:
+    bool wantsLivePreview(const IopContext&) const override { return false; }
+};
+} // namespace
+
+TEST(IopAsyncPreview, AnOpThatSuppressesItsPreviewStillCommitsBetweenFrames) {
+    Rig r;
+    DeferringController ctl;
+    ctl.target = r.id;
+    ctl.height = 15.0;
+    ASSERT_TRUE(ctl.begin(r.ctx()));
+    EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // never previewed
+
+    std::function<void()> deferred;
+    IopContext c = r.ctx();
+    c.progress = [](float, const char*) { return false; };
+    c.deferHeavy = [&](std::function<void()> fn) { deferred = std::move(fn); };
+    ctl.commit(c);
+    ASSERT_TRUE(deferred) << "wantsDeferredCommit is what earns the progress window";
     EXPECT_EQ(r.history.operations().size(), 0u);
-    EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // snapshot until the deferred task runs
+    const int marksBefore = r.bodyDirtyMarks;
     deferred();
     ASSERT_EQ(r.history.operations().size(), 1u);
     EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+    EXPECT_GT(r.bodyDirtyMarks, marksBefore)
+        << "the deferred task diffs the document itself and marks per body";
 }
 
 namespace {
@@ -267,7 +296,11 @@ struct DeferRig {
 };
 } // namespace
 
-TEST(IopLiveOpCommit, AnAsyncGestureCommitsBehindTheProgressWindow) {
+TEST(IopLiveOpCommit, TheCommitRunsInTheFrameEvenWithADeferralSlotAvailable) {
+    // Deliberate: only ProjectSketchOp reports progress and only Extrude and
+    // Boolean pump the UI, so deferring these ops would draw no window and
+    // offer no Cancel - just the same freeze a frame later. On a threaded body
+    // it would also move the push out from under History's thread reflow.
     DeferRig r;
     LiveController ctl;
     ctl.target = r.rig.id;
@@ -276,39 +309,10 @@ TEST(IopLiveOpCommit, AnAsyncGestureCommitsBehindTheProgressWindow) {
 
     ctl.commit(r.ctx());
     EXPECT_FALSE(ctl.active());
-    ASSERT_TRUE(r.deferred()) << "the one real execute of a Push/Pull-shaped gesture "
-                           "must not freeze the frame that confirmed it";
-    EXPECT_EQ(r.rig.history.operations().size(), 0u);
-    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // preview undone
-
-    r.runDeferred();
+    EXPECT_FALSE(r.deferred()) << "a LiveOp commit must not be deferred";
     ASSERT_EQ(r.rig.history.operations().size(), 1u);
     EXPECT_EQ(r.rig.history.operations()[0]->serializeParams(), "h=15.000000");
     EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
-}
-
-TEST(IopLiveOpCommit, AnInlineGestureStillCommitsInTheFrame) {
-    DeferRig r;
-    LiveController ctl;
-    ctl.target = r.rig.id;
-    ctl.wentAsync = false;   // small bodies previewed inline: nothing to defer
-    ASSERT_TRUE(ctl.begin(r.ctx()));
-    ctl.commit(r.ctx());
-    EXPECT_FALSE(r.deferred());
-    ASSERT_EQ(r.rig.history.operations().size(), 1u);
-    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
-}
-
-TEST(IopLiveOpCommit, WithoutADeferralSlotTheCommitRunsInline) {
-    // Headless embeddings (and the tests above) hand the controller no
-    // progress reporter: deferCommit must decline and leave the op to run.
-    Rig r;
-    LiveController ctl;
-    ctl.target = r.id;
-    ASSERT_TRUE(ctl.begin(r.ctx()));
-    ctl.commit(r.ctx());
-    ASSERT_EQ(r.history.operations().size(), 1u);
-    EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
 }
 
 TEST(DeferredTasks, RunInTheOrderTheyWereQueued) {
