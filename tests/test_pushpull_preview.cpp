@@ -160,6 +160,28 @@ TEST(PushPullPreview, ACutThroughTheModelReachesTheSecondBodyToo) {
     EXPECT_NEAR(volume(ref.getBody(rhid)), 10.0 * 10.0 * 15.0, 1e-6);
 }
 
+TEST(PushPullPreview, AStaleFaceProfileIsStillPrepared) {
+    // The profile is a face of some other body (the host was rebuilt under
+    // it): prepare() must neither throw (ModifiedShape does, for a shape
+    // that was not copied) nor refuse; the op re-resolves against the copy.
+    Document live;
+    const int host = live.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "host");
+    const TopoDS_Shape other = BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape();
+    const materializr::BodySnapshot originals = materializr::snapshotBodies(live);
+    PreviewTarget t;
+    t.profile = topFace(other); // same geometry, not a face of the host
+    t.sourceBodyId = host;
+    PreviewParams p;
+    p.distance = 5.0;
+    std::unique_ptr<PreviewJob> job = PreviewJob::prepare(originals, {t}, p);
+    ASSERT_TRUE(job);
+    PreviewResult r = job->run();
+    EXPECT_TRUE(r.ok);
+    ASSERT_EQ(r.bodies.size(), 1u);
+    EXPECT_NEAR(volume(r.bodies[0].second), 20.0 * 20.0 * 15.0, 1e-6);
+    EXPECT_TRUE(live.getBody(host).IsEqual(originals.at(host).shape));
+}
+
 TEST(PushPullPreview, AMeshImportInTheToolsPathIsNotCopied) {
     // Copying a 100k-face import costs more than the preview gains; the real
     // op still cuts it, once, at commit.
@@ -216,6 +238,11 @@ TEST(PushPullPreview, PrecomputedResultIsAppliedWithoutBooleansAndUndone) {
     EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
     ASSERT_NE(doc.bodyFaceIds(id), nullptr);
     EXPECT_EQ(doc.bodyFaceIds(id)->size(), 6u);
+    for (const auto& seeded : ids) {
+        const std::vector<int>* got = materializr::topo::idsFor(*doc.bodyFaceIds(id), seeded.face);
+        ASSERT_NE(got, nullptr);
+        EXPECT_EQ(*got, seeded.ids);
+    }
 
     // One-shot: the next execute runs the real booleans.
     ASSERT_TRUE(op.execute(doc));

@@ -150,11 +150,11 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | percent | src/app/FaceOpControllers.cpp:2165 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
 | percent | src/app/FaceOpControllers.cpp:2169 | `if (materializr::stepperRow("sclBStep", &b,` |
 | percent | src/app/FaceOpControllers.cpp:2174 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| CONVERTED | src/app/PushPullController.cpp:701 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
-| CONVERTED | src/app/PushPullController.cpp:715 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
-| CONVERTED | src/app/PushPullController.cpp:722 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
-| CONVERTED | src/app/PushPullController.cpp:738 | `materializr::lengthStepperRow("ppStep", &m_st.distance,` |
-| CONVERTED | src/app/PushPullController.cpp:784 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/PushPullController.cpp:721 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
+| CONVERTED | src/app/PushPullController.cpp:735 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/PushPullController.cpp:742 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
+| CONVERTED | src/app/PushPullController.cpp:758 | `materializr::lengthStepperRow("ppStep", &m_st.distance,` |
+| CONVERTED | src/app/PushPullController.cpp:804 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
 | CONVERTED | src/app/SplitController.cpp:167 | `if (materializr::lengthStepperRow("splitOffset", &m_offset, /*allowNegative=*/true,` |
 | CONVERTED | src/app/SplitController.cpp:171 | `materializr::amountLengthField("splitOffsetAmt", nullptr, &m_offset, /*allowSign=*/true, -lim, lim))` |
 | CONVERTED | src/core/LengthEdit.h:24 | `inline double lengthFieldCommit(double displayValue) { return toMm(displayValue); }` |
@@ -374,11 +374,11 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/FaceOpControllers.cpp:968 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
 | comment | src/app/FaceOpControllers.cpp:969 | `// precision at two decimals, quantising metres to 10 mm. Its` |
 | comment | src/app/FaceOpControllers.cpp:1527 | `// of the hole rather than swamping a 3 mm bore.` |
-| comment | src/app/PushPullController.cpp:87 | `// hundreds of mm away - a push/pull on an unlinked sketch must` |
-| diagnostic | src/app/PushPullController.cpp:558 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
-| diagnostic | src/app/PushPullController.cpp:569 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
-| diagnostic | src/app/PushPullController.cpp:581 | `std::fprintf(stdout, "Push/Pull (smart cut) committed at %.2f mm\n",` |
-| diagnostic | src/app/PushPullController.cpp:588 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| comment | src/app/PushPullController.cpp:89 | `// hundreds of mm away - a push/pull on an unlinked sketch must` |
+| diagnostic | src/app/PushPullController.cpp:578 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| diagnostic | src/app/PushPullController.cpp:589 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| diagnostic | src/app/PushPullController.cpp:601 | `std::fprintf(stdout, "Push/Pull (smart cut) committed at %.2f mm\n",` |
+| diagnostic | src/app/PushPullController.cpp:608 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
 | comment | src/app/SplitController.h:49 | `float m_offset = 0.0f;    // mm from the body's bbox centre, along the axis` |
 | comment | src/app/layout/imtouch/ImTouchLayout.cpp:259 | `// badge. Raw mm here read "10" after picking the "1" preset under cm.` |
 | comment | src/core/Document.h:54 | `// Half-size of the rendered translucent quad in mm. Free to grow later` |
@@ -559,8 +559,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/viewport/RefImageRenderer.cpp:194 | `// zoom (bias shrinks with depth precision, the 0.05 mm lift doesn't).` |
 | comment | src/viewport/RefImageRenderer.cpp:211 | `// Lift the quad 0.05 mm off its plane: the ground grid renders BEFORE` |
 | comment | src/viewport/RefImageRenderer.cpp:214 | `// plane - the common case). 0.05 mm is invisible for tracing and the` |
-| comment | src/viewport/SectionCap.cpp:39 | `// Endpoints closer than this (in mm, in the plane) are one vertex. Crossings` |
-| comment | src/viewport/SectionCap.cpp:41 | `// mesh feature the app produces is the 0.01 mm Ultra deflection.` |
+| comment | src/viewport/SectionCap.cpp:40 | `// Endpoints closer than this (in mm, in the plane) are one vertex. Crossings` |
+| comment | src/viewport/SectionCap.cpp:42 | `// mesh feature the app produces is the 0.01 mm Ultra deflection.` |
 | comment | src/viewport/SketchRenderer.cpp:756 | `// Same mapping AirfoilImport::place uses: chord-normalised -> mm, rotated` |
 
 ## `Operation::description()` captions

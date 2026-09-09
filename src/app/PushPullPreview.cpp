@@ -94,11 +94,20 @@ std::unique_ptr<PreviewJob> PreviewJob::prepareOrThrow(const BodySnapshot& origi
             if (t.sketchId < 0) {
                 TopTools_IndexedMapOfShape faces;
                 TopExp::MapShapes(originals.at(t.sourceBodyId).shape, TopAbs_FACE, faces);
+                bool mappedOntoCopy = false;
                 if (faces.Contains(t.profile)) {
                     const TopoDS_Shape mapped = copiers[t.sourceBodyId].ModifiedShape(t.profile);
-                    if (!mapped.IsNull() && mapped.ShapeType() == TopAbs_FACE)
+                    if (!mapped.IsNull() && mapped.ShapeType() == TopAbs_FACE) {
                         ot.profile = TopoDS::Face(mapped);
+                        mappedOntoCopy = true;
+                    }
                 }
+                // A stale profile is still a live face; the worker must not
+                // touch it either. Its own copy is geometrically the same and
+                // the op re-resolves it against the copied host.
+                if (!mappedOntoCopy)
+                    ot.profile = TopoDS::Face(
+                        BRepBuilderAPI_Copy(t.profile, Standard_True, Standard_False).Shape());
             }
         }
         if (t.sketchId >= 0) {

@@ -7,6 +7,7 @@
 #include "SectionCap.h"
 
 #include <BRepMesh_Triangulator.hxx>
+#include <BRepBndLib.hxx>
 #include <BRep_Tool.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Vector.hxx>
@@ -280,9 +281,11 @@ std::vector<FaceMesh> faceMeshes(const TopoDS_Shape& shape)
     for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(TopoDS::Face(fe.Current()), loc);
-        // A bare face stays in the list (null handle): the slice must know the
-        // body is incomplete, see sliceSection.
-        out.push_back({tri, loc.Transformation(), loc.IsIdentity() == Standard_False});
+        FaceMesh fm{tri, Bnd_Box(), loc.Transformation(), loc.IsIdentity() == Standard_False};
+        // A bare face stays in the list (null handle) with its box: a plane
+        // through that box has a gap in its slice, see sliceSection.
+        if (tri.IsNull()) BRepBndLib::Add(fe.Current(), fm.box, Standard_False);
+        out.push_back(fm);
     }
     return out;
 }
@@ -297,9 +300,12 @@ bool sliceSection(const std::vector<FaceMesh>& faces, const gp_Pln& cuttingPlane
         double dLo = std::numeric_limits<double>::infinity();
         double dHi = -std::numeric_limits<double>::infinity();
         sliceTriangulation(faces, frame, sl, dLo, dHi);
+        // Complete for THIS plane: a bare face the plane does not pass through
+        // leaves no gap in this slice (a body with one face the mesher never
+        // triangulates keeps its cap on every other plane).
         bool complete = true;
         for (const FaceMesh& f : faces)
-            if (f.tri.IsNull()) { complete = false; break; }
+            if (f.tri.IsNull() && !f.box.IsVoid() && !f.box.IsOut(cuttingPlane)) { complete = false; break; }
         // The body must straddle the plane; a plane tangent to a face is no cut.
         const double straddleEps = 1e-6;
         if (!(dLo < -straddleEps && dHi > straddleEps)) return false;

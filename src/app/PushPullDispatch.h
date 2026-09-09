@@ -66,6 +66,11 @@ public:
         m_hasApplied = true;
     }
 
+    // The applied preview was taken off the body (the arrow went back to
+    // zero): whatever key was on screen no longer is, so coming back to that
+    // distance must launch again. Async mode and any running job stay.
+    void retracted() { m_hasApplied = false; }
+
     // The running job finished. True when its key is what the arrow shows
     // now, so the caller applies it; false means the arrow moved and the
     // result is stale (the caller then launches again at `now`). A current

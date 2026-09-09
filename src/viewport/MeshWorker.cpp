@@ -12,6 +12,8 @@
 #include <TopoDS.hxx>
 
 #include <chrono>
+#include <map>
+#include <vector>
 
 namespace materializr {
 
@@ -46,7 +48,12 @@ bool MeshWorker::request(int bodyId, const TopoDS_Shape& shape, float deflection
             f.copy = TopoDS::Face(copier.ModifiedShape(f.live));
             for (TopExp_Explorer ee(f.live, TopAbs_EDGE); ee.More(); ee.Next()) {
                 const TopoDS_Edge& e = TopoDS::Edge(ee.Current());
-                f.edges.emplace_back(e, TopoDS::Edge(copier.ModifiedShape(e)));
+                // The copier maps by IsSame, so both occurrences of a seam
+                // edge come back as the same forward copy; give each the
+                // live occurrence's orientation, or the orientation-aware
+                // polygon lookup on the worker returns the same side twice.
+                f.edges.emplace_back(
+                    e, TopoDS::Edge(copier.ModifiedShape(e).Oriented(e.Orientation())));
             }
             job.faces.push_back(std::move(f));
         }
@@ -76,9 +83,10 @@ std::vector<MeshWorker::Result> MeshWorker::collect()
 int MeshWorker::land(const Result& r)
 {
     BRep_Builder builder;
-    // Drop every old triangulation and edge polygon first, in one pass: an
-    // edge shared by two faces carries a polygon per face, and cleaning face
-    // B after landing face A would take A's fresh polygon with it.
+    // Drop each face's old triangulation and the polygons its edges held for
+    // it, then install the new ones. (Clean removes only the polygons bound
+    // to that face's own triangulation, so the order is a matter of tidiness,
+    // not correctness.)
     for (const auto& f : r.faces) BRepTools::Clean(f.live);
     int landed = 0;
     for (const auto& f : r.faces) {
@@ -86,8 +94,33 @@ int MeshWorker::land(const Result& r)
         builder.UpdateFace(f.live, f.tri);
         TopLoc_Location loc;
         BRep_Tool::Triangulation(f.live, loc);
-        for (const auto& [edge, poly] : f.edges)
-            if (!poly.IsNull()) builder.UpdateEdge(edge, poly, f.tri, loc);
+        // A seam edge (a cylinder's) occurs twice in its face, forward and
+        // reversed, with a polygon each; both must go on in one call, the
+        // single-polygon UpdateEdge replaces what is there for (tri, loc).
+        std::map<const void*, std::vector<const std::pair<TopoDS_Edge, Handle(Poly_PolygonOnTriangulation)>*>> byEdge;
+        std::vector<const void*> order;
+        for (const auto& ep : f.edges) {
+            const void* key = ep.first.TShape().get();
+            if (byEdge[key].empty()) order.push_back(key);
+            byEdge[key].push_back(&ep);
+        }
+        for (const void* key : order) {
+            const auto& occ = byEdge[key];
+            if (occ.size() == 1) {
+                if (!occ[0]->second.IsNull())
+                    builder.UpdateEdge(occ[0]->first, occ[0]->second, f.tri, loc);
+                continue;
+            }
+            Handle(Poly_PolygonOnTriangulation) forward, reversed;
+            for (const auto* ep : occ)
+                (ep->first.Orientation() == TopAbs_REVERSED ? reversed : forward) = ep->second;
+            if (!forward.IsNull() && !reversed.IsNull())
+                builder.UpdateEdge(occ[0]->first, forward, reversed, f.tri, loc);
+            else if (!forward.IsNull())
+                builder.UpdateEdge(occ[0]->first, forward, f.tri, loc);
+            else if (!reversed.IsNull())
+                builder.UpdateEdge(occ[0]->first, reversed, f.tri, loc);
+        }
         ++landed;
     }
     return landed;

@@ -134,7 +134,7 @@ TEST(MeshWorker, LandsTheEdgePolygonsToo) {
     // ghost, for one) finds nothing and takes its slow path forever.
     TopoDS_Shape shape = holePlate();
     MeshWorker worker;
-    worker.request(9, shape, kDefl, kAng);
+    EXPECT_TRUE(worker.request(9, shape, kDefl, kAng));
     std::vector<MeshWorker::Result> results = waitAll(worker);
     ASSERT_EQ(results.size(), 1u);
     ASSERT_GT(MeshWorker::land(results[0]), 0);
@@ -152,6 +152,34 @@ TEST(MeshWorker, LandsTheEdgePolygonsToo) {
         }
     }
     EXPECT_GT(edgesChecked, 100);
+    // Seam edges (one per hole wall) keep BOTH polygons, forward and reversed:
+    // the single-polygon update would leave one and the edge no longer closed.
+    int closedSeams = 0, distinctSides = 0;
+    for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
+        const TopoDS_Face face = TopoDS::Face(fe.Current());
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+        for (TopExp_Explorer ee(face, TopAbs_EDGE); ee.More(); ee.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(ee.Current());
+            if (edge.Orientation() != TopAbs_FORWARD || !BRep_Tool::IsClosed(edge, tri, loc)) continue;
+            ++closedSeams;
+            // The two sides of a seam run along different node columns; the
+            // same polygon stored twice would make them equal.
+            Handle(Poly_PolygonOnTriangulation) p1 = BRep_Tool::PolygonOnTriangulation(edge, tri, loc);
+            Handle(Poly_PolygonOnTriangulation) p2 =
+                BRep_Tool::PolygonOnTriangulation(TopoDS::Edge(edge.Reversed()), tri, loc);
+            ASSERT_FALSE(p1.IsNull());
+            ASSERT_FALSE(p2.IsNull());
+            const TColStd_Array1OfInteger& n1 = p1->Nodes();
+            const TColStd_Array1OfInteger& n2 = p2->Nodes();
+            bool same = n1.Length() == n2.Length();
+            for (int k = n1.Lower(); same && k <= n1.Upper(); ++k)
+                same = n1(k) == n2(n2.Lower() + (k - n1.Lower()));
+            if (!same) ++distinctSides;
+        }
+    }
+    EXPECT_EQ(closedSeams, 64); // 8 x 8 holes, one cylinder wall each
+    EXPECT_EQ(distinctSides, 64);
     // And the consumer that motivated it: the ghost builds from a landed face.
     std::vector<float> ghost;
     EXPECT_TRUE(materializr::ghostPrismMesh(TopoDS::Face(TopExp_Explorer(shape, TopAbs_FACE).Current()),

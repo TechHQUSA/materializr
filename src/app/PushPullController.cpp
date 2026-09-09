@@ -16,6 +16,8 @@
 #include "../touch_mode.h"
 #include <imgui.h>
 #include <chrono>
+#include <cstddef>
+#include <system_error>
 #include <thread>
 #include <BRep_Builder.hxx>
 #include <TopLoc_Location.hxx>
@@ -410,6 +412,7 @@ void PushPullController::updatePushPull(const IopContext& ctx, bool applySnap) {
             // must not stay on the body (no job runs for zero, so nothing
             // else would take it off).
             retractLivePreview(ctx);
+            m_dispatch.retracted(); // coming back to the old distance must ask again
             updateGhost(ctx); // clears it
             return;
         }
@@ -471,19 +474,36 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
     params.symmetric = want.symmetric;
     params.cutIntersecting = allFreeSketchTargets() || m_st.distance < 0.0f;
     std::unique_ptr<PreviewJob> job = PreviewJob::prepare(m_originals, targets, params);
-    if (!job) { m_dispatch.refused(want); return; } // not per frame: wait for the arrow to move
+    if (!job) {
+        // Nothing can be previewed at this distance: the body must not keep
+        // showing the previous one. The ghost stays, it is what is being
+        // dragged. Not retried until the arrow moves.
+        retractLivePreview(ctx);
+        m_dispatch.refused(want);
+        return;
+    }
     auto run = std::make_shared<PreviewRun>();
     run->job = std::move(job);
     run->key = want;
-    m_dispatch.launched(want);
-    m_run = run;
+    // Start the thread BEFORE publishing the run: a thread the system refuses
+    // must leave nothing pending, or the gesture would wait on it forever.
+    std::thread thread;
+    try {
+        thread = std::thread([run] {
+            run->result = run->job->run();
+            run->done.store(true);
+        });
+    } catch (const std::system_error&) {
+        m_dispatch.refused(want);
+        return;
+    }
     // The thread lives in the run and the run lives in the controller until
     // joined: an abandoned job (cancel, commit, a newer gesture) finishes on
     // its own and is reaped later; nothing in a frame ever waits on it.
-    run->thread = std::thread([run] {
-        run->result = run->job->run();
-        run->done.store(true);
-    });
+    run->thread = std::move(thread);
+    m_dispatch.launched(want);
+    if (m_run) m_abandoned.push_back(std::move(m_run)); // never drop a run: its thread must be joined
+    m_run = run;
 }
 
 void PushPullController::pollPreview(const IopContext& ctx) {

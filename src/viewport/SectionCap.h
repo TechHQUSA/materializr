@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Bnd_Box.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Standard_Handle.hxx>
 #include <TopoDS_Shape.hxx>
@@ -16,7 +17,8 @@ namespace materializr {
 // handle), so the main thread can hand these to a worker without copying the
 // body and re-mesh underneath it safely.
 struct FaceMesh {
-    Handle(Poly_Triangulation) tri;
+    Handle(Poly_Triangulation) tri; // null for a face the mesher left bare
+    Bnd_Box box;                    // bare faces only: where the gap in the slice would be
     gp_Trsf trsf;
     bool moved = false;
 };

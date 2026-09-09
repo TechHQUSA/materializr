@@ -17,6 +17,7 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_Surface.hxx>
 #include <Poly_Triangle.hxx>
@@ -264,11 +265,29 @@ TEST(SectionSlice, AMeshEdgeLyingInThePlaneIsDrawnOnce) {
     tri->SetTriangle(1, Poly_Triangle(1, 2, 3));
     tri->SetTriangle(2, Poly_Triangle(2, 1, 4));
     tri->SetTriangle(3, Poly_Triangle(1, 2, 5));
-    std::vector<materializr::FaceMesh> faces{{tri, gp_Trsf(), false}};
+    std::vector<materializr::FaceMesh> faces{{tri, Bnd_Box(), gp_Trsf(), false}};
     SectionSlice slice;
     EXPECT_TRUE(sliceSection(faces, gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), slice));
     EXPECT_NEAR(lineLength(slice.lines), 10.0, 1e-6);
     EXPECT_TRUE(slice.cap.empty());
+}
+
+TEST(SectionSlice, ABareFaceAwayFromThePlaneStillAllowsTheCap) {
+    // The top face is bare, the cut is through the middle: no gap in this
+    // slice, so the cap is filled as if the body were whole.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
+    meshLikeRenderer(box);
+    for (TopExp_Explorer e(box, TopAbs_FACE); e.More(); e.Next()) {
+        TopoDS_Face face = TopoDS::Face(e.Current());
+        TopLoc_Location loc;
+        Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
+        bool atZMax = true;
+        for (int i = 1; i <= tri->NbNodes(); ++i) atZMax = atZMax && tri->Node(i).Z() > 19.9;
+        if (atZMax) BRep_Builder().UpdateFace(face, Handle(Poly_Triangulation)());
+    }
+    SectionSlice slice;
+    EXPECT_TRUE(sliceSection(faceMeshes(box), gp_Pln(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1)), slice));
+    EXPECT_NEAR(capArea(slice.cap), 400.0, 1e-6);
 }
 
 TEST(SectionSlice, UnmeshedFaceStillDrawsTheRest) {

@@ -50,6 +50,19 @@ TEST(PushPullDispatch, AStaleResultIsDroppedAndTheArrowReAsked) {
     EXPECT_TRUE(d.shouldLaunch({5.0, false})); // nothing was applied for 5 either
 }
 
+TEST(PushPullDispatch, RetractingForgetsTheAppliedKey) {
+    // Land 5, drag back to zero (the preview is taken off the body), drag
+    // back to 5: it must be asked again, the body shows the baseline.
+    PushPullDispatch d;
+    d.inlinePreviewTook(100.0);
+    d.launched({5.0, false});
+    EXPECT_TRUE(d.finished({5.0, false}));
+    EXPECT_FALSE(d.shouldLaunch({5.0, false}));
+    d.retracted();
+    EXPECT_TRUE(d.async());
+    EXPECT_TRUE(d.shouldLaunch({5.0, false}));
+}
+
 TEST(PushPullDispatch, ARefusedKeyIsNotAskedAgainUntilTheArrowMoves) {
     PushPullDispatch d;
     d.inlinePreviewTook(100.0);

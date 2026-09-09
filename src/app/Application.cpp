@@ -7180,8 +7180,9 @@ void Application::run() {
         }
         // Apply/discard any landed async thread re-cuts before this frame.
         pollThreadRecuts();
-        // Land a finished off-thread push/pull preview, or relaunch it.
-        if (m_ppCtl.active()) m_ppCtl.pollPreview(iopContext());
+        // Land a finished off-thread push/pull preview, or relaunch it; also
+        // reaps abandoned jobs, so it runs whether or not a gesture is active.
+        m_ppCtl.pollPreview(iopContext());
 
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
