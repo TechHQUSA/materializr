@@ -115,6 +115,7 @@ add_library(materializr_core STATIC
     # only Document / History / SelectionManager / Operation + imgui.
     ${CMAKE_SOURCE_DIR}/src/app/InteractiveOpController.cpp
     ${CMAKE_SOURCE_DIR}/src/app/PushPullPreview.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/SnapshotPreview.cpp
     ${CMAKE_SOURCE_DIR}/src/app/GhostMesh.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/TouchWidgets.cpp
     # Installs OCCT's signal handler for every test binary - see the file for
@@ -308,6 +309,16 @@ add_test(NAME test_pushpull_preview COMMAND test_pushpull_preview)
 add_executable(test_async_job test_async_job.cpp)
 target_link_libraries(test_async_job PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_async_job COMMAND test_async_job)
+
+# test_snapshot_preview - a snapshot-body op run on a private copy equals the inline execute and never touches the snapshot
+add_executable(test_snapshot_preview test_snapshot_preview.cpp)
+target_link_libraries(test_snapshot_preview PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_snapshot_preview COMMAND test_snapshot_preview)
+
+# test_iop_async_preview - the SnapshotBody engine's off-thread preview: inline until slow, trails the slider, cancel/commit mid-job
+add_executable(test_iop_async_preview test_iop_async_preview.cpp)
+target_link_libraries(test_iop_async_preview PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_iop_async_preview COMMAND test_iop_async_preview)
 
 # test_pushpull_dispatch - inline until slow, one job at a time, land then relaunch when the arrow moved
 add_executable(test_pushpull_dispatch test_pushpull_dispatch.cpp)

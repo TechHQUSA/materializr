@@ -19,6 +19,11 @@ public:
     void setBody(int bodyId);
     void setEdges(const std::vector<TopoDS_Edge>& edges);
     void setDistance(double distance);
+    std::vector<TopoDS_Shape*> shapeParams() override {
+        std::vector<TopoDS_Shape*> out;
+        for (TopoDS_Shape& s : m_edges) out.push_back(&s);
+        return out;
+    }
     // Second setback (along the OTHER face of each edge). <= 0 means symmetric:
     // both faces use setDistance(). > 0 makes an asymmetric chamfer.
     void setDistance2(double distance) { m_distance2 = distance; }

@@ -7,7 +7,10 @@
 #include "../core/SelectionManager.h"
 #include "../core/Operation.h"
 #include <imgui.h>
+#include <chrono>
 #include <cstdio>
+#include <optional>
+#include <string>
 
 namespace materializr {
 
@@ -65,6 +68,11 @@ void InteractiveOpController::update(const IopContext& ctx) {
         m_previewOk = true;
         return;
     }
+    if (previewOffThread()) { updateSnapshotAsync(ctx); return; }
+    updateSnapshotInline(ctx);
+}
+
+void InteractiveOpController::updateSnapshotInline(const IopContext& ctx) {
     // Reset to the snapshot, then run a fresh op against it so the live
     // preview tracks the current values exactly without compounding edits.
     ctx.doc.updateBody(m_bodyId, m_snapshot);
@@ -79,6 +87,79 @@ void InteractiveOpController::update(const IopContext& ctx) {
     } catch (...) {
         ctx.doc.updateBody(m_bodyId, m_snapshot);
     }
+}
+
+void InteractiveOpController::updateSnapshotAsync(const IopContext& ctx) {
+    if (!m_dispatch.async()) {
+        const auto t0 = std::chrono::steady_clock::now();
+        updateSnapshotInline(ctx);
+        m_dispatch.inlinePreviewTook(std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - t0).count());
+        return;
+    }
+    // Async: the body keeps showing the last landed preview (or the snapshot)
+    // until a job for the current parameters lands - never restore the
+    // snapshot per frame here, or the body would flash back on every change.
+    launchSnapshotPreviewIfWanted(ctx);
+}
+
+std::string InteractiveOpController::snapshotPreviewKey(const IopContext& ctx) {
+    try {
+        std::unique_ptr<Operation> op = buildOp(ctx);
+        return op ? op->serializeParams() : std::string();
+    } catch (...) {
+        return std::string();
+    }
+}
+
+void InteractiveOpController::launchSnapshotPreviewIfWanted(const IopContext& ctx) {
+    std::unique_ptr<Operation> op;
+    try { op = buildOp(ctx); } catch (...) {}
+    if (!op) {
+        // Nothing to preview at these parameters (a zero thickness): show
+        // the snapshot, and remember that whatever key was on screen is gone.
+        ctx.doc.updateBody(m_bodyId, m_snapshot);
+        m_previewOk = false;
+        m_dispatch.retracted();
+        return;
+    }
+    const std::string key = op->serializeParams();
+    if (!m_dispatch.shouldLaunch(key)) return;
+    std::unique_ptr<SnapshotPreviewJob> job =
+        SnapshotPreviewJob::prepare(m_bodyId, m_snapshot, std::move(op));
+    std::shared_ptr<SnapshotPreviewJob> shared = std::move(job);
+    if (!shared || !m_job.launch([shared] { return shared->run(); })) {
+        // No copy, or no thread: nothing will be previewed at these
+        // parameters, so the previous preview must not stay on the body. Not
+        // retried until the parameters move.
+        ctx.doc.updateBody(m_bodyId, m_snapshot);
+        m_previewOk = false;
+        m_dispatch.refused(key);
+        return;
+    }
+    m_dispatch.launched(key);
+}
+
+void InteractiveOpController::pollPreview(const IopContext& ctx) {
+    m_job.reap(); // abandoned jobs finish whether or not a gesture is active
+    if (!m_active || previewModel() != PreviewModel::SnapshotBody || m_bodyId < 0) return;
+    std::optional<SnapshotPreviewResult> result = m_job.take();
+    if (!result) return;
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
+    if (m_dispatch.finished(snapshotPreviewKey(ctx))) {
+        if (result->ok) {
+            ctx.doc.updateBody(m_bodyId, result->shape);
+            m_previewOk = true;
+        } else {
+            // The op refused these parameters: show the gesture-start state,
+            // not the last landed preview at some other value.
+            ctx.doc.updateBody(m_bodyId, m_snapshot);
+            m_previewOk = false;
+        }
+        return;
+    }
+    // The parameters moved while the job ran: that result is stale, ask again.
+    launchSnapshotPreviewIfWanted(ctx);
 }
 
 // LiveOp preview: ONE instance, toggled against the document. Undo whatever
@@ -144,13 +225,19 @@ void InteractiveOpController::commit(const IopContext& ctx) {
     // Roll back the preview; History::pushOperation re-runs the op cleanly
     // against the snapshot.
     ctx.doc.updateBody(m_bodyId, m_snapshot);
-    if (!m_previewOk) {
+    // In an async gesture m_previewOk describes the last LANDED job, which
+    // may be for other parameters than the ones being committed (or none has
+    // landed yet), so it cannot gate the commit: pushOperation re-runs the op
+    // and refuses on failure, which is the same clean no-op cancel() gives.
+    if (!m_previewOk && !m_dispatch.async()) {
         cancel(ctx);
         return;
     }
     std::unique_ptr<Operation> op = buildOp(ctx);
     if (op) {
-        if (wantsDeferredCommit(ctx) && ctx.progress && ctx.deferHeavy) {
+        // A gesture that went async proved the op slow: run the commit behind
+        // the progress window too, instead of freezing on the final execute.
+        if ((wantsDeferredCommit(ctx) || m_dispatch.async()) && ctx.progress && ctx.deferHeavy) {
             // Heavy op (live preview was off): defer it to run BETWEEN frames
             // with a progress reporter so the window stays alive and the user
             // can cancel. A cancel makes execute() fail → pushOperation refuses
@@ -197,6 +284,8 @@ void InteractiveOpController::cleanup() {
     m_snapshot.Nullify();
     m_liveOp.reset();
     m_liveApplied = false;
+    m_dispatch.reset();
+    m_job.abandon(); // finishes on its own, reaped by a later poll
     onCleanup();
 }
 

@@ -3,7 +3,12 @@
 #include <functional>
 #include <vector>
 #include <memory>
+#include <string>
 #include <TopoDS_Face.hxx>
+#include "AsyncJob.h"
+#include "PreviewDispatch.h"
+#include "SnapshotPreview.h"
+
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
 
@@ -184,6 +189,14 @@ public:
     virtual void commit(const IopContext& ctx);
     virtual void cancel(const IopContext& ctx);
 
+    // Off-thread preview, polled every frame loop iteration whether or not a
+    // gesture is active (abandoned worker jobs finish either way). SnapshotBody:
+    // lands a finished job's body, or relaunches when the parameters moved
+    // meanwhile. Push/Pull overrides both for its own worker.
+    virtual void pollPreview(const IopContext& ctx);
+    // A worker job is running: keep frames coming until it lands.
+    virtual bool previewPending() const { return m_job.running(); }
+
     // Draws nothing when inactive. The scaffold handles window placement,
     // title, Confirm/Cancel buttons, and Enter/Esc keys. Virtual for
     // controllers whose panel isn't scaffold-shaped (Move Face anchors its
@@ -252,6 +265,15 @@ protected:
     // every body the preview changed; overrides add what a diff cannot see
     // (Push/Pull's renderer-only ghost slot).
     virtual void markPreviewDirty(const IopContext&) const {}
+    // SnapshotBody only: run the per-frame op on a worker once one inline
+    // frame took PreviewDispatch::kAsyncPreviewMs or more. The op is built by
+    // buildOp as usual, its shape parameters are pointed at a private copy of
+    // the snapshot (Operation::shapeParams, so the op must override it) and
+    // it executes in a scratch Document under the live id; the body on screen
+    // trails the slider by one job. Commit re-runs buildOp on the live
+    // document as always, behind the progress window when the gesture went
+    // async. Default: every frame runs inline.
+    virtual bool previewOffThread() const { return false; }
     // Override to suppress the per-change live preview when recomputing it would
     // freeze the UI (e.g. projecting a sketch with hundreds of regions). Commit
     // still builds + runs the op once. Default: always preview.
@@ -313,6 +335,15 @@ protected:
 private:
     void cleanup();
     void updateLive(const IopContext& ctx);
+    // SnapshotBody: restore the snapshot, build a fresh op, execute it here.
+    void updateSnapshotInline(const IopContext& ctx);
+    // SnapshotBody + previewOffThread: inline and timed until one frame is
+    // slow, then one worker job at a time (see pollPreview).
+    void updateSnapshotAsync(const IopContext& ctx);
+    void launchSnapshotPreviewIfWanted(const IopContext& ctx);
+    // The key of what the gesture asks for now: the fresh op's serialized
+    // parameters, empty when there is nothing to preview (buildOp gave null).
+    std::string snapshotPreviewKey(const IopContext& ctx);
 
     bool m_active = false;
     bool m_previewOk = false;
@@ -323,6 +354,9 @@ private:
     // LiveOp model only - see PreviewModel.
     std::unique_ptr<Operation> m_liveOp;
     bool m_liveApplied = false;
+    // SnapshotBody off-thread preview (previewOffThread).
+    PreviewDispatch<std::string> m_dispatch;
+    AsyncJob<SnapshotPreviewResult> m_job;
 };
 
 } // namespace materializr

@@ -18,6 +18,11 @@ public:
     void setBody(int bodyId);
     void setEdges(const std::vector<TopoDS_Edge>& edges);
     void setRadius(double radius);
+    std::vector<TopoDS_Shape*> shapeParams() override {
+        std::vector<TopoDS_Shape*> out;
+        for (TopoDS_Shape& s : m_edges) out.push_back(&s);
+        return out;
+    }
 
     // Generative edge tracking (experiment/generative-edges): remember which
     // SKETCH generated this body so a filleted CORNER edge can be re-found by

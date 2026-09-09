@@ -7180,9 +7180,13 @@ void Application::run() {
         }
         // Apply/discard any landed async thread re-cuts before this frame.
         pollThreadRecuts();
-        // Land a finished off-thread push/pull preview, or relaunch it; also
-        // reaps abandoned jobs, so it runs whether or not a gesture is active.
-        m_ppCtl.pollPreview(iopContext());
+        // Land a finished off-thread preview (push/pull, or a snapshot-body op
+        // that went async), or relaunch it; also reaps abandoned jobs, so it
+        // runs whether or not a gesture is active.
+        {
+            IopContext ictx = iopContext();
+            for (auto* c : m_iops) c->pollPreview(ictx);
+        }
 
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
@@ -7195,7 +7199,8 @@ void Application::run() {
                 return true;
             if (!m_threadRecuts.empty()) return true; // async re-cut in flight
             if (m_meshDispatch.anyPending()) return true; // off-thread mesh in flight: land it when it finishes
-            if (m_ppCtl.previewPending()) return true;  // off-thread push/pull preview in flight
+            for (auto* c : m_iops)
+                if (c->previewPending()) return true; // off-thread preview in flight
             // A rebuild is waiting for a frame (a landed worker result marked
             // its body dirty): render it rather than idle on the stale mesh.
             if (m_meshesDirty || !m_dirtyBodyIds.empty()) return true;

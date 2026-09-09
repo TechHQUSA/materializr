@@ -152,6 +152,14 @@ public:
     // means "unknown / not boolean-sensitive" - no reflow.
     virtual std::vector<int> plannedBodyIds() const { return {}; }
 
+    // The sub-shapes this op was handed as parameters (the faces to remove,
+    // the edges to fillet) while it still holds them as live references, so
+    // an off-thread preview can point them at a private copy of the body
+    // before execute() runs there (SnapshotPreview). An op that returns
+    // nothing while it does hold such references is not eligible for that
+    // preview and keeps running in the frame. Default: no shape parameters.
+    virtual std::vector<TopoDS_Shape*> shapeParams() { return {}; }
+
     // Maintained by History: the serialised parameter set from this op's last
     // SUCCESSFUL execute. Used to roll a rejected edit back - the UI mutates
     // params in place before editStep runs, so "the values that worked" must

@@ -22,6 +22,7 @@ protected:
     const char* title() const override { return "Shell"; }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
+    bool previewOffThread() const override { return true; }
     void panelBody(const IopContext& ctx, bool& changed) override;
     void onCleanup() override;
     float panelWidth() const override { return 300.0f; }
@@ -44,6 +45,7 @@ protected:
     const char* title() const override { return "Draft"; }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
+    bool previewOffThread() const override { return true; }
     void panelBody(const IopContext& ctx, bool& changed) override;
     void onCleanup() override;
 
@@ -119,6 +121,7 @@ protected:
     void drawOverlay(const IopOverlay& ov) const override;
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
+    bool previewOffThread() const override { return true; }
     void panelBody(const IopContext& ctx, bool& changed) override;
     void onCleanup() override;
 

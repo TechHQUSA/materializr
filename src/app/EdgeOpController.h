@@ -79,6 +79,7 @@ protected:
     }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
+    bool previewOffThread() const override { return true; }
     void panelBody(const IopContext& ctx, bool& changed) override;
     void markPreviewDirty(const IopContext& ctx) const override;
     // The panel is renderEdgeOpPanel (viewport-anchored), so the scaffold's

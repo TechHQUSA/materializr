@@ -70,8 +70,8 @@ public:
     // Off-thread preview (see PushPullDispatch): once one inline preview of
     // this gesture took kAsyncPreviewMs or more, later frames draw the ghost
     // and run the boolean on a worker. Application polls once per frame.
-    void pollPreview(const IopContext& ctx);
-    bool previewPending() const; // a worker job is running: keep frames coming
+    void pollPreview(const IopContext& ctx) override;
+    bool previewPending() const override; // a worker job is running: keep frames coming
 
     // Public because the base's is: the generic Esc chain and single-flight
     // cancellation call it. Overridden only to drop the ghost mesh first -

@@ -2,6 +2,8 @@
 // runs one worker job at a time and re-asks when the arrow moved meanwhile.
 #include "app/PushPullDispatch.h"
 
+#include <string>
+
 #include <gtest/gtest.h>
 
 using materializr::PushPullDispatch;
@@ -93,4 +95,26 @@ TEST(PushPullDispatch, ResetStartsTheNextGestureInline) {
     EXPECT_FALSE(d.async());
     EXPECT_FALSE(d.running());
     EXPECT_FALSE(d.shouldLaunch({5.0, false}));
+}
+
+// The same rules with a string key, as the snapshot-body engine uses
+// (Operation::serializeParams): the template is not tied to the arrow.
+TEST(PreviewDispatch, StringKeyedGestureTrailsTheParameters) {
+    materializr::PreviewDispatch<std::string> d;
+    EXPECT_FALSE(d.shouldLaunch("t=1"));
+    d.inlinePreviewTook(materializr::PreviewDispatch<std::string>::kAsyncPreviewMs);
+    EXPECT_TRUE(d.shouldLaunch("t=1"));
+    d.launched("t=1");
+    EXPECT_FALSE(d.shouldLaunch("t=2"));
+    EXPECT_FALSE(d.finished("t=2"));   // moved meanwhile: stale
+    EXPECT_TRUE(d.shouldLaunch("t=2"));
+    d.launched("t=2");
+    EXPECT_TRUE(d.finished("t=2"));
+    EXPECT_FALSE(d.shouldLaunch("t=2")); // already on screen
+    d.retracted();
+    EXPECT_TRUE(d.shouldLaunch("t=2"));
+    d.refused("t=3");
+    EXPECT_FALSE(d.shouldLaunch("t=3"));
+    d.reset();
+    EXPECT_FALSE(d.async());
 }

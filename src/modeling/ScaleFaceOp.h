@@ -30,6 +30,7 @@ public:
                                            // in-plane X / Y directions
     void setLength(double l);       // blend length along the face normal
     void setMode(Mode m);
+    std::vector<TopoDS_Shape*> shapeParams() override { return {&m_face}; }
 
     int    getBodyId() const { return m_bodyId; }
     double getScalePercent() const { return 0.5 * (m_scaleU + m_scaleV); }

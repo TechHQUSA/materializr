@@ -38,6 +38,11 @@ public:
     std::string typeId() const override { return "taper"; }
     OperationDiff captureDiff() const override;
     std::vector<int> plannedBodyIds() const override { return {m_bodyId}; }
+    std::vector<TopoDS_Shape*> shapeParams() override {
+        std::vector<TopoDS_Shape*> out;
+        for (TopoDS_Shape& s : m_faces) out.push_back(&s);
+        return out;
+    }
     std::string serializeParams() const override;
     bool deserializeParams(const std::string& blob) override;
     bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
