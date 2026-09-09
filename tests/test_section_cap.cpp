@@ -313,6 +313,7 @@ TEST(SectionSlice, ABareFaceWithNoUsableBoxCountsAsAGap) {
         SectionSlice slice;
         EXPECT_TRUE(sliceSection(faces, plane, slice));
         EXPECT_TRUE(slice.cap.empty());
+        EXPECT_NEAR(lineLength(slice.lines), 80.0, 1e-6);
     }
 }
 

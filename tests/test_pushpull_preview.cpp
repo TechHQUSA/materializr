@@ -195,6 +195,35 @@ TEST(PushPullPreview, AStaleFaceProfileIsStillPrepared) {
     EXPECT_EQ(r.bodies[0].first, host);
 }
 
+TEST(PushPullPreview, AFreeProfileWithNoHostAndNoSketchIsCopiedToo) {
+    // The third kind of target (neither host body nor sketch region): the
+    // worker must still get its own copy, and the sweep becomes a new body.
+    Document live;
+    live.addBody(BRepPrimAPI_MakeBox(gp_Pnt(200.0, 0.0, 0.0), 5.0, 5.0, 5.0).Shape(), "far");
+    const TopoDS_Shape other = BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape();
+    const materializr::BodySnapshot originals = materializr::snapshotBodies(live);
+    PreviewTarget t;
+    t.profile = topFace(other);
+    t.sourceBodyId = -1;
+    t.sketchId = -1;
+    PreviewParams p;
+    p.distance = 5.0;
+    std::unique_ptr<PreviewJob> job = PreviewJob::prepare(originals, {t}, p);
+    ASSERT_TRUE(job);
+    ASSERT_EQ(job->profiles().size(), 1u);
+    TopTools_IndexedMapOfShape liveParts, preparedParts;
+    TopExp::MapShapes(t.profile, liveParts);
+    TopExp::MapShapes(job->profiles()[0], preparedParts);
+    ASSERT_GT(preparedParts.Extent(), 1);
+    for (int i = 1; i <= preparedParts.Extent(); ++i)
+        EXPECT_FALSE(liveParts.Contains(preparedParts(i))) << "shared sub-shape " << i;
+    PreviewResult r = job->run();
+    EXPECT_TRUE(r.ok);
+    EXPECT_TRUE(r.bodies.empty());
+    ASSERT_EQ(r.created.size(), 1u);
+    EXPECT_NEAR(volume(r.created[0]), 20.0 * 20.0 * 5.0, 1e-6);
+}
+
 TEST(PushPullPreview, AMeshImportInTheToolsPathIsNotCopied) {
     // Copying a 100k-face import costs more than the preview gains; the real
     // op still cuts it, once, at commit.
