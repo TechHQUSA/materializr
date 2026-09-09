@@ -574,12 +574,24 @@ void Application::runPendingHeavyTasks() {
     // confirmed, and letting one outlive its session would apply it to the
     // wrong project or to a destroyed one. Each is taken out of the queue
     // before it runs, so a throwing task costs only itself.
+    // No progress window while draining: an ImGui frame is already open on
+    // this path, so the op must not try to paint one of its own.
+    m_drainingHeavyTasks = true;
     while (auto task = m_deferredHeavy.takeNext()) {
+        // A stale cancel latch must not make this task give up before it
+        // starts; the main-loop runner resets it per task for the same reason.
+        m_progressCancelled = false;
         try {
             task();
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[Session] a confirmed operation failed while "
+                                 "draining before a tab switch: %s\n", e.what());
         } catch (...) {
+            std::fprintf(stderr, "[Session] a confirmed operation failed while "
+                                 "draining before a tab switch.\n");
         }
     }
+    m_drainingHeavyTasks = false;
 }
 
 bool Application::switchToSession(size_t idx) {
@@ -1479,6 +1491,13 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     // fresh ImGui frame here is safe. fraction==0 marks a new op → reset the
     // cancel latch so a prior cancel doesn't carry over. (fraction<0 is the
     // indeterminate spinner and must NOT reset it.)
+    //
+    // The exception is a task drained mid-frame by runPendingHeavyTasks: a
+    // frame is already open there, and beginFrame() below would nest one. The
+    // op runs without a window in that case (it is one operation, already
+    // confirmed, in the one-frame window between a commit and a tab switch);
+    // returning false says "not cancelled" so it still completes.
+    if (m_drainingHeavyTasks) return false;
     if (fraction == 0.0f) m_progressCancelled = false;
     if (m_progressCancelled || !m_window) return m_progressCancelled;
 

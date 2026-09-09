@@ -295,10 +295,10 @@ bool InteractiveOpController::deferCommit(const IopContext& ctx,
     // because std::function requires a copyable target.
     auto markBody = ctx.markBodyDirty;
     // The op travels in a shared_ptr because std::function needs a copyable
-    // target. It must NOT be a raw pointer: a queued task that never runs (the
-    // app quits, the startup restore path clears the queue) would then leak the
-    // operation and the geometry it holds. Moving out of the held pointer also
-    // makes a second invocation a no-op rather than a double free.
+    // target, and a queued task that never runs (the app quits, the startup
+    // restore path clears the queue) must still release the operation and the
+    // geometry it holds. Moving out of the held pointer also makes a second
+    // invocation a no-op.
     auto held = std::make_shared<std::unique_ptr<Operation>>(std::move(op));
     ctx.deferHeavy([hist, doc, held, markDirty, markBody, onDone]() {
         std::unique_ptr<Operation> o = std::move(*held);

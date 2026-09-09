@@ -554,6 +554,9 @@ private:
     // Drain the between-frames task queue now. Called before a session swap or
     // close, since the queued tasks point into the session that is going away.
     void runPendingHeavyTasks();
+    // True only inside runPendingHeavyTasks: an ImGui frame is open there, so
+    // renderProgressFrame must not start another one.
+    bool m_drainingHeavyTasks = false;
     // Marks dirty, when the returned scope closes, every body whose shape or
     // visibility changed since it was created. Hold it for the whole edit:
     //     auto trackBodies = trackBodyChanges();
