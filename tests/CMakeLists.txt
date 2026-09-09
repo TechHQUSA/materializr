@@ -315,6 +315,11 @@ add_executable(test_snapshot_preview test_snapshot_preview.cpp)
 target_link_libraries(test_snapshot_preview PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_snapshot_preview COMMAND test_snapshot_preview)
 
+# test_preview_adoption - adopting the preview worker's result at commit only when the body and selection still match
+add_executable(test_preview_adoption test_preview_adoption.cpp)
+target_link_libraries(test_preview_adoption PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_preview_adoption COMMAND test_preview_adoption)
+
 # test_op_progress - cancelling a heavy op from its progress reporter aborts the kernel algorithm and leaves the document untouched
 add_executable(test_op_progress test_op_progress.cpp)
 target_link_libraries(test_op_progress PRIVATE materializr_core gtest gtest_main)

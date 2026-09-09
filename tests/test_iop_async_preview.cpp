@@ -57,6 +57,63 @@ private:
     TopoDS_Shape m_prev;
 };
 
+// Records what the controller offered it and whether that offer was usable.
+// The controller's plumbing is the part these tests cover: the op-side rules
+// live in test_preview_adoption.
+int g_adoptions = 0;
+int g_offers = 0;
+class AdoptingOp : public Operation {
+public:
+    AdoptingOp(int id, double h) : m_id(id), m_h(h) {}
+    bool execute(Document& doc) override {
+        auto cand = takePrecomputed();
+        if (cand) {
+            ++g_offers;
+            if (canAdopt(*cand, doc.getBody(m_id), previewKey(doc.getBody(m_id)))) {
+                ++g_adoptions;
+                m_prev = doc.getBody(m_id);
+                doc.updateBody(m_id, cand->result);
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        if (m_h <= 0.0) return false;
+        m_prev = doc.getBody(m_id);
+        doc.updateBody(m_id, BRepPrimAPI_MakeBox(20.0, 20.0, m_h).Shape());
+        return true;
+    }
+    bool undo(Document& doc) override { doc.updateBody(m_id, m_prev); return true; }
+    std::string name() const override { return "Adopting"; }
+    std::string description() const override { return name(); }
+    void renderProperties() override {}
+    std::string typeId() const override { return "adopting"; }
+    std::string serializeParams() const override { return "h=" + std::to_string(m_h); }
+    // Non-empty and stable for a given height, and does not depend on the
+    // base, so this exercises the controller's offer rather than the key.
+    std::string previewKey(const TopoDS_Shape&) const override {
+        return "adopting;h=" + std::to_string(m_h);
+    }
+    std::vector<int> plannedBodyIds() const override { return {m_id}; }
+private:
+    int m_id;
+    double m_h;
+    TopoDS_Shape m_prev;
+};
+
+class AdoptingController : public InteractiveOpController {
+public:
+    int target = -1;
+    double height = 10.0;
+protected:
+    const char* title() const override { return "Adopting"; }
+    int onBegin(const IopContext&) override { return target; }
+    std::unique_ptr<Operation> buildOp(const IopContext&) override {
+        return std::make_unique<AdoptingOp>(target, height);
+    }
+    bool previewOffThread() const override { return true; }
+    void panelBody(const IopContext&, bool&) override {}
+};
+
 class AsyncController : public InteractiveOpController {
 public:
     int target = -1;
@@ -387,4 +444,72 @@ TEST(DeferredTasks, ReplaceAllDropsWhatWasQueuedAndNullIsIgnored) {
     q.queue([&] { ran += 100; });
     q.clear();
     EXPECT_TRUE(q.empty());
+}
+
+
+// End to end: the controller must offer the commit op a candidate whose base
+// is the live snapshot (not the worker's private copy) and whose key describes
+// what the worker actually computed. Getting the base wrong would make every
+// adoption miss, and no op-level test would notice.
+TEST(IopPreviewAdoption, TheCommitAdoptsTheLandedPreview) {
+    g_adoptions = g_offers = 0;
+    Document doc;
+    History history;
+    SelectionManager selection;
+    const int id = doc.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "b");
+    AdoptingController ctl;
+    ctl.target = id;
+    auto ctx = [&] { return IopContext{doc, history, selection}; };
+
+    ASSERT_TRUE(ctl.begin(ctx()));          // first frame inline, trips async
+    ctl.height = 15.0;
+    ctl.update(ctx());                      // launches a worker job
+    ASSERT_TRUE(ctl.previewPending());
+    for (int i = 0; i < 5000 && ctl.previewPending(); ++i) {
+        ctl.pollPreview(ctx());
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_FALSE(ctl.previewPending()) << "the preview job never landed";
+    ASSERT_TRUE(ctl.previewOk());
+
+    ctl.commit(ctx());
+    EXPECT_EQ(g_offers, 1) << "the controller offered the commit op nothing";
+    EXPECT_EQ(g_adoptions, 1)
+        << "the commit op was offered a candidate it could not use: the base "
+           "or the key the controller passed does not match what execute sees";
+    EXPECT_NEAR(volume(doc.getBody(id)), 20.0 * 20.0 * 15.0, 1e-6)
+        << "the adopted body is not the previewed one";
+}
+
+// The hazard the controller layer owns: a result landed for one set of
+// parameters must not be offered for a commit at another. The op-level tests
+// prove the key rejects a mismatch; this proves the controller hands over the
+// key the worker earned rather than rebuilding one from current parameters.
+TEST(IopPreviewAdoption, AResultLandedForOtherParametersIsNotAdopted) {
+    g_adoptions = g_offers = 0;
+    Document doc;
+    History history;
+    SelectionManager selection;
+    const int id = doc.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "b");
+    AdoptingController ctl;
+    ctl.target = id;
+    auto ctx = [&] { return IopContext{doc, history, selection}; };
+
+    ASSERT_TRUE(ctl.begin(ctx()));
+    ctl.height = 15.0;
+    ctl.update(ctx());
+    for (int i = 0; i < 5000 && ctl.previewPending(); ++i) {
+        ctl.pollPreview(ctx());
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_FALSE(ctl.previewPending());
+    ASSERT_TRUE(ctl.previewOk());          // a result for height 15 has landed
+
+    // Move on, and confirm before anything lands for the new value.
+    ctl.height = 20.0;
+    ctl.commit(ctx());
+    EXPECT_EQ(g_adoptions, 0)
+        << "a result computed for height 15 was adopted for a commit at 20";
+    EXPECT_NEAR(volume(doc.getBody(id)), 20.0 * 20.0 * 20.0, 1e-6)
+        << "the commit did not recompute at the parameters it was given";
 }

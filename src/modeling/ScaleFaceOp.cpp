@@ -53,6 +53,13 @@ void ScaleFaceOp::setLength(double l) { m_length = l; }
 void ScaleFaceOp::setMode(Mode m) { m_mode = m; }
 
 bool ScaleFaceOp::execute(Document& doc) {
+    // FIRST statement, before the parameter guards below: any early return
+    // must still consume the candidate, or an operation that was armed, then
+    // executed once at an invalid value, would keep the candidate armed for a
+    // later execute at the original value. Whether it is USED is decided
+    // further down, after the face references have been re-bound.
+    auto adopted = takePrecomputed();
+
     if (m_bodyId < 0 || m_face.IsNull() || m_length <= 1e-6 ||
         m_scaleU < 1.0 || m_scaleU > 500.0 ||
         m_scaleV < 1.0 || m_scaleV > 500.0 ||
@@ -62,6 +69,16 @@ bool ScaleFaceOp::execute(Document& doc) {
     }
     try {
         m_previousShape = doc.getBody(m_bodyId);
+
+        // The worker already reshaped this exact body from this exact face.
+        // ScaleFace keeps its face handle as stored rather than re-binding, so
+        // there is no re-bind to sequence after; the key check below still
+        // proves the selection is the one the worker used.
+        if (adopted && canAdopt(*adopted, m_previousShape,
+                                previewKey(m_previousShape))) {
+            doc.updateBody(m_bodyId, adopted->result);
+            return true;
+        }
 
         // Planar end faces only (a wing tip cap, a box end…).
         Handle(Geom_Plane) pl =
@@ -183,11 +200,18 @@ bool ScaleFaceOp::execute(Document& doc) {
             // defaults to using a triangulation when the shape carries one.
             // The live body is meshed; the preview worker computes on a copy
             // that deliberately is not (see SnapshotPreview.cpp), so the same
-            // body measured the two ways disagrees - 5.65 mm on a torus, far
-            // more than the 1e-4 the branch is decided by. Preview and commit
-            // could therefore take different branches on identical inputs.
-            // Asking for geometry bounds makes the answer independent of
-            // whether anything happens to be meshed.
+            // body measures 20.000 by geometry and 20.125 through its mesh on
+            // a plain cone - and the branch turns on 1e-4. The branch really
+            // does flip between the two paths.
+            //
+            // No input has been found where that flip changes the RESULT: a
+            // sweep of 123 lengths across the threshold, at three scales, on
+            // a cone and a cylinder, produced identical geometry either way,
+            // because the two branches agree wherever they can both apply. So
+            // this is a latent dependency removed, not a demonstrated defect
+            // repaired. It matters because the commit may now ADOPT what the
+            // preview computed, and a decision that depends on whether a body
+            // happens to be meshed is one the two paths must not disagree on.
             BRepBndLib::Add(m_previousShape, bb, Standard_False);
             double bx0, by0, bz0, bx1, by1, bz1;
             bb.Get(bx0, by0, bz0, bx1, by1, bz1);
@@ -348,6 +372,15 @@ void ScaleFaceOp::renderProperties() {
     materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);
     ImGui::Text(materializr::tr("Mode: %s"), m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
+}
+
+std::string ScaleFaceOp::previewKey(const TopoDS_Shape& base) const {
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "scaleface;u=%a;v=%a;L=%a;mode=%d;face=",
+                  m_scaleU, m_scaleV, m_length, static_cast<int>(m_mode));
+    std::string sel;
+    if (!SubShapeIndex::orientedKey(base, {m_face}, TopAbs_FACE, sel)) return {};
+    return std::string(buf) + sel;
 }
 
 std::string ScaleFaceOp::serializeParams() const {

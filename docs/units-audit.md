@@ -211,15 +211,15 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | unitless | src/modeling/RevolveOp.cpp:294 | `materializr::inputNumber(materializr::tr("Dir X"), &m_axisDirX, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/RevolveOp.cpp:295 | `materializr::inputNumber(materializr::tr("Dir Y"), &m_axisDirY, 0.1, 1.0, "%g");` |
 | unitless | src/modeling/RevolveOp.cpp:296 | `materializr::inputNumber(materializr::tr("Dir Z"), &m_axisDirZ, 0.1, 1.0, "%g");` |
-| percent | src/modeling/ScaleFaceOp.cpp:336 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
-| percent | src/modeling/ScaleFaceOp.cpp:337 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
-| CONVERTED | src/modeling/ScaleFaceOp.cpp:338 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
-| CONVERTED | src/modeling/ShellOp.cpp:358 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
+| percent | src/modeling/ScaleFaceOp.cpp:370 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
+| percent | src/modeling/ScaleFaceOp.cpp:371 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:372 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
+| CONVERTED | src/modeling/ShellOp.cpp:376 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:396 | `if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:408 | `if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/SketchEditOp.cpp:418 | `if (materializr::inputNumber(materializr::tr("Angle (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:462 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia,` |
-| angle | src/modeling/TaperOp.cpp:143 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");` |
+| angle | src/modeling/TaperOp.cpp:159 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");` |
 | CONVERTED | src/modeling/ThreadOp.cpp:2112 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
 | CONVERTED | src/modeling/ThreadOp.cpp:2114 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
 | CONVERTED | src/modeling/ThreadOp.cpp:2140 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
@@ -443,10 +443,10 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/PushPullOp.cpp:591 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:517 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:542 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
-| comment | src/modeling/ScaleFaceOp.cpp:334 | `// they were converted display->mm on commit, so typing 100 under inches` |
+| comment | src/modeling/ScaleFaceOp.cpp:368 | `// they were converted display->mm on commit, so typing 100 under inches` |
 | allowed-by-hand | src/modeling/SewOp.cpp:199 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:214 | `"body (thickness %.3f mm).\n", m_thickness);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:319 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:221 | `"body (thickness %.3f mm).\n", m_thickness);` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:337 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
 | comment | src/modeling/Sketch.cpp:556 | `// these a later dimension (e.g. a 2 mm gap to another edge) lets the naive` |
 | comment | src/modeling/SketchConstraints.h:84 | `// dimension label rather than clicking it. Pixels rather than sketch mm because` |
 | comment | src/modeling/SketchEditOp.cpp:140 | `// "Add sketch element" into "Rectangle 80 × 45 mm", "Circle Ø20 mm", etc.,` |
@@ -516,8 +516,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/SketchTool.h:674 | `float m_airfoilChord = 100.0f;  // mm, a typical model-wing root chord` |
 | comment | src/modeling/SketchTool.h:676 | `float m_svgWidth = 50.0f; // target artwork width, mm` |
 | comment | src/modeling/SketchTool.h:702 | `float m_gridStep = 1.0f; // default 1 mm grid (zoom-scaled; snapping)` |
-| comment | src/modeling/SubShapeIndex.cpp:101 | `constexpr double kDistTol = 1e-3;   // mm` |
-| comment | src/modeling/SubShapeIndex.cpp:148 | `// same-curve-type candidate within 2 mm ONLY when it wins unambiguously` |
+| comment | src/modeling/SubShapeIndex.cpp:136 | `constexpr double kDistTol = 1e-3;   // mm` |
+| comment | src/modeling/SubShapeIndex.cpp:183 | `// same-curve-type candidate within 2 mm ONLY when it wins unambiguously` |
 | allowed-by-hand | src/modeling/SvgImport.cpp:706 | `NSVGimage* img = nsvgParse(text.data(), "mm", 96.0f);` |
 | diagnostic | src/modeling/SvgImport.cpp:1019 | `std::fprintf(stderr, "[SVG] placed %d loops at %.1f mm wide\n", placed,` |
 | comment | src/modeling/TextSketchOp.cpp:61 | `// units to mm for the requested capital height.` |
@@ -602,14 +602,14 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | stored-string | src/modeling/ReplayOp.h:29 | `ReplayOp` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:711 | `ResizeCylindricalOp` |
 | no-length | src/modeling/RevolveOp.cpp:267 | `RevolveOp` |
-| CONVERTED | src/modeling/ScaleFaceOp.cpp:323 | `ScaleFaceOp` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:357 | `ScaleFaceOp` |
 | no-length | src/modeling/SeparateBodyOp.cpp:85 | `SeparateBodyOp` |
 | no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
-| CONVERTED | src/modeling/ShellOp.cpp:348 | `ShellOp` |
+| CONVERTED | src/modeling/ShellOp.cpp:366 | `ShellOp` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:59 | `SketchEditOp` |
 | stored-string | src/modeling/SketchTransformOp.h:31 | `SketchTransformOp` |
 | no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
 | no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
-| no-length | src/modeling/TaperOp.cpp:133 | `TaperOp` |
+| no-length | src/modeling/TaperOp.cpp:149 | `TaperOp` |
 | CONVERTED | src/modeling/ThreadOp.cpp:2100 | `ThreadOp` |
 | CONVERTED | src/modeling/TransformOp.cpp:242 | `TransformOp` |

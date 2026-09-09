@@ -376,6 +376,24 @@ private:
     // this pair.
     PreviewDispatch<std::string> m_dispatch;
     AsyncJob<SnapshotPreviewResult> m_job;
+    // The last off-thread preview that landed, plus the key describing the
+    // inputs it was computed from, captured when the job was LAUNCHED (the
+    // dispatch's own key is serializeParams(), which omits the face selection
+    // on a fresh op and so cannot stand in for this). Offered to the commit
+    // op, which re-checks the body and the selection itself before adopting -
+    // see Operation::setPrecomputedResult.
+    TopoDS_Shape m_landedShape;
+    // The body the worker actually measured, captured when the result landed
+    // rather than read from m_snapshot at commit. Those are the same thing
+    // within one gesture, but a gesture can end without cleanup()
+    // (setActive(false), a custom lifecycle - see pollPreview), and then
+    // m_snapshot belongs to the NEXT gesture while this result belongs to the
+    // last. Passing the live snapshot would certify a stale result against a
+    // body it was never computed from.
+    TopoDS_Shape m_landedBase;
+    std::string m_landedPreviewKey;
+    std::string m_launchedPreviewKey;
+    TopoDS_Shape m_launchedBase;
 };
 
 } // namespace materializr

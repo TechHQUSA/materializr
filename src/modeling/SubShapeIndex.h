@@ -34,6 +34,18 @@ std::string serialize(const TopoDS_Shape& shape,
                       const std::vector<TopoDS_Shape>& subs,
                       TopAbs_ShapeEnum type);
 
+// Ordered, orientation-carrying key for a selection: "3F,17R". Unlike
+// serialize(), this returns FALSE (clearing `out`) when any sub-shape fails to
+// resolve, because a key is a claim about the WHOLE selection: serialize()
+// skips strays, so [live, stale] serialises identically to [live], and a cache
+// keyed on that would reuse a result computed for a different selection.
+// Orientation is encoded because the index map compares with IsSame, which
+// ignores it, while an operation reading a face normal does not. All four
+// orientations get distinct characters: folding INTERNAL and EXTERNAL into
+// FORWARD would let two different selections key identically.
+bool orientedKey(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& subs,
+                 TopAbs_ShapeEnum type, std::string& out);
+
 // Parse "3,17,42" back into indices. Returns empty on malformed input.
 std::vector<int> parse(const std::string& csv);
 

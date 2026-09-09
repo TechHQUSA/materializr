@@ -179,10 +179,10 @@ src/modeling/PushPullOp.cpp:404:
 src/modeling/PushPullOp.cpp:591:
 src/modeling/ResizeCylindricalOp.cpp:517:
 src/modeling/ResizeCylindricalOp.cpp:542:
-src/modeling/ScaleFaceOp.cpp:334:
+src/modeling/ScaleFaceOp.cpp:368:
 src/modeling/SewOp.cpp:199:
-src/modeling/ShellOp.cpp:214:
-src/modeling/ShellOp.cpp:319:
+src/modeling/ShellOp.cpp:221:
+src/modeling/ShellOp.cpp:337:
 src/modeling/Sketch.cpp:556:
 src/modeling/SketchConstraints.h:84:
 src/modeling/SketchEditOp.cpp:140:
@@ -252,8 +252,8 @@ src/modeling/SketchTool.h:664:
 src/modeling/SketchTool.h:674:
 src/modeling/SketchTool.h:676:
 src/modeling/SketchTool.h:702:
-src/modeling/SubShapeIndex.cpp:101:
-src/modeling/SubShapeIndex.cpp:148:
+src/modeling/SubShapeIndex.cpp:136:
+src/modeling/SubShapeIndex.cpp:183:
 src/modeling/SvgImport.cpp:706:
 src/modeling/SvgImport.cpp:1019:
 src/modeling/TextSketchOp.cpp:61:

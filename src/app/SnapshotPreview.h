@@ -6,6 +6,7 @@
 #include <TopoDS_Shape.hxx>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace materializr {
@@ -17,6 +18,13 @@ struct SnapshotPreviewResult {
     bool ok = false;
     TopoDS_Shape shape;
     double millis = 0.0;
+    // The op's own account of the inputs it ACTUALLY used, taken after it ran.
+    // Not the key the caller computed before launching: the op re-binds its
+    // face references inside execute(), against this scratch document, and a
+    // rebind here can legitimately land somewhere the commit's rebind (real
+    // document, real sketches) does not. Keying on the pre-launch value would
+    // then certify a result computed on one face as if it were the other's.
+    std::string key;
 };
 
 // One snapshot-body preview frame run off the main thread. prepare() copies

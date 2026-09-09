@@ -19,6 +19,13 @@ bool InteractiveOpController::begin(const IopContext& ctx) {
     // would carry the same key and land on this gesture: never inherit one.
     m_dispatch.reset();
     m_job.abandon();
+    // A previous gesture that ended without cleanup() (setActive(false), a
+    // custom lifecycle) would otherwise leave its landed result here.
+    m_landedShape.Nullify();
+    m_landedBase.Nullify();
+    m_landedPreviewKey.clear();
+    m_launchedPreviewKey.clear();
+    m_launchedBase.Nullify();
     int body = onBegin(ctx);
     if (body == -1) return false;   // refused
     if (previewModel() == PreviewModel::HistoryEdit) {
@@ -139,6 +146,10 @@ void InteractiveOpController::launchSnapshotPreviewIfWanted(const IopContext& ct
     }
     const std::string key = op->serializeParams();
     if (!m_dispatch.shouldLaunch(key)) return;
+    // Captured before the op is moved into the job, and against m_snapshot,
+    // which is exactly the shape the worker copies and starts from.
+    m_launchedPreviewKey = op->previewKey(m_snapshot);
+    m_launchedBase = m_snapshot;
     std::unique_ptr<SnapshotPreviewJob> job =
         SnapshotPreviewJob::prepare(m_bodyId, m_snapshot, std::move(op));
     std::shared_ptr<SnapshotPreviewJob> shared = std::move(job);
@@ -172,6 +183,11 @@ void InteractiveOpController::pollPreview(const IopContext& ctx) {
     if (m_dispatch.finished(snapshotPreviewKey(ctx))) {
         if (result->ok) {
             ctx.doc.updateBody(m_bodyId, result->shape);
+            m_landedShape = result->shape;
+            m_landedBase = m_launchedBase;
+            // The worker's own account of what it operated on, not the key
+            // computed before launching: the op re-binds inside execute().
+            m_landedPreviewKey = result->key;
             m_previewOk = true;
         } else {
             // The op refused these parameters: show the gesture-start state,
@@ -273,6 +289,14 @@ void InteractiveOpController::commit(const IopContext& ctx) {
     }
     std::unique_ptr<Operation> op = buildOp(ctx);
     if (op) {
+        // The worker may already have computed exactly this. Offer it; the op
+        // adopts only if the live body is still the one the worker started
+        // from AND its own post-rebind selection matches. Nothing here is
+        // trusted - see Operation::canAdopt.
+        if (!m_landedShape.IsNull() && !m_landedBase.IsNull() &&
+            !m_landedPreviewKey.empty())
+            op->setPrecomputedResult(m_landedBase, m_landedShape,
+                                     m_landedPreviewKey);
         // An op that turned its live preview off because it is slow (Project
         // Sketch) runs BETWEEN frames with a progress reporter, so the window
         // stays alive and the user can cancel; a cancel makes execute() fail,
@@ -346,6 +370,15 @@ void InteractiveOpController::cleanup() {
     m_liveOp.reset();
     m_liveApplied = false;
     m_dispatch.reset();
+    // A landed result belongs to the gesture that produced it. Carried into
+    // the next gesture it would be offered against a different body with a
+    // stale key; the op would refuse it, but the right place to drop it is
+    // here rather than relying on that.
+    m_landedShape.Nullify();
+    m_landedBase.Nullify();
+    m_landedPreviewKey.clear();
+    m_launchedPreviewKey.clear();
+    m_launchedBase.Nullify();
     m_job.abandon(); // finishes on its own, reaped by a later poll
     onCleanup();
 }

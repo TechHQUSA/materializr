@@ -188,6 +188,13 @@ void ShellOp::clearFacesToRemove() {
 }
 
 bool ShellOp::execute(Document& doc) {
+    // FIRST statement, before the parameter guards below: any early return
+    // must still consume the candidate, or an operation that was armed, then
+    // executed once at an invalid value, would keep the candidate armed for a
+    // later execute at the original value. Whether it is USED is decided
+    // further down, after the face references have been re-bound.
+    auto adopted = takePrecomputed();
+
     if (m_bodyId < 0 || m_thickness <= 0.0) {
         return false;
     }
@@ -213,6 +220,17 @@ bool ShellOp::execute(Document& doc) {
                 "[Shell] could not re-find the opened face(s) on the rebuilt "
                 "body (thickness %.3f mm).\n", m_thickness);
             return false;
+        }
+
+        // The preview worker already offset this exact body with this exact
+        // selection: adopt its result instead of repeating the offset. Checked
+        // only AFTER the re-bind above, because that re-bind can legitimately
+        // resolve to a different face than the worker used (it reads sketch
+        // names, and the worker's scratch document has no sketches).
+        if (adopted && canAdopt(*adopted, m_previousShape,
+                                previewKey(m_previousShape))) {
+            doc.updateBody(m_bodyId, adopted->result);
+            return true;
         }
 
         // Two join strategies, tried in order:
@@ -360,6 +378,26 @@ void ShellOp::renderProperties() {
     int faceCount = m_facesToRemove.Size();
     ImGui::Text(materializr::tr("Open faces: %d selected"), faceCount);
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
+}
+
+std::string ShellOp::previewKey(const TopoDS_Shape& base) const {
+    // %a is lossless for a double, unlike the %.6f the on-disk serialiser
+    // uses: two thicknesses that round to the same text must not share a
+    // cache entry.
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "shell;t=%a;faces=", m_thickness);
+    std::vector<TopoDS_Shape> faces;
+    for (TopTools_ListIteratorOfListOfShape it(m_facesToRemove); it.More(); it.Next())
+        faces.push_back(it.Value());
+    // No opened faces is legal, not a failure: MakeThickSolid hollows a closed
+    // shell without an opening (see rehydrateFromReload). Routing that through
+    // orientedKey, whose empty list means "could not resolve", would deny the
+    // most expensive shell case the whole optimisation.
+    if (faces.empty()) return std::string(buf) + "none";
+    std::string sel;
+    if (!SubShapeIndex::orientedKey(base, faces, TopAbs_FACE, sel))
+        return {};   // unresolved selection: never adopt
+    return std::string(buf) + sel;
 }
 
 std::string ShellOp::serializeParams() const {

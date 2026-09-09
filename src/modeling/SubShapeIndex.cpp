@@ -53,6 +53,41 @@ std::string serialize(const TopoDS_Shape& shape,
     return out;
 }
 
+bool orientedKey(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& subs,
+                 TopAbs_ShapeEnum type, std::string& out) {
+    out.clear();
+    if (shape.IsNull() || subs.empty()) return false;
+    try {
+        // Built once for the whole selection; FindIndex per face would rebuild
+        // this map on every call.
+        TopTools_IndexedMapOfShape map;
+        TopExp::MapShapes(shape, type, map);
+        std::string acc;
+        for (const auto& sub : subs) {
+            if (sub.IsNull()) return false;
+            const int idx = map.FindIndex(sub);
+            if (idx <= 0) return false;   // the whole key is void, not shorter
+            if (!acc.empty()) acc += ',';
+            acc += std::to_string(idx);
+            // All four, not just REVERSED: collapsing INTERNAL and EXTERNAL
+            // into FORWARD would let two genuinely different selections key
+            // the same, which is the whole thing this encoding exists to stop.
+            switch (sub.Orientation()) {
+                case TopAbs_FORWARD:  acc += 'F'; break;
+                case TopAbs_REVERSED: acc += 'R'; break;
+                case TopAbs_INTERNAL: acc += 'I'; break;
+                case TopAbs_EXTERNAL: acc += 'E'; break;
+                default: return false;   // unknown: void the whole key
+            }
+        }
+        out = std::move(acc);
+        return true;
+    } catch (...) {
+        out.clear();
+        return false;
+    }
+}
+
 std::vector<int> parse(const std::string& csv) {
     std::vector<int> out;
     size_t pos = 0;

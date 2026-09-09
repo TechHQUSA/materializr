@@ -45,6 +45,10 @@ SnapshotPreviewResult SnapshotPreviewJob::run() {
         if (m_op && m_scratch && m_op->execute(*m_scratch)) {
             out.shape = m_scratch->getBody(m_bodyId);
             out.ok = !out.shape.IsNull();
+            // Asked AFTER execute, so it reflects any re-bind the op did.
+            // Indices are into m_copy, whose sub-shape map matches the
+            // snapshot's: BRepBuilderAPI_Copy preserves topology order.
+            if (out.ok) out.key = m_op->previewKey(m_copy);
         }
     } catch (...) {
         out.ok = false;

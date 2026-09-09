@@ -160,6 +160,65 @@ public:
     // preview and keeps running in the frame. Default: no shape parameters.
     virtual std::vector<TopoDS_Shape*> shapeParams() { return {}; }
 
+    // ---- Adopting a result the preview worker already computed ------------
+    //
+    // The snapshot-body operations run on a worker during the drag and then
+    // recompute the identical thing on Confirm. When the worker's result is
+    // provably still valid the commit can adopt it instead, which is the whole
+    // commit cost (Shell was 2915 ms on a 300-hole plate).
+    //
+    // "Provably still valid" is two checks, and they are the entire safety
+    // argument - see canAdopt(). Only operations whose execute() produces
+    // geometry and nothing else may use this: an operation that also mints
+    // face ids, writes a generation ledger or records generated faces would
+    // adopt correct geometry with broken naming, because the worker ran on a
+    // scratch Document with its own id counter.
+    struct Precomputed {
+        TopoDS_Shape base;         // the LIVE body the gesture started from
+        TopoDS_Shape result;       // what the worker produced from it
+        std::string selectionKey;  // the selection the worker operated on
+    };
+
+    void setPrecomputedResult(TopoDS_Shape base, TopoDS_Shape result,
+                              std::string selectionKey) {
+        m_precomputed = Precomputed{std::move(base), std::move(result),
+                                    std::move(selectionKey)};
+        m_hasPrecomputed = true;
+    }
+
+    // Everything about this operation's inputs that changes its result,
+    // resolved against `base`. Empty means "never adopt", which is the default
+    // and therefore the safe answer for every operation that has not opted in.
+    virtual std::string previewKey(const TopoDS_Shape& /*base*/) const {
+        return {};
+    }
+
+protected:
+    // Taken at the TOP of execute(), before any validation or face re-bind.
+    // Consuming it there is what makes it one-shot: an operation that returns
+    // early would otherwise sit in history with a candidate still armed, and a
+    // later replay presenting the same base could adopt it long after the
+    // context moved on.
+    std::unique_ptr<Precomputed> takePrecomputed() {
+        if (!m_hasPrecomputed) return nullptr;
+        m_hasPrecomputed = false;
+        auto out = std::make_unique<Precomputed>(std::move(m_precomputed));
+        m_precomputed = Precomputed{};
+        return out;
+    }
+
+    // The two checks, in one place because they are the whole argument.
+    // `liveKey` is previewKey() evaluated AFTER the operation re-bound its
+    // face references, so a re-bind that legitimately resolved to a different
+    // face than the worker used is caught here rather than adopted.
+    static bool canAdopt(const Precomputed& cand, const TopoDS_Shape& liveBody,
+                         const std::string& liveKey) {
+        return !cand.result.IsNull() && !liveBody.IsNull() &&
+               liveBody.IsEqual(cand.base) &&   // IsSame would ignore orientation
+               !liveKey.empty() && liveKey == cand.selectionKey;
+    }
+
+public:
     // Maintained by History: the serialised parameter set from this op's last
     // SUCCESSFUL execute. Used to roll a rejected edit back - the UI mutates
     // params in place before editStep runs, so "the values that worked" must
@@ -206,6 +265,8 @@ protected:
     }
 
     bool m_enabled = true;
+    Precomputed m_precomputed;
+    bool m_hasPrecomputed = false;
     std::string m_lastGoodParams; // see lastGoodParams()
     std::chrono::system_clock::time_point m_timestamp = std::chrono::system_clock::now();
     std::function<bool(float, const char*)> m_progress;
