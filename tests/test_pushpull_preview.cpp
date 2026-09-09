@@ -180,11 +180,14 @@ TEST(PushPullPreview, AStaleFaceProfileIsStillPrepared) {
     // The worker must get its own copy: no TShape of the prepared profile
     // (face, edges, vertices) may be one of the live profile's.
     ASSERT_EQ(job->profiles().size(), 1u);
-    TopTools_IndexedMapOfShape liveParts;
+    // (TopExp_Explorer over TopAbs_SHAPE is empty by definition; map the
+    // descendants instead and make sure some were collected.)
+    TopTools_IndexedMapOfShape liveParts, preparedParts;
     TopExp::MapShapes(t.profile, liveParts);
-    for (TopExp_Explorer e(job->profiles()[0], TopAbs_SHAPE); e.More(); e.Next())
-        EXPECT_FALSE(liveParts.Contains(e.Current()));
-    EXPECT_FALSE(liveParts.Contains(job->profiles()[0]));
+    TopExp::MapShapes(job->profiles()[0], preparedParts);
+    ASSERT_GT(preparedParts.Extent(), 1); // the face plus its edges and vertices
+    for (int i = 1; i <= preparedParts.Extent(); ++i)
+        EXPECT_FALSE(liveParts.Contains(preparedParts(i))) << "shared sub-shape " << i;
     PreviewResult r = job->run();
     EXPECT_TRUE(r.ok);
     ASSERT_EQ(r.bodies.size(), 1u);

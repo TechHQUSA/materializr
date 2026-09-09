@@ -115,9 +115,9 @@ int MeshWorker::land(const Result& r)
             for (const auto* ep : occ)
                 (ep->first.Orientation() == TopAbs_REVERSED ? reversed : forward) = ep->second;
             // P1 is the FORWARD side, P2 the REVERSED one (that is how
-            // BRep_Tool::PolygonOnTriangulation picks them); hand the builder
-            // the forward-oriented edge so the pairing is right whichever
-            // occurrence came first.
+            // BRep_Tool::PolygonOnTriangulation picks them). The builder does
+            // not read the edge handle's orientation; it is normalised here
+            // for clarity only, the argument order is what pairs the sides.
             if (!forward.IsNull() && !reversed.IsNull())
                 builder.UpdateEdge(TopoDS::Edge(occ[0]->first.Oriented(TopAbs_FORWARD)),
                                    forward, reversed, f.tri, loc);

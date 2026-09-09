@@ -290,6 +290,32 @@ TEST(SectionSlice, ABareFaceAwayFromThePlaneStillAllowsTheCap) {
     EXPECT_NEAR(capArea(slice.cap), 400.0, 1e-6);
 }
 
+TEST(SectionSlice, ABareFaceWithNoUsableBoxCountsAsAGap) {
+    // A bare face whose box could not be computed (SetWhole) or is void must
+    // read as "gap everywhere", never as "complete": the cap of an otherwise
+    // whole box is suppressed in both cases.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape();
+    meshLikeRenderer(box);
+    const gp_Pln plane(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1));
+    {
+        std::vector<materializr::FaceMesh> faces = faceMeshes(box);
+        materializr::FaceMesh bare{Handle(Poly_Triangulation)(), Bnd_Box(), gp_Trsf(), false};
+        bare.box.SetWhole();
+        faces.push_back(bare);
+        SectionSlice slice;
+        EXPECT_TRUE(sliceSection(faces, plane, slice));
+        EXPECT_TRUE(slice.cap.empty());
+        EXPECT_NEAR(lineLength(slice.lines), 80.0, 1e-6);
+    }
+    {
+        std::vector<materializr::FaceMesh> faces = faceMeshes(box);
+        faces.push_back({Handle(Poly_Triangulation)(), Bnd_Box(), gp_Trsf(), false}); // void box
+        SectionSlice slice;
+        EXPECT_TRUE(sliceSection(faces, plane, slice));
+        EXPECT_TRUE(slice.cap.empty());
+    }
+}
+
 TEST(SectionSlice, UnmeshedFaceStillDrawsTheRest) {
     // Strip one side face's triangulation: the loop cannot close, so there is
     // no cap, but the three meshed sides still draw their outline.

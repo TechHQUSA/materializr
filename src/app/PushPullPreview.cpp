@@ -117,6 +117,11 @@ std::unique_ptr<PreviewJob> PreviewJob::prepareOrThrow(const BodySnapshot& origi
                 BRepBuilderAPI_Copy(t.profile, Standard_True, Standard_False).Shape());
             sketchSources.emplace_back(static_cast<int>(opTargets.size()),
                                        std::make_pair(t.sketchId, t.regionIndex));
+        } else if (t.sourceBodyId < 0) {
+            // No host and no sketch: nothing above copied it. Every profile
+            // the worker sees is a copy, structurally, not by which branch ran.
+            ot.profile = TopoDS::Face(
+                BRepBuilderAPI_Copy(t.profile, Standard_True, Standard_False).Shape());
         }
         job->m_profiles.push_back(ot.profile);
         opTargets.push_back(ot);

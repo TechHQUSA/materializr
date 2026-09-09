@@ -489,7 +489,13 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
     std::thread thread;
     try {
         thread = std::thread([run] {
-            run->result = run->job->run();
+            // run() catches what the op throws; anything else must still end
+            // the job (an exception leaving a std::thread ends the process).
+            try {
+                run->result = run->job->run();
+            } catch (...) {
+                run->result = PreviewResult{};
+            }
             run->done.store(true);
         });
     } catch (const std::system_error&) {
@@ -541,9 +547,10 @@ void PushPullController::pollPreview(const IopContext& ctx) {
 bool PushPullController::previewPending() const {
     // Pending until POLLED, not until done: a job finishing between the poll
     // and the frame loop's active-work check must still earn the next frame.
-    // Abandoned jobs count too, so their copies are reaped when they finish
-    // rather than on the next input event.
-    return m_run != nullptr || !m_abandoned.empty();
+    // Abandoned jobs do NOT count: the loop keeps iterating at the idle floor
+    // and polls every iteration, so they are reaped within a tick of
+    // finishing without rendering frames for a preview nobody wants.
+    return m_run != nullptr;
 }
 
 // Mark only what the push/pull actually touched. On a 100+ body project this

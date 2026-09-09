@@ -186,7 +186,9 @@ TEST(MeshWorker, LandsTheEdgePolygonsToo) {
                 same = n(k) == rn(rn.Lower() + (k - n.Lower()));
             if (!same) ++mismatched;
         }
+        EXPECT_FALSE(ee.More() || er.More()); // both faces have the same edge occurrences
     }
+    EXPECT_FALSE(fe.More() || fr.More()); // and both shapes the same faces
     EXPECT_GT(closedSeams, 0); // the hole walls; how many faces a boolean makes of them is OCCT's business
     EXPECT_GT(occurrences, 300);
     EXPECT_EQ(mismatched, 0);
