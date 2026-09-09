@@ -30,8 +30,8 @@ All notable changes to Materializr are documented here. Format loosely follows
   which for a pure sketch edit is none (the bodies a sketch drives are
   re-derived by the cascade, which already marked exactly those). Project
   load, mesh-quality changes, imports, session switches and the panels whose
-  own render call performs the edit (the desktop History, Items and Properties
-  panels) still rebuild everything, which is what they mean to do. A commit deferred between
+  own render call performs the edit (the History, Items and Properties panels)
+  still rebuild everything, which is what they mean to do. A commit deferred between
   frames (Project Sketch) also marks per body now instead of flagging a full
   rebuild when it lands.
 - **Shell, Draft, Scale Face, and Fillet and Chamfer when creating one, stay

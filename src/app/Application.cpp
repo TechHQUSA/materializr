@@ -622,7 +622,10 @@ bool Application::switchToSession(size_t idx) {
     runPendingHeavyTasks();
     // A drained task can itself open or close tabs (restoreSessionTabs does),
     // so the index this switch was asked for may no longer mean what it did.
-    if (idx >= m_sessions.size() || idx == m_activeSession) return false;
+    // The two outcomes are not the same answer: a vanished index is a refusal,
+    // but "already active" is success, and callers close the tab on a refusal.
+    if (idx >= m_sessions.size()) return false;
+    if (idx == m_activeSession) return true;
     // The section cut is view state aimed at the OUTGOING project's geometry;
     // carried across it would carve the wrong model. Off on every switch.
     m_sectionEnabled = false;
@@ -8153,6 +8156,11 @@ void Application::run() {
                 try { ImGui::EndFrame(); } catch (...) {}
             }
         }
+        // endFrame() never ran, so clear what it would have. Unconditional and
+        // outside the scope check: a stale "a frame is open" silences the
+        // progress window for every heavy task afterwards, and a backgrounded
+        // window skips beginFrame entirely, so it would never self-clear.
+        m_imguiFrameOpen = false;
         std::fprintf(stderr,
                      "[Recovered] exception escaped a frame: %s\n"
                      "[Recovered]   this is a BUG - the frame was abandoned and "
