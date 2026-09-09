@@ -1,5 +1,6 @@
 #pragma once
 #include "modeling/MoveHoleOp.h"
+#include "app/DeferredTasks.h"
 #include "app/MoveFaceState.h"
 #include "../platform_defs.h"
 
@@ -142,7 +143,7 @@ private:
     void renderSplashFrame(const char* status);
     void noteHeavyPumpGap();
     // Self-contained progress frame for long operations, rendered between main
-    // frames (via m_deferredHeavyTask). Returns true if the user hit Cancel.
+    // frames (via m_deferredHeavy). Returns true if the user hit Cancel.
     // fraction<0 = indeterminate; fraction<=0 also resets the cancel latch.
     bool renderProgressFrame(float fraction, const char* label);
     // A left→right sweeping marquee bar at the current ImGui cursor (shared by
@@ -155,7 +156,7 @@ private:
     bool m_splashPrimed = false;
     // A heavy op deferred from a controller commit to run between frames, where
     // renderProgressFrame can pump its own frames without nesting ImGui frames.
-    std::function<void()> m_deferredHeavyTask;
+    materializr::DeferredTasks m_deferredHeavy;
     // What the UI keep-alive should redraw while a heavy task blocks the main
     // thread (see core/UiKeepAlive.h). The task updates these as it advances -
     // the history replay sets a real step fraction - and the keep-alive repaints

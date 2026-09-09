@@ -3,7 +3,7 @@
 // through pollPreview; the body trails the parameters, a mid-job change is
 // re-asked, cancel restores the snapshot, and commit records the op even
 // while a job is in flight.
-#include "app/DeferredChain.h"
+#include "app/DeferredTasks.h"
 #include "app/InteractiveOpController.h"
 #include "core/Document.h"
 #include "core/History.h"
@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -253,15 +254,16 @@ namespace {
 // A context with the app's deferral wired the way Application does it.
 struct DeferRig {
     Rig rig;
-    std::function<void()> slot;
+    materializr::DeferredTasks queue;   // wired the way Application wires it
     IopContext ctx() {
         IopContext c = rig.ctx();
         c.progress = [](float, const char*) { return false; };
-        c.deferHeavy = [this](std::function<void()> fn) {
-            materializr::chainDeferred(slot, std::move(fn));
-        };
+        c.deferHeavy = [this](std::function<void()> fn) { queue.queue(std::move(fn)); };
         return c;
     }
+    // Run everything the commit deferred, as the frame loop would.
+    void runDeferred() { while (auto t = queue.takeNext()) t(); }
+    bool deferred() const { return !queue.empty(); }
 };
 } // namespace
 
@@ -274,12 +276,12 @@ TEST(IopLiveOpCommit, AnAsyncGestureCommitsBehindTheProgressWindow) {
 
     ctl.commit(r.ctx());
     EXPECT_FALSE(ctl.active());
-    ASSERT_TRUE(r.slot) << "the one real execute of a Push/Pull-shaped gesture "
+    ASSERT_TRUE(r.deferred()) << "the one real execute of a Push/Pull-shaped gesture "
                            "must not freeze the frame that confirmed it";
     EXPECT_EQ(r.rig.history.operations().size(), 0u);
     EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // preview undone
 
-    r.slot();
+    r.runDeferred();
     ASSERT_EQ(r.rig.history.operations().size(), 1u);
     EXPECT_EQ(r.rig.history.operations()[0]->serializeParams(), "h=15.000000");
     EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
@@ -292,7 +294,7 @@ TEST(IopLiveOpCommit, AnInlineGestureStillCommitsInTheFrame) {
     ctl.wentAsync = false;   // small bodies previewed inline: nothing to defer
     ASSERT_TRUE(ctl.begin(r.ctx()));
     ctl.commit(r.ctx());
-    EXPECT_FALSE(r.slot);
+    EXPECT_FALSE(r.deferred());
     ASSERT_EQ(r.rig.history.operations().size(), 1u);
     EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
 }
@@ -309,26 +311,48 @@ TEST(IopLiveOpCommit, WithoutADeferralSlotTheCommitRunsInline) {
     EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
 }
 
-TEST(DeferredChain, QueuesBehindAPendingTaskInOrder) {
-    std::function<void()> slot;
+TEST(DeferredTasks, RunInTheOrderTheyWereQueued) {
+    materializr::DeferredTasks q;
     std::string log;
-    materializr::chainDeferred(slot, [&] { log += "a"; });
-    materializr::chainDeferred(slot, [&] { log += "b"; });
-    materializr::chainDeferred(slot, [&] { log += "c"; });
-    ASSERT_TRUE(slot);
-    slot();
-    EXPECT_EQ(log, "abc") << "a confirmed operation waiting in the slot must "
+    q.queue([&] { log += "a"; });
+    q.queue([&] { log += "b"; });
+    q.queue([&] { log += "c"; });
+    EXPECT_EQ(q.size(), 3u);
+    while (auto t = q.takeNext()) t();
+    EXPECT_EQ(log, "abc") << "a confirmed operation waiting in the queue must "
                              "never be dropped by the next one";
+    EXPECT_TRUE(q.empty());
 }
 
-TEST(DeferredChain, AnEmptySlotTakesTheTaskAndANullTaskIsIgnored) {
-    std::function<void()> slot;
-    materializr::chainDeferred(slot, {});
-    EXPECT_FALSE(slot);
+TEST(DeferredTasks, AThrowingTaskLeavesTheRestQueued) {
+    // The frame loop takes one task out and runs it; its exception recovery
+    // must not cost the operations queued behind it.
+    materializr::DeferredTasks q;
+    bool second = false;
+    q.queue([] { throw std::runtime_error("boom"); });
+    q.queue([&] { second = true; });
+    auto first = q.takeNext();
+    ASSERT_TRUE(first);
+    EXPECT_THROW(first(), std::runtime_error);
+    EXPECT_EQ(q.size(), 1u);
+    auto next = q.takeNext();
+    ASSERT_TRUE(next);
+    next();
+    EXPECT_TRUE(second);
+}
+
+TEST(DeferredTasks, ReplaceAllDropsWhatWasQueuedAndNullIsIgnored) {
+    materializr::DeferredTasks q;
     int ran = 0;
-    materializr::chainDeferred(slot, [&] { ++ran; });
-    ASSERT_TRUE(slot);
-    materializr::chainDeferred(slot, {});
-    slot();
-    EXPECT_EQ(ran, 1);
+    q.queue([&] { ran += 1; });
+    q.queue({});                      // null: not queued
+    EXPECT_EQ(q.size(), 1u);
+    q.replaceAll([&] { ran += 10; }); // the startup load owns the queue alone
+    EXPECT_EQ(q.size(), 1u);
+    while (auto t = q.takeNext()) t();
+    EXPECT_EQ(ran, 10);
+    EXPECT_FALSE(q.takeNext());
+    q.queue([&] { ran += 100; });
+    q.clear();
+    EXPECT_TRUE(q.empty());
 }

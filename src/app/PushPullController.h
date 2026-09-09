@@ -96,10 +96,13 @@ protected:
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
     bool syncLiveOp(Operation& op) override;
     std::unique_ptr<Operation> buildCommitOp(const IopContext& ctx) override;
-    // Dense bodies draw a ghost instead of previewing for real. (The commit
-    // still runs inline - the LiveOp branch never consults
-    // wantsDeferredCommit, which is right here: History has to reflow this op
-    // beneath the Thread step and re-cut the thread around it.)
+    // Dense bodies draw a ghost instead of previewing for real, so the commit
+    // is the gesture's only real execute. previewWentAsync() above reports
+    // that path too, which is what makes the base run it between frames
+    // behind the progress window instead of freezing on it. (The LiveOp
+    // branch never consults wantsDeferredCommit; History still reflows this
+    // op beneath the Thread step and re-cuts the thread around it, now inside
+    // the deferred task.)
     bool wantsLivePreview(const IopContext&) const override {
         return !m_st.heavyPreview;
     }

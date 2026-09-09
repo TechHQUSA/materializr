@@ -1035,7 +1035,6 @@ void Application::renderScalePanel() {
             double cx = 0, cy = 0, cz = 0;               // pivot in world coords
 
             try {
-                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 const TopoDS_Shape& shape = m_document->getBody(bodyId);
                 Bnd_Box bb;
                 BRepBndLib::AddOptimal(shape, bb, Standard_False, Standard_False);
@@ -1096,6 +1095,10 @@ void Application::renderScalePanel() {
                 (std::abs(sx - 1) > 1e-4f ||
                  std::abs(sy - 1) > 1e-4f ||
                  std::abs(sz - 1) > 1e-4f)) {
+                // Around the PUSH, not around the bounding-box read above: that
+                // try block closes before the operation runs, so a scope there
+                // would observe no change and leave the scaled body stale.
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 auto op = std::make_unique<TransformOp>();
                 op->setBodyId(bodyId);
                 op->setType(TransformType::Scale);
@@ -4872,7 +4875,7 @@ void Application::commitStlImport() {
     // Defer the import: decimate + build + UnifySameDomain can take a few seconds
     // at high accuracy, so run it in the between-frames slot where it can paint a
     // progress frame instead of freezing the window (same path as project load).
-    m_deferredHeavyTask = [this, path, acc]() {
+    m_deferredHeavy.replaceAll([this, path, acc]() {
         renderProgressFrame(-1.0f, "Importing STL\xE2\x80\xA6");
         auto result = materializr::StlIO::import(path, *m_document, acc);
         if (result.success) {
@@ -4894,7 +4897,7 @@ void Application::commitStlImport() {
         } else {
             showToast("STL import failed: " + result.errorMessage, 6.0);
         }
-    };
+    });
 }
 
 void Application::cancelStlImport() {

@@ -36,7 +36,7 @@ inline void resetFpuForOcct() {
 #endif
 
 #include "app/Application.h"
-#include "app/DeferredChain.h"
+#include "app/DeferredTasks.h"
 #include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
@@ -1138,9 +1138,7 @@ materializr::IopContext Application::iopContext() {
         // task, and dropping an already-queued commit on the floor would lose
         // an operation the user confirmed. (The startup auto-open/restore
         // paths assign the slot directly and do mean to replace each other.)
-        [this](std::function<void()> t) {
-            materializr::chainDeferred(m_deferredHeavyTask, std::move(t));
-        },
+        [this](std::function<void()> t) { m_deferredHeavy.queue(std::move(t)); },
         // im-touch hosts the Confirm/Cancel as corner FABs - the scaffold
         // then skips its in-panel buttons (Enter/Esc still work).
         // NOTE: aggregate init, so this list must stay in DECLARATION order -
@@ -1455,7 +1453,7 @@ void Application::drawIndeterminateBar() {
 
 bool Application::renderProgressFrame(float fraction, const char* label) {
     // Called from inside a long op's execute() via the progress reporter. Must
-    // run BETWEEN main frames (the op is deferred to m_deferredHeavyTask), so a
+    // run BETWEEN main frames (the op is deferred to m_deferredHeavy), so a
     // fresh ImGui frame here is safe. fraction==0 marks a new op → reset the
     // cancel latch so a prior cancel doesn't carry over. (fraction<0 is the
     // indeterminate spinner and must NOT reset it.)
@@ -1627,7 +1625,7 @@ void Application::loadAppSettings() {
         // already up) - otherwise the synchronous load froze startup with the
         // OS flagging "not responding".
         std::string p = s.lastProjectPath;
-        m_deferredHeavyTask = [this, p]() {
+        m_deferredHeavy.replaceAll([this, p]() {
 #if defined(__ANDROID__)
             if (p.rfind("content:", 0) == 0) {
                 // A persisted document URI (quick-save identity). Resolve it
@@ -1656,7 +1654,7 @@ void Application::loadAppSettings() {
             }
 #endif
             loadProjectWithProgress(p);
-        };
+        });
     }
 
     // Auto check for updates: hit the GitHub releases API and, if a newer
@@ -1739,16 +1737,16 @@ void Application::loadAppSettings() {
                 restore.push_back(s.lastProjectPath);
         }
         if (restore.empty()) {
-            m_deferredHeavyTask = nullptr;  // nothing to resume; home screen
+            m_deferredHeavy.clear();  // nothing to resume; home screen
             showLandingPage(/*fromStartup=*/true);
         } else {
             // Replaces the single-project auto-open queued above; same deferred
             // slot, so the loads run between frames with the window already up
             // and the loading bar able to pump.
             size_t active = static_cast<size_t>(s.sessionActive);
-            m_deferredHeavyTask = [this, restore, active]() {
+            m_deferredHeavy.replaceAll([this, restore, active]() {
                 restoreSessionTabs(restore, active);
-            };
+            });
         }
     }
 }
@@ -7196,7 +7194,7 @@ void Application::run() {
             // a pending heavy task to run, a toast that must tick down and clear
             // (regressed once as "toast never clears"), a modal popup, or an
             // extension tool that may animate on its own.
-            if (m_deferredHeavyTask || m_showUpdatePopup || !m_toastText.empty())
+            if (!m_deferredHeavy.empty() || m_showUpdatePopup || !m_toastText.empty())
                 return true;
             if (!m_threadRecuts.empty()) return true; // async re-cut in flight
             if (m_meshDispatch.anyPending()) return true; // off-thread mesh in flight: land it when it finishes
@@ -7237,7 +7235,7 @@ void Application::run() {
                 if (m_edgeCtl.active())            st += "edgeop ";
                 if (m_moveFaceCtl.active())       st += "moveface ";
                 if (m_revolveActive)           st += "revolve ";
-                if (m_deferredHeavyTask)       st += "heavy ";
+                if (!m_deferredHeavy.empty())  st += "heavy ";
                 if (!m_toastText.empty())      st += "toast ";
                 if (m_showUpdatePopup)         st += "update ";
                 bool iop = false;
@@ -7359,9 +7357,9 @@ void Application::run() {
         // Run a heavy op deferred from last frame's commit HERE, between frames,
         // so its progress reporter (renderProgressFrame) can pump its own frames
         // without nesting ImGui frames.
-        if (m_deferredHeavyTask) {
-            auto task = std::move(m_deferredHeavyTask);
-            m_deferredHeavyTask = nullptr;
+        // Taken out of the queue BEFORE it runs: a task that throws must not
+        // take the ones queued behind it down with it.
+        if (auto task = m_deferredHeavy.takeNext()) {
             // Arm the UI keep-alive for the duration of the task, and ONLY for
             // that duration. Between frames is the one place where repainting
             // from deep inside an op is safe (no ImGui frame is in flight), and
