@@ -1,3 +1,7 @@
+// Two subjects, both about when work runs off the frame:
+//   - the SnapshotBody engine's off-thread preview, below;
+//   - the Push/Pull commit-deferral policy, at the end of the file.
+//
 // The SnapshotBody engine's off-thread preview (previewOffThread): inline
 // until one frame is slow, then one worker job at a time whose result lands
 // through pollPreview; the body trails the parameters, a mid-job change is
@@ -5,6 +9,7 @@
 // while a job is in flight.
 #include "app/DeferredTasks.h"
 #include "app/InteractiveOpController.h"
+#include "app/PushPullController.h"
 #include "core/Document.h"
 #include "core/History.h"
 #include "core/Operation.h"
@@ -512,4 +517,57 @@ TEST(IopPreviewAdoption, AResultLandedForOtherParametersIsNotAdopted) {
         << "a result computed for height 15 was adopted for a commit at 20";
     EXPECT_NEAR(volume(doc.getBody(id)), 20.0 * 20.0 * 20.0, 1e-6)
         << "the commit did not recompute at the parameters it was given";
+}
+
+
+// The Push/Pull deferral truth table. The condition turns on three things and
+// only two of them were ever acted on: a ghosted gesture deferred, while a
+// gesture whose PREVIEW went async - the scaffold's own measurement that this
+// body is slow - committed inline and froze. Measured, that was 565 ms on a
+// body just under the ghost threshold, against 814 ms with a progress bar on
+// one 24% larger.
+// The helper is protected, which is right - it is an implementation detail of
+// the controller, not API. A test-local subclass reaches it without widening
+// the production surface.
+namespace {
+struct DeferProbe : materializr::PushPullController {
+    using materializr::PushPullController::shouldDeferCommit;
+};
+} // namespace
+
+// WHAT THIS DOES NOT COVER, and cannot. These cases pin the DECISION; they do
+// not pin the WIRING. Reverting wantsDeferredCommit to its old condition
+// leaves every one of them passing - verified by mutation. The wiring has no
+// reachable seam: PushPullController.cpp is not part of materializr_core, so
+// no test binary here can instantiate the controller at all, and the static
+// helper is the only thing a test can touch. Closing it means either moving
+// the controller into the core library or building a rig that can drive a
+// real gesture with sketch or face targets.
+//
+// Two rows below are defensive rather than reachable: a ghosted gesture
+// returns from updatePushPull before inlinePreviewTook ever runs, so
+// async cannot be true while ghosted. They are kept because the helper is
+// written as a general predicate and should behave sanely if that changes.
+TEST(PushPullDeferral, GhostedOrAsyncDefersUnlessAThreadIsInThePath) {
+    using P = DeferProbe;
+    //                          ghosted  async  threaded
+    EXPECT_FALSE(P::shouldDeferCommit(false, false, false))
+        << "a fast gesture must stay inline; deferring costs a frame for nothing";
+    EXPECT_TRUE(P::shouldDeferCommit(true, false, false))
+        << "a ghosted gesture never ran the boolean and must defer";
+    EXPECT_TRUE(P::shouldDeferCommit(false, true, false))
+        << "the preview went async because this body is slow, so the commit "
+           "is slow too and must not freeze the frame";
+    EXPECT_TRUE(P::shouldDeferCommit(true, true, false));   // defensive: unreachable
+
+    // A thread anywhere in the tool's path overrides all of it: the main loop
+    // applies landed thread re-cuts before it runs the deferred task, so a
+    // re-cut can land between the commit frame and the push and change the
+    // body underneath it.
+    EXPECT_FALSE(P::shouldDeferCommit(true, false, true))
+        << "a threaded body must commit inline even when ghosted";
+    EXPECT_FALSE(P::shouldDeferCommit(false, true, true))
+        << "a threaded body must commit inline even when the preview is async";
+    EXPECT_FALSE(P::shouldDeferCommit(true, true, true));   // defensive: unreachable
+    EXPECT_FALSE(P::shouldDeferCommit(false, false, true));
 }

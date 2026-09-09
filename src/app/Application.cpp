@@ -2944,7 +2944,15 @@ void Application::handleShortcuts() {
     // ImGui has text input focus. Always false on Android (no modifier keys).
     bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
+        // Also blocked while a confirmed operation is still QUEUED. A
+        // deferred commit runs between frames, and cleanup() has already
+        // cleared active() by then, so without this an undo in the same frame
+        // as Confirm pops the PREVIOUS history step and the queued operation
+        // then executes against that altered document. The window is one
+        // frame, and Confirm-then-Ctrl+Z is exactly the sequence a user
+        // hammering undo produces.
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active() &&
+            m_deferredHeavy.empty()) {
             auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
             // editor convention - and Steve's muscle memory); the next
@@ -3000,7 +3008,15 @@ void Application::handleShortcuts() {
         }
     }
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
-        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
+        // Also blocked while a confirmed operation is still QUEUED. A
+        // deferred commit runs between frames, and cleanup() has already
+        // cleared active() by then, so without this an undo in the same frame
+        // as Confirm pops the PREVIOUS history step and the queued operation
+        // then executes against that altered document. The window is one
+        // frame, and Confirm-then-Ctrl+Z is exactly the sequence a user
+        // hammering undo produces.
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active() &&
+            m_deferredHeavy.empty()) {
             if (m_history->canRedo()) {
                 auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_history->redo(*m_document);

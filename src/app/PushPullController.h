@@ -93,10 +93,10 @@ protected:
     bool wantsLivePreview(const IopContext&) const override {
         return !m_st.heavyPreview;
     }
-    // A ghosted gesture never previewed for real, so its boolean runs in full
-    // at commit - 814 ms on a 300-hole plate, on the main thread. Run it
-    // between frames instead, where PushPullOp's progress range keeps the
-    // window painting and Cancel aborts the boolean.
+    // Run the commit between frames, behind PushPullOp's progress range, when
+    // the gesture has established that this body is slow. See
+    // shouldDeferCommit for the two ways it can establish that and the
+    // measurements behind them.
     //
     // Never on a threaded body. Application's main loop applies landed thread
     // re-cuts (pollThreadRecuts) near the top of an iteration and runs the
@@ -114,6 +114,19 @@ protected:
     // executes, not when the gesture began. Trusting the stale answer would
     // defer a commit that then cuts the very body this exclusion exists for.
     bool wantsDeferredCommit(const IopContext& ctx) const override;
+    // The deferral decision as a plain function of the three things it turns
+    // on, so the truth table can be tested without driving a gesture.
+    //
+    //   ghosted        the gesture drew a ghost instead of previewing, so the
+    //                  boolean has not run at all yet
+    //   previewAsync   the preview went to a worker because an inline frame
+    //                  crossed the async threshold - the scaffold's own
+    //                  measurement that this body is slow
+    //   anyThreaded    any visible body carries a thread
+    static bool shouldDeferCommit(bool ghosted, bool previewAsync,
+                                  bool anyThreaded) {
+        return (ghosted || previewAsync) && !anyThreaded;
+    }
     // Any VISIBLE body carrying a thread, asked fresh. Static: it reads only
     // the context, never gesture state.
     static bool anyVisibleBodyThreaded(const IopContext& ctx);

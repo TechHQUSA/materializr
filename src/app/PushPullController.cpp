@@ -78,7 +78,34 @@ bool PushPullController::anyVisibleBodyThreaded(const IopContext& ctx) {
 }
 
 bool PushPullController::wantsDeferredCommit(const IopContext& ctx) const {
-    return m_st.heavyPreview && !anyVisibleBodyThreaded(ctx);
+    // Also when the PREVIEW went async, not only when the gesture was ghosted.
+    // Those are two different ways of learning the same thing, and only one of
+    // them was acted on. The async path is the scaffold's own measurement that
+    // this body is slow, and its commit re-runs the boolean in full on the
+    // main thread. Measured on hole-grid plates, commit cost by face count:
+    //
+    //     102 faces   155 ms      async band, ran inline and froze
+    //     204 faces   429 ms      async band, ran inline and froze
+    //     246 faces   565 ms      async band, ran inline and froze
+    //     306 faces   814 ms      ghosted, already deferred with a window
+    //
+    // So a body just under the 250-face ghost threshold froze for 565 ms while
+    // one 24% larger got a live progress bar and a Cancel. That discontinuity
+    // is the bug.
+    //
+    // One difference from the ghosted path is worth knowing. There, nothing
+    // was ever applied, so there is nothing to undo. Here a preview IS on the
+    // body and the LiveOp commit undoes it before handing the operation over.
+    // That undo is tracked - commit runs inside a BodyChangeScope, so the
+    // affected bodies re-tessellate and the renderer never disagrees with the
+    // document - and the deferred task runs early in the next main-loop
+    // iteration, before renderViewport. Whether any frame actually draws the
+    // intermediate state depends on where the viewport-anchored panel sits
+    // relative to the 3D pass, which has not been pinned down. The exposure is
+    // at most one frame and may be none; against 565 ms of frozen UI it is
+    // worth it either way.
+    return shouldDeferCommit(m_st.heavyPreview, m_ppDispatch.async(),
+                             anyVisibleBodyThreaded(ctx));
 }
 
 int PushPullController::onBegin(const IopContext& ctx) {
@@ -345,6 +372,15 @@ bool PushPullController::syncLiveOp(Operation& op) {
     auto& pp = static_cast<PushPullOp&>(op);
     pp.setDistance(static_cast<double>(m_st.distance));
     pp.setSymmetric(m_st.symmetric);
+    // Kept in step with makeOp(), which decides this from the FINAL distance.
+    // The live op is built once at gesture start, when the distance is zero,
+    // so for face targets this used to latch false and never move: dragging
+    // negative previewed a cut of the source body alone while the commit cut
+    // through every visible body in the tool's path. Two problems in one - the
+    // preview showed something other than what Confirm would do, and it timed
+    // a cheaper operation than the one that would run, so the commit could
+    // look fast enough to leave on the main thread.
+    pp.setCutIntersecting(allFreeSketchTargets() || m_st.distance < 0.0f);
     // A zero-distance gesture is a no-op: leave the document un-previewed
     // rather than running a degenerate prism through the booleans.
     return std::abs(m_st.distance) > 1e-6;
@@ -557,7 +593,13 @@ std::unique_ptr<Operation> PushPullController::buildCommitOp(const IopContext& c
         // Zero distance included: the last landed preview may still be
         // applied at zero (no job runs for zero), and returning null here
         // would record it. The fresh op refuses zero and History drops it.
-        std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);
+        //
+        // The smart-cut detail is spelled out here too: makeOp decides it from
+        // the final distance, and this early return would otherwise print the
+        // plain message for every async commit, including the cutting ones.
+        const bool smartCut = allFreeSketchTargets() || m_st.distance < 0.0f;
+        std::fprintf(stdout, "Push/Pull %scommitted at %.2f mm\n",
+                     smartCut ? "(smart cut) " : "", m_st.distance);
         return makeOp();
     }
 

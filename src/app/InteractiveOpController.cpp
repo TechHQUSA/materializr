@@ -253,10 +253,11 @@ void InteractiveOpController::commit(const IopContext& ctx) {
             // Inline unless the controller asks otherwise. Deferring used to
             // be worthless here: no LiveOp operation reported progress, so a
             // deferred boolean drew no window, offered no Cancel and pumped no
-            // events - the same freeze one frame later, plus a frame of the
-            // un-previewed body. PushPullOp now drives a progress range, and
-            // the un-previewed frame does not arise in the case that defers
-            // (a ghosted gesture applied no preview to undo).
+            // events - the same freeze one frame later. PushPullOp now drives
+            // a progress range. A ghosted gesture applied no preview, so there
+            // is nothing to undo; a gesture whose preview went async DID apply
+            // one, and the undo above is what it costs - see
+            // PushPullController::wantsDeferredCommit.
             //
             // Still inline on a threaded body, which is the override's job to
             // exclude: History reflows this op beneath the Thread step, and
