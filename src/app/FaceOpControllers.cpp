@@ -163,7 +163,11 @@ void ShellController::panelBody(const IopContext& ctx, bool& changed) {
         changed = true;
     }
 
-    if (!previewOk()) {
+    // Not while a worker job is in flight: previewOk() then describes the
+    // last LANDED thickness, and on a heavy body the slider runs ahead of it,
+    // so the failure of a value the user has already moved past would flash
+    // over a thickness that is still being computed.
+    if (!previewOk() && !previewPending()) {
         const ImVec4 warn(1.0f, 0.6f, 0.3f, 1.0f);
         // Only blame fillets when THIS face actually borders one - OCCT can't
         // open a fillet-bordered face (it seals the cavity), and no thickness
