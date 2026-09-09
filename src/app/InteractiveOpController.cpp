@@ -158,8 +158,11 @@ void InteractiveOpController::pollPreview(const IopContext& ctx) {
     m_job.reap(); // abandoned jobs finish whether or not a gesture is active
     if (!m_active) {
         // Deactivated without cleanup() (setActive(false), a custom lifecycle):
-        // the run must not stay pending, or hasActiveWork renders forever.
+        // the run must not stay pending, or hasActiveWork renders forever, and
+        // the dispatch must not remember it as running, or a controller that
+        // reactivates through setActive(true) could never launch again.
         m_job.abandon();
+        m_dispatch.reset();
         return;
     }
     if (previewModel() != PreviewModel::SnapshotBody || m_bodyId < 0) return;
