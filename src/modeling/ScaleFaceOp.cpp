@@ -38,6 +38,7 @@
 #include "../ui/NumField.h"
 #include "../i18n.h"
 #include "../i18n.h"
+#include "modeling/BoolArgs.h"
 
 ScaleFaceOp::ScaleFaceOp() = default;
 
@@ -161,7 +162,8 @@ bool ScaleFaceOp::execute(Document& doc) {
                 std::fprintf(stderr, "[ScaleFace] tip loft failed\n");
                 return false;
             }
-            BRepAlgoAPI_Fuse fuse(m_previousShape, loft.Shape());
+            BRepAlgoAPI_Fuse fuse;
+            materializr::setBooleanShapes(fuse, m_previousShape, loft.Shape());
             fuse.SetFuzzyValue(1.0e-4);
             fuse.Build();
             if (!fuse.IsDone()) {
@@ -229,14 +231,16 @@ bool ScaleFaceOp::execute(Document& doc) {
             // frustum only spans the last L, so only that band flares.
             const bool grow = (su > 1.0 || sv > 1.0);
             if (grow) {
-                BRepAlgoAPI_Fuse fuse(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Fuse fuse;
+                materializr::setBooleanShapes(fuse, m_previousShape, loft.Shape());
                 fuse.SetFuzzyValue(1.0e-4);
                 fuse.Build();
                 if (!fuse.IsDone()) return false;
                 result = fuse.Shape();
             } else if (fullDepth) {
                 // The frustum spans the entire body: one Common does it.
-                BRepAlgoAPI_Common common(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, m_previousShape, loft.Shape());
                 common.SetFuzzyValue(1.0e-4);
                 common.Build();
                 if (!common.IsDone()) return false;
@@ -249,24 +253,28 @@ bool ScaleFaceOp::execute(Document& doc) {
                     BRepPrimAPI_MakePrism(bigFace, gp_Vec(n) * (2.0 * diag))
                         .Shape();
 
-                BRepAlgoAPI_Cut mainCut(m_previousShape, tipBox);
+                BRepAlgoAPI_Cut mainCut;
+                materializr::setBooleanShapes(mainCut, m_previousShape, tipBox);
                 mainCut.SetFuzzyValue(1.0e-4);
                 mainCut.Build();
                 if (!mainCut.IsDone()) return false;
                 TopoDS_Shape mainPiece = mainCut.Shape();
 
-                BRepAlgoAPI_Common tipCommon(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Common tipCommon;
+                materializr::setBooleanShapes(tipCommon, m_previousShape, loft.Shape());
                 tipCommon.SetFuzzyValue(1.0e-4);
                 tipCommon.Build();
                 if (!tipCommon.IsDone()) return false;
                 // Keep only the part beyond the cut plane - the frustum
                 // also overlaps inboard material.
-                BRepAlgoAPI_Common tipPiece(tipCommon.Shape(), tipBox);
+                BRepAlgoAPI_Common tipPiece;
+                materializr::setBooleanShapes(tipPiece, tipCommon.Shape(), tipBox);
                 tipPiece.SetFuzzyValue(1.0e-4);
                 tipPiece.Build();
                 if (!tipPiece.IsDone()) return false;
 
-                BRepAlgoAPI_Fuse fuse(mainPiece, tipPiece.Shape());
+                BRepAlgoAPI_Fuse fuse;
+                materializr::setBooleanShapes(fuse, mainPiece, tipPiece.Shape());
                 fuse.SetFuzzyValue(1.0e-4);
                 fuse.Build();
                 if (!fuse.IsDone()) return false;

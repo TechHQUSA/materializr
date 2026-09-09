@@ -175,8 +175,8 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/CopyOp.cpp:79 | `materializr::lengthField("X", &m_dx);` |
 | CONVERTED | src/modeling/CopyOp.cpp:80 | `materializr::lengthField("Y", &m_dy);` |
 | CONVERTED | src/modeling/CopyOp.cpp:81 | `materializr::lengthField("Z", &m_dz);` |
-| CONVERTED | src/modeling/ExtrudeOp.cpp:807 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
-| angle | src/modeling/ExtrudeOp.cpp:823 | `materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");` |
+| CONVERTED | src/modeling/ExtrudeOp.cpp:810 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| angle | src/modeling/ExtrudeOp.cpp:826 | `materializr::inputNumber(materializr::tr("Draft Angle"), &m_draftAngle, 0.1, 1.0, "%.1f");` |
 | CONVERTED | src/modeling/FilletOp.cpp:676 | `materializr::lengthField(materializr::tr("Radius"), &m_radius);` |
 | CONVERTED | src/modeling/PatternOp.cpp:226 | `materializr::lengthField(materializr::tr("Spacing X"), &m_spacingX);` |
 | CONVERTED | src/modeling/PatternOp.cpp:227 | `materializr::lengthField(materializr::tr("Spacing Y"), &m_spacingY);` |
@@ -200,30 +200,30 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/PrimitiveOp.cpp:163 | `materializr::lengthField("Y", &m_oy);` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:164 | `materializr::lengthField("Z", &m_oz);` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:537 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
-| CONVERTED | src/modeling/PushPullOp.cpp:674 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
-| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:682 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia))` |
-| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:689 | `if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) ` |
-| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:693 | `if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {` |
-| angle | src/modeling/RevolveOp.cpp:278 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");` |
-| CONVERTED | src/modeling/RevolveOp.cpp:284 | `materializr::lengthField(materializr::tr("Origin X"), &m_axisOriginX);` |
-| CONVERTED | src/modeling/RevolveOp.cpp:285 | `materializr::lengthField(materializr::tr("Origin Y"), &m_axisOriginY);` |
-| CONVERTED | src/modeling/RevolveOp.cpp:286 | `materializr::lengthField(materializr::tr("Origin Z"), &m_axisOriginZ);` |
-| unitless | src/modeling/RevolveOp.cpp:290 | `materializr::inputNumber(materializr::tr("Dir X"), &m_axisDirX, 0.1, 1.0, "%g");` |
-| unitless | src/modeling/RevolveOp.cpp:291 | `materializr::inputNumber(materializr::tr("Dir Y"), &m_axisDirY, 0.1, 1.0, "%g");` |
-| unitless | src/modeling/RevolveOp.cpp:292 | `materializr::inputNumber(materializr::tr("Dir Z"), &m_axisDirZ, 0.1, 1.0, "%g");` |
-| percent | src/modeling/ScaleFaceOp.cpp:328 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
-| percent | src/modeling/ScaleFaceOp.cpp:329 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
-| CONVERTED | src/modeling/ScaleFaceOp.cpp:330 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
+| CONVERTED | src/modeling/PushPullOp.cpp:680 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:689 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia))` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:696 | `if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) ` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:700 | `if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {` |
+| angle | src/modeling/RevolveOp.cpp:282 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angle, 1.0, 10.0, "%.1f");` |
+| CONVERTED | src/modeling/RevolveOp.cpp:288 | `materializr::lengthField(materializr::tr("Origin X"), &m_axisOriginX);` |
+| CONVERTED | src/modeling/RevolveOp.cpp:289 | `materializr::lengthField(materializr::tr("Origin Y"), &m_axisOriginY);` |
+| CONVERTED | src/modeling/RevolveOp.cpp:290 | `materializr::lengthField(materializr::tr("Origin Z"), &m_axisOriginZ);` |
+| unitless | src/modeling/RevolveOp.cpp:294 | `materializr::inputNumber(materializr::tr("Dir X"), &m_axisDirX, 0.1, 1.0, "%g");` |
+| unitless | src/modeling/RevolveOp.cpp:295 | `materializr::inputNumber(materializr::tr("Dir Y"), &m_axisDirY, 0.1, 1.0, "%g");` |
+| unitless | src/modeling/RevolveOp.cpp:296 | `materializr::inputNumber(materializr::tr("Dir Z"), &m_axisDirZ, 0.1, 1.0, "%g");` |
+| percent | src/modeling/ScaleFaceOp.cpp:336 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
+| percent | src/modeling/ScaleFaceOp.cpp:337 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:338 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
 | CONVERTED | src/modeling/ShellOp.cpp:327 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:396 | `if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:408 | `if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/SketchEditOp.cpp:418 | `if (materializr::inputNumber(materializr::tr("Angle (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:462 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/TaperOp.cpp:143 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2109 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2111 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2137 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2144 | `materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_cl` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2105 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2107 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2133 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2140 | `materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_cl` |
 | CONVERTED | src/modeling/TransformOp.cpp:270 | `materializr::lengthField("X", &m_dx);` |
 | CONVERTED | src/modeling/TransformOp.cpp:271 | `materializr::lengthField("Y", &m_dy);` |
 | CONVERTED | src/modeling/TransformOp.cpp:272 | `materializr::lengthField("Z", &m_dz);` |
@@ -418,13 +418,13 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/FilletOp.cpp:855 | `// ≈ m_radius. Matching on radius keeps a 3 mm fillet from ever claiming a` |
 | comment | src/modeling/FilletOp.cpp:856 | `// neighbouring 4 mm fillet's faces, and is invariant under rigid moves.` |
 | comment | src/modeling/FilletProbe.cpp:66 | `// Quantise the radius to 1e-6 mm so float noise in a dragged value doesn't` |
-| comment | src/modeling/LoftOp.cpp:91 | `// fractions. Worst case measured (robot dog cover.mzr, two ~2 mm-wide C-shaped` |
-| comment | src/modeling/LoftOp.cpp:98 | `//     arc-length resample + best seam    still folded (rms misfit 18.7 mm)` |
-| comment | src/modeling/LoftOp.cpp:153 | `// sampled version missed the ~0.2 mm tip arcs by up to 50 um, which forced the` |
-| comment | src/modeling/LoftOp.cpp:154 | `// bridge sew tolerance to 2e-2 and left seam edges carrying ~0.05 mm` |
-| comment | src/modeling/LoftOp.cpp:253 | `// float32 sketch storage), and a planar cap whose boundary sits 0.1 mm` |
-| comment | src/modeling/LoftOp.cpp:294 | `// fuzzy 1e-5/1e-3, glue, 0.2 mm forced interpenetration, healed inputs. The` |
-| comment | src/modeling/LoftOp.cpp:295 | `// contact is two long ~2 mm-wide tangent strips, and BOP either returns an` |
+| comment | src/modeling/LoftOp.cpp:92 | `// fractions. Worst case measured (robot dog cover.mzr, two ~2 mm-wide C-shaped` |
+| comment | src/modeling/LoftOp.cpp:99 | `//     arc-length resample + best seam    still folded (rms misfit 18.7 mm)` |
+| comment | src/modeling/LoftOp.cpp:154 | `// sampled version missed the ~0.2 mm tip arcs by up to 50 um, which forced the` |
+| comment | src/modeling/LoftOp.cpp:155 | `// bridge sew tolerance to 2e-2 and left seam edges carrying ~0.05 mm` |
+| comment | src/modeling/LoftOp.cpp:254 | `// float32 sketch storage), and a planar cap whose boundary sits 0.1 mm` |
+| comment | src/modeling/LoftOp.cpp:295 | `// fuzzy 1e-5/1e-3, glue, 0.2 mm forced interpenetration, healed inputs. The` |
+| comment | src/modeling/LoftOp.cpp:296 | `// contact is two long ~2 mm-wide tangent strips, and BOP either returns an` |
 | comment | src/modeling/MergeFacesOp.cpp:118 | `// Left at OCCT's default (Precision::Confusion, 1e-7 mm) unless asked.` |
 | comment | src/modeling/MergeFacesOp.cpp:174 | `// 1e-7 mm. That decides whether two PARALLEL planes count as the same plane --` |
 | comment | src/modeling/MergeFacesOp.cpp:182 | `//     separation      = 3.054738e-06 mm     -- 30x the default tolerance` |
@@ -434,16 +434,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/MergeFacesOp.cpp:231 | `// and 15.38 mm long, each exactly 3.0546e-6 mm wide -- the same figure as the` |
 | comment | src/modeling/MergeFacesOp.cpp:290 | `// "Extrude"): two coplanar faces, centres 0.47 mm apart, outward normals` |
 | comment | src/modeling/MergeFacesOp.cpp:292 | `// thing it was not: they are the same plane to 3e-6 mm.` |
-| comment | src/modeling/MoveHoleOp.cpp:295 | `// measured on a Ø10 hole it left a 14 mm-wide opening, the silhouette of the` |
+| comment | src/modeling/MoveHoleOp.cpp:296 | `// measured on a Ø10 hole it left a 14 mm-wide opening, the silhouette of the` |
 | allowed-by-hand | src/modeling/PatchOp.cpp:389 | `ImGui::TextDisabled(materializr::tr("Fit: gap %.4f mm, tangency %.2f deg"),` |
 | comment | src/modeling/PatchOp.h:96 | `double tol3d       = 1e-4;   // G0: max gap to the boundary, mm` |
 | comment | src/modeling/PatchOp.h:106 | `double g0Error() const { return m_g0Error; }  // mm` |
 | comment | src/modeling/PrimitiveOp.h:23 | `// Box: XYZ extents in mm.` |
-| comment | src/modeling/PushPullOp.cpp:368 | `// BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such` |
-| comment | src/modeling/PushPullOp.cpp:544 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
-| allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:512 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
-| allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:536 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
-| comment | src/modeling/ScaleFaceOp.cpp:326 | `// they were converted display->mm on commit, so typing 100 under inches` |
+| comment | src/modeling/PushPullOp.cpp:369 | `// BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such` |
+| comment | src/modeling/PushPullOp.cpp:549 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
+| allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:517 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
+| allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:542 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
+| comment | src/modeling/ScaleFaceOp.cpp:334 | `// they were converted display->mm on commit, so typing 100 under inches` |
 | allowed-by-hand | src/modeling/SewOp.cpp:199 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
 | allowed-by-hand | src/modeling/ShellOp.cpp:211 | `"body (thickness %.3f mm).\n", m_thickness);` |
 | allowed-by-hand | src/modeling/ShellOp.cpp:289 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
@@ -524,9 +524,9 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/TextSketchOp.cpp:131 | `// 0.2%% of the em - ~0.02 mm chord error on 10 mm letters.` |
 | comment | src/modeling/TextSketchOp.h:30 | `// Text extents relative to the baseline-left anchor, UNROTATED, in mm:` |
 | comment | src/modeling/TextSketchOp.h:37 | `// Glyph contours relative to the baseline-left anchor, UNROTATED, in mm -` |
-| comment | src/modeling/ThreadOp.cpp:224 | `// One pitch spans 360°, so `clearance` mm ↦ clearance/pitch·360°; the` |
-| comment | src/modeling/ThreadOp.cpp:449 | `// Runaway guard: a 0.1 mm pitch over a long rod would sweep thousands of` |
-| comment | src/modeling/ThreadOp.cpp:491 | `// Flank clearance (mm per side): widen the groove - and thus every gate` |
+| comment | src/modeling/ThreadOp.cpp:225 | `// One pitch spans 360°, so `clearance` mm ↦ clearance/pitch·360°; the` |
+| comment | src/modeling/ThreadOp.cpp:450 | `// Runaway guard: a 0.1 mm pitch over a long rod would sweep thousands of` |
+| comment | src/modeling/ThreadOp.cpp:492 | `// Flank clearance (mm per side): widen the groove - and thus every gate` |
 | comment | src/modeling/ThreadOp.h:62 | `// Explicit groove width in mm, decoupling the cut from the pitch. Every` |
 | comment | src/modeling/ThreadOp.h:163 | `double m_clearance = 0.0;   // radial fit gap (mm); 0 = geometrically exact` |
 | comment | src/modeling/ThreadOp.h:164 | `double m_grooveWidth = 0.0; // explicit groove width (mm); 0 = from pitch` |
@@ -575,7 +575,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/AxisTransformOp.cpp:23 | `AxisTransformOp` |
 | stored-string | src/modeling/BatchTransformOp.h:34 | `BatchTransformOp` |
 | no-length | src/modeling/BooleanOp.cpp:309 | `BooleanOp` |
-| no-length | src/modeling/BoundaryFillOp.cpp:169 | `BoundaryFillOp` |
+| no-length | src/modeling/BoundaryFillOp.cpp:172 | `BoundaryFillOp` |
 | CONVERTED | src/modeling/ChamferOp.cpp:788 | `ChamferOp` |
 | no-length | src/modeling/CombineSketchesOp.cpp:98 | `CombineSketchesOp` |
 | no-length | src/modeling/ConstructionAxisOp.cpp:143 | `ConstructionAxisOp` |
@@ -584,25 +584,25 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/DefeatureOp.cpp:60 | `DefeatureOp` |
 | no-length | src/modeling/DeleteOp.cpp:51 | `DeleteOp` |
 | no-length | src/modeling/DuplicateSketchOp.cpp:41 | `DuplicateSketchOp` |
-| CONVERTED | src/modeling/ExtrudeOp.cpp:792 | `ExtrudeOp` |
+| CONVERTED | src/modeling/ExtrudeOp.cpp:795 | `ExtrudeOp` |
 | CONVERTED | src/modeling/FaceTweakOp.cpp:126 | `FaceTweakOp` |
 | CONVERTED | src/modeling/FilletOp.cpp:667 | `FilletOp` |
 | no-length | src/modeling/GuidedLoftOp.cpp:421 | `GuidedLoftOp` |
-| no-length | src/modeling/LoftOp.cpp:586 | `LoftOp` |
+| no-length | src/modeling/LoftOp.cpp:588 | `LoftOp` |
 | no-length | src/modeling/MergeFacesOp.cpp:548 | `MergeFacesOp` |
 | no-length | src/modeling/MirrorOp.cpp:102 | `MirrorOp` |
-| no-length | src/modeling/MoveFaceOp.cpp:571 | `MoveFaceOp` |
-| CONVERTED | src/modeling/MoveHoleOp.cpp:654 | `MoveHoleOp` |
+| no-length | src/modeling/MoveFaceOp.cpp:574 | `MoveFaceOp` |
+| CONVERTED | src/modeling/MoveHoleOp.cpp:657 | `MoveHoleOp` |
 | no-length | src/modeling/PatchOp.cpp:375 | `PatchOp` |
 | no-length | src/modeling/PatternOp.cpp:140 | `PatternOp` |
 | no-length | src/modeling/PlaneTransformOp.cpp:26 | `PlaneTransformOp` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:116 | `PrimitiveOp` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:526 | `ProjectSketchOp` |
-| CONVERTED | src/modeling/PushPullOp.cpp:665 | `PushPullOp` |
+| CONVERTED | src/modeling/PushPullOp.cpp:671 | `PushPullOp` |
 | stored-string | src/modeling/ReplayOp.h:29 | `ReplayOp` |
-| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:704 | `ResizeCylindricalOp` |
-| no-length | src/modeling/RevolveOp.cpp:263 | `RevolveOp` |
-| CONVERTED | src/modeling/ScaleFaceOp.cpp:315 | `ScaleFaceOp` |
+| CONVERTED | src/modeling/ResizeCylindricalOp.cpp:711 | `ResizeCylindricalOp` |
+| no-length | src/modeling/RevolveOp.cpp:267 | `RevolveOp` |
+| CONVERTED | src/modeling/ScaleFaceOp.cpp:323 | `ScaleFaceOp` |
 | no-length | src/modeling/SeparateBodyOp.cpp:85 | `SeparateBodyOp` |
 | no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
 | CONVERTED | src/modeling/ShellOp.cpp:317 | `ShellOp` |
@@ -611,5 +611,5 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
 | no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
 | no-length | src/modeling/TaperOp.cpp:133 | `TaperOp` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2097 | `ThreadOp` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2093 | `ThreadOp` |
 | CONVERTED | src/modeling/TransformOp.cpp:242 | `TransformOp` |

@@ -65,6 +65,7 @@ void ExtrudeOp::setProfile(const TopoDS_Shape& wire) {
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "modeling/BoolArgs.h"
 
 namespace {
 // Interior points of `face`, up to `maxPts`, spread over a UV grid. MANY
@@ -390,7 +391,8 @@ bool ExtrudeOp::execute(Document& doc) {
             prismDown.Build();
             if (!prismDown.IsDone()) return false;
 
-            BRepAlgoAPI_Fuse fuse(prismUp.Shape(), prismDown.Shape());
+            BRepAlgoAPI_Fuse fuse;
+            materializr::setBooleanShapes(fuse, prismUp.Shape(), prismDown.Shape());
             fuse.Build();
             if (!fuse.IsDone()) return false;
             extrudedShape = fuse.Shape();
@@ -537,7 +539,8 @@ bool ExtrudeOp::execute(Document& doc) {
                 m_prevFaceIds.clear();
                 if (const auto* im = doc.bodyFaceIds(m_targetBodyId))
                     m_prevFaceIds = *im;
-                BRepAlgoAPI_Common common(m_previousTargetShape, extrudedShape);
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, m_previousTargetShape, extrudedShape);
                 common.Build();
                 if (!common.IsDone()) {
                     return false;

@@ -37,6 +37,7 @@
 #include "../ui/NumField.h"
 #include "../i18n.h"
 #include "../i18n.h"
+#include "modeling/BoolArgs.h"
 
 // Per-op diagnostic log. Off unless the user passed --verbose; under verbose,
 // stderr is redirected to /tmp/materializr.log (or --log <path>), so these
@@ -295,7 +296,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
         }
 
         // Ring / frustum shell = outer − inner.
-        BRepAlgoAPI_Cut ringMaker(outerSolid, innerSolid);
+        BRepAlgoAPI_Cut ringMaker;
+        materializr::setBooleanShapes(ringMaker, outerSolid, innerSolid);
         ringMaker.Build();
         if (!ringMaker.IsDone()) {
             MZLOG("[Resize] ring cut failed\n");
@@ -382,7 +384,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                         padAxis, innerBot, innerTop, padH, &okp);
                     if (!okp || innerPadded.IsNull())
                         throw std::runtime_error("padded inner revolve failed");
-                    BRepAlgoAPI_Cut ringPadMake(outerPadded, innerPadded);
+                    BRepAlgoAPI_Cut ringPadMake;
+                    materializr::setBooleanShapes(ringPadMake, outerPadded, innerPadded);
                     ringPadMake.Build();
                     if (!ringPadMake.IsDone() || ringPadMake.Shape().IsNull())
                         throw std::runtime_error("padded ring cut failed");
@@ -442,7 +445,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                                 const gp_Pnt& ref = (attempt == 0) ? refIn : refOut;
                                 BRepPrimAPI_MakeHalfSpace hsMake(planeFace, ref);
                                 if (!hsMake.IsDone()) continue;
-                                BRepAlgoAPI_Common common(toClip, hsMake.Solid());
+                                BRepAlgoAPI_Common common;
+                                materializr::setBooleanShapes(common, toClip, hsMake.Solid());
                                 common.Build();
                                 if (!common.IsDone() || common.Shape().IsNull()) continue;
                                 double v = volOf(common.Shape());
@@ -485,7 +489,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                                 TopoDS_Shape prism =
                                     BRepPrimAPI_MakePrism(wideFace, extrudeVec).Shape();
                                 if (prism.IsNull()) continue;
-                                BRepAlgoAPI_Common common(toClip, prism);
+                                BRepAlgoAPI_Common common;
+                                materializr::setBooleanShapes(common, toClip, prism);
                                 common.Build();
                                 if (!common.IsDone() || common.Shape().IsNull()) continue;
                                 double v = volOf(common.Shape());
@@ -521,7 +526,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
             }
             if (!fillBuilt) fillShape = ring;
 
-            BRepAlgoAPI_Fuse fuse(m_previousShape, fillShape);
+            BRepAlgoAPI_Fuse fuse;
+            materializr::setBooleanShapes(fuse, m_previousShape, fillShape);
             fuse.Build();
             if (!fuse.IsDone()) {
                 MZLOG("[Resize] body fuse failed\n");
@@ -537,7 +543,8 @@ bool ResizeCylindricalOp::execute(Document& doc) {
                     gp1.Mass(), gp2.Mass(), gp2.Mass() - gp1.Mass());
             }
         } else {
-            BRepAlgoAPI_Cut cut(m_previousShape, ring);
+            BRepAlgoAPI_Cut cut;
+            materializr::setBooleanShapes(cut, m_previousShape, ring);
             cut.Build();
             if (!cut.IsDone()) {
                 MZLOG("[Resize] body cut failed\n");

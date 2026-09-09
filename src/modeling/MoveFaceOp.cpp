@@ -47,6 +47,7 @@
 #include <algorithm>
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "modeling/BoolArgs.h"
 
 namespace {
 // The far cross-section of the feature attached to `face`: the edge LOOPS where
@@ -446,7 +447,8 @@ bool MoveFaceOp::execute(Document& doc) {
             }
             TopoDS_Shape rest;
             try {
-                BRepAlgoAPI_Cut c(m_previousShape, oldFeature);
+                BRepAlgoAPI_Cut c;
+                materializr::setBooleanShapes(c, m_previousShape, oldFeature);
                 c.Build(); if (c.IsDone()) rest = c.Shape();
             } catch (...) {}
             int restSolids = 0;
@@ -456,7 +458,8 @@ bool MoveFaceOp::execute(Document& doc) {
                 result = newFeature; // the feature was the whole body after all
             } else {
                 try {
-                    BRepAlgoAPI_Fuse f(rest, newFeature);
+                    BRepAlgoAPI_Fuse f;
+                    materializr::setBooleanShapes(f, rest, newFeature);
                     f.Build(); if (f.IsDone()) result = f.Shape();
                 } catch (...) {}
                 if (result.IsNull()) {

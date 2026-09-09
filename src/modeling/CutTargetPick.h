@@ -19,6 +19,7 @@
 // (root CMakeLists.txt and tests/CMakeLists.txt) and one always gets forgotten.
 
 #include <BRepAlgoAPI_Common.hxx>
+#include "modeling/BoolArgs.h"
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
@@ -52,7 +53,8 @@ inline double removedVolume(const TopoDS_Shape& body, const TopoDS_Shape& tool) 
         BRepBndLib::Add(tool, tb);
         if (bb.IsVoid() || tb.IsVoid() || bb.IsOut(tb)) return 0.0;
 
-        BRepAlgoAPI_Common common(body, tool);
+        BRepAlgoAPI_Common common;
+        materializr::setBooleanShapes(common, body, tool);
         common.Build();
         if (!common.IsDone()) return 0.0;
         const TopoDS_Shape& s = common.Shape();

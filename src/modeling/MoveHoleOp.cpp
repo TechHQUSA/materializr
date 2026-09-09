@@ -26,6 +26,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include "UnifyTolerance.h"
+#include "modeling/BoolArgs.h"
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
@@ -475,7 +476,8 @@ bool MoveHoleOp::execute(Document& doc) {
 
     try {
         // Fill the old hole back to solid, then cut the same void at the new spot.
-        BRepAlgoAPI_Fuse fuse(body, voidSolid);
+        BRepAlgoAPI_Fuse fuse;
+        materializr::setBooleanShapes(fuse, body, voidSolid);
         fuse.Build();
         if (!fuse.IsDone() || fuse.Shape().IsNull()) return false;
 
@@ -515,7 +517,8 @@ bool MoveHoleOp::execute(Document& doc) {
             movedVoid = BRepBuilderAPI_Transform(voidSolid, t, true).Shape();
         }
 
-        BRepAlgoAPI_Cut cut(fuse.Shape(), movedVoid);
+        BRepAlgoAPI_Cut cut;
+        materializr::setBooleanShapes(cut, fuse.Shape(), movedVoid);
         cut.Build();
         if (!cut.IsDone() || cut.Shape().IsNull()) return false;
 

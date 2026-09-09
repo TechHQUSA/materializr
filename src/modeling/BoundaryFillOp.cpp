@@ -26,6 +26,7 @@
 #include <cctype>
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "modeling/BoolArgs.h"
 
 namespace {
 
@@ -119,7 +120,8 @@ bool BoundaryFillOp::execute(Document& doc) {
                 TopoDS_Shape hPrism =
                     BRepPrimAPI_MakePrism(h0, n.Multiplied(2.0 * L)).Shape();
                 if (hPrism.IsNull()) continue;
-                BRepAlgoAPI_Cut cut(prism, hPrism);
+                BRepAlgoAPI_Cut cut;
+                materializr::setBooleanShapes(cut, prism, hPrism);
                 cut.Build();
                 if (cut.IsDone() && !cut.Shape().IsNull()) prism = cut.Shape();
             }
@@ -127,7 +129,8 @@ bool BoundaryFillOp::execute(Document& doc) {
             if (acc.IsNull()) {
                 acc = prism;
             } else {
-                BRepAlgoAPI_Common common(acc, prism);
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, acc, prism);
                 common.Build();
                 if (!common.IsDone() || common.Shape().IsNull()) {
                     std::fprintf(stderr,

@@ -47,6 +47,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "modeling/BoolArgs.h"
 
 // A point that genuinely lies on the face's MATERIAL. Returns `center` when it's
 // already inside the trimmed face; otherwise samples a UV grid (rejecting points
@@ -383,7 +384,9 @@ bool PushPullOp::execute(Document& doc) {
             Bnd_Box bbox; BRepBndLib::Add(body, bbox);
             if (prismBox.IsOut(bbox)) continue;             // cheap disjoint reject
             try {
-                BRepAlgoAPI_Cut cut(body, prism); cut.Build();
+                BRepAlgoAPI_Cut cut;
+                materializr::setBooleanShapes(cut, body, prism);
+                cut.Build();
                 if (!cut.IsDone()) continue;
                 TopoDS_Shape result = cut.Shape();
                 if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) continue;
@@ -526,13 +529,15 @@ bool PushPullOp::execute(Document& doc) {
             TopoDS_Shape result;
             try {
                 if (m_distance > 0) {
-                    BRepAlgoAPI_Fuse fuse(current, prism);
+                    BRepAlgoAPI_Fuse fuse;
+                    materializr::setBooleanShapes(fuse, current, prism);
                     fuse.Build();
                     if (!fuse.IsDone()) continue;
                     result = fuse.Shape();
                     captureLedger(tgt.sourceBodyId, current, fuse);
                 } else {
-                    BRepAlgoAPI_Cut cut(current, prism);
+                    BRepAlgoAPI_Cut cut;
+                    materializr::setBooleanShapes(cut, current, prism);
                     cut.Build();
                     if (!cut.IsDone()) continue;
                     result = cut.Shape();
@@ -557,7 +562,8 @@ bool PushPullOp::execute(Document& doc) {
                         toolVol = gt.Mass();
                     } catch (...) {}
                     if (removed < std::max(1e-6, toolVol * 1e-3)) {
-                        BRepAlgoAPI_Fuse fill(current, prism);
+                        BRepAlgoAPI_Fuse fill;
+                        materializr::setBooleanShapes(fill, current, prism);
                         fill.Build();
                         if (!fill.IsDone()) continue;
                         TopoDS_Shape fused = fill.Shape();

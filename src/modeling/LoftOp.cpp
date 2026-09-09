@@ -39,6 +39,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "modeling/BoolArgs.h"
 
 namespace {
 
@@ -507,7 +508,8 @@ bool LoftOp::execute(Document& doc) {
                 }
                 inner.Build();
                 if (!inner.IsDone()) continue; // skip a hole that won't loft
-                BRepAlgoAPI_Cut cut(loftedShape, inner.Shape());
+                BRepAlgoAPI_Cut cut;
+                materializr::setBooleanShapes(cut, loftedShape, inner.Shape());
                 cut.Build();
                 if (!cut.IsDone()) continue;
                 // Adopt the cut only if it's still a usable solid - a bad hole
