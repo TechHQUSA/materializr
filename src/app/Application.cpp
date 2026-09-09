@@ -588,14 +588,34 @@ void Application::runPendingHeavyTasks() {
         // A stale cancel latch must not make this task give up before it
         // starts; the main-loop runner resets it per task for the same reason.
         m_progressCancelled = false;
+        // Whether a frame was ALREADY open decides who owns one that is open
+        // after a throw. Drained mid-frame (a commit queued by a panel, then a
+        // tab click in the same frame) the open frame belongs to the layout
+        // code still running above this call, and ending it here would tear
+        // the frame out from under it. Drained between frames - a session
+        // restore - the progress reporter opens a frame of its own, and a
+        // throw would strand both it and the flag, silencing the progress
+        // window for every heavy task afterwards.
+        const bool frameWasOpen = m_imguiFrameOpen;
+        auto unwindOwnFrame = [this, frameWasOpen]() {
+            if (frameWasOpen || !m_imguiFrameOpen) return;   // not ours to end
+            if (ImGuiContext* g = ImGui::GetCurrentContext()) {
+                if (g->WithinFrameScope) {
+                    try { ImGui::EndFrame(); } catch (...) {}
+                }
+            }
+            m_imguiFrameOpen = false;
+        };
         try {
             task();
         } catch (const std::exception& e) {
             std::fprintf(stderr, "[Session] a confirmed operation failed while "
                                  "draining before a tab switch: %s\n", e.what());
+            unwindOwnFrame();
         } catch (...) {
             std::fprintf(stderr, "[Session] a confirmed operation failed while "
                                  "draining before a tab switch.\n");
+            unwindOwnFrame();
         }
     }
 }
