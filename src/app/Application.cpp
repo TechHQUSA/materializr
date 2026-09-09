@@ -574,17 +574,19 @@ void Application::runPendingHeavyTasks() {
     // confirmed, and letting one outlive its session would apply it to the
     // wrong project or to a destroyed one. Each is taken out of the queue
     // before it runs, so a throwing task costs only itself.
-    // The main loop restores the FPU before every heavy task because a frame
-    // of GL leaves SSE flush-to-zero set and an OCCT boolean run that way can
-    // silently degenerate. This runner is reached after a full frame of GL
-    // too, and the progress reporter's own restore is suppressed below, so it
-    // has to do the same.
-    resetFpuForOcct();
     // Deliberately NOT touching the heavy-task counters or the progress label:
     // the watchdog reads them only when m_heavyRanThisIter is set, which this
     // runner never sets, and zeroing them mid-iteration made it report a
     // main-loop task that HAD pumped as "0 UI pumps" - an invented stall.
     while (auto task = m_deferredHeavy.takeNext()) {
+        // Per task, exactly as the main-loop runner does it. A frame of GL
+        // leaves SSE flush-to-zero set and an OCCT boolean run that way can
+        // silently degenerate; this runner is reached after a full frame of
+        // GL, the progress reporter's own restore is suppressed on the
+        // mid-frame path, and an earlier task that throws mid-paint skips
+        // that restore entirely - so resetting once above the loop would
+        // leave the second task exposed.
+        resetFpuForOcct();
         // A stale cancel latch must not make this task give up before it
         // starts; the main-loop runner resets it per task for the same reason.
         m_progressCancelled = false;
