@@ -56,6 +56,11 @@ struct PushPullState {
     // volume instead of running the real boolean (which would also trigger
     // the thread reflow) every frame. The real op runs once, on commit.
     bool heavyPreview = false;
+    // Any VISIBLE body carries a thread. Wider than the target list on
+    // purpose: a cut-intersecting push/pull booleans into everything in the
+    // tool's path. Keeps the commit inline (see
+    // PushPullController::wantsDeferredCommit).
+    bool threadedPath = false;
 
     std::vector<Target> targets;
 };

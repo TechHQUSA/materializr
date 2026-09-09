@@ -47,7 +47,11 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
+#include <algorithm>
+#include "core/OpProgress.h"
+#include <Message_ProgressRange.hxx>
+#include <Message_ProgressScope.hxx>
 
 // A point that genuinely lies on the face's MATERIAL. Returns `center` when it's
 // already inside the trimmed face; otherwise samples a UV grid (rejecting points
@@ -353,6 +357,32 @@ bool PushPullOp::execute(Document& doc) {
 
     bool anyChange = false;
 
+    // The commit runs between frames behind a progress window (see
+    // PushPullController::wantsDeferredCommit). Handing the kernel a range
+    // keeps that window painting and makes Cancel land inside the boolean:
+    // on the 300-hole plate a cut polls UserBreak 172940 times and aborts
+    // within about 10 ms of the click, leaving IsDone() false. Null when no
+    // reporter is set, which is every headless and preview-worker call.
+    Handle(materializr::OpProgressBridge) progress;
+    if (m_progress)
+        progress = new materializr::OpProgressBridge(
+            [this](float f, const char* l) { return reportProgress(f, l); },
+            materializr::tr("Push / Pull"));
+    // One step per target. A target opens its own three-step scope, which is
+    // what the longest path actually spends: the cut, the fill that replaces
+    // it when the cut only grazed, and then the through-model cut across every
+    // other visible body. Under-declaring is not cosmetic - an over-consumed
+    // Next() returns an INACTIVE range, and a scope built from one has no
+    // indicator, so UserBreak beneath it is dead and that last cut (often the
+    // heaviest step of the commit) would run with no progress and no Cancel.
+    Message_ProgressScope targets(
+        progress.IsNull() ? Message_ProgressRange() : progress->Start(),
+        nullptr, static_cast<int>(m_targets.size()));
+    // Asked of the bridge itself rather than tracked in a flag: an aborted
+    // boolean leaves the loop through `continue`, which would step over any
+    // check written at the end of the loop body.
+    auto cancelled = [&] { return !progress.IsNull() && progress->cancelled(); };
+
     std::unordered_set<int> savedBodies;
 
     // Subtract `prism` from every VISIBLE body it intersects, except `excludeId`
@@ -360,8 +390,13 @@ bool PushPullOp::execute(Document& doc) {
     // separately; hidden bodies skipped; invalid or no-overlap results skipped.
     // Returns how many bodies were actually cut. This is what makes a push/pull
     // cut go THROUGH everything in its path, not just the sketch's source body.
-    auto cutVisibleBodies = [&](const TopoDS_Shape& prism, int excludeId) -> int {
+    auto cutVisibleBodies = [&](const TopoDS_Shape& prism, int excludeId,
+                                Message_ProgressRange range) -> int {
         int n = 0;
+        // One step per candidate body, so the bar advances across a cut that
+        // runs through the whole model rather than sitting at one value.
+        Message_ProgressScope bodies(range, nullptr,
+                                     static_cast<int>(doc.getAllBodyIds().size()));
         Bnd_Box prismBox; BRepBndLib::Add(prism, prismBox);
         // The tool prism's own volume sets the scale for "a real cut". A prism
         // that only GRAZES a body - or lands coincident with a hole the same
@@ -376,6 +411,9 @@ bool PushPullOp::execute(Document& doc) {
               prismVol = gp.Mass(); } catch (...) {}
         const double minRemoved = std::max(1e-6, prismVol * 1e-3);
         for (int bid : doc.getAllBodyIds()) {
+            // Taken per candidate, before the cheap rejects below, so the bar
+            // tracks the sweep rather than only the bodies actually cut.
+            Message_ProgressRange bodyRange = bodies.Next();
             if (bid == excludeId) continue;
             if (!doc.isBodyVisible(bid)) continue;          // respect hidden
             TopoDS_Shape body;
@@ -386,7 +424,7 @@ bool PushPullOp::execute(Document& doc) {
             try {
                 BRepAlgoAPI_Cut cut;
                 materializr::setBooleanShapes(cut, body, prism);
-                cut.Build();
+                cut.Build(bodyRange);
                 if (!cut.IsDone()) continue;
                 TopoDS_Shape result = cut.Shape();
                 if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) continue;
@@ -421,7 +459,11 @@ bool PushPullOp::execute(Document& doc) {
     };
 
     for (const auto& tgt : m_targets) {
-        if (tgt.profile.IsNull()) continue;
+        if (cancelled()) break;
+        // Consume the step even when skipping, or the bar sits at 0 through
+        // the next (possibly heavy) target and then jumps.
+        if (tgt.profile.IsNull()) { targets.Next(); continue; }
+        Message_ProgressScope tgtScope(targets.Next(), nullptr, 3);
 
         // Compute push/pull direction. For a flat face this is the face's
         // outward normal at its UV midpoint. For a CURVED face (chamfer cone,
@@ -531,14 +573,14 @@ bool PushPullOp::execute(Document& doc) {
                 if (m_distance > 0) {
                     BRepAlgoAPI_Fuse fuse;
                     materializr::setBooleanShapes(fuse, current, prism);
-                    fuse.Build();
+                    fuse.Build(tgtScope.Next());
                     if (!fuse.IsDone()) continue;
                     result = fuse.Shape();
                     captureLedger(tgt.sourceBodyId, current, fuse);
                 } else {
                     BRepAlgoAPI_Cut cut;
                     materializr::setBooleanShapes(cut, current, prism);
-                    cut.Build();
+                    cut.Build(tgtScope.Next());
                     if (!cut.IsDone()) continue;
                     result = cut.Shape();
                     captureLedger(tgt.sourceBodyId, current, cut);
@@ -564,7 +606,7 @@ bool PushPullOp::execute(Document& doc) {
                     if (removed < std::max(1e-6, toolVol * 1e-3)) {
                         BRepAlgoAPI_Fuse fill;
                         materializr::setBooleanShapes(fill, current, prism);
-                        fill.Build();
+                        fill.Build(tgtScope.Next());
                         if (!fill.IsDone()) continue;
                         TopoDS_Shape fused = fill.Shape();
                         int nSolids = 0;
@@ -611,7 +653,7 @@ bool PushPullOp::execute(Document& doc) {
             // replay (the "editing the box deletes its floor" bug).
             bool willReuse = m_reuseIdx < m_reuseBodyIds.size();
             bool cutAny = m_cutIntersecting && !willReuse &&
-                          (cutVisibleBodies(prism, -1) > 0);
+                          (cutVisibleBodies(prism, -1, tgtScope.Next()) > 0);
             if (cutAny) anyChange = true;
             if (!cutAny) {
                 // Free-floating: create a new body. On redo, m_reuseBodyIds holds
@@ -631,7 +673,42 @@ bool PushPullOp::execute(Document& doc) {
         // path (hidden bodies skipped). Only for cut direction - an extrude
         // (add) still only affects its source body.
         if (m_cutIntersecting && tgt.sourceBodyId >= 0 && m_distance < 0.0)
-            if (cutVisibleBodies(prism, tgt.sourceBodyId) > 0) anyChange = true;
+            if (cutVisibleBodies(prism, tgt.sourceBodyId, tgtScope.Next()) > 0)
+                anyChange = true;
+    }
+
+    // A cancel must leave nothing behind. History::pushOperation does not
+    // restore the document when execute() returns false - it only declines to
+    // record the step - so a multi-target gesture cancelled after its first
+    // target landed would otherwise mutate the body with no history entry to
+    // undo. Roll the applied targets back here, which is the clean no-op the
+    // controller's Cancel promises.
+    if (cancelled()) {
+        // Roll back ONLY the bodies this run actually changed. A target whose
+        // boolean was aborted was snapshotted (the shape is saved before the
+        // boolean) but never updated, and pushing it through undo() would send
+        // its unchanged shape back through Document::updateBody, which erases
+        // the face-id map and the generation ledger by design. That would
+        // strip the lineage off a body the operation never touched, with no
+        // history entry behind the change. The bodies that DID change kept
+        // their pre-op lineage in m_prevFaceIds, snapshotted just before their
+        // update, so undo() can restore those properly.
+        m_previousBodies.erase(
+            std::remove_if(m_previousBodies.begin(), m_previousBodies.end(),
+                           [&doc](const std::pair<int, TopoDS_Shape>& prev) {
+                               try {
+                                   return doc.getBody(prev.first)
+                                       .IsSame(prev.second);
+                               } catch (...) {
+                                   return true;   // gone; nothing to restore
+                               }
+                           }),
+            m_previousBodies.end());
+        if (!undo(doc))
+            std::fprintf(stderr, "Push/Pull: rolling back the cancelled "
+                                 "operation failed; bodies may be left as the "
+                                 "partial result\n");
+        return false;
     }
 
     // Refused/no-op targets leave saved snapshots behind; only a real

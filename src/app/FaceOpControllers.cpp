@@ -106,6 +106,10 @@ int ShellController::onBegin(const IopContext& ctx) {
     return -1;
 }
 
+bool ShellController::wantsDeferredCommit(const IopContext& ctx) const {
+    return previewIsOffThread() && !ctx.history.isBodyThreaded(bodyId());
+}
+
 std::unique_ptr<Operation> ShellController::buildOp(const IopContext&) {
     if (m_thickness <= 0.0f) return nullptr;
     auto op = std::make_unique<ShellOp>();

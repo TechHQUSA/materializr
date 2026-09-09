@@ -64,7 +64,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "../i18n.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 
 namespace {
 // Turns the per-job cancel token into an OCCT user-break, so a Cancel click
@@ -1747,7 +1747,14 @@ TopoDS_Shape ThreadOp::buildResult(const TopoDS_Shape& body) const {
                         TopoDS_Shape res;
                         {
                             BRepAlgoAPI_Cut compCut;
-                            materializr::setBooleanShapes(compCut, BRepPrimAPI_MakeCylinder( gp_Ax2(segBase.Location(), segBase.Direction(), segBase.XDirection()), m_radius, span).Shape(), bodyCopy);
+                            materializr::setBooleanShapes(
+                                compCut,
+                                BRepPrimAPI_MakeCylinder(
+                                    gp_Ax2(segBase.Location(),
+                                           segBase.Direction(),
+                                           segBase.XDirection()),
+                                    m_radius, span).Shape(),
+                                bodyCopy);
                             compCut.SetFuzzyValue(1.0e-3);
                             compCut.Build();
                             if (compCut.IsDone() &&

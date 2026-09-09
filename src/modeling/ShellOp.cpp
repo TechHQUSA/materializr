@@ -28,6 +28,9 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
+#include "core/OpProgress.h"
+#include <Message_ProgressRange.hxx>
+#include <Message_ProgressScope.hxx>
 
 namespace {
 
@@ -246,6 +249,22 @@ bool ShellOp::execute(Document& doc) {
             return shells.Extent() == 1;   // 2 shells == sealed void
         };
 
+        // The commit runs between frames behind a progress window (see
+        // ShellController::wantsDeferredCommit). MakeThickSolid on the
+        // 300-hole plate calls Show 11275 times over three seconds, so the
+        // window stays live and Cancel aborts the offset within about 10 ms,
+        // leaving IsDone() false. Null when no reporter is set, which is every
+        // headless and preview-worker call.
+        Handle(materializr::OpProgressBridge) progress;
+        if (m_progress)
+            progress = new materializr::OpProgressBridge(
+                [this](float f, const char* l) { return reportProgress(f, l); },
+                materializr::tr("Shell"));
+        // Two steps: the arc attempt, and the intersection retry it may need.
+        Message_ProgressScope attempts(
+            progress.IsNull() ? Message_ProgressRange() : progress->Start(),
+            nullptr, 2);
+
         enum Outcome { Ok, CleanFail, Threw };
         auto tryShell = [&](Standard_Boolean inter, GeomAbs_JoinType join,
                             TopoDS_Shape& out) -> Outcome {
@@ -256,9 +275,15 @@ bool ShellOp::execute(Document& doc) {
                 // Standard_Failure the catch below absorbs.
                 OCC_CATCH_SIGNALS
                 BRepOffsetAPI_MakeThickSolid mk;
+                // The range goes on ByJoin, which is where the offset is
+                // actually computed. BRepOffsetAPI_MakeThickSolid::Build is
+                // commented "Does nothing." in OCCT's own header, and a range
+                // handed to it drove the window three times in three seconds
+                // instead of the expected fifty.
                 mk.MakeThickSolidByJoin(m_previousShape, m_facesToRemove,
                                         -m_thickness, 1.0e-3, BRepOffset_Skin,
-                                        inter, Standard_False, join);
+                                        inter, Standard_False, join,
+                                        Standard_False, attempts.Next());
                 mk.Build();
                 if (!mk.IsDone() || mk.Shape().IsNull()) return CleanFail;
                 TopoDS_Shape s = mk.Shape();
@@ -279,12 +304,17 @@ bool ShellOp::execute(Document& doc) {
 
         TopoDS_Shape result;
         Outcome arc = tryShell(Standard_False, GeomAbs_Arc, result);
+        // A cancelled offset comes back not-done, which is indistinguishable
+        // from a wall that is too thick. Answer here rather than let the
+        // retry run, print the misleading advice and then fail anyway.
+        if (!progress.IsNull() && progress->cancelled()) return false;
         if (arc != Ok) {
             // Only the clean-fail (lofted-wall) case earns the intersection
             // retry; a throw means the wall is too thick for the geometry, and
             // the intersection join would hang instead of refusing.
             if (arc == Threw ||
                 tryShell(Standard_True, GeomAbs_Intersection, result) != Ok) {
+                if (!progress.IsNull() && progress->cancelled()) return false;
                 std::fprintf(stderr,
                     "[Shell] failed at thickness %.3f mm - the wall is too thick, "
                     "or the opened face is ringed by fillets (shell BEFORE adding "
@@ -294,6 +324,7 @@ bool ShellOp::execute(Document& doc) {
             }
         }
 
+        if (!progress.IsNull() && progress->cancelled()) return false;
         doc.updateBody(m_bodyId, result);
         return true;
     } catch (...) {

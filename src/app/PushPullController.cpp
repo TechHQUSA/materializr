@@ -65,6 +65,22 @@ bool PushPullController::beginPushPull(const IopContext& ctx) {
 
 // Scan the selection into targets, then work out the arrow frame and whether
 // this gesture has to fall back to the ghost preview.
+// Does any body the tool could reach right now carry a thread? Wider than the
+// target list on purpose: a cut-intersecting push/pull booleans into every
+// VISIBLE body in the prism's path, and visibility is read when the operation
+// executes.
+bool PushPullController::anyVisibleBodyThreaded(const IopContext& ctx) {
+    for (int id : ctx.doc.getAllBodyIds()) {
+        if (!ctx.doc.isBodyVisible(id)) continue;
+        if (ctx.history.isBodyThreaded(id)) return true;
+    }
+    return false;
+}
+
+bool PushPullController::wantsDeferredCommit(const IopContext& ctx) const {
+    return m_st.heavyPreview && !anyVisibleBodyThreaded(ctx);
+}
+
 int PushPullController::onBegin(const IopContext& ctx) {
     bool curvedFaceSkipped = false;   // a rounded/fillet face was picked (#28)
     for (const auto& e : ctx.selection.getSelection()) {
@@ -263,12 +279,14 @@ int PushPullController::onBegin(const IopContext& ctx) {
     // over the thread's helicoid faces per preview frame ("stacked discs"
     // + not-responding, 2026-07-21). Ghost preview + one real boolean at
     // commit, where the thread reflow handles it once.
-    if (!m_st.heavyPreview) {
-        for (int id : ctx.doc.getAllBodyIds()) {
-            if (!ctx.doc.isBodyVisible(id)) continue;
-            if (ctx.history.isBodyThreaded(id)) { m_st.heavyPreview = true; break; }
-        }
-    }
+    //
+    // Scanned unconditionally, not just when the face-count pass found
+    // nothing: a dense body can be threaded too, and the answer decides more
+    // than the preview. wantsDeferredCommit reads it to keep the commit
+    // inline on a threaded body, where History reflows this op beneath the
+    // Thread step.
+    m_st.threadedPath = anyVisibleBodyThreaded(ctx);
+    if (m_st.threadedPath) m_st.heavyPreview = true;
 
     // The async preview computes every frame from the bodies as they are NOW,
     // before any preview touched them (the live document carries the previous

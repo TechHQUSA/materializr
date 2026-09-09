@@ -39,7 +39,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "ParamParse.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 
 namespace {
 

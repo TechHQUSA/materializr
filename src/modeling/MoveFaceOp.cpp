@@ -47,7 +47,7 @@
 #include <algorithm>
 #include "../i18n.h"
 #include "ParamParse.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 
 namespace {
 // The far cross-section of the feature attached to `face`: the edge LOOPS where

@@ -37,7 +37,7 @@
 #include "../ui/NumField.h"
 #include "../i18n.h"
 #include "../i18n.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 
 // Per-op diagnostic log. Off unless the user passed --verbose; under verbose,
 // stderr is redirected to /tmp/materializr.log (or --log <path>), so these

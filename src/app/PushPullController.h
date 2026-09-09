@@ -89,13 +89,34 @@ protected:
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
     bool syncLiveOp(Operation& op) override;
     std::unique_ptr<Operation> buildCommitOp(const IopContext& ctx) override;
-    // Dense bodies draw a ghost instead of previewing for real. (The commit
-    // still runs inline - the LiveOp branch never consults
-    // wantsDeferredCommit, which is right here: History has to reflow this op
-    // beneath the Thread step and re-cut the thread around it.)
+    // Dense bodies draw a ghost instead of previewing for real.
     bool wantsLivePreview(const IopContext&) const override {
         return !m_st.heavyPreview;
     }
+    // A ghosted gesture never previewed for real, so its boolean runs in full
+    // at commit - 814 ms on a 300-hole plate, on the main thread. Run it
+    // between frames instead, where PushPullOp's progress range keeps the
+    // window painting and Cancel aborts the boolean.
+    //
+    // Never on a threaded body. Application's main loop applies landed thread
+    // re-cuts (pollThreadRecuts) near the top of an iteration and runs the
+    // deferred task later in the same one, so a re-cut can land between the
+    // commit frame and the push and change the body underneath it. History
+    // also has to reflow this op beneath the Thread step; moving the push out
+    // from under that hook is what produced a partially re-cut thread before
+    // (see ResizeCylindricalController, which stays inline for the same
+    // reason).
+    //
+    // The threaded check is re-run HERE rather than read from m_st, which
+    // holds what was true at gesture start. The Items panel renders during the
+    // gesture and its visibility checkbox is live, so a hidden threaded body
+    // can be revealed mid-drag - and cutVisibleBodies reads visibility when it
+    // executes, not when the gesture began. Trusting the stale answer would
+    // defer a commit that then cuts the very body this exclusion exists for.
+    bool wantsDeferredCommit(const IopContext& ctx) const override;
+    // Any VISIBLE body carrying a thread, asked fresh. Static: it reads only
+    // the context, never gesture state.
+    static bool anyVisibleBodyThreaded(const IopContext& ctx);
     void markPreviewDirty(const IopContext& ctx) const override;
     void panelBody(const IopContext& ctx, bool& changed) override;
     // The panel is renderPushPullPanel (viewport-anchored), so the scaffold's

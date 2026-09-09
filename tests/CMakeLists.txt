@@ -315,6 +315,11 @@ add_executable(test_snapshot_preview test_snapshot_preview.cpp)
 target_link_libraries(test_snapshot_preview PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_snapshot_preview COMMAND test_snapshot_preview)
 
+# test_op_progress - cancelling a heavy op from its progress reporter aborts the kernel algorithm and leaves the document untouched
+add_executable(test_op_progress test_op_progress.cpp)
+target_link_libraries(test_op_progress PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_op_progress COMMAND test_op_progress)
+
 # test_iop_async_preview - the SnapshotBody engine's off-thread preview: inline until slow, trails the slider, cancel/commit mid-job
 add_executable(test_iop_async_preview test_iop_async_preview.cpp)
 target_link_libraries(test_iop_async_preview PRIVATE materializr_core gtest gtest_main)

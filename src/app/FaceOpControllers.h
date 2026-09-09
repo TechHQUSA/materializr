@@ -26,6 +26,16 @@ protected:
     void panelBody(const IopContext& ctx, bool& changed) override;
     void onCleanup() override;
     float panelWidth() const override { return 300.0f; }
+    // The drag previews on a worker, but the commit re-runs the offset on the
+    // main thread: 2761 ms on a 300-hole plate, with no window and no way
+    // out. Once the preview has proved slow enough to go off-thread, run the
+    // commit between frames, where ShellOp's progress range keeps the window
+    // painting and Cancel aborts the offset.
+    //
+    // Never on a threaded body: the main loop applies landed thread re-cuts
+    // before it runs the deferred task, so one can land between the commit
+    // frame and the push and change the body underneath it.
+    bool wantsDeferredCommit(const IopContext& ctx) const override;
 
 private:
     TopoDS_Face m_face;

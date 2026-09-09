@@ -19,7 +19,7 @@
 // (root CMakeLists.txt and tests/CMakeLists.txt) and one always gets forgotten.
 
 #include <BRepAlgoAPI_Common.hxx>
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>

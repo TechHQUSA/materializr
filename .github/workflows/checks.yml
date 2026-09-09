@@ -39,11 +39,13 @@ jobs:
 
       # An OCCT boolean performed twice for one result. The two-shape
       # constructor of BRepAlgoAPI_Cut/Fuse/Common already builds, so a
-      # trailing Build() runs the whole boolean a second time AND is the only
-      # run any setter between them reaches. Both halves read as correct code,
-      # which is how thirty-two sites drifted into it unreviewed.
+      # trailing Build() runs the whole boolean a second time and throws the
+      # first result away. It reads as correct code, which is how thirty-one
+      # sites drifted into it unreviewed.
       - name: No double-built booleans
-        run: python3 tools/no_double_build.py
+        run: |
+          python3 tools/no_double_build.py --selftest
+          python3 tools/no_double_build.py
 
       # The display-units inventory. Two failures to catch, and they are
       # different: unclassified rows mean real unconverted work exists, while

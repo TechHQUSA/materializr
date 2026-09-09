@@ -10,9 +10,11 @@
 //     cut.SetFuzzyValue(1.0e-4);         // <- too late for that run
 //     cut.Build();                       // <- runs it a second time
 //
-// costs two full booleans for one result, and any setter written between the
-// two lines only ever reached the second run. On the 300-hole plate a single
-// cut is 927 ms and that shape cost 1866 ms for a byte-identical shape.
+// costs two full booleans for one result. The RESULT is correct - Shape()
+// returns the second build, which did have the setter applied - so what the
+// first build produced was thrown away, having run at the default tolerance.
+// On the 300-hole plate a single cut is 927 ms and that shape cost 1866 ms for
+// a byte-identical shape.
 //
 // Constructing empty and declaring the operands through this helper keeps one
 // build per boolean and leaves the setters where they read as if they work.

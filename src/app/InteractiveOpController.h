@@ -326,6 +326,12 @@ protected:
     void setActive(bool a) { m_active = a; if (!a) m_draggingHandle = false; }
 
     int bodyId() const { return m_bodyId; }
+    // Has the SnapshotBody preview moved to a worker? True once an inline
+    // preview frame cost PreviewDispatch::kAsyncPreviewMs or more, which is
+    // this scaffold's only measurement of how heavy the operation actually
+    // is on THIS body. A wantsDeferredCommit override reads it to decide
+    // whether the commit is worth running between frames.
+    bool previewIsOffThread() const { return m_dispatch.async(); }
     const TopoDS_Shape& snapshot() const { return m_snapshot; }
     // LiveOp: the instance currently driving the preview (null before the
     // first update, or after a commit/cancel released it).

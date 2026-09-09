@@ -234,18 +234,22 @@ void InteractiveOpController::commit(const IopContext& ctx) {
                 m_liveApplied = false;
             }
             m_liveOp.reset();
-            // Pushed inline, deliberately. Deferring this to run between
-            // frames buys nothing for these ops: only ProjectSketchOp reports
-            // progress and only ExtrudeOp/BooleanOp pump uiKeepAlive(), so a
-            // deferred Push/Pull boolean draws no window, offers no Cancel and
-            // pumps no events - the same freeze, one frame later, plus a frame
-            // of the un-previewed body. It is also unsafe on a threaded body:
-            // History has to reflow this op beneath the Thread step, and
+            // Inline unless the controller asks otherwise. Deferring used to
+            // be worthless here: no LiveOp operation reported progress, so a
+            // deferred boolean drew no window, offered no Cancel and pumped no
+            // events - the same freeze one frame later, plus a frame of the
+            // un-previewed body. PushPullOp now drives a progress range, and
+            // the un-previewed frame does not arise in the case that defers
+            // (a ghosted gesture applied no preview to undo).
+            //
+            // Still inline on a threaded body, which is the override's job to
+            // exclude: History reflows this op beneath the Thread step, and
             // moving the push out from under that hook is what produced a
             // partially re-cut thread before (see ResizeCylindricalController,
             // which overrides wantsDeferredCommit to false for the same
             // reason).
-            ctx.history.pushOperation(std::move(alt), ctx.doc);
+            if (!wantsDeferredCommit(ctx) || !deferCommit(ctx, alt))
+                ctx.history.pushOperation(std::move(alt), ctx.doc);
         } else if (m_liveApplied && m_liveOp) {
             // The preview IS the result - record it without re-running it.
             ctx.history.pushExecuted(std::move(m_liveOp));

@@ -26,7 +26,7 @@
 #include <BRepCheck_Analyzer.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include "UnifyTolerance.h"
-#include "modeling/BoolArgs.h"
+#include "BoolArgs.h"
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>

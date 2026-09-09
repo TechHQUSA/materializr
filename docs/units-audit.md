@@ -122,39 +122,39 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/ExtrudeController.cpp:420 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
 | CONVERTED | src/app/ExtrudeController.cpp:433 | `materializr::lengthStepperRow("extrudeStep", &m_distance,` |
 | CONVERTED | src/app/ExtrudeController.cpp:479 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
-| CONVERTED | src/app/FaceOpControllers.cpp:124 | `if (materializr::amountLengthField("shellAmt", nullptr, &m_thickness, /*allowSign=*/false, 0.1f, 20.0f)) {` |
-| CONVERTED | src/app/FaceOpControllers.cpp:140 | `(void)materializr::parseLength(m_inputBuf, m_thickness);` |
-| CONVERTED | src/app/FaceOpControllers.cpp:147 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
-| CONVERTED | src/app/FaceOpControllers.cpp:157 | `if (materializr::lengthStepperRow("shellStep", &m_thickness,` |
-| angle | src/app/FaceOpControllers.cpp:333 | `if (materializr::stepperRow("taperStep", &m_angle,` |
-| angle | src/app/FaceOpControllers.cpp:337 | `touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,` |
-| CONVERTED | src/app/FaceOpControllers.cpp:598 | `if (materializr::lengthStepperRow("projDepthStep", &m_depth,` |
-| CONVERTED | src/app/FaceOpControllers.cpp:603 | `materializr::amountLengthField("projAmt", nullptr, &m_depth, /*allowSign=*/false, 0.1f, 10.0f))` |
-| percent | src/app/FaceOpControllers.cpp:837 | `if (materializr::stepperRow("scaleStep", &m_pctU,` |
-| percent | src/app/FaceOpControllers.cpp:844 | `touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,` |
-| percent | src/app/FaceOpControllers.cpp:858 | `if (materializr::stepperRow("scaleUStep", &m_pctU,` |
-| percent | src/app/FaceOpControllers.cpp:863 | `touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,` |
-| percent | src/app/FaceOpControllers.cpp:868 | `if (materializr::stepperRow("scaleVStep", &m_pctV,` |
-| percent | src/app/FaceOpControllers.cpp:873 | `touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,` |
-| CONVERTED | src/app/FaceOpControllers.cpp:879 | `if (materializr::lengthStepperRow("lenStep", &m_len,` |
-| CONVERTED | src/app/FaceOpControllers.cpp:884 | `materializr::amountLengthField("lenAmt", nullptr, &m_len, /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f))` |
-| CONVERTED | src/app/FaceOpControllers.cpp:976 | `if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {` |
-| CONVERTED | src/app/FaceOpControllers.cpp:996 | `materializr::parseLength(buf, parsed) &&` |
-| angle | src/app/FaceOpControllers.cpp:2083 | `if (materializr::stepperRow("tiltStep", &deg,` |
-| angle | src/app/FaceOpControllers.cpp:2087 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
-| angle | src/app/FaceOpControllers.cpp:2106 | `if (materializr::stepperRow("twistStep", &twdeg,` |
-| angle | src/app/FaceOpControllers.cpp:2110 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2160 | `if (materializr::stepperRow("sclStep", &pct,` |
-| percent | src/app/FaceOpControllers.cpp:2165 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2172 | `if (materializr::stepperRow("sclAStep", &a,` |
-| percent | src/app/FaceOpControllers.cpp:2177 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2181 | `if (materializr::stepperRow("sclBStep", &b,` |
-| percent | src/app/FaceOpControllers.cpp:2186 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| CONVERTED | src/app/PushPullController.cpp:685 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
-| CONVERTED | src/app/PushPullController.cpp:699 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
-| CONVERTED | src/app/PushPullController.cpp:706 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
-| CONVERTED | src/app/PushPullController.cpp:722 | `materializr::lengthStepperRow("ppStep", &m_st.distance,` |
-| CONVERTED | src/app/PushPullController.cpp:768 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/FaceOpControllers.cpp:128 | `if (materializr::amountLengthField("shellAmt", nullptr, &m_thickness, /*allowSign=*/false, 0.1f, 20.0f)) {` |
+| CONVERTED | src/app/FaceOpControllers.cpp:144 | `(void)materializr::parseLength(m_inputBuf, m_thickness);` |
+| CONVERTED | src/app/FaceOpControllers.cpp:151 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/FaceOpControllers.cpp:161 | `if (materializr::lengthStepperRow("shellStep", &m_thickness,` |
+| angle | src/app/FaceOpControllers.cpp:337 | `if (materializr::stepperRow("taperStep", &m_angle,` |
+| angle | src/app/FaceOpControllers.cpp:341 | `touchui::amountField("taperAmt", nullptr, &m_angle, "deg", 1,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:602 | `if (materializr::lengthStepperRow("projDepthStep", &m_depth,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:607 | `materializr::amountLengthField("projAmt", nullptr, &m_depth, /*allowSign=*/false, 0.1f, 10.0f))` |
+| percent | src/app/FaceOpControllers.cpp:841 | `if (materializr::stepperRow("scaleStep", &m_pctU,` |
+| percent | src/app/FaceOpControllers.cpp:848 | `touchui::amountField("scaleAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:862 | `if (materializr::stepperRow("scaleUStep", &m_pctU,` |
+| percent | src/app/FaceOpControllers.cpp:867 | `touchui::amountField("scaleUAmt", nullptr, &m_pctU, "%", 0,` |
+| percent | src/app/FaceOpControllers.cpp:872 | `if (materializr::stepperRow("scaleVStep", &m_pctV,` |
+| percent | src/app/FaceOpControllers.cpp:877 | `touchui::amountField("scaleVAmt", nullptr, &m_pctV, "%", 0,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:883 | `if (materializr::lengthStepperRow("lenStep", &m_len,` |
+| CONVERTED | src/app/FaceOpControllers.cpp:888 | `materializr::amountLengthField("lenAmt", nullptr, &m_len, /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f))` |
+| CONVERTED | src/app/FaceOpControllers.cpp:980 | `if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {` |
+| CONVERTED | src/app/FaceOpControllers.cpp:1000 | `materializr::parseLength(buf, parsed) &&` |
+| angle | src/app/FaceOpControllers.cpp:2087 | `if (materializr::stepperRow("tiltStep", &deg,` |
+| angle | src/app/FaceOpControllers.cpp:2091 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:2110 | `if (materializr::stepperRow("twistStep", &twdeg,` |
+| angle | src/app/FaceOpControllers.cpp:2114 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2164 | `if (materializr::stepperRow("sclStep", &pct,` |
+| percent | src/app/FaceOpControllers.cpp:2169 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2176 | `if (materializr::stepperRow("sclAStep", &a,` |
+| percent | src/app/FaceOpControllers.cpp:2181 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2185 | `if (materializr::stepperRow("sclBStep", &b,` |
+| percent | src/app/FaceOpControllers.cpp:2190 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| CONVERTED | src/app/PushPullController.cpp:703 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
+| CONVERTED | src/app/PushPullController.cpp:717 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
+| CONVERTED | src/app/PushPullController.cpp:724 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
+| CONVERTED | src/app/PushPullController.cpp:740 | `materializr::lengthStepperRow("ppStep", &m_st.distance,` |
+| CONVERTED | src/app/PushPullController.cpp:786 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
 | CONVERTED | src/app/SplitController.cpp:167 | `if (materializr::lengthStepperRow("splitOffset", &m_offset, /*allowNegative=*/true,` |
 | CONVERTED | src/app/SplitController.cpp:171 | `materializr::amountLengthField("splitOffsetAmt", nullptr, &m_offset, /*allowSign=*/true, -lim, lim))` |
 | CONVERTED | src/core/LengthEdit.h:24 | `inline double lengthFieldCommit(double displayValue) { return toMm(displayValue); }` |
@@ -200,7 +200,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/PrimitiveOp.cpp:163 | `materializr::lengthField("Y", &m_oy);` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:164 | `materializr::lengthField("Z", &m_oz);` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:537 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
-| CONVERTED | src/modeling/PushPullOp.cpp:680 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/PushPullOp.cpp:757 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:689 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia))` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:696 | `if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) ` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:700 | `if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {` |
@@ -214,16 +214,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | percent | src/modeling/ScaleFaceOp.cpp:336 | `materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");` |
 | percent | src/modeling/ScaleFaceOp.cpp:337 | `materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");` |
 | CONVERTED | src/modeling/ScaleFaceOp.cpp:338 | `materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);` |
-| CONVERTED | src/modeling/ShellOp.cpp:327 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
+| CONVERTED | src/modeling/ShellOp.cpp:358 | `materializr::lengthField(materializr::tr("Thickness"), &m_thickness);` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:396 | `if (materializr::lengthField(materializr::trFormat("Distance (%s)", materializr::unitSuffix()).c_str(), &v,` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:408 | `if (materializr::lengthField(materializr::trFormat("\xC3\x98 (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/SketchEditOp.cpp:418 | `if (materializr::inputNumber(materializr::tr("Angle (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:462 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia,` |
 | angle | src/modeling/TaperOp.cpp:143 | `materializr::inputNumber(materializr::tr("Angle (deg)"), &m_angleDeg, 0.5, 5.0, "%.1f");` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2105 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2107 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2133 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2140 | `materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_cl` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2112 | `materializr::lengthField(materializr::trFormat("Pitch (%s)", materializr::unitSuffix()).c_str(), &m_pitch);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2114 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2140 | `materializr::lengthField(materializr::trFormat("Groove width (%s)", materializr::unitSuffix()).c_str(), &m_gro` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2147 | `materializr::lengthField(materializr::trFormat("Fit clearance (%s)", materializr::unitSuffix()).c_str(), &m_cl` |
 | CONVERTED | src/modeling/TransformOp.cpp:270 | `materializr::lengthField("X", &m_dx);` |
 | CONVERTED | src/modeling/TransformOp.cpp:271 | `materializr::lengthField("Y", &m_dy);` |
 | CONVERTED | src/modeling/TransformOp.cpp:272 | `materializr::lengthField("Z", &m_dz);` |
@@ -369,16 +369,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | diagnostic | src/app/ExtrudeController.cpp:259 | `std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",` |
 | diagnostic | src/app/ExtrudeController.cpp:282 | `std::fprintf(stdout, "Extruded %.1f mm\n", m_distance);` |
 | diagnostic | src/app/ExtrudeController.cpp:291 | `std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",` |
-| comment | src/app/FaceOpControllers.cpp:159 | `// Snap to 0.1 mm - wall thicknesses are almost always in tenths, and a` |
-| comment | src/app/FaceOpControllers.cpp:160 | `// free-floating 3.47 mm slider value is just noise.` |
-| comment | src/app/FaceOpControllers.cpp:980 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
-| comment | src/app/FaceOpControllers.cpp:981 | `// precision at two decimals, quantising metres to 10 mm. Its` |
-| comment | src/app/FaceOpControllers.cpp:1539 | `// of the hole rather than swamping a 3 mm bore.` |
-| comment | src/app/PushPullController.cpp:88 | `// hundreds of mm away - a push/pull on an unlinked sketch must` |
-| diagnostic | src/app/PushPullController.cpp:542 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
-| diagnostic | src/app/PushPullController.cpp:553 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
-| diagnostic | src/app/PushPullController.cpp:565 | `std::fprintf(stdout, "Push/Pull (smart cut) committed at %.2f mm\n",` |
-| diagnostic | src/app/PushPullController.cpp:572 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| comment | src/app/FaceOpControllers.cpp:163 | `// Snap to 0.1 mm - wall thicknesses are almost always in tenths, and a` |
+| comment | src/app/FaceOpControllers.cpp:164 | `// free-floating 3.47 mm slider value is just noise.` |
+| comment | src/app/FaceOpControllers.cpp:984 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
+| comment | src/app/FaceOpControllers.cpp:985 | `// precision at two decimals, quantising metres to 10 mm. Its` |
+| comment | src/app/FaceOpControllers.cpp:1543 | `// of the hole rather than swamping a 3 mm bore.` |
+| comment | src/app/PushPullController.cpp:104 | `// hundreds of mm away - a push/pull on an unlinked sketch must` |
+| diagnostic | src/app/PushPullController.cpp:560 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| diagnostic | src/app/PushPullController.cpp:571 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
+| diagnostic | src/app/PushPullController.cpp:583 | `std::fprintf(stdout, "Push/Pull (smart cut) committed at %.2f mm\n",` |
+| diagnostic | src/app/PushPullController.cpp:590 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |
 | comment | src/app/SplitController.h:49 | `float m_offset = 0.0f;    // mm from the body's bbox centre, along the axis` |
 | comment | src/app/layout/imtouch/ImTouchLayout.cpp:259 | `// badge. Raw mm here read "10" after picking the "1" preset under cm.` |
 | comment | src/core/Document.h:54 | `// Half-size of the rendered translucent quad in mm. Free to grow later` |
@@ -439,14 +439,14 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/PatchOp.h:96 | `double tol3d       = 1e-4;   // G0: max gap to the boundary, mm` |
 | comment | src/modeling/PatchOp.h:106 | `double g0Error() const { return m_g0Error; }  // mm` |
 | comment | src/modeling/PrimitiveOp.h:23 | `// Box: XYZ extents in mm.` |
-| comment | src/modeling/PushPullOp.cpp:369 | `// BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such` |
-| comment | src/modeling/PushPullOp.cpp:549 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
+| comment | src/modeling/PushPullOp.cpp:404 | `// BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such` |
+| comment | src/modeling/PushPullOp.cpp:591 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:517 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:542 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
 | comment | src/modeling/ScaleFaceOp.cpp:334 | `// they were converted display->mm on commit, so typing 100 under inches` |
 | allowed-by-hand | src/modeling/SewOp.cpp:199 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:211 | `"body (thickness %.3f mm).\n", m_thickness);` |
-| allowed-by-hand | src/modeling/ShellOp.cpp:289 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:214 | `"body (thickness %.3f mm).\n", m_thickness);` |
+| allowed-by-hand | src/modeling/ShellOp.cpp:319 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
 | comment | src/modeling/Sketch.cpp:556 | `// these a later dimension (e.g. a 2 mm gap to another edge) lets the naive` |
 | comment | src/modeling/SketchConstraints.h:84 | `// dimension label rather than clicking it. Pixels rather than sketch mm because` |
 | comment | src/modeling/SketchEditOp.cpp:140 | `// "Add sketch element" into "Rectangle 80 × 45 mm", "Circle Ø20 mm", etc.,` |
@@ -598,18 +598,18 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/PlaneTransformOp.cpp:26 | `PlaneTransformOp` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:116 | `PrimitiveOp` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:526 | `ProjectSketchOp` |
-| CONVERTED | src/modeling/PushPullOp.cpp:671 | `PushPullOp` |
+| CONVERTED | src/modeling/PushPullOp.cpp:748 | `PushPullOp` |
 | stored-string | src/modeling/ReplayOp.h:29 | `ReplayOp` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:711 | `ResizeCylindricalOp` |
 | no-length | src/modeling/RevolveOp.cpp:267 | `RevolveOp` |
 | CONVERTED | src/modeling/ScaleFaceOp.cpp:323 | `ScaleFaceOp` |
 | no-length | src/modeling/SeparateBodyOp.cpp:85 | `SeparateBodyOp` |
 | no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
-| CONVERTED | src/modeling/ShellOp.cpp:317 | `ShellOp` |
+| CONVERTED | src/modeling/ShellOp.cpp:348 | `ShellOp` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:59 | `SketchEditOp` |
 | stored-string | src/modeling/SketchTransformOp.h:31 | `SketchTransformOp` |
 | no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
 | no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
 | no-length | src/modeling/TaperOp.cpp:133 | `TaperOp` |
-| CONVERTED | src/modeling/ThreadOp.cpp:2093 | `ThreadOp` |
+| CONVERTED | src/modeling/ThreadOp.cpp:2100 | `ThreadOp` |
 | CONVERTED | src/modeling/TransformOp.cpp:242 | `TransformOp` |

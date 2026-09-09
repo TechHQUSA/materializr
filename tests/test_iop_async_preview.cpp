@@ -92,6 +92,13 @@ protected:
     void panelBody(const IopContext&, bool&) override {}
 };
 
+// A LiveOp controller that opts INTO the between-frames commit, the way
+// Push/Pull does for a ghosted gesture on a body with no thread on it.
+class DeferringLiveController : public LiveController {
+protected:
+    bool wantsDeferredCommit(const IopContext&) const override { return true; }
+};
+
 struct Rig {
     Document doc;
     History history;
@@ -296,11 +303,12 @@ struct DeferRig {
 };
 } // namespace
 
-TEST(IopLiveOpCommit, TheCommitRunsInTheFrameEvenWithADeferralSlotAvailable) {
-    // Deliberate: only ProjectSketchOp reports progress and only Extrude and
-    // Boolean pump the UI, so deferring these ops would draw no window and
-    // offer no Cancel - just the same freeze a frame later. On a threaded body
-    // it would also move the push out from under History's thread reflow.
+TEST(IopLiveOpCommit, TheCommitRunsInTheFrameUnlessTheControllerOptsIn) {
+    // Inline is the default even when a deferral slot is available. A LiveOp
+    // commit only belongs between frames when its operation actually drives a
+    // progress range, and never on a threaded body, where it would move the
+    // push out from under History's thread reflow. The controller decides;
+    // the scaffold does not guess.
     DeferRig r;
     LiveController ctl;
     ctl.target = r.rig.id;
@@ -310,6 +318,26 @@ TEST(IopLiveOpCommit, TheCommitRunsInTheFrameEvenWithADeferralSlotAvailable) {
     ctl.commit(r.ctx());
     EXPECT_FALSE(ctl.active());
     EXPECT_FALSE(r.deferred()) << "a LiveOp commit must not be deferred";
+    ASSERT_EQ(r.rig.history.operations().size(), 1u);
+    EXPECT_EQ(r.rig.history.operations()[0]->serializeParams(), "h=15.000000");
+    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+TEST(IopLiveOpCommit, AControllerThatOptsInGetsItsCommitDeferred) {
+    DeferRig r;
+    DeferringLiveController ctl;
+    ctl.target = r.rig.id;
+    ASSERT_TRUE(ctl.begin(r.ctx()));
+
+    ctl.commit(r.ctx());
+    EXPECT_FALSE(ctl.active());
+    ASSERT_TRUE(r.deferred()) << "the opt-in was ignored";
+    // Nothing has run yet: the operation is queued, not applied. The preview
+    // was rolled back on the way out, so the body reads pre-gesture until the
+    // task runs between frames.
+    EXPECT_EQ(r.rig.history.operations().size(), 0u);
+
+    r.runDeferred();
     ASSERT_EQ(r.rig.history.operations().size(), 1u);
     EXPECT_EQ(r.rig.history.operations()[0]->serializeParams(), "h=15.000000");
     EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
