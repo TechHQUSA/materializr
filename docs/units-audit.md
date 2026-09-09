@@ -48,49 +48,49 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/app/Application_Dialogs.cpp:1446 | `if (materializr::parseFinite(m_patternAngleBuf, parsed) &&` |
 | angle | src/app/Application_Dialogs.cpp:1450 | `if (ImGui::SliderFloat("##patangleslider", &m_patternAngle, 5.0f, 360.0f, "%.1f°")) {` |
 | angle | src/app/Application_Dialogs.cpp:1456 | `touchui::amountField("patAngAmt", nullptr, &m_patternAngle,` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1619 | `if (materializr::amountLengthField("thrPitchAmt", materializr::tr("Pitch"), &m_threadPitch, /*allowSign=*/fals` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1627 | `if (materializr::parseLength(m_threadPitchBuf, v) && v >= 0.1f)` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1634 | `if (materializr::amountLengthField("thrDepthAmt", materializr::tr("Depth"), &m_threadDepth, /*allowSign=*/fals` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1642 | `if (materializr::parseLength(m_threadDepthBuf, v) && v >= 0.05f)` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1679 | `materializr::lengthField("##thrClr", &m_threadClearance);` |
-| CONVERTED | src/app/Application_Dialogs.cpp:1693 | `materializr::lengthField("##thrGWidth", &m_threadGrooveWidth);` |
-| percent | src/app/Application_Dialogs.cpp:2075 | `if (ImGui::SliderFloat(materializr::tr("Opacity"), &opacity, 0.05f, 1.0f, "%.2f")) {` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2083 | `if (materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &widthMM,` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2307 | `(void)materializr::parseLength(m_refImgDistBuf, distMM);` |
-| count | src/app/Application_Dialogs.cpp:2444 | `if (materializr::stepperRow("patchDetailStep", &f, /*allowNegative=*/false,` |
-| absolute-mm | src/app/Application_Dialogs.cpp:2464 | `if (materializr::inputNumber("##patchTol3d", &m_patchParams.tol3d,` |
-| angle | src/app/Application_Dialogs.cpp:2474 | `if (materializr::inputNumber("##patchTolAng", &deg, 0.1, 1.0, "%.2f")) {` |
-| unitless | src/app/Application_Dialogs.cpp:2483 | `if (materializr::inputNumber("##patchTolCurv", &m_patchParams.tolCurv,` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2626 | `if (materializr::parseLength(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv;` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2633 | `if (materializr::lengthSlider("##slider", &m_sketchMove[i], -100.0f, 100.0f)) {` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2968 | `if (materializr::parseLength(m_planeOpOffsetBuf, parsed) &&` |
-| CONVERTED | src/app/Application_Dialogs.cpp:2979 | `if (materializr::lengthStepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,` |
-| angle | src/app/Application_Dialogs.cpp:3036 | `materializr::parseFinite(m_planeOpRotBufX, dx);` |
-| angle | src/app/Application_Dialogs.cpp:3037 | `materializr::parseFinite(m_planeOpRotBufY, dy);` |
-| angle | src/app/Application_Dialogs.cpp:3038 | `materializr::parseFinite(m_planeOpRotBufZ, dz);` |
-| angle | src/app/Application_Dialogs.cpp:3256 | `if (materializr::parseFinite(m_revolveAngleBuf, a)) m_revolveAngle = a; }` |
-| angle | src/app/Application_Dialogs.cpp:3260 | `if (ImGui::SliderFloat("##revAngSld", &m_revolveAngle,` |
-| CONVERTED | src/app/Application_Dialogs.cpp:3555 | `if (materializr::parseLength(m_alignOffsetBuf, a)) m_alignOffset = a;` |
-| CONVERTED | src/app/Application_Dialogs.cpp:3584 | `if (materializr::parseLength(m_alignUBuf, a)) m_alignU = a;` |
-| CONVERTED | src/app/Application_Dialogs.cpp:3592 | `if (materializr::parseLength(m_alignVBuf, a)) m_alignV = a;` |
-| angle | src/app/Application_Dialogs.cpp:3711 | `if (materializr::parseFinite(m_rotPlaneAngleBuf, a)) m_rotPlaneAngle = a; }` |
-| angle | src/app/Application_Dialogs.cpp:3715 | `if (ImGui::SliderFloat("##rotPlaneAngSld", &m_rotPlaneAngle, -180.0f, 180.0f, "%.1f°")) {` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4059 | `if (materializr::parseLength(m_axisOpOriginBuf[i], parsed) &&` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4194 | `if (materializr::lengthSlider(materializr::trFormat("Offset (%s)", materializr::unitSuffix()).c_str(), &m_sect` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4272 | `if (materializr::lengthSlider(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), &h, 1.0` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4376 | `if (materializr::lengthSlider(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, ` |
-| seconds | src/app/Application_Dialogs.cpp:4387 | `if (ImGui::SliderInt(materializr::tr("Points per surface"), &budget, 8, 200) &&` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4500 | `if (materializr::lengthSlider(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &w, 1.0f` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4670 | `if (materializr::lengthField("##offsetDist", &mag,` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4742 | `materializr::amountLengthField(label, label, v);` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4744 | `materializr::lengthField(label, v);` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4773 | `materializr::lengthField("X", &m_primitivePopupOrigin[0]);` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4774 | `materializr::lengthField("Y", &m_primitivePopupOrigin[1]);` |
-| CONVERTED | src/app/Application_Dialogs.cpp:4775 | `materializr::lengthField("Z", &m_primitivePopupOrigin[2]);` |
-| ratio | src/app/Application_Dialogs.cpp:4943 | `ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");` |
-| CONVERTED | src/app/Application_Dialogs.cpp:5447 | `if (materializr::lengthField(materializr::trFormat("Thickness (%s)", materializr::unitSuffix()).c_str(), &m_un` |
-| angle | src/app/Application_Dialogs.cpp:5461 | `if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))` |
-| angle | src/app/Application_Dialogs.cpp:5520 | `ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1622 | `if (materializr::amountLengthField("thrPitchAmt", materializr::tr("Pitch"), &m_threadPitch, /*allowSign=*/fals` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1630 | `if (materializr::parseLength(m_threadPitchBuf, v) && v >= 0.1f)` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1637 | `if (materializr::amountLengthField("thrDepthAmt", materializr::tr("Depth"), &m_threadDepth, /*allowSign=*/fals` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1645 | `if (materializr::parseLength(m_threadDepthBuf, v) && v >= 0.05f)` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1682 | `materializr::lengthField("##thrClr", &m_threadClearance);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:1696 | `materializr::lengthField("##thrGWidth", &m_threadGrooveWidth);` |
+| percent | src/app/Application_Dialogs.cpp:2078 | `if (ImGui::SliderFloat(materializr::tr("Opacity"), &opacity, 0.05f, 1.0f, "%.2f")) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2086 | `if (materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &widthMM,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2310 | `(void)materializr::parseLength(m_refImgDistBuf, distMM);` |
+| count | src/app/Application_Dialogs.cpp:2447 | `if (materializr::stepperRow("patchDetailStep", &f, /*allowNegative=*/false,` |
+| absolute-mm | src/app/Application_Dialogs.cpp:2467 | `if (materializr::inputNumber("##patchTol3d", &m_patchParams.tol3d,` |
+| angle | src/app/Application_Dialogs.cpp:2477 | `if (materializr::inputNumber("##patchTolAng", &deg, 0.1, 1.0, "%.2f")) {` |
+| unitless | src/app/Application_Dialogs.cpp:2486 | `if (materializr::inputNumber("##patchTolCurv", &m_patchParams.tolCurv,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2629 | `if (materializr::parseLength(m_sketchMoveBuf[i], mv)) m_sketchMove[i] = mv;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2636 | `if (materializr::lengthSlider("##slider", &m_sketchMove[i], -100.0f, 100.0f)) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2971 | `if (materializr::parseLength(m_planeOpOffsetBuf, parsed) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:2982 | `if (materializr::lengthStepperRow("planeOffsetStep", &offsetF, /*allowNegative=*/true,` |
+| angle | src/app/Application_Dialogs.cpp:3039 | `materializr::parseFinite(m_planeOpRotBufX, dx);` |
+| angle | src/app/Application_Dialogs.cpp:3040 | `materializr::parseFinite(m_planeOpRotBufY, dy);` |
+| angle | src/app/Application_Dialogs.cpp:3041 | `materializr::parseFinite(m_planeOpRotBufZ, dz);` |
+| angle | src/app/Application_Dialogs.cpp:3259 | `if (materializr::parseFinite(m_revolveAngleBuf, a)) m_revolveAngle = a; }` |
+| angle | src/app/Application_Dialogs.cpp:3263 | `if (ImGui::SliderFloat("##revAngSld", &m_revolveAngle,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3558 | `if (materializr::parseLength(m_alignOffsetBuf, a)) m_alignOffset = a;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3587 | `if (materializr::parseLength(m_alignUBuf, a)) m_alignU = a;` |
+| CONVERTED | src/app/Application_Dialogs.cpp:3595 | `if (materializr::parseLength(m_alignVBuf, a)) m_alignV = a;` |
+| angle | src/app/Application_Dialogs.cpp:3714 | `if (materializr::parseFinite(m_rotPlaneAngleBuf, a)) m_rotPlaneAngle = a; }` |
+| angle | src/app/Application_Dialogs.cpp:3718 | `if (ImGui::SliderFloat("##rotPlaneAngSld", &m_rotPlaneAngle, -180.0f, 180.0f, "%.1f°")) {` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4061 | `if (materializr::parseLength(m_axisOpOriginBuf[i], parsed) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4196 | `if (materializr::lengthSlider(materializr::trFormat("Offset (%s)", materializr::unitSuffix()).c_str(), &m_sect` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4274 | `if (materializr::lengthSlider(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), &h, 1.0` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4378 | `if (materializr::lengthSlider(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, ` |
+| seconds | src/app/Application_Dialogs.cpp:4389 | `if (ImGui::SliderInt(materializr::tr("Points per surface"), &budget, 8, 200) &&` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4502 | `if (materializr::lengthSlider(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &w, 1.0f` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4672 | `if (materializr::lengthField("##offsetDist", &mag,` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4744 | `materializr::amountLengthField(label, label, v);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4746 | `materializr::lengthField(label, v);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4775 | `materializr::lengthField("X", &m_primitivePopupOrigin[0]);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4776 | `materializr::lengthField("Y", &m_primitivePopupOrigin[1]);` |
+| CONVERTED | src/app/Application_Dialogs.cpp:4777 | `materializr::lengthField("Z", &m_primitivePopupOrigin[2]);` |
+| ratio | src/app/Application_Dialogs.cpp:4945 | `ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");` |
+| CONVERTED | src/app/Application_Dialogs.cpp:5449 | `if (materializr::lengthField(materializr::trFormat("Thickness (%s)", materializr::unitSuffix()).c_str(), &m_un` |
+| angle | src/app/Application_Dialogs.cpp:5463 | `if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))` |
+| angle | src/app/Application_Dialogs.cpp:5522 | `ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");` |
 | CONVERTED | src/app/Application_Viewport.cpp:2052 | `(void)materializr::parseFinite(m_sketchShapeDimBuf,` |
 | CONVERTED | src/app/Application_Viewport.cpp:2054 | `if (touchui::numberField("##bubbleDia", nullptr,` |
 | CONVERTED | src/app/Application_Viewport.cpp:2075 | `materializr::lengthField("##bubbleW", &m_sketchShapeDimW);` |
@@ -311,33 +311,33 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | identifier/other | src/app/Application_Dialogs.cpp:1046 | `if (!mm) {` |
 | comment | src/app/Application_Dialogs.cpp:1053 | `// mm mode: target dims → ratios on each USER axis,` |
 | comment | src/app/Application_Dialogs.cpp:1106 | `// Reset % fields after Apply. mm-mode fields reseed naturally` |
-| comment | src/app/Application_Dialogs.cpp:2305 | `// Typed in the display unit (or with its own suffix); the model wants mm.` |
-| comment | src/app/Application_Dialogs.cpp:2315 | `// mm-per-pixel from the picked pair → full-frame physical width.` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:2462 | `ImGui::Text("%s", materializr::tr("Gap tolerance (mm)"));` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:2522 | `ImGui::TextDisabled(materializr::tr("Gap %.4f mm  -  tangency %.2f deg"),` |
-| comment | src/app/Application_Dialogs.cpp:2789 | `// and print a literal, so choosing "1" under centimetres stored 10 mm and` |
-| comment | src/app/Application_Dialogs.cpp:2851 | `// literal mm under a header that already said "(cm)" or "(in)", so the` |
-| comment | src/app/Application_Dialogs.cpp:2852 | `// label named one unit while the button set another - 1 meant 1 mm while` |
-| comment | src/app/Application_Dialogs.cpp:2853 | `// the popup claimed centimetres. m_sketchGridStep stays mm; only the` |
-| comment | src/app/Application_Dialogs.cpp:2976 | `// in, and dragging a -100..100 slider cannot land on 12.5 mm. Same row the` |
-| comment | src/app/Application_Dialogs.cpp:4168 | `// traversed - the old fixed ±100 mm couldn't reach the far side of a` |
-| comment | src/app/Application_Dialogs.cpp:4170 | `// bodies (floored at 100 mm so small parts keep a usable range), cached` |
-| comment | src/app/Application_Dialogs.cpp:4276 | `// dimension, and a text height that came out 1 mm or 100 mm` |
-| comment | src/app/Application_Dialogs.cpp:4442 | `// Real extents of the section, anchor-relative and in mm, so the` |
-| comment | src/app/Application_Dialogs.cpp:4990 | `// Write a 1:1-mm SVG. cut = solid black (the outline). For SemiRigid the fold` |
-| comment | src/app/Application_Dialogs.cpp:5095 | `double minx = 0, miny = 0, maxx = 0, maxy = 0;   // pattern bbox (mm)` |
-| comment | src/app/Application_Dialogs.cpp:5097 | `double pad = 5, margin = 12, strip = 12, overlap = 12;  // mm` |
-| comment | src/app/Application_Dialogs.cpp:5098 | `double cwMM = 0, chMM = 0, stepX = 0, stepY = 0; // tile content + step (mm)` |
-| comment | src/app/Application_Dialogs.cpp:5127 | `// An alignment cross at a position (in drawing-mm) that falls inside a tile` |
-| comment | src/app/Application_Dialogs.cpp:5132 | `// filler marks between the seams so you can pick the density. The same drawing-mm` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5170 | `// corners, an overlap between tiles for assembly, and a 50 mm scale bar in the` |
-| comment | src/app/Application_Dialogs.cpp:5182 | `auto DX = [&](double x) { return (x - minx) + pad; };   // world → drawing mm (Y up)` |
-| comment | src/app/Application_Dialogs.cpp:5192 | `const double ox = col * stepX, oy = row * stepY;    // tile origin (drawing mm)` |
-| comment | src/app/Application_Dialogs.cpp:5239 | `// Registration crosses in the tile OVERLAPS: the same drawing-mm point` |
-| comment | src/app/Application_Dialogs.cpp:5244 | `const double regArm = 4.0;                    // mm half-length of each arm` |
-| comment | src/app/Application_Dialogs.cpp:5266 | `// 50 mm scale bar in the bottom strip + caption + tile label.` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5271 | `pdff(s, "BT /F1 8 Tf %.2f %.2f Td (50 mm \\(5 cm\\) - verify print scale) Tj ET\n",` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5699 | `: "Tiled, full-size (1:1) PDF with crop marks, a 50 mm scale bar, and "` |
+| comment | src/app/Application_Dialogs.cpp:2308 | `// Typed in the display unit (or with its own suffix); the model wants mm.` |
+| comment | src/app/Application_Dialogs.cpp:2318 | `// mm-per-pixel from the picked pair → full-frame physical width.` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:2465 | `ImGui::Text("%s", materializr::tr("Gap tolerance (mm)"));` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:2525 | `ImGui::TextDisabled(materializr::tr("Gap %.4f mm  -  tangency %.2f deg"),` |
+| comment | src/app/Application_Dialogs.cpp:2792 | `// and print a literal, so choosing "1" under centimetres stored 10 mm and` |
+| comment | src/app/Application_Dialogs.cpp:2854 | `// literal mm under a header that already said "(cm)" or "(in)", so the` |
+| comment | src/app/Application_Dialogs.cpp:2855 | `// label named one unit while the button set another - 1 meant 1 mm while` |
+| comment | src/app/Application_Dialogs.cpp:2856 | `// the popup claimed centimetres. m_sketchGridStep stays mm; only the` |
+| comment | src/app/Application_Dialogs.cpp:2979 | `// in, and dragging a -100..100 slider cannot land on 12.5 mm. Same row the` |
+| comment | src/app/Application_Dialogs.cpp:4170 | `// traversed - the old fixed ±100 mm couldn't reach the far side of a` |
+| comment | src/app/Application_Dialogs.cpp:4172 | `// bodies (floored at 100 mm so small parts keep a usable range), cached` |
+| comment | src/app/Application_Dialogs.cpp:4278 | `// dimension, and a text height that came out 1 mm or 100 mm` |
+| comment | src/app/Application_Dialogs.cpp:4444 | `// Real extents of the section, anchor-relative and in mm, so the` |
+| comment | src/app/Application_Dialogs.cpp:4992 | `// Write a 1:1-mm SVG. cut = solid black (the outline). For SemiRigid the fold` |
+| comment | src/app/Application_Dialogs.cpp:5097 | `double minx = 0, miny = 0, maxx = 0, maxy = 0;   // pattern bbox (mm)` |
+| comment | src/app/Application_Dialogs.cpp:5099 | `double pad = 5, margin = 12, strip = 12, overlap = 12;  // mm` |
+| comment | src/app/Application_Dialogs.cpp:5100 | `double cwMM = 0, chMM = 0, stepX = 0, stepY = 0; // tile content + step (mm)` |
+| comment | src/app/Application_Dialogs.cpp:5129 | `// An alignment cross at a position (in drawing-mm) that falls inside a tile` |
+| comment | src/app/Application_Dialogs.cpp:5134 | `// filler marks between the seams so you can pick the density. The same drawing-mm` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5172 | `// corners, an overlap between tiles for assembly, and a 50 mm scale bar in the` |
+| comment | src/app/Application_Dialogs.cpp:5184 | `auto DX = [&](double x) { return (x - minx) + pad; };   // world → drawing mm (Y up)` |
+| comment | src/app/Application_Dialogs.cpp:5194 | `const double ox = col * stepX, oy = row * stepY;    // tile origin (drawing mm)` |
+| comment | src/app/Application_Dialogs.cpp:5241 | `// Registration crosses in the tile OVERLAPS: the same drawing-mm point` |
+| comment | src/app/Application_Dialogs.cpp:5246 | `const double regArm = 4.0;                    // mm half-length of each arm` |
+| comment | src/app/Application_Dialogs.cpp:5268 | `// 50 mm scale bar in the bottom strip + caption + tile label.` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5273 | `pdff(s, "BT /F1 8 Tf %.2f %.2f Td (50 mm \\(5 cm\\) - verify print scale) Tj ET\n",` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5701 | `: "Tiled, full-size (1:1) PDF with crop marks, a 50 mm scale bar, and "` |
 | comment | src/app/Application_InteractiveOps.cpp:309 | `// field defaulting to 1.0 mm. Typing rebuilds via ShellOp::execute against` |
 | comment | src/app/Application_Viewport.cpp:143 | `// 0.05 mm-per-pixel, which felt sluggish zoomed in and jumpy zoomed out.` |
 | comment | src/app/Application_Viewport.cpp:499 | `// the step (base 1 mm -> 10 mm) the drawn grid sat up to a full` |

@@ -1513,9 +1513,12 @@ void Application::renderThreadPanel() {
     // the popup down. A modal keeps input blocked meanwhile so the window
     // stays responsive instead of "not responding".
     if (m_threadComputing) {
-        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         if (m_threadFuture.wait_for(std::chrono::milliseconds(0)) ==
             std::future_status::ready) {
+            // Inside the landing branch, not around the poll: the poll runs
+            // every frame the cut is computing, and a document snapshot per
+            // frame is the cost this whole change exists to remove.
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             TopoDS_Shape result = m_threadFuture.get();
             m_threadComputing = false;
             if (!result.IsNull()) {
@@ -3941,7 +3944,6 @@ void Application::applyRevolve() {
         }
 
         if (rotated > 0) {
-            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             char buf[96];
             std::snprintf(buf, sizeof(buf),
                           "Revolve %d bodies by %.1f\xC2\xB0", rotated,
