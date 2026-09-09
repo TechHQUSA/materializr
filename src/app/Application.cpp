@@ -580,17 +580,10 @@ void Application::runPendingHeavyTasks() {
     // too, and the progress reporter's own restore is suppressed below, so it
     // has to do the same.
     resetFpuForOcct();
-    // No progress window while draining: an ImGui frame is already open on
-    // this path, so the op must not try to paint one of its own. Saved and
-    // restored rather than set and cleared, so a task that reaches another
-    // session switch cannot clear the flag out from under the outer drain.
-    const bool wasDraining = m_drainingHeavyTasks;
-    m_drainingHeavyTasks = true;
-    // The stall watchdog reads these; leaving a drained task's counters behind
-    // would misreport the next task the main loop runs.
-    m_heavyProgressFrac = -1.0f;
-    m_heavyProgressLabel.clear();
-    m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;
+    // Deliberately NOT touching the heavy-task counters or the progress label:
+    // the watchdog reads them only when m_heavyRanThisIter is set, which this
+    // runner never sets, and zeroing them mid-iteration made it report a
+    // main-loop task that HAD pumped as "0 UI pumps" - an invented stall.
     while (auto task = m_deferredHeavy.takeNext()) {
         // A stale cancel latch must not make this task give up before it
         // starts; the main-loop runner resets it per task for the same reason.
@@ -605,7 +598,6 @@ void Application::runPendingHeavyTasks() {
                                  "draining before a tab switch.\n");
         }
     }
-    m_drainingHeavyTasks = wasDraining;
 }
 
 bool Application::switchToSession(size_t idx) {
@@ -628,6 +620,9 @@ bool Application::switchToSession(size_t idx) {
     // session and captured its document and history. Run it now, before the
     // swap.
     runPendingHeavyTasks();
+    // A drained task can itself open or close tabs (restoreSessionTabs does),
+    // so the index this switch was asked for may no longer mean what it did.
+    if (idx >= m_sessions.size() || idx == m_activeSession) return false;
     // The section cut is view state aimed at the OUTGOING project's geometry;
     // carried across it would carve the wrong model. Off on every switch.
     m_sectionEnabled = false;
@@ -651,13 +646,18 @@ bool Application::switchToSession(size_t idx) {
 void Application::closeSession(size_t idx) {
     if (idx >= m_sessions.size()) return;
     const bool wasActive = (idx == m_activeSession);
-    // Both of these reach the closing session through m_document / m_history,
-    // which keep pointing into it until applySessionState repoints them below
-    // - so both must run BEFORE the erase destroys it. Cancelling previews
-    // afterwards dereferenced freed memory, and a queued task would have too.
+    // The preview cancel reaches the closing session through m_document, which
+    // keeps pointing into it until applySessionState repoints it below, so it
+    // must happen BEFORE the erase (doing it after dereferenced freed memory).
+    //
+    // Queued tasks are DROPPED here rather than run: every producer targets
+    // the document this close is about to destroy, so running them would be a
+    // silent multi-second freeze whose result is thrown away a line later.
+    // The operation is held in a shared_ptr, so clearing releases it.
+    // switchToSession is the case that must actually run them.
     if (wasActive) {
         cancelAllInteractivePreviews();
-        runPendingHeavyTasks();
+        m_deferredHeavy.clear();
     }
     // The closing tab's snapshot is no longer unfinished work, and its
     // recovery index returns to the pool by virtue of the session vanishing.
@@ -1328,6 +1328,11 @@ void Application::beginIop(materializr::InteractiveOpController& ctl) {
 }
 
 void Application::beginFrame() {
+    // A frame is open from here until endFrame. renderProgressFrame reads this
+    // to refuse to nest one (see its comment): a heavy task drained mid-frame
+    // by runPendingHeavyTasks would otherwise open a second frame inside this
+    // one.
+    m_imguiFrameOpen = true;
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     // Touch tooltip timeout. A finger lift leaves io.MousePos parked on the last
@@ -1404,6 +1409,7 @@ void Application::endFrame() {
         m_window->updateTextInput(want,
                                   kio.MouseClicked[0] && kio.WantTextInput);
     }
+    m_imguiFrameOpen = false;
 }
 
 // Fold the stretch since the previous pump into the heavy task's worst gap.
@@ -1511,12 +1517,13 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     // cancel latch so a prior cancel doesn't carry over. (fraction<0 is the
     // indeterminate spinner and must NOT reset it.)
     //
-    // The exception is a task drained mid-frame by runPendingHeavyTasks: a
-    // frame is already open there, and beginFrame() below would nest one. The
-    // op runs without a window in that case (it is one operation, already
-    // confirmed, in the one-frame window between a commit and a tab switch);
-    // returning false says "not cancelled" so it still completes.
-    if (m_drainingHeavyTasks) return false;
+    // The exception is a task drained mid-frame by runPendingHeavyTasks (a
+    // commit queued by a panel, then a tab click in the same frame): a frame
+    // is already open, and beginFrame() below would nest one. The op runs
+    // without a window there; returning false says "not cancelled" so it
+    // still completes. Keyed on the frame, not on the drain, because
+    // restoreSessionTabs drains BETWEEN frames, where a window is wanted.
+    if (m_imguiFrameOpen) return false;
     if (fraction == 0.0f) m_progressCancelled = false;
     if (m_progressCancelled || !m_window) return m_progressCancelled;
 
@@ -7459,6 +7466,11 @@ void Application::run() {
 
                 const auto now = clock::now();
                 if (now < m_nextHeavyDraw) return;
+                // No bookkeeping for a frame that was refused: while a frame
+                // is already open the reporter paints nothing, and counting it
+                // both inflates the draw count and applies the backoff below
+                // to a cost that was never paid.
+                if (m_imguiFrameOpen) return;
                 renderProgressFrame(m_heavyProgressFrac,
                                     m_heavyProgressLabel.c_str());
                 ++m_heavyDraws;

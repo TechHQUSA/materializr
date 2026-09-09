@@ -387,10 +387,12 @@ void Application::renderImTouchLayout() {
                 if (act.eyeToggled) {
                     m_document->setBodyVisible(id, visible);
                     // The viewport only filters hidden bodies when it rebuilds
-                    // its meshes - without this the flag flips but the stale
+                    // their meshes - without this the flag flips but the stale
                     // mesh keeps drawing (#37; desktop's ItemsPanel returns
-                    // colorChanged for the same reason).
-                    m_meshesDirty = true;
+                    // colorChanged for the same reason). Just this body: the
+                    // partial pass drops it or meshes it, whichever way the
+                    // eye went.
+                    markBodyDirty(id);
                     markDirty();
                 }
                 if (act.swatchClicked) ImGui::OpenPopup("bodyColor");

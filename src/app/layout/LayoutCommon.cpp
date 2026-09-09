@@ -165,8 +165,7 @@ void Application::touchUndo() {
         // convention, and what the sketch's own Ctrl+Z does.
         if (m_sketchTool && m_sketchTool->isPlacing()) {
             m_sketchTool->onCancel();
-            m_meshesDirty = true;
-            return;
+            return;   // sketch geometry only; no body mesh depends on it
         }
         // Undo committed sketch edits, but never past the sketch's entry into
         // history: rolling the host body back under a live sketch crashes.

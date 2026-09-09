@@ -4888,7 +4888,9 @@ void Application::commitStlImport() {
     // at high accuracy, so run it in the between-frames slot where it can paint a
     // progress frame instead of freezing the window (same path as project load).
     m_deferredHeavy.queue([this, path, acc]() {
-        renderProgressFrame(-1.0f, "Importing STL\xE2\x80\xA6");
+        // Honour Cancel: the reporter returns true when the user asked to
+        // stop, and importing anyway made the button look broken.
+        if (renderProgressFrame(-1.0f, "Importing STL\xE2\x80\xA6")) return;
         auto result = materializr::StlIO::import(path, *m_document, acc);
         if (result.success) {
             m_meshesDirty = true;

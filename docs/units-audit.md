@@ -87,10 +87,10 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/Application_Dialogs.cpp:4790 | `materializr::lengthField("X", &m_primitivePopupOrigin[0]);` |
 | CONVERTED | src/app/Application_Dialogs.cpp:4791 | `materializr::lengthField("Y", &m_primitivePopupOrigin[1]);` |
 | CONVERTED | src/app/Application_Dialogs.cpp:4792 | `materializr::lengthField("Z", &m_primitivePopupOrigin[2]);` |
-| ratio | src/app/Application_Dialogs.cpp:4960 | `ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");` |
-| CONVERTED | src/app/Application_Dialogs.cpp:5464 | `if (materializr::lengthField(materializr::trFormat("Thickness (%s)", materializr::unitSuffix()).c_str(), &m_un` |
-| angle | src/app/Application_Dialogs.cpp:5478 | `if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))` |
-| angle | src/app/Application_Dialogs.cpp:5537 | `ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");` |
+| ratio | src/app/Application_Dialogs.cpp:4962 | `ImGui::SliderFloat(materializr::tr("Accuracy"), &m_stlDialogAccuracy, 0.0f, 1.0f, "%.2f");` |
+| CONVERTED | src/app/Application_Dialogs.cpp:5466 | `if (materializr::lengthField(materializr::trFormat("Thickness (%s)", materializr::unitSuffix()).c_str(), &m_un` |
+| angle | src/app/Application_Dialogs.cpp:5480 | `if (ImGui::SliderFloat(materializr::tr("Curve detail"), &m_unfoldMaxBevelDeg, 2.0f, 40.0f, "%.0f°"))` |
+| angle | src/app/Application_Dialogs.cpp:5539 | `ImGui::SliderFloat(materializr::tr("Rotate"), &m_unfoldRotationDeg, -180.0f, 180.0f, "%.0f°");` |
 | CONVERTED | src/app/Application_Viewport.cpp:2052 | `(void)materializr::parseFinite(m_sketchShapeDimBuf,` |
 | CONVERTED | src/app/Application_Viewport.cpp:2054 | `if (touchui::numberField("##bubbleDia", nullptr,` |
 | CONVERTED | src/app/Application_Viewport.cpp:2075 | `materializr::lengthField("##bubbleW", &m_sketchShapeDimW);` |
@@ -264,37 +264,37 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 |---|---|---|
 | comment | src/app/Application.cpp:846 | `// ios_platform.mm).` |
 | comment | src/app/Application.cpp:1104 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
-| comment | src/app/Application.cpp:1899 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
-| comment | src/app/Application.cpp:1973 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
-| comment | src/app/Application.cpp:4293 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
-| comment | src/app/Application.cpp:4319 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
-| comment | src/app/Application.cpp:4690 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
-| comment | src/app/Application.cpp:4698 | `// 152 mm - see 0733a59, which reverted exactly that.` |
-| comment | src/app/Application.cpp:5286 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
-| comment | src/app/Application.cpp:5348 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
-| comment | src/app/Application.cpp:5413 | `// then keeps the wrong band, landing 0.6 mm off with a` |
-| comment | src/app/Application.cpp:5462 | `// 0.64 mm off-axis at the surface origin) that WON` |
-| comment | src/app/Application.cpp:5556 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
-| comment | src/app/Application.cpp:5571 | `const double eps = 1.0; // mm` |
-| comment | src/app/Application.cpp:6199 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
-| comment | src/app/Application.cpp:6234 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
-| comment | src/app/Application.cpp:6573 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
-| comment | src/app/Application.cpp:6633 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
-| comment | src/app/Application.cpp:6634 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
-| comment | src/app/Application.h:634 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
-| comment | src/app/Application.h:913 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
-| comment | src/app/Application.h:915 | `// 300 mm because it reads as a round number in the units that needed` |
-| comment | src/app/Application.h:917 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
-| comment | src/app/Application.h:920 | `// 40 mm and this never engages, so the common case does not move.` |
-| comment | src/app/Application.h:922 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
-| comment | src/app/Application.h:928 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
-| comment | src/app/Application.h:1126 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
-| comment | src/app/Application.h:1329 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
-| comment | src/app/Application.h:1335 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
-| comment | src/app/Application.h:1415 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
-| comment | src/app/Application.h:1417 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
-| comment | src/app/Application.h:1633 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
-| comment | src/app/Application.h:2088 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
+| comment | src/app/Application.cpp:1906 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
+| comment | src/app/Application.cpp:1980 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
+| comment | src/app/Application.cpp:4300 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
+| comment | src/app/Application.cpp:4326 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
+| comment | src/app/Application.cpp:4697 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
+| comment | src/app/Application.cpp:4705 | `// 152 mm - see 0733a59, which reverted exactly that.` |
+| comment | src/app/Application.cpp:5293 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
+| comment | src/app/Application.cpp:5355 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
+| comment | src/app/Application.cpp:5420 | `// then keeps the wrong band, landing 0.6 mm off with a` |
+| comment | src/app/Application.cpp:5469 | `// 0.64 mm off-axis at the surface origin) that WON` |
+| comment | src/app/Application.cpp:5563 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
+| comment | src/app/Application.cpp:5578 | `const double eps = 1.0; // mm` |
+| comment | src/app/Application.cpp:6206 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
+| comment | src/app/Application.cpp:6241 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
+| comment | src/app/Application.cpp:6580 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
+| comment | src/app/Application.cpp:6640 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
+| comment | src/app/Application.cpp:6641 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
+| comment | src/app/Application.h:635 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
+| comment | src/app/Application.h:914 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
+| comment | src/app/Application.h:916 | `// 300 mm because it reads as a round number in the units that needed` |
+| comment | src/app/Application.h:918 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
+| comment | src/app/Application.h:921 | `// 40 mm and this never engages, so the common case does not move.` |
+| comment | src/app/Application.h:923 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
+| comment | src/app/Application.h:929 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
+| comment | src/app/Application.h:1127 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
+| comment | src/app/Application.h:1330 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
+| comment | src/app/Application.h:1336 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
+| comment | src/app/Application.h:1416 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
+| comment | src/app/Application.h:1418 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
+| comment | src/app/Application.h:1634 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
+| comment | src/app/Application.h:2089 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
 | comment | src/app/Application_Dialogs.cpp:908 | `// mm mode only makes sense for a single body - multi-body scale needs a` |
 | comment | src/app/Application_Dialogs.cpp:914 | `// Resolve the (single-body) bbox now so mm-mode fields can pre-fill from` |
 | identifier/other | src/app/Application_Dialogs.cpp:953 | `const bool mm = (m_scaleUnitMode == ScaleUnitMode::Millimeter);` |
@@ -324,20 +324,20 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application_Dialogs.cpp:4187 | `// bodies (floored at 100 mm so small parts keep a usable range), cached` |
 | comment | src/app/Application_Dialogs.cpp:4293 | `// dimension, and a text height that came out 1 mm or 100 mm` |
 | comment | src/app/Application_Dialogs.cpp:4459 | `// Real extents of the section, anchor-relative and in mm, so the` |
-| comment | src/app/Application_Dialogs.cpp:5007 | `// Write a 1:1-mm SVG. cut = solid black (the outline). For SemiRigid the fold` |
-| comment | src/app/Application_Dialogs.cpp:5112 | `double minx = 0, miny = 0, maxx = 0, maxy = 0;   // pattern bbox (mm)` |
-| comment | src/app/Application_Dialogs.cpp:5114 | `double pad = 5, margin = 12, strip = 12, overlap = 12;  // mm` |
-| comment | src/app/Application_Dialogs.cpp:5115 | `double cwMM = 0, chMM = 0, stepX = 0, stepY = 0; // tile content + step (mm)` |
-| comment | src/app/Application_Dialogs.cpp:5144 | `// An alignment cross at a position (in drawing-mm) that falls inside a tile` |
-| comment | src/app/Application_Dialogs.cpp:5149 | `// filler marks between the seams so you can pick the density. The same drawing-mm` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5187 | `// corners, an overlap between tiles for assembly, and a 50 mm scale bar in the` |
-| comment | src/app/Application_Dialogs.cpp:5199 | `auto DX = [&](double x) { return (x - minx) + pad; };   // world → drawing mm (Y up)` |
-| comment | src/app/Application_Dialogs.cpp:5209 | `const double ox = col * stepX, oy = row * stepY;    // tile origin (drawing mm)` |
-| comment | src/app/Application_Dialogs.cpp:5256 | `// Registration crosses in the tile OVERLAPS: the same drawing-mm point` |
-| comment | src/app/Application_Dialogs.cpp:5261 | `const double regArm = 4.0;                    // mm half-length of each arm` |
-| comment | src/app/Application_Dialogs.cpp:5283 | `// 50 mm scale bar in the bottom strip + caption + tile label.` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5288 | `pdff(s, "BT /F1 8 Tf %.2f %.2f Td (50 mm \\(5 cm\\) - verify print scale) Tj ET\n",` |
-| allowed-by-hand | src/app/Application_Dialogs.cpp:5716 | `: "Tiled, full-size (1:1) PDF with crop marks, a 50 mm scale bar, and "` |
+| comment | src/app/Application_Dialogs.cpp:5009 | `// Write a 1:1-mm SVG. cut = solid black (the outline). For SemiRigid the fold` |
+| comment | src/app/Application_Dialogs.cpp:5114 | `double minx = 0, miny = 0, maxx = 0, maxy = 0;   // pattern bbox (mm)` |
+| comment | src/app/Application_Dialogs.cpp:5116 | `double pad = 5, margin = 12, strip = 12, overlap = 12;  // mm` |
+| comment | src/app/Application_Dialogs.cpp:5117 | `double cwMM = 0, chMM = 0, stepX = 0, stepY = 0; // tile content + step (mm)` |
+| comment | src/app/Application_Dialogs.cpp:5146 | `// An alignment cross at a position (in drawing-mm) that falls inside a tile` |
+| comment | src/app/Application_Dialogs.cpp:5151 | `// filler marks between the seams so you can pick the density. The same drawing-mm` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5189 | `// corners, an overlap between tiles for assembly, and a 50 mm scale bar in the` |
+| comment | src/app/Application_Dialogs.cpp:5201 | `auto DX = [&](double x) { return (x - minx) + pad; };   // world → drawing mm (Y up)` |
+| comment | src/app/Application_Dialogs.cpp:5211 | `const double ox = col * stepX, oy = row * stepY;    // tile origin (drawing mm)` |
+| comment | src/app/Application_Dialogs.cpp:5258 | `// Registration crosses in the tile OVERLAPS: the same drawing-mm point` |
+| comment | src/app/Application_Dialogs.cpp:5263 | `const double regArm = 4.0;                    // mm half-length of each arm` |
+| comment | src/app/Application_Dialogs.cpp:5285 | `// 50 mm scale bar in the bottom strip + caption + tile label.` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5290 | `pdff(s, "BT /F1 8 Tf %.2f %.2f Td (50 mm \\(5 cm\\) - verify print scale) Tj ET\n",` |
+| allowed-by-hand | src/app/Application_Dialogs.cpp:5718 | `: "Tiled, full-size (1:1) PDF with crop marks, a 50 mm scale bar, and "` |
 | comment | src/app/Application_InteractiveOps.cpp:309 | `// field defaulting to 1.0 mm. Typing rebuilds via ShellOp::execute against` |
 | comment | src/app/Application_Viewport.cpp:143 | `// 0.05 mm-per-pixel, which felt sluggish zoomed in and jumpy zoomed out.` |
 | comment | src/app/Application_Viewport.cpp:499 | `// the step (base 1 mm -> 10 mm) the drawn grid sat up to a full` |
