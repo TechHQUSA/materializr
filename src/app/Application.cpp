@@ -381,7 +381,8 @@ Application::Application(bool safeMode, float uiScaleOverride)
             });
             if (m_eventBus && m_activeSketchId >= 0)
                 m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-            m_meshesDirty = true;
+            // The bodies this sketch drives are re-derived (and marked) by
+            // cascadeFromSketchEdit on the event above; no full rebuild.
             markDirty();
         });
     // If no system file-dialog helper exists, Open/Save/Export would otherwise
@@ -1524,6 +1525,7 @@ int Application::sketchIdEditedBy(const Operation* op) const {
 }
 
 void Application::undoWithCascade() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     const Operation* undone = m_history->getStep(m_history->currentStep());
     m_history->undo(*m_document);
     // Keep a sketch-driven body in sync after undoing a sketch edit (the
@@ -1536,10 +1538,10 @@ void Application::undoWithCascade() {
     }
     if (int sid = sketchIdEditedBy(undone); sid >= 0 && sid != cascaded)
         cascadeFromSketchEdit(sid);
-    m_meshesDirty = true;
 }
 
 void Application::redoWithCascade() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     m_history->redo(*m_document);
     const Operation* redone = m_history->getStep(m_history->currentStep());
     int cascaded = -1;
@@ -1549,7 +1551,6 @@ void Application::redoWithCascade() {
     }
     if (int sid = sketchIdEditedBy(redone); sid >= 0 && sid != cascaded)
         cascadeFromSketchEdit(sid);
-    m_meshesDirty = true;
 }
 
 void Application::renderSmallScreenWarning() {
@@ -2122,13 +2123,13 @@ void Application::handleToolAction(int action) {
             // leave sketch mode. Drops every line / circle / arc / etc. the
             // user drew, plus any in-progress placement state.
             if (m_inSketchMode && m_history && m_sketchTool) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_sketchTool->onCancel(); // clear m_isPlacing etc.
                 while (m_history->currentStep() > m_sketchEntryHistoryStep &&
                        m_history->canUndo()) {
                     m_history->undo(*m_document);
                 }
                 m_sketchEntryHistoryStep = -1;
-                m_meshesDirty = true;
                 // After undo'ing everything we did since entry, also remove
                 // the sketch from the document if it ended up empty.
                 if (m_activeSketch && m_activeSketch->elementCount() == 0 &&
@@ -2706,6 +2707,7 @@ void Application::handleToolAction(int action) {
         }
 
         case ToolAction::MergeFaces: {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             // The repair half of #81, for geometry that was ALREADY split when
             // it arrived (imported STEP) or was edited before the ops started
             // preventing new seams.
@@ -2794,7 +2796,6 @@ void Application::handleToolAction(int action) {
             // shapes the body no longer has, and hand the next op dead
             // references.
             if (merged > 0) m_selection->clear();
-            m_meshesDirty = true;
             break;
         }
 
@@ -2853,6 +2854,7 @@ void Application::handleShortcuts() {
     // ImGui has text input focus. Always false on Android (no modifier keys).
     bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
             // editor convention - and Steve's muscle memory); the next
@@ -2904,13 +2906,13 @@ void Application::handleShortcuts() {
                     m_sketchTool->getMode() == SketchToolMode::Dimension) {
                     m_sketchTool->clearDimState();
                 }
-                m_meshesDirty = true;
             }
         }
     }
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
         if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
             if (m_history->canRedo()) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_history->redo(*m_document);
                 const Operation* redone =
                     m_history->getStep(m_history->currentStep());
@@ -2930,7 +2932,6 @@ void Application::handleShortcuts() {
                     m_sketchTool->getMode() == SketchToolMode::Dimension) {
                     m_sketchTool->clearDimState();
                 }
-                m_meshesDirty = true;
             }
         }
     }
@@ -3036,6 +3037,7 @@ void Application::handleShortcuts() {
         if (!sel.empty()) {
             const auto& first = sel[0];
             if (first.type == SelectionType::Body && first.bodyId >= 0) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 int srcFolder = m_document->getBodyFolder(first.bodyId);
                 auto op = std::make_unique<CopyOp>();
                 op->setSourceBodyId(first.bodyId);
@@ -3052,7 +3054,6 @@ void Application::handleShortcuts() {
                         try { e.shape = m_document->getBody(newId); } catch (...) {}
                         m_selection->select(e);
                     }
-                    m_meshesDirty = true;
                 }
             } else if (first.type == SelectionType::Axis && first.axisId >= 0) {
                 if (const auto* a = m_document->getAxis(first.axisId)) {
@@ -3123,7 +3124,6 @@ void Application::handleShortcuts() {
                         m_selection->select(e);
                     }
                     markDirty();
-                    m_meshesDirty = true;
                 }
             }
             // Face / Edge / etc.: no-op intentionally - duplicating a
@@ -3246,7 +3246,6 @@ void Application::handleShortcuts() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_edgeCtl.active()) {
         m_edgeCtl.confirmFromKey(iopContext());
-        m_meshesDirty = true;
     }
     // Extrude has no scaffold panel (which is where the other iops catch
     // Enter), so its Enter-to-confirm lives here - same as Move Face's.
@@ -3255,7 +3254,6 @@ void Application::handleShortcuts() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_ppCtl.active()) {
         m_ppCtl.confirmFromKey(iopContext());
-        m_meshesDirty = true;
     }
     // Move Face has no scaffold panel (which is where the other iops catch
     // Enter), so its Enter-to-confirm lives here.
@@ -3292,6 +3290,7 @@ void Application::handleShortcuts() {
             // stays selected to keep its face highlighted) must not get nuked.
             deleteSelectedSketchElements();
         } else if (m_selection->hasSelection()) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             const auto& sel = m_selection->getSelection();
             std::vector<int> bodiesToDelete;
             std::vector<int> sketchesToDelete;
@@ -3334,7 +3333,6 @@ void Application::handleShortcuts() {
             }
             m_selection->clear();
             m_hoveredBodyId = -1;
-            m_meshesDirty = true;
         }
     }
     // Gizmo mode switching. WantTextInput is true while an InputText (rename
@@ -5009,7 +5007,6 @@ void Application::combineSketches(const std::vector<int>& ids) {
     if (m_history->pushOperation(std::move(op), *m_document)) {
         m_selection->clear();
         markDirty();
-        m_meshesDirty = true;
         std::fprintf(stdout, "Combined %d sketch(es) into %d\n",
                      static_cast<int>(coplanar.size()), ids.front());
     }
@@ -5036,7 +5033,6 @@ void Application::duplicateSketch(int sketchId) {
     DuplicateSketchOp* raw = op.get();  // valid while History owns the op
     if (m_history->pushOperation(std::move(op), *m_document)) {
         markDirty();
-        m_meshesDirty = true;
         std::fprintf(stdout, "Duplicated sketch %d -> %d\n",
                      sketchId, raw->newSketchId());
         showToast("Duplicated \"" + base + "\" - edit the copy freely "
@@ -6286,7 +6282,6 @@ void Application::sketchChainBack() {
     } else {
         return;
     }
-    m_meshesDirty = true;
 }
 
 void Application::sketchChainCancel() {
@@ -6300,7 +6295,6 @@ void Application::sketchChainCancel() {
     // now-disconnected start vertex is swept below.
     m_sketchTool->onCancel();
     if (m_activeSketch) m_activeSketch->pruneOrphanPoints();
-    m_meshesDirty = true;
 }
 
 void Application::deleteSelectedSketchElements() {

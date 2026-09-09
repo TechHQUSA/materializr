@@ -645,6 +645,7 @@ void Application::renderMirrorPopup() {
         // axis (the copy lands flush beside the original).
         auto mirrorAxis = [&](int axis) {
             try {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 const TopoDS_Shape& shape = m_document->getBody(m_mirrorBodyId);
                 Bnd_Box bb; BRepBndLib::Add(shape, bb);
                 if (bb.IsVoid()) return;
@@ -659,7 +660,7 @@ void Application::renderMirrorPopup() {
                 op->setPlane(MirrorPlane::Custom);
                 op->setCustomPlane(gp_Ax2(pt, dir));
                 op->setKeepOriginal(true);
-                if (m_history->pushOperation(std::move(op), *m_document)) m_meshesDirty = true;
+                m_history->pushOperation(std::move(op), *m_document);
             } catch (...) {}
         };
 
@@ -824,6 +825,7 @@ void Application::renderMultiTransformPanel() {
 }
 
 void Application::applyMultiBodyRotation() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_selection || !m_document || !m_history) return;
 
     // Snapshot every selected body's current state.
@@ -893,7 +895,6 @@ void Application::applyMultiBodyRotation() {
         std::move(beforeState), std::move(afterState),
         /*fromReload=*/false);
     m_history->pushExecuted(std::move(op));
-    m_meshesDirty = true;
 
     // Zero the sliders so the next Apply is relative to the new orientation.
     m_multiRotate[0] = m_multiRotate[1] = m_multiRotate[2] = 0.0f;
@@ -1034,6 +1035,7 @@ void Application::renderScalePanel() {
             double cx = 0, cy = 0, cz = 0;               // pivot in world coords
 
             try {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 const TopoDS_Shape& shape = m_document->getBody(bodyId);
                 Bnd_Box bb;
                 BRepBndLib::AddOptimal(shape, bb, Standard_False, Standard_False);
@@ -1099,7 +1101,7 @@ void Application::renderScalePanel() {
                 op->setType(TransformType::Scale);
                 op->setCenter(cx, cy, cz);
                 op->setScaleXYZ(sx, sy, sz);
-                if (m_history->pushOperation(std::move(op), *m_document)) m_meshesDirty = true;
+                m_history->pushOperation(std::move(op), *m_document);
             }
             // Reset % fields after Apply. mm-mode fields reseed naturally
             // from the new bbox next frame.
@@ -1511,6 +1513,7 @@ void Application::renderThreadPanel() {
     // the popup down. A modal keeps input blocked meanwhile so the window
     // stays responsive instead of "not responding".
     if (m_threadComputing) {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         if (m_threadFuture.wait_for(std::chrono::milliseconds(0)) ==
             std::future_status::ready) {
             TopoDS_Shape result = m_threadFuture.get();
@@ -1531,7 +1534,6 @@ void Application::renderThreadPanel() {
             m_threadActive = false;
             m_threadBodyId = -1;
             m_selection->clear();
-            m_meshesDirty = true;
         } else {
             ImGui::OpenPopup("Cutting thread…");
             ImVec2 center = ImGui::GetMainViewport()->GetCenter();
@@ -2654,6 +2656,7 @@ void Application::renderSketchMovePanel() {
 }
 
 void Application::applySketchMove() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_selection || !m_document || !m_history) {
         std::fprintf(stderr, "[SketchMove] missing selection/document/history\n");
         return;
@@ -2683,7 +2686,6 @@ void Application::applySketchMove() {
     m_sketchMove[0] = m_sketchMove[1] = m_sketchMove[2] = 0.0f;
     for (int i = 0; i < 3; ++i)
         std::snprintf(m_sketchMoveBuf[i], sizeof(m_sketchMoveBuf[i]), "0");
-    m_meshesDirty = true;
 }
 
 void Application::renderSnapWidget() {
@@ -3470,6 +3472,7 @@ bool Application::computeAlignTransform(gp_Trsf& rotOut, gp_Trsf& moveOut,
 }
 
 void Application::applyAlignPreview() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_alignActive || !m_document) return;
     if (m_alignSketchId >= 0) {
         auto sk = m_document->getSketch(m_alignSketchId);
@@ -3484,14 +3487,12 @@ void Application::applyAlignPreview() {
             next.Transform(full);
             sk->setPlane(next);
         }
-        m_meshesDirty = true;
         return;
     }
     if (m_alignBodyId < 0) return;
     gp_Trsf R, T; gp_Pnt c; bool nr, nm;
     if (!computeAlignTransform(R, T, c, nr, nm)) {
         m_document->updateBody(m_alignBodyId, m_alignSnapshot);
-        m_meshesDirty = true;
         return;
     }
     gp_Trsf full;
@@ -3503,10 +3504,10 @@ void Application::applyAlignPreview() {
             BRepBuilderAPI_Transform(m_alignSnapshot, full, Standard_True).Shape();
         if (!moved.IsNull()) m_document->updateBody(m_alignBodyId, moved);
     } catch (...) {}
-    m_meshesDirty = true;
 }
 
 void Application::cancelAlignFace() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (m_document && m_alignBodyId >= 0 && !m_alignSnapshot.IsNull())
         m_document->updateBody(m_alignBodyId, m_alignSnapshot);
     if (m_document && m_alignSketchId >= 0)
@@ -3515,7 +3516,6 @@ void Application::cancelAlignFace() {
     m_alignSketchId = -1;
     m_alignActive = false;
     m_alignFace.Nullify(); m_alignSnapshot.Nullify();
-    m_meshesDirty = true;
 }
 
 void Application::renderAlignFacePopup() {
@@ -3602,6 +3602,7 @@ void Application::renderAlignFacePopup() {
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) cancelClicked = true;
 
     if (applyClicked && m_alignSketchId >= 0) {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         gp_Trsf R, T; gp_Pnt c; bool nr, nm;
         const bool any = computeAlignTransform(R, T, c, nr, nm);
         if (auto sk = m_document->getSketch(m_alignSketchId))
@@ -3617,8 +3618,8 @@ void Application::renderAlignFacePopup() {
         }
         m_alignSketchId = -1;
         m_alignActive = false;
-        m_meshesDirty = true;
     } else if (applyClicked) {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         // Restore the snapshot, then commit through the ordinary op path so
         // undo / reload capture everything (a rotate then a move, matching
         // what the preview showed).
@@ -3652,7 +3653,6 @@ void Application::renderAlignFacePopup() {
         }
         m_alignActive = false;
         m_alignFace.Nullify(); m_alignSnapshot.Nullify();
-        m_meshesDirty = true;
     } else if (cancelClicked) {
         cancelAlignFace();
     }
@@ -3876,6 +3876,7 @@ void Application::revolveLiveRestore() {
 }
 
 void Application::applyRevolve() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (!m_history || !m_document) return;
 
     // Resolve the axis once - both flows use the same picker.
@@ -3940,6 +3941,7 @@ void Application::applyRevolve() {
         }
 
         if (rotated > 0) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             char buf[96];
             std::snprintf(buf, sizeof(buf),
                           "Revolve %d bodies by %.1f\xC2\xB0", rotated,
@@ -3954,7 +3956,6 @@ void Application::applyRevolve() {
             // document above; we just want history to know it happened so
             // Ctrl+Z can roll it back via the captured before-state.
             m_history->pushExecuted(std::move(op));
-            m_meshesDirty = true;
             if (materializr::isVerbose())
                 std::fprintf(stderr, "[Revolve] applied: %.1f° dir(%.3f,%.3f,%.3f) "
                                      "origin(%.2f,%.2f,%.2f) over %d bodies "
@@ -4008,7 +4009,6 @@ void Application::applyRevolve() {
     if (mode != RevolveMode::NewBody) op->setTargetBody(m_revolveBodyId);
 
     if (m_history->pushOperation(std::move(op), *m_document)) {
-        m_meshesDirty = true;
         std::fprintf(stdout, "[Revolve] sweep-sketch applied: angle=%.1f° mode=%d\n",
                      m_revolveAngle, m_revolveModeIdx);
     } else {
@@ -4591,13 +4591,13 @@ void Application::renderMirrorToolPanel() {
 
         ImGui::Separator();
         if (ImGui::Button(materializr::tr("Mirror"))) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             std::set<int> newPts, newLines;
             recordSketchMutation([&]{ m_sketchTool->commitMirror(newPts, newLines); });
             m_sketchTool->cancelMirror();
             m_sketchTool->setMode(SketchToolMode::Select);
             m_sketchTool->setSelection(newPts, newLines);
             markDirty();
-            m_meshesDirty = true;
         }
         ImGui::SameLine();
         if (ImGui::Button(materializr::tr("Cancel"))) {
@@ -4623,6 +4623,7 @@ void Application::renderOffsetToolPanel() {
     // the button below), so each lands inside recordSketchMutation as one undo
     // step and each reports the same way.
     auto commitOffsetNow = [&]() {
+        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
         std::set<int> newPts, newEls;
         recordSketchMutation([&]{ m_sketchTool->commitOffset(newPts, newEls); });
         // Without this the commit is genuinely hard to see: the new geometry
@@ -4638,7 +4639,6 @@ void Application::renderOffsetToolPanel() {
             showToast(msg, 2.0);
         }
         markDirty();
-        m_meshesDirty = true;
     };
 
     if (m_sketchTool->offsetReadyToCommit()) commitOffsetNow();

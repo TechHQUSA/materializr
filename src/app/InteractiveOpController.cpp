@@ -288,11 +288,22 @@ bool InteractiveOpController::deferCommit(const IopContext& ctx,
     // The task outlives this controller (a commit tears it down at once), so
     // it may capture nothing owned by `this`. The op travels as a raw pointer
     // because std::function requires a copyable target.
+    auto markBody = ctx.markBodyDirty;
     Operation* raw = op.release();
-    ctx.deferHeavy([hist, doc, raw, markDirty, onDone]() {
+    ctx.deferHeavy([hist, doc, raw, markDirty, markBody, onDone]() {
         std::unique_ptr<Operation> o(raw);
+        // The scope that tracked this edit closed with the frame that
+        // confirmed it, so the task diffs the document itself: a heavy commit
+        // is exactly when the project is big enough that re-tessellating every
+        // body afterwards hurts.
+        materializr::BodySnapshot before;
+        if (markBody) before = materializr::snapshotBodies(*doc);
         const bool ok = hist->pushOperation(std::move(o), *doc);
-        if (markDirty) markDirty();
+        if (markBody) {
+            for (int id : materializr::changedBodies(before, *doc)) markBody(id);
+        } else if (markDirty) {
+            markDirty();
+        }
         if (onDone) onDone(ok);
     });
     return true;

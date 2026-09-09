@@ -23,6 +23,18 @@ All notable changes to Materializr are documented here. Format loosely follows
   own triangulation instead of being meshed each frame (32 ms per frame on a
   300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
   milliseconds.
+- **Editing a sketch, undoing, or running a menu operation no longer
+  re-tessellates every body.** Roughly fifty call sites raised the
+  full-rebuild flag after an edit: the viewport then retired and re-adopted
+  every visible body, dropped the hover-pick cache and re-sliced the Section
+  View, once per dimension keystroke, per Ctrl+Z and per menu action. Each of
+  those now marks only the bodies whose shape or visibility actually changed,
+  which for a pure sketch edit is none (the bodies a sketch drives are
+  re-derived by the cascade, which already marked exactly those). Project
+  load, mesh-quality changes, imports and session switches still rebuild
+  everything, which is what they mean to do. A heavy commit run between
+  frames also marks per body now instead of flagging a full rebuild when it
+  lands.
 - **Shell, Draft, Scale Face, and Fillet and Chamfer when creating one, stay
   responsive while dragging on a heavy body** (re-editing an existing fillet
   or chamfer is unchanged). These previews execute the operation on the

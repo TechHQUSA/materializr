@@ -2603,6 +2603,7 @@ void Application::pollThreadRecuts() {
 }
 
 void Application::cancelThreadRecuts() {
+    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
     if (m_threadRecuts.empty()) return;
     for (auto& p : m_threadRecuts) {
         if (p.cancel) p.cancel->store(true);
@@ -2616,7 +2617,6 @@ void Application::cancelThreadRecuts() {
         m_threadZombies.push_back(std::move(p.fut));
     }
     m_threadRecuts.clear();
-    m_meshesDirty = true;
     showToast("Thread re-cut cancelled - the Thread step is "
               "suspended; re-enable it in History to re-cut.");
 }

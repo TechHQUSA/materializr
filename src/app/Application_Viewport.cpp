@@ -3261,7 +3261,10 @@ void Application::renderViewport() {
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                             });
                             markDirty();
-                            m_meshesDirty = true;
+                            // No mesh flag: a sketch edit changes no body. The ones a sketch
+                            // DOES drive are re-derived by cascadeFromSketchEdit, which marks
+                            // exactly those. Flagging a full rebuild here re-tessellated every
+                            // visible body on every dimension keystroke.
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
@@ -3288,7 +3291,6 @@ void Application::renderViewport() {
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                                     });
                                     markDirty();
-                                    m_meshesDirty = true;
                                 }
                                 ImGui::SameLine();
                                 ImGui::TextDisabled(drv ? "(controls geometry)"
@@ -3318,7 +3320,6 @@ void Application::renderViewport() {
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                                     });
                                     markDirty();
-                                    m_meshesDirty = true;
                                     m_dimEditingId = -1;
                                     ImGui::CloseCurrentPopup();
                                 }
@@ -3338,7 +3339,6 @@ void Application::renderViewport() {
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                             });
                             markDirty();
-                            m_meshesDirty = true;
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
@@ -4996,6 +4996,7 @@ void Application::renderViewport() {
                                 TopoDS_Face face = TopoDS::Face(result.pickedShape);
                                 Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
                                 if (!surf.IsNull() && surf->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                         auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                                     gp_Pln pln = Handle(Geom_Plane)::DownCast(surf)->Pln();
                                     const gp_Ax3& ax = pln.Position();
                                     auto op = std::make_unique<MirrorOp>();
@@ -5003,8 +5004,7 @@ void Application::renderViewport() {
                                     op->setPlane(MirrorPlane::Custom);
                                     op->setCustomPlane(gp_Ax2(ax.Location(), ax.Direction()));
                                     op->setKeepOriginal(true);
-                                    if (m_history->pushOperation(std::move(op), *m_document))
-                                        m_meshesDirty = true;
+                                    m_history->pushOperation(std::move(op), *m_document);
                                 }
                             } catch (...) {}
                         }
@@ -5951,7 +5951,6 @@ void Application::renderViewport() {
                                 // the body stale.
                                 if (m_eventBus && m_activeSketchId >= 0)
                                     m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -6040,7 +6039,6 @@ void Application::renderViewport() {
                                 // the body stale.
                                 if (m_eventBus && m_activeSketchId >= 0)
                                     m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -6496,6 +6494,7 @@ void Application::renderViewport() {
                                !m_moveModeToggle &&
                                m_window && m_window->lastLeftReleaseWasGesture() &&
                                m_sketchTool->isPlacing()) {
+                                   auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                         // A two-finger pan/zoom began right after this finger's
                         // press started a drawing placement. Roll that placement
                         // back so two-finger navigation needs no Move button and
@@ -6517,7 +6516,6 @@ void Application::renderViewport() {
                             if (m_activeSketchId >= 0)
                                 cascadeFromSketchEdit(m_activeSketchId);
                         }
-                        m_meshesDirty = true;
                     }
                     m_sketchPressActive = false;
                     m_sketchDragCenterPlaced = false;
@@ -6562,7 +6560,6 @@ void Application::renderViewport() {
                             if (m_eventBus && m_activeSketchId >= 0)
                                 m_eventBus->publish(
                                     SketchEditedEvent{m_activeSketchId});
-                            m_meshesDirty = true;
                         }
                         m_sketchDragBefore.reset();
                     }
@@ -6818,19 +6815,19 @@ void Application::renderViewport() {
             // flags the PROJECT as unsaved). The full rebuild skips invisible
             // bodies, so post-isolate it re-tessellates just the one body.
             if (ImGui::MenuItem(materializr::tr("Isolate"))) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, o == bid);
                 markDirty();
-                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
             // The way back from Isolate - without this the only recovery is
             // re-ticking every body's checkbox in the Items panel.
             if (ImGui::MenuItem(materializr::tr("Show All Bodies"))) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, true);
                 markDirty();
-                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
             // Export ▸ - the same submenu the Items panel offers, from the
@@ -6891,11 +6888,11 @@ void Application::renderViewport() {
             try { bshape = m_document->getBody(bid); } catch (...) {}
             if (m_history && SeparateBodyOp::solidCount(bshape) > 1) {
                 if (ImGui::MenuItem(materializr::tr("Separate"))) {
+                    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                     auto op = std::make_unique<SeparateBodyOp>();
                     op->setBody(bid);
                     m_history->pushOperation(std::move(op), *m_document);
                     markDirty();
-                    m_meshesDirty = true;
                     m_contextMenuFace.Nullify();
                 }
             }
