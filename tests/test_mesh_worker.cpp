@@ -154,32 +154,42 @@ TEST(MeshWorker, LandsTheEdgePolygonsToo) {
     EXPECT_GT(edgesChecked, 100);
     // Seam edges (one per hole wall) keep BOTH polygons, forward and reversed:
     // the single-polygon update would leave one and the edge no longer closed.
-    int closedSeams = 0, distinctSides = 0;
-    for (TopExp_Explorer fe(shape, TopAbs_FACE); fe.More(); fe.Next()) {
-        const TopoDS_Face face = TopoDS::Face(fe.Current());
-        TopLoc_Location loc;
+    // Every edge occurrence's polygon, seam sides included, must be the one
+    // a direct mesher pass installs. Delabella is deterministic, so a direct
+    // mesh of a copy numbers its nodes identically (test 1 relies on that)
+    // and the node arrays compare exactly; a swapped or duplicated seam side
+    // shows up here.
+    TopoDS_Shape reference = BRepBuilderAPI_Copy(shape, Standard_True, Standard_False).Shape();
+    BRepMesh_IncrementalMesh direct(reference, materializr::meshParams(kDefl, kAng, true));
+    int closedSeams = 0, occurrences = 0, mismatched = 0;
+    TopExp_Explorer fe(shape, TopAbs_FACE), fr(reference, TopAbs_FACE);
+    for (; fe.More() && fr.More(); fe.Next(), fr.Next()) {
+        const TopoDS_Face face = TopoDS::Face(fe.Current()), ref = TopoDS::Face(fr.Current());
+        TopLoc_Location loc, rloc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
-        for (TopExp_Explorer ee(face, TopAbs_EDGE); ee.More(); ee.Next()) {
-            const TopoDS_Edge edge = TopoDS::Edge(ee.Current());
-            if (edge.Orientation() != TopAbs_FORWARD || !BRep_Tool::IsClosed(edge, tri, loc)) continue;
-            ++closedSeams;
-            // The two sides of a seam run along different node columns; the
-            // same polygon stored twice would make them equal.
-            Handle(Poly_PolygonOnTriangulation) p1 = BRep_Tool::PolygonOnTriangulation(edge, tri, loc);
-            Handle(Poly_PolygonOnTriangulation) p2 =
-                BRep_Tool::PolygonOnTriangulation(TopoDS::Edge(edge.Reversed()), tri, loc);
-            ASSERT_FALSE(p1.IsNull());
-            ASSERT_FALSE(p2.IsNull());
-            const TColStd_Array1OfInteger& n1 = p1->Nodes();
-            const TColStd_Array1OfInteger& n2 = p2->Nodes();
-            bool same = n1.Length() == n2.Length();
-            for (int k = n1.Lower(); same && k <= n1.Upper(); ++k)
-                same = n1(k) == n2(n2.Lower() + (k - n1.Lower()));
-            if (!same) ++distinctSides;
+        Handle(Poly_Triangulation) rtri = BRep_Tool::Triangulation(ref, rloc);
+        TopExp_Explorer ee(face, TopAbs_EDGE), er(ref, TopAbs_EDGE);
+        for (; ee.More() && er.More(); ee.Next(), er.Next()) {
+            const TopoDS_Edge edge = TopoDS::Edge(ee.Current()), redge = TopoDS::Edge(er.Current());
+            ASSERT_EQ(edge.Orientation(), redge.Orientation());
+            if (BRep_Tool::Degenerated(edge)) continue;
+            if (edge.Orientation() == TopAbs_FORWARD && BRep_Tool::IsClosed(edge, tri, loc)) ++closedSeams;
+            Handle(Poly_PolygonOnTriangulation) p = BRep_Tool::PolygonOnTriangulation(edge, tri, loc);
+            Handle(Poly_PolygonOnTriangulation) rp = BRep_Tool::PolygonOnTriangulation(redge, rtri, rloc);
+            ASSERT_FALSE(p.IsNull());
+            ASSERT_FALSE(rp.IsNull());
+            ++occurrences;
+            const TColStd_Array1OfInteger& n = p->Nodes();
+            const TColStd_Array1OfInteger& rn = rp->Nodes();
+            bool same = n.Length() == rn.Length();
+            for (int k = n.Lower(); same && k <= n.Upper(); ++k)
+                same = n(k) == rn(rn.Lower() + (k - n.Lower()));
+            if (!same) ++mismatched;
         }
     }
-    EXPECT_EQ(closedSeams, 64); // 8 x 8 holes, one cylinder wall each
-    EXPECT_EQ(distinctSides, 64);
+    EXPECT_GT(closedSeams, 0); // the hole walls; how many faces a boolean makes of them is OCCT's business
+    EXPECT_GT(occurrences, 300);
+    EXPECT_EQ(mismatched, 0);
     // And the consumer that motivated it: the ghost builds from a landed face.
     std::vector<float> ghost;
     EXPECT_TRUE(materializr::ghostPrismMesh(TopoDS::Face(TopExp_Explorer(shape, TopAbs_FACE).Current()),

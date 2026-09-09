@@ -114,10 +114,10 @@ src/app/FaceOpControllers.cpp:968:
 src/app/FaceOpControllers.cpp:969:
 src/app/FaceOpControllers.cpp:1527:
 src/app/PushPullController.cpp:89:
-src/app/PushPullController.cpp:578:
-src/app/PushPullController.cpp:589:
-src/app/PushPullController.cpp:601:
-src/app/PushPullController.cpp:608:
+src/app/PushPullController.cpp:582:
+src/app/PushPullController.cpp:593:
+src/app/PushPullController.cpp:605:
+src/app/PushPullController.cpp:612:
 src/app/SplitController.h:49:
 src/app/layout/imtouch/ImTouchLayout.cpp:259:
 src/core/Document.h:54:

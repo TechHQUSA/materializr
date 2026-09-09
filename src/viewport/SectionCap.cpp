@@ -284,7 +284,13 @@ std::vector<FaceMesh> faceMeshes(const TopoDS_Shape& shape)
         FaceMesh fm{tri, Bnd_Box(), loc.Transformation(), loc.IsIdentity() == Standard_False};
         // A bare face stays in the list (null handle) with its box: a plane
         // through that box has a gap in its slice, see sliceSection.
-        if (tri.IsNull()) BRepBndLib::Add(fe.Current(), fm.box, Standard_False);
+        if (tri.IsNull()) {
+            // Bare faces are the mesher's failures, so this is the geometry
+            // most likely to upset the box too: a box we cannot get means
+            // "assume a gap everywhere" (SetWhole), never "no gap".
+            try { BRepBndLib::Add(fe.Current(), fm.box, Standard_False); }
+            catch (...) { fm.box.SetWhole(); }
+        }
         out.push_back(fm);
     }
     return out;
@@ -305,7 +311,7 @@ bool sliceSection(const std::vector<FaceMesh>& faces, const gp_Pln& cuttingPlane
         // triangulates keeps its cap on every other plane).
         bool complete = true;
         for (const FaceMesh& f : faces)
-            if (f.tri.IsNull() && !f.box.IsVoid() && !f.box.IsOut(cuttingPlane)) { complete = false; break; }
+            if (f.tri.IsNull() && (f.box.IsVoid() || !f.box.IsOut(cuttingPlane))) { complete = false; break; }
         // The body must straddle the plane; a plane tangent to a face is no cut.
         const double straddleEps = 1e-6;
         if (!(dLo < -straddleEps && dHi > straddleEps)) return false;

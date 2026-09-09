@@ -64,6 +64,9 @@ public:
 
     // Scratch bodies that stand for live ones (for tests and diagnostics).
     size_t copiedBodies() const { return m_scratchToLive.size(); }
+    // The profiles the scratch op will sweep, one per usable target, in
+    // order. For tests: none of them may share a TShape with a live face.
+    const std::vector<TopoDS_Face>& profiles() const { return m_profiles; }
 
 private:
     PreviewJob();
@@ -73,6 +76,7 @@ private:
     std::unique_ptr<Document> m_scratch;
     std::map<int, int> m_scratchToLive;
     std::unique_ptr<PushPullOp> m_op;
+    std::vector<TopoDS_Face> m_profiles;
 };
 
 } // namespace materializr

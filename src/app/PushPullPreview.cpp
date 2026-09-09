@@ -118,6 +118,7 @@ std::unique_ptr<PreviewJob> PreviewJob::prepareOrThrow(const BodySnapshot& origi
             sketchSources.emplace_back(static_cast<int>(opTargets.size()),
                                        std::make_pair(t.sketchId, t.regionIndex));
         }
+        job->m_profiles.push_back(ot.profile);
         opTargets.push_back(ot);
     }
     if (opTargets.empty()) return nullptr;

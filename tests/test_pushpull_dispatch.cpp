@@ -63,6 +63,19 @@ TEST(PushPullDispatch, RetractingForgetsTheAppliedKey) {
     EXPECT_TRUE(d.shouldLaunch({5.0, false}));
 }
 
+TEST(PushPullDispatch, AJobStillRunningAcrossARetractLandsWhenTheArrowIsBack) {
+    // Launch 5, drag to zero (retract) while it runs, come back to 5 before it
+    // finishes: the result is for what the arrow shows, so it applies and is
+    // not asked again.
+    PushPullDispatch d;
+    d.inlinePreviewTook(100.0);
+    d.launched({5.0, false});
+    d.retracted();
+    EXPECT_TRUE(d.running());
+    EXPECT_TRUE(d.finished({5.0, false}));
+    EXPECT_FALSE(d.shouldLaunch({5.0, false}));
+}
+
 TEST(PushPullDispatch, ARefusedKeyIsNotAskedAgainUntilTheArrowMoves) {
     PushPullDispatch d;
     d.inlinePreviewTook(100.0);

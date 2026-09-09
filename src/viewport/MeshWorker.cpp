@@ -12,7 +12,6 @@
 #include <TopoDS.hxx>
 
 #include <chrono>
-#include <map>
 #include <vector>
 
 namespace materializr {
@@ -97,15 +96,16 @@ int MeshWorker::land(const Result& r)
         // A seam edge (a cylinder's) occurs twice in its face, forward and
         // reversed, with a polygon each; both must go on in one call, the
         // single-polygon UpdateEdge replaces what is there for (tri, loc).
-        std::map<const void*, std::vector<const std::pair<TopoDS_Edge, Handle(Poly_PolygonOnTriangulation)>*>> byEdge;
-        std::vector<const void*> order;
+        // Group the occurrences of one edge (IsSame: TShape and Location; a
+        // face has few edges, a linear partner search is enough).
+        std::vector<std::vector<const std::pair<TopoDS_Edge, Handle(Poly_PolygonOnTriangulation)>*>> groups;
         for (const auto& ep : f.edges) {
-            const void* key = ep.first.TShape().get();
-            if (byEdge[key].empty()) order.push_back(key);
-            byEdge[key].push_back(&ep);
+            bool placed = false;
+            for (auto& g : groups)
+                if (g.front()->first.IsSame(ep.first)) { g.push_back(&ep); placed = true; break; }
+            if (!placed) groups.push_back({&ep});
         }
-        for (const void* key : order) {
-            const auto& occ = byEdge[key];
+        for (const auto& occ : groups) {
             if (occ.size() == 1) {
                 if (!occ[0]->second.IsNull())
                     builder.UpdateEdge(occ[0]->first, occ[0]->second, f.tri, loc);
@@ -114,8 +114,13 @@ int MeshWorker::land(const Result& r)
             Handle(Poly_PolygonOnTriangulation) forward, reversed;
             for (const auto* ep : occ)
                 (ep->first.Orientation() == TopAbs_REVERSED ? reversed : forward) = ep->second;
+            // P1 is the FORWARD side, P2 the REVERSED one (that is how
+            // BRep_Tool::PolygonOnTriangulation picks them); hand the builder
+            // the forward-oriented edge so the pairing is right whichever
+            // occurrence came first.
             if (!forward.IsNull() && !reversed.IsNull())
-                builder.UpdateEdge(occ[0]->first, forward, reversed, f.tri, loc);
+                builder.UpdateEdge(TopoDS::Edge(occ[0]->first.Oriented(TopAbs_FORWARD)),
+                                   forward, reversed, f.tri, loc);
             else if (!forward.IsNull())
                 builder.UpdateEdge(occ[0]->first, forward, f.tri, loc);
             else if (!reversed.IsNull())

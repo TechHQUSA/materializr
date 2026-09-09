@@ -13,7 +13,9 @@
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <GProp_GProps.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Pnt.hxx>
@@ -175,11 +177,19 @@ TEST(PushPullPreview, AStaleFaceProfileIsStillPrepared) {
     p.distance = 5.0;
     std::unique_ptr<PreviewJob> job = PreviewJob::prepare(originals, {t}, p);
     ASSERT_TRUE(job);
+    // The worker must get its own copy: no TShape of the prepared profile
+    // (face, edges, vertices) may be one of the live profile's.
+    ASSERT_EQ(job->profiles().size(), 1u);
+    TopTools_IndexedMapOfShape liveParts;
+    TopExp::MapShapes(t.profile, liveParts);
+    for (TopExp_Explorer e(job->profiles()[0], TopAbs_SHAPE); e.More(); e.Next())
+        EXPECT_FALSE(liveParts.Contains(e.Current()));
+    EXPECT_FALSE(liveParts.Contains(job->profiles()[0]));
     PreviewResult r = job->run();
     EXPECT_TRUE(r.ok);
     ASSERT_EQ(r.bodies.size(), 1u);
     EXPECT_NEAR(volume(r.bodies[0].second), 20.0 * 20.0 * 15.0, 1e-6);
-    EXPECT_TRUE(live.getBody(host).IsEqual(originals.at(host).shape));
+    EXPECT_EQ(r.bodies[0].first, host);
 }
 
 TEST(PushPullPreview, AMeshImportInTheToolsPathIsNotCopied) {

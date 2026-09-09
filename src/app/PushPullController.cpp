@@ -455,7 +455,6 @@ void PushPullController::reapAbandoned() {
 }
 
 void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
-    (void)ctx;
     reapAbandoned();
     const PushPullKey want{static_cast<double>(m_st.distance), m_st.symmetric};
     if (std::abs(m_st.distance) <= 1e-6) return; // a zero gesture previews nothing
@@ -494,6 +493,9 @@ void PushPullController::launchPreviewIfWanted(const IopContext& ctx) {
             run->done.store(true);
         });
     } catch (const std::system_error&) {
+        // Same as a refused prepare(): nothing will be previewed at this
+        // distance, so the previous preview must not stay on the body.
+        retractLivePreview(ctx);
         m_dispatch.refused(want);
         return;
     }
@@ -539,7 +541,9 @@ void PushPullController::pollPreview(const IopContext& ctx) {
 bool PushPullController::previewPending() const {
     // Pending until POLLED, not until done: a job finishing between the poll
     // and the frame loop's active-work check must still earn the next frame.
-    return m_run != nullptr;
+    // Abandoned jobs count too, so their copies are reaped when they finish
+    // rather than on the next input event.
+    return m_run != nullptr || !m_abandoned.empty();
 }
 
 // Mark only what the push/pull actually touched. On a 100+ body project this
