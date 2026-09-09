@@ -16,8 +16,10 @@ All notable changes to Materializr are documented here. Format loosely follows
   when it is ready and asking again if the arrow moved meanwhile. The body
   therefore trails the arrow at the worker's pace instead of stalling the
   app. Committing such a gesture runs the operation once at the final
-  distance, as the dense-body ghost path always did. Small bodies preview
-  exactly as before. The ghost tool volume is now built from the profile's
+  distance, as the dense-body ghost path always did, and that one run now
+  happens between frames behind the cancellable progress window instead of
+  freezing the frame that confirmed it (1.3 s on the 300-hole plate). Small
+  bodies preview and commit exactly as before. The ghost tool volume is now built from the profile's
   own triangulation instead of being meshed each frame (32 ms per frame on a
   300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
   milliseconds.

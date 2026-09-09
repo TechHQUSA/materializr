@@ -3,6 +3,7 @@
 // through pollPreview; the body trails the parameters, a mid-job change is
 // re-asked, cancel restores the snapshot, and commit records the op even
 // while a job is in flight.
+#include "app/DeferredChain.h"
 #include "app/InteractiveOpController.h"
 #include "core/Document.h"
 #include "core/History.h"
@@ -68,6 +69,29 @@ protected:
     }
     void panelBody(const IopContext&, bool&) override {}
     bool previewOffThread() const override { return true; }
+};
+
+// The LiveOp shape (Push/Pull, Extrude): the preview is an applied instance,
+// and the commit records a DIFFERENT op built at the final values.
+class LiveController : public InteractiveOpController {
+public:
+    int target = -1;
+    double height = 12.0;     // what the preview applied
+    double commitHeight = 15.0;
+    bool wentAsync = true;
+    using InteractiveOpController::livePreviewApplied;
+protected:
+    PreviewModel previewModel() const override { return PreviewModel::LiveOp; }
+    bool previewWentAsync() const override { return wentAsync; }
+    const char* title() const override { return "Live"; }
+    int onBegin(const IopContext&) override { return target; }
+    std::unique_ptr<Operation> buildOp(const IopContext&) override {
+        return std::make_unique<SlowHeightOp>(target, height);
+    }
+    std::unique_ptr<Operation> buildCommitOp(const IopContext&) override {
+        return std::make_unique<SlowHeightOp>(target, commitHeight);
+    }
+    void panelBody(const IopContext&, bool&) override {}
 };
 
 struct Rig {
@@ -223,4 +247,88 @@ TEST(IopAsyncPreview, CommitAfterAnAsyncGestureIsDeferredWhenTheAppCan) {
     deferred();
     ASSERT_EQ(r.history.operations().size(), 1u);
     EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+namespace {
+// A context with the app's deferral wired the way Application does it.
+struct DeferRig {
+    Rig rig;
+    std::function<void()> slot;
+    IopContext ctx() {
+        IopContext c = rig.ctx();
+        c.progress = [](float, const char*) { return false; };
+        c.deferHeavy = [this](std::function<void()> fn) {
+            materializr::chainDeferred(slot, std::move(fn));
+        };
+        return c;
+    }
+};
+} // namespace
+
+TEST(IopLiveOpCommit, AnAsyncGestureCommitsBehindTheProgressWindow) {
+    DeferRig r;
+    LiveController ctl;
+    ctl.target = r.rig.id;
+    ASSERT_TRUE(ctl.begin(r.ctx()));
+    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 12.0, 1e-6); // preview applied
+
+    ctl.commit(r.ctx());
+    EXPECT_FALSE(ctl.active());
+    ASSERT_TRUE(r.slot) << "the one real execute of a Push/Pull-shaped gesture "
+                           "must not freeze the frame that confirmed it";
+    EXPECT_EQ(r.rig.history.operations().size(), 0u);
+    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 10.0, 1e-6); // preview undone
+
+    r.slot();
+    ASSERT_EQ(r.rig.history.operations().size(), 1u);
+    EXPECT_EQ(r.rig.history.operations()[0]->serializeParams(), "h=15.000000");
+    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+TEST(IopLiveOpCommit, AnInlineGestureStillCommitsInTheFrame) {
+    DeferRig r;
+    LiveController ctl;
+    ctl.target = r.rig.id;
+    ctl.wentAsync = false;   // small bodies previewed inline: nothing to defer
+    ASSERT_TRUE(ctl.begin(r.ctx()));
+    ctl.commit(r.ctx());
+    EXPECT_FALSE(r.slot);
+    ASSERT_EQ(r.rig.history.operations().size(), 1u);
+    EXPECT_NEAR(r.rig.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+TEST(IopLiveOpCommit, WithoutADeferralSlotTheCommitRunsInline) {
+    // Headless embeddings (and the tests above) hand the controller no
+    // progress reporter: deferCommit must decline and leave the op to run.
+    Rig r;
+    LiveController ctl;
+    ctl.target = r.id;
+    ASSERT_TRUE(ctl.begin(r.ctx()));
+    ctl.commit(r.ctx());
+    ASSERT_EQ(r.history.operations().size(), 1u);
+    EXPECT_NEAR(r.bodyVolume(), 20.0 * 20.0 * 15.0, 1e-6);
+}
+
+TEST(DeferredChain, QueuesBehindAPendingTaskInOrder) {
+    std::function<void()> slot;
+    std::string log;
+    materializr::chainDeferred(slot, [&] { log += "a"; });
+    materializr::chainDeferred(slot, [&] { log += "b"; });
+    materializr::chainDeferred(slot, [&] { log += "c"; });
+    ASSERT_TRUE(slot);
+    slot();
+    EXPECT_EQ(log, "abc") << "a confirmed operation waiting in the slot must "
+                             "never be dropped by the next one";
+}
+
+TEST(DeferredChain, AnEmptySlotTakesTheTaskAndANullTaskIsIgnored) {
+    std::function<void()> slot;
+    materializr::chainDeferred(slot, {});
+    EXPECT_FALSE(slot);
+    int ran = 0;
+    materializr::chainDeferred(slot, [&] { ++ran; });
+    ASSERT_TRUE(slot);
+    materializr::chainDeferred(slot, {});
+    slot();
+    EXPECT_EQ(ran, 1);
 }

@@ -108,15 +108,15 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/Application_Viewport.cpp:7375 | `return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;` |
 | CONVERTED | src/app/Application_Viewport.cpp:7410 | `const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)` |
 | angle | src/app/Application_Viewport.cpp:7411 | `: materializr::parseFinite(m_sketchDimBuf, v0);` |
-| CONVERTED | src/app/EdgeOpController.cpp:831 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
-| CONVERTED | src/app/EdgeOpController.cpp:844 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
-| CONVERTED | src/app/EdgeOpController.cpp:852 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
-| CONVERTED | src/app/EdgeOpController.cpp:866 | `materializr::lengthStepperRow("edgeStep", &m_value,` |
-| CONVERTED | src/app/EdgeOpController.cpp:889 | `if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, ` |
-| CONVERTED | src/app/EdgeOpController.cpp:898 | `(void)materializr::parseLength(m_inputBuf2, m_value2);` |
-| CONVERTED | src/app/EdgeOpController.cpp:903 | `if (materializr::parseLength(m_inputBuf2, p2) &&` |
-| CONVERTED | src/app/EdgeOpController.cpp:913 | `materializr::lengthStepperRow("edgeStep2", &m_value2,` |
-| CONVERTED | src/app/EdgeOpController.cpp:937 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/EdgeOpController.cpp:821 | `if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false,` |
+| CONVERTED | src/app/EdgeOpController.cpp:834 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
+| CONVERTED | src/app/EdgeOpController.cpp:842 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:856 | `materializr::lengthStepperRow("edgeStep", &m_value,` |
+| CONVERTED | src/app/EdgeOpController.cpp:879 | `if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, ` |
+| CONVERTED | src/app/EdgeOpController.cpp:888 | `(void)materializr::parseLength(m_inputBuf2, m_value2);` |
+| CONVERTED | src/app/EdgeOpController.cpp:893 | `if (materializr::parseLength(m_inputBuf2, p2) &&` |
+| CONVERTED | src/app/EdgeOpController.cpp:903 | `materializr::lengthStepperRow("edgeStep2", &m_value2,` |
+| CONVERTED | src/app/EdgeOpController.cpp:927 | `(void)materializr::parseLength(m_inputBuf, m_value);` |
 | CONVERTED | src/app/ExtrudeController.cpp:397 | `if (materializr::amountLengthField("extAmt", materializr::tr("Distance"), &m_distance, /*allowSign=*/true)) {` |
 | CONVERTED | src/app/ExtrudeController.cpp:413 | `(void)materializr::parseLength(m_inputBuf, m_distance);` |
 | CONVERTED | src/app/ExtrudeController.cpp:420 | `if (materializr::parseLength(m_inputBuf, parsed) &&` |
@@ -262,25 +262,25 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 
 | class | file:line | code |
 |---|---|---|
-| comment | src/app/Application.cpp:791 | `// ios_platform.mm).` |
-| comment | src/app/Application.cpp:1049 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
-| comment | src/app/Application.cpp:1833 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
-| comment | src/app/Application.cpp:1907 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
-| comment | src/app/Application.cpp:4230 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
-| comment | src/app/Application.cpp:4256 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
-| comment | src/app/Application.cpp:4627 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
-| comment | src/app/Application.cpp:4635 | `// 152 mm - see 0733a59, which reverted exactly that.` |
-| comment | src/app/Application.cpp:5225 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
-| comment | src/app/Application.cpp:5287 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
-| comment | src/app/Application.cpp:5352 | `// then keeps the wrong band, landing 0.6 mm off with a` |
-| comment | src/app/Application.cpp:5401 | `// 0.64 mm off-axis at the surface origin) that WON` |
-| comment | src/app/Application.cpp:5495 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
-| comment | src/app/Application.cpp:5510 | `const double eps = 1.0; // mm` |
-| comment | src/app/Application.cpp:6138 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
-| comment | src/app/Application.cpp:6174 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
-| comment | src/app/Application.cpp:6515 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
-| comment | src/app/Application.cpp:6575 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
-| comment | src/app/Application.cpp:6576 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
+| comment | src/app/Application.cpp:792 | `// ios_platform.mm).` |
+| comment | src/app/Application.cpp:1050 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
+| comment | src/app/Application.cpp:1840 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
+| comment | src/app/Application.cpp:1914 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
+| comment | src/app/Application.cpp:4237 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
+| comment | src/app/Application.cpp:4263 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
+| comment | src/app/Application.cpp:4634 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
+| comment | src/app/Application.cpp:4642 | `// 152 mm - see 0733a59, which reverted exactly that.` |
+| comment | src/app/Application.cpp:5232 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
+| comment | src/app/Application.cpp:5294 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
+| comment | src/app/Application.cpp:5359 | `// then keeps the wrong band, landing 0.6 mm off with a` |
+| comment | src/app/Application.cpp:5408 | `// 0.64 mm off-axis at the surface origin) that WON` |
+| comment | src/app/Application.cpp:5502 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
+| comment | src/app/Application.cpp:5517 | `const double eps = 1.0; // mm` |
+| comment | src/app/Application.cpp:6145 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
+| comment | src/app/Application.cpp:6181 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
+| comment | src/app/Application.cpp:6522 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
+| comment | src/app/Application.cpp:6582 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
+| comment | src/app/Application.cpp:6583 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
 | comment | src/app/Application.h:627 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
 | comment | src/app/Application.h:902 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
 | comment | src/app/Application.h:904 | `// 300 mm because it reads as a round number in the units that needed` |
@@ -361,11 +361,11 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application_Viewport.cpp:7406 | `// Converting those display->mm made a typed 180 deg arrive` |
 | diagnostic | src/app/EdgeOpController.cpp:540 | `std::fprintf(stdout, "%s edited to %.1f mm\n",` |
 | diagnostic | src/app/EdgeOpController.cpp:552 | `std::fprintf(stdout, "%s %.1f mm committed\n",` |
-| comment | src/app/EdgeOpController.cpp:605 | `// visible arrow length (1 mm single / 0.6 mm per chamfer arrow) keeps the hit` |
-| comment | src/app/EdgeOpController.cpp:682 | `// the edge grows the value (>= 0.1 mm); dragging back toward or` |
-| comment | src/app/EdgeOpController.cpp:686 | `// Quantise the drag to the displayed precision (0.1 mm): every` |
-| comment | src/app/EdgeOpController.cpp:690 | `m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm` |
-| comment | src/app/EdgeOpController.cpp:762 | `// Minimum 1 mm visible even at value 0 so the handle can be seen and` |
+| comment | src/app/EdgeOpController.cpp:595 | `// visible arrow length (1 mm single / 0.6 mm per chamfer arrow) keeps the hit` |
+| comment | src/app/EdgeOpController.cpp:672 | `// the edge grows the value (>= 0.1 mm); dragging back toward or` |
+| comment | src/app/EdgeOpController.cpp:676 | `// Quantise the drag to the displayed precision (0.1 mm): every` |
+| comment | src/app/EdgeOpController.cpp:680 | `m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm` |
+| comment | src/app/EdgeOpController.cpp:752 | `// Minimum 1 mm visible even at value 0 so the handle can be seen and` |
 | diagnostic | src/app/ExtrudeController.cpp:259 | `std::fprintf(stdout, "Subtracted %.1f mm from %d of %zu bodies\n",` |
 | diagnostic | src/app/ExtrudeController.cpp:282 | `std::fprintf(stdout, "Extruded %.1f mm\n", m_distance);` |
 | diagnostic | src/app/ExtrudeController.cpp:291 | `std::fprintf(stdout, "Subtracted %.1f mm from body %d\n",` |

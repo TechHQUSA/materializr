@@ -293,11 +293,20 @@ protected:
     }
 
     void requestCommit() { m_commitRequested = true; }
-    // SnapshotBody + previewOffThread: this gesture proved the op slow and
-    // moved its previews to the worker. A controller with its own commit
-    // path uses it to decide on the deferred (progress window) commit the
-    // base's commit() would have chosen.
-    bool previewWentAsync() const { return m_dispatch.async(); }
+    // This gesture proved the op slow and moved its previews to the worker,
+    // so its commit belongs behind the progress window too. Virtual because a
+    // controller running its own preview engine (Push/Pull) knows this from
+    // its own dispatch, not the base's.
+    virtual bool previewWentAsync() const { return m_dispatch.async(); }
+    // Push `op` onto History BETWEEN frames, behind the cancellable progress
+    // window, instead of freezing this frame on its execute. `onDone`, when
+    // given, is called in that deferred task with pushOperation's result (a
+    // controller that reports a refusal to the user). False means the host
+    // offers no deferral (no progress reporter or no deferHeavy - tests, and
+    // any headless embedding): `op` is untouched and the caller pushes it
+    // inline itself.
+    bool deferCommit(const IopContext& ctx, std::unique_ptr<Operation>& op,
+                     std::function<void(bool)> onDone = {});
     void setDraggingHandle(bool d) { m_draggingHandle = d; }
     // For a controller that runs its own preview (HistoryEdit) and has to
     // report whether the frame landed.

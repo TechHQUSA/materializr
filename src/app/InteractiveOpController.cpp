@@ -234,7 +234,13 @@ void InteractiveOpController::commit(const IopContext& ctx) {
                 m_liveApplied = false;
             }
             m_liveOp.reset();
-            ctx.history.pushOperation(std::move(alt), ctx.doc);
+            // The undo above is cheap (it restores the previous shapes); the
+            // op itself is what costs, so a gesture whose previews went to the
+            // worker (or that never previewed at all, Push/Pull's ghost path)
+            // runs its one real execute behind the progress window rather than
+            // freezing the frame that confirmed it.
+            if (!previewWentAsync() || !deferCommit(ctx, alt))
+                ctx.history.pushOperation(std::move(alt), ctx.doc);
         } else if (m_liveApplied && m_liveOp) {
             // The preview IS the result - record it without re-running it.
             ctx.history.pushExecuted(std::move(m_liveOp));
@@ -258,29 +264,38 @@ void InteractiveOpController::commit(const IopContext& ctx) {
     }
     std::unique_ptr<Operation> op = buildOp(ctx);
     if (op) {
-        // A gesture that went async proved the op slow: run the commit behind
-        // the progress window too, instead of freezing on the final execute.
-        if ((wantsDeferredCommit(ctx) || m_dispatch.async()) && ctx.progress && ctx.deferHeavy) {
-            // Heavy op (live preview was off): defer it to run BETWEEN frames
-            // with a progress reporter so the window stays alive and the user
-            // can cancel. A cancel makes execute() fail → pushOperation refuses
-            // → body stays at the snapshot (clean no-op).
-            op->setProgressReporter(ctx.progress);
-            History* hist = &ctx.history;
-            Document* doc = &ctx.doc;
-            auto markDirty = ctx.markMeshesDirty;
-            Operation* raw = op.release();
-            ctx.deferHeavy([hist, doc, raw, markDirty]() {
-                std::unique_ptr<Operation> o(raw);
-                hist->pushOperation(std::move(o), *doc);
-                if (markDirty) markDirty();
-            });
-        } else {
+        // Heavy op (the live preview was off, or the gesture proved slow and
+        // went to the worker): defer it to run BETWEEN frames with a progress
+        // reporter so the window stays alive and the user can cancel. A cancel
+        // makes execute() fail, pushOperation refuses, and the body stays at
+        // the snapshot (a clean no-op).
+        const bool heavy = wantsDeferredCommit(ctx) || previewWentAsync();
+        if (!heavy || !deferCommit(ctx, op))
             ctx.history.pushOperation(std::move(op), ctx.doc);
-        }
     }
     ctx.selection.clear();
     cleanup();
+}
+
+bool InteractiveOpController::deferCommit(const IopContext& ctx,
+                                          std::unique_ptr<Operation>& op,
+                                          std::function<void(bool)> onDone) {
+    if (!op || !ctx.progress || !ctx.deferHeavy) return false;
+    op->setProgressReporter(ctx.progress);
+    History* hist = &ctx.history;
+    Document* doc = &ctx.doc;
+    auto markDirty = ctx.markMeshesDirty;
+    // The task outlives this controller (a commit tears it down at once), so
+    // it may capture nothing owned by `this`. The op travels as a raw pointer
+    // because std::function requires a copyable target.
+    Operation* raw = op.release();
+    ctx.deferHeavy([hist, doc, raw, markDirty, onDone]() {
+        std::unique_ptr<Operation> o(raw);
+        const bool ok = hist->pushOperation(std::move(o), *doc);
+        if (markDirty) markDirty();
+        if (onDone) onDone(ok);
+    });
+    return true;
 }
 
 void InteractiveOpController::cancel(const IopContext& ctx) {

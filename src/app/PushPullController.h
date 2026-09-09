@@ -85,6 +85,13 @@ public:
 protected:
     const char* title() const override { return "Push / Pull"; }
     PreviewModel previewModel() const override { return PreviewModel::LiveOp; }
+    // This gesture's one real execute is the commit, and it is the expensive
+    // one: either the previews went to the worker (async) or there were none
+    // at all (the ghost path on a dense or threaded body). Both mean the
+    // base's commit should defer it behind the progress window.
+    bool previewWentAsync() const override {
+        return m_ppDispatch.async() || m_st.heavyPreview;
+    }
     int onBegin(const IopContext& ctx) override;
     std::unique_ptr<Operation> buildOp(const IopContext& ctx) override;
     bool syncLiveOp(Operation& op) override;

@@ -36,6 +36,7 @@ inline void resetFpuForOcct() {
 #endif
 
 #include "app/Application.h"
+#include "app/DeferredChain.h"
 #include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
@@ -1132,7 +1133,13 @@ materializr::IopContext Application::iopContext() {
         *m_document, *m_history, *m_selection,
         [this] { m_meshesDirty = true; },
         [this](float f, const char* l) { return renderProgressFrame(f, l); },
-        [this](std::function<void()> t) { m_deferredHeavyTask = std::move(t); },
+        // Deferred heavy commits CHAIN rather than replace: the slot holds one
+        // task, and dropping an already-queued commit on the floor would lose
+        // an operation the user confirmed. (The startup auto-open/restore
+        // paths assign the slot directly and do mean to replace each other.)
+        [this](std::function<void()> t) {
+            materializr::chainDeferred(m_deferredHeavyTask, std::move(t));
+        },
         // im-touch hosts the Confirm/Cancel as corner FABs - the scaffold
         // then skips its in-panel buttons (Enter/Esc still work).
         // NOTE: aggregate init, so this list must stay in DECLARATION order -

@@ -558,20 +558,10 @@ void EdgeOpController::commit(const IopContext& ctx) {
                               "or fewer edges.").c_str());
         }
     };
-    if (op && previewWentAsync() && ctx.progress && ctx.deferHeavy) {
-        // The gesture's previews ran on the worker because one frame was
-        // slow: run the commit between frames behind the progress window (as
-        // the base engine's commit does) instead of freezing on it here.
-        op->setProgressReporter(ctx.progress);
-        History* hist = &ctx.history;
-        Document* doc = &ctx.doc;
-        auto markDirty = ctx.markMeshesDirty;
-        Operation* raw = op.release();
-        ctx.deferHeavy([hist, doc, raw, markDirty, report]() {
-            std::unique_ptr<Operation> o(raw);
-            report(hist->pushOperation(std::move(o), *doc));
-            if (markDirty) markDirty();
-        });
+    // The gesture's previews ran on the worker because one frame was slow:
+    // run the commit between frames behind the progress window (as the base
+    // engine's commit does) instead of freezing on it here.
+    if (op && previewWentAsync() && deferCommit(ctx, op, report)) {
         finish(ctx);
         return;
     }
