@@ -178,7 +178,17 @@ bool ScaleFaceOp::execute(Document& doc) {
             // degenerates and a single Common against the frustum does
             // everything.
             Bnd_Box bb;
-            BRepBndLib::Add(m_previousShape, bb);
+            // Triangulation OFF, deliberately. These bounds drive `depth` and
+            // therefore the fullDepth branch below, and BRepBndLib::Add
+            // defaults to using a triangulation when the shape carries one.
+            // The live body is meshed; the preview worker computes on a copy
+            // that deliberately is not (see SnapshotPreview.cpp), so the same
+            // body measured the two ways disagrees - 5.65 mm on a torus, far
+            // more than the 1e-4 the branch is decided by. Preview and commit
+            // could therefore take different branches on identical inputs.
+            // Asking for geometry bounds makes the answer independent of
+            // whether anything happens to be meshed.
+            BRepBndLib::Add(m_previousShape, bb, Standard_False);
             double bx0, by0, bz0, bx1, by1, bz1;
             bb.Get(bx0, by0, bz0, bx1, by1, bz1);
             double diag = gp_Pnt(bx0, by0, bz0).Distance(
