@@ -283,16 +283,14 @@ void InteractiveOpController::commit(const IopContext& ctx) {
 }
 
 bool InteractiveOpController::deferCommit(const IopContext& ctx,
-                                          std::unique_ptr<Operation>& op,
-                                          std::function<void(bool)> onDone) {
+                                          std::unique_ptr<Operation>& op) {
     if (!op || !ctx.progress || !ctx.deferHeavy) return false;
     op->setProgressReporter(ctx.progress);
     History* hist = &ctx.history;
     Document* doc = &ctx.doc;
     auto markDirty = ctx.markMeshesDirty;
     // The task outlives this controller (a commit tears it down at once), so
-    // it may capture nothing owned by `this`. The op travels as a raw pointer
-    // because std::function requires a copyable target.
+    // it may capture nothing owned by `this`.
     auto markBody = ctx.markBodyDirty;
     // The op travels in a shared_ptr because std::function needs a copyable
     // target, and a queued task that never runs (the app quits, the startup
@@ -300,7 +298,7 @@ bool InteractiveOpController::deferCommit(const IopContext& ctx,
     // geometry it holds. Moving out of the held pointer also makes a second
     // invocation a no-op.
     auto held = std::make_shared<std::unique_ptr<Operation>>(std::move(op));
-    ctx.deferHeavy([hist, doc, held, markDirty, markBody, onDone]() {
+    ctx.deferHeavy([hist, doc, held, markDirty, markBody]() {
         std::unique_ptr<Operation> o = std::move(*held);
         if (!o) return;
         // The scope that tracked this edit closed with the frame that
@@ -309,13 +307,12 @@ bool InteractiveOpController::deferCommit(const IopContext& ctx,
         // body afterwards hurts.
         materializr::BodySnapshot before;
         if (markBody) before = materializr::snapshotBodies(*doc);
-        const bool ok = hist->pushOperation(std::move(o), *doc);
+        hist->pushOperation(std::move(o), *doc);
         if (markBody) {
             for (int id : materializr::changedBodies(before, *doc)) markBody(id);
         } else if (markDirty) {
             markDirty();
         }
-        if (onDone) onDone(ok);
     });
     return true;
 }

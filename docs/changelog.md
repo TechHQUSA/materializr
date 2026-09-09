@@ -17,10 +17,10 @@ All notable changes to Materializr are documented here. Format loosely follows
   therefore trails the arrow at the worker's pace instead of stalling the
   app. Committing such a gesture still runs the operation once at the final
   distance, on the main thread, as the dense-body ghost path always did.
-  Small bodies preview exactly as before. The ghost tool volume is now built from the profile's
-  own triangulation instead of being meshed each frame (32 ms per frame on a
-  300-hole profile, now 1 ms), so a drag on such a body costs the frame a few
-  milliseconds.
+  Small bodies preview exactly as before. The ghost tool volume is now built
+  from the profile's own triangulation instead of being meshed each frame
+  (32 ms per frame on a 300-hole profile, now 1 ms), so a drag on such a body
+  costs the frame a few milliseconds.
 - **Editing a sketch, undoing, or running a menu operation no longer
   re-tessellates every body.** Roughly fifty call sites raised the
   full-rebuild flag after an edit: the viewport then retired and re-adopted

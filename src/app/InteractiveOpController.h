@@ -294,14 +294,11 @@ protected:
 
     void requestCommit() { m_commitRequested = true; }
     // Push `op` onto History BETWEEN frames, behind the cancellable progress
-    // window, instead of freezing this frame on its execute. `onDone`, when
-    // given, is called in that deferred task with pushOperation's result (a
-    // controller that reports a refusal to the user). False means the host
-    // offers no deferral (no progress reporter or no deferHeavy - tests, and
-    // any headless embedding): `op` is untouched and the caller pushes it
+    // window, instead of freezing this frame on its execute. False means the
+    // host offers no deferral (no progress reporter or no deferHeavy - tests,
+    // and any headless embedding): `op` is untouched and the caller pushes it
     // inline itself.
-    bool deferCommit(const IopContext& ctx, std::unique_ptr<Operation>& op,
-                     std::function<void(bool)> onDone = {});
+    bool deferCommit(const IopContext& ctx, std::unique_ptr<Operation>& op);
     void setDraggingHandle(bool d) { m_draggingHandle = d; }
     // For a controller that runs its own preview (HistoryEdit) and has to
     // report whether the frame landed.

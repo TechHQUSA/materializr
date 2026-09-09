@@ -2604,7 +2604,9 @@ void Application::pollThreadRecuts() {
 
 void Application::cancelThreadRecuts() {
     if (m_threadRecuts.empty()) return;
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+    // Nothing to invalidate: this signals the workers and suspends the Thread
+    // step (which only records an index). The bodies are already sitting at
+    // their pre-thread shapes, put there by whoever started the re-cut.
     for (auto& p : m_threadRecuts) {
         if (p.cancel) p.cancel->store(true);
         // The body is sitting at its pre-thread state with the Thread step

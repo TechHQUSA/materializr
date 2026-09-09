@@ -574,9 +574,23 @@ void Application::runPendingHeavyTasks() {
     // confirmed, and letting one outlive its session would apply it to the
     // wrong project or to a destroyed one. Each is taken out of the queue
     // before it runs, so a throwing task costs only itself.
+    // The main loop restores the FPU before every heavy task because a frame
+    // of GL leaves SSE flush-to-zero set and an OCCT boolean run that way can
+    // silently degenerate. This runner is reached after a full frame of GL
+    // too, and the progress reporter's own restore is suppressed below, so it
+    // has to do the same.
+    resetFpuForOcct();
     // No progress window while draining: an ImGui frame is already open on
-    // this path, so the op must not try to paint one of its own.
+    // this path, so the op must not try to paint one of its own. Saved and
+    // restored rather than set and cleared, so a task that reaches another
+    // session switch cannot clear the flag out from under the outer drain.
+    const bool wasDraining = m_drainingHeavyTasks;
     m_drainingHeavyTasks = true;
+    // The stall watchdog reads these; leaving a drained task's counters behind
+    // would misreport the next task the main loop runs.
+    m_heavyProgressFrac = -1.0f;
+    m_heavyProgressLabel.clear();
+    m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;
     while (auto task = m_deferredHeavy.takeNext()) {
         // A stale cancel latch must not make this task give up before it
         // starts; the main-loop runner resets it per task for the same reason.
@@ -591,7 +605,7 @@ void Application::runPendingHeavyTasks() {
                                  "draining before a tab switch.\n");
         }
     }
-    m_drainingHeavyTasks = false;
+    m_drainingHeavyTasks = wasDraining;
 }
 
 bool Application::switchToSession(size_t idx) {
@@ -636,13 +650,18 @@ bool Application::switchToSession(size_t idx) {
 
 void Application::closeSession(size_t idx) {
     if (idx >= m_sessions.size()) return;
-    // Before the erase below destroys a session: a queued task holds raw
-    // pointers into one, and running it late would dereference freed memory.
-    runPendingHeavyTasks();
+    const bool wasActive = (idx == m_activeSession);
+    // Both of these reach the closing session through m_document / m_history,
+    // which keep pointing into it until applySessionState repoints them below
+    // - so both must run BEFORE the erase destroys it. Cancelling previews
+    // afterwards dereferenced freed memory, and a queued task would have too.
+    if (wasActive) {
+        cancelAllInteractivePreviews();
+        runPendingHeavyTasks();
+    }
     // The closing tab's snapshot is no longer unfinished work, and its
     // recovery index returns to the pool by virtue of the session vanishing.
     materializr::clearProjectRecovery(m_sessions[idx]->recoveryIndex);
-    const bool wasActive = (idx == m_activeSession);
     m_sessions.erase(m_sessions.begin() + static_cast<long>(idx));
     bool closedLast = false;
     if (m_sessions.empty()) {
@@ -652,8 +671,8 @@ void Application::closeSession(size_t idx) {
     }
     if (wasActive) {
         // No stash - the outgoing session is gone. Apply a neighbor and run
-        // the same GPU-shelving discipline as a normal switch.
-        cancelAllInteractivePreviews();
+        // the same GPU-shelving discipline as a normal switch. (The preview
+        // cancel happened above, while its document was still alive.)
         m_sectionEnabled = false;
         m_sectionDirty = true;
         applySessionState(std::min(idx, m_sessions.size() - 1));
@@ -1168,10 +1187,10 @@ materializr::IopContext Application::iopContext() {
         *m_document, *m_history, *m_selection,
         [this] { m_meshesDirty = true; },
         [this](float f, const char* l) { return renderProgressFrame(f, l); },
-        // Deferred heavy commits CHAIN rather than replace: the slot holds one
-        // task, and dropping an already-queued commit on the floor would lose
-        // an operation the user confirmed. (The startup auto-open/restore
-        // paths assign the slot directly and do mean to replace each other.)
+        // Commits are APPENDED to the queue: dropping an already-queued one
+        // would lose an operation the user confirmed. (The startup auto-open
+        // and session-restore paths call replaceAll instead, because only one
+        // of them owns the startup load.)
         [this](std::function<void()> t) { m_deferredHeavy.queue(std::move(t)); },
         // im-touch hosts the Confirm/Cancel as corner FABs - the scaffold
         // then skips its in-panel buttons (Enter/Esc still work).
@@ -6776,6 +6795,12 @@ glm::vec2 Application::screenToSketch(float sx, float sy, float vpW, float vpH) 
 
 
 void Application::exitSketchMode() {
+    // Saving or discarding the sketch can add or remove one, and on the
+    // discard path the caller has already rolled history back; only a body
+    // that actually moved needs a new mesh. The flag this replaced
+    // re-tessellated every visible body to refresh sketch rendering, which
+    // does not read it at all.
+    auto trackBodies = trackBodyChanges();
     m_inSketchMode = false;
     if (m_history) m_history->clearUndoFloor();  // undo is unrestricted again
     m_toolbar->setSketchMode(false);
@@ -6809,7 +6834,6 @@ void Application::exitSketchMode() {
     m_activeSketch.reset();
     m_sketchSolver.reset();
     m_activeSketchId = -1;
-    m_meshesDirty = true; // refresh sketch rendering set
 
     // The sketch is resolved (committed to the document or discarded), so the
     // crash-recovery draft is no longer "unfinished" - drop it. A draft only
@@ -7415,6 +7439,13 @@ void Application::run() {
             m_heavyProgressLabel.clear();
             m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;
             m_nextHeavyDraw = m_lastHeavyPump = std::chrono::steady_clock::now();
+            // Disarmed on EVERY exit. The task can throw out to the frame-level
+            // firewall, and a keep-alive left armed would repaint from deep
+            // inside every later operation - the exact thing scoping it here
+            // is meant to prevent.
+            struct KeepAliveGuard {
+                ~KeepAliveGuard() { materializr::setUiKeepAlive(nullptr); }
+            } keepAliveGuard;
             materializr::setUiKeepAlive([this]() {
                 using clock = std::chrono::steady_clock;
                 ++m_heavyPumps;
@@ -7440,8 +7471,7 @@ void Application::run() {
                     std::chrono::duration_cast<clock::duration>(
                         std::chrono::milliseconds(200)), cost * 4);
             });
-            task();
-            materializr::setUiKeepAlive(nullptr);
+            task();                // keepAliveGuard disarms on every exit
             noteHeavyPumpGap();   // close the books on the tail of the task
             m_heavyRanThisIter = true;   // the watchdog reads this next time round
             m_wakeFrames = 5; // task finished - repaint the result

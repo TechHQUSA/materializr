@@ -4997,7 +4997,7 @@ void Application::renderViewport() {
                                 TopoDS_Face face = TopoDS::Face(result.pickedShape);
                                 Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
                                 if (!surf.IsNull() && surf->IsKind(STANDARD_TYPE(Geom_Plane))) {
-                         auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+                                    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                                     gp_Pln pln = Handle(Geom_Plane)::DownCast(surf)->Pln();
                                     const gp_Ax3& ax = pln.Position();
                                     auto op = std::make_unique<MirrorOp>();
@@ -6495,7 +6495,7 @@ void Application::renderViewport() {
                                !m_moveModeToggle &&
                                m_window && m_window->lastLeftReleaseWasGesture() &&
                                m_sketchTool->isPlacing()) {
-                                   auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+                        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                         // A two-finger pan/zoom began right after this finger's
                         // press started a drawing placement. Roll that placement
                         // back so two-finger navigation needs no Move button and
