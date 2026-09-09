@@ -108,19 +108,19 @@ TEST(PushPullPreview, ACutThroughTheModelReachesTheSecondBodyToo) {
     // A negative drag cuts the host and every visible body in the tool's path.
     // Host 20x20 at z 0..10, cut 8 deep: the tool spans z 2..10. A post
     // 10x10x15 at z -10..5 runs through the host and loses its top 3 mm; a
-    // hidden twin of it is left alone (the real op skips hidden bodies); a far
+    // hidden twin of it is left alone (the real op skips hidden bodies); a distant
     // body is out of reach and not even copied.
-    auto build = [](Document& d, int& host, int& post, int& hidden, int& far) {
+    auto build = [](Document& d, int& host, int& post, int& hidden, int& outOfReach) {
         d.addBody(BRepPrimAPI_MakeBox(gp_Pnt(200.0, 0.0, 0.0), 5.0, 5.0, 5.0).Shape(), "far0"); // shifts live ids off the scratch ids
         host = d.addBody(BRepPrimAPI_MakeBox(20.0, 20.0, 10.0).Shape(), "host");
         post = d.addBody(BRepPrimAPI_MakeBox(gp_Pnt(5.0, 5.0, -10.0), 10.0, 10.0, 15.0).Shape(), "post");
         hidden = d.addBody(BRepPrimAPI_MakeBox(gp_Pnt(5.0, 5.0, -10.0), 10.0, 10.0, 15.0).Shape(), "hidden");
         d.setBodyVisible(hidden, false);
-        far = d.addBody(BRepPrimAPI_MakeBox(gp_Pnt(100.0, 0.0, 0.0), 5.0, 5.0, 5.0).Shape(), "far");
+        outOfReach = d.addBody(BRepPrimAPI_MakeBox(gp_Pnt(100.0, 0.0, 0.0), 5.0, 5.0, 5.0).Shape(), "far");
     };
     Document live;
-    int host, post, hidden, far;
-    build(live, host, post, hidden, far);
+    int host, post, hidden, outOfReach;
+    build(live, host, post, hidden, outOfReach);
     const materializr::BodySnapshot originals = materializr::snapshotBodies(live);
 
     PreviewTarget t;
