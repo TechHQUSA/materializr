@@ -110,9 +110,9 @@ src/app/ExtrudeController.cpp:282:
 src/app/ExtrudeController.cpp:291:
 src/app/FaceOpControllers.cpp:159:
 src/app/FaceOpControllers.cpp:160:
-src/app/FaceOpControllers.cpp:976:
-src/app/FaceOpControllers.cpp:977:
-src/app/FaceOpControllers.cpp:1535:
+src/app/FaceOpControllers.cpp:980:
+src/app/FaceOpControllers.cpp:981:
+src/app/FaceOpControllers.cpp:1539:
 src/app/PushPullController.cpp:88:
 src/app/PushPullController.cpp:542:
 src/app/PushPullController.cpp:553:
