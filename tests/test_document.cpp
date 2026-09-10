@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include "core/Document.h"
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <algorithm>
+#include <vector>
 
 // Helper: create a simple box shape for testing
 static TopoDS_Shape makeTestBox(double x = 10, double y = 10, double z = 10) {
@@ -124,4 +126,48 @@ TEST(DocumentTest, RemoveNonexistentBodyDoesNotCrash) {
     // Removing a non-existent body should not throw or crash
     doc.removeBody(999);
     EXPECT_EQ(doc.bodyCount(), 1);
+}
+
+
+// The invariant Application::markFolderBodiesDirty rests on.
+//
+// That helper marks exactly getBodiesInFolder(fid) after a folder colour or
+// visibility edit, on the understanding that those edits touch the folder's
+// members and nothing else. If a future change made folders nest, or gave a
+// body a colour that overrides its folder's, the helper would start
+// under-marking and bodies would keep stale colours on screen until something
+// forced a full rebuild. Pin the assumption here, where it is cheap, rather
+// than in Application, which no test binary can construct.
+TEST(DocumentTest, FolderColourAndVisibilityCascadeToExactlyTheFoldersMembers) {
+    Document doc;
+    const int fid = doc.addFolder("group");
+    const int inA = doc.addBody(makeTestBox(), "in-a");
+    const int inB = doc.addBody(makeTestBox(), "in-b");
+    const int out = doc.addBody(makeTestBox(), "outside");
+    doc.setBodyFolder(inA, fid);
+    doc.setBodyFolder(inB, fid);
+
+    std::vector<int> members = doc.getBodiesInFolder(fid);
+    std::sort(members.begin(), members.end());
+    std::vector<int> want{inA, inB};
+    std::sort(want.begin(), want.end());
+    ASSERT_EQ(members, want) << "getBodiesInFolder is what the marking uses";
+
+    const glm::vec3 before = doc.getBodyColor(out);
+    const glm::vec3 tint(0.1f, 0.7f, 0.3f);
+    doc.setFolderColor(fid, tint);
+    EXPECT_EQ(doc.getBodyColor(inA), tint);
+    EXPECT_EQ(doc.getBodyColor(inB), tint);
+    EXPECT_EQ(doc.getBodyColor(out), before)
+        << "a folder colour reached a body outside the folder";
+
+    doc.setFolderVisible(fid, false);
+    EXPECT_FALSE(doc.isBodyVisible(inA));
+    EXPECT_FALSE(doc.isBodyVisible(inB));
+    EXPECT_TRUE(doc.isBodyVisible(out))
+        << "a folder visibility change reached a body outside the folder";
+
+    // Root bodies are folderId -1, which is why the helper guards on that:
+    // an unguarded -1 would mark every body at the root.
+    EXPECT_EQ(doc.getBodyFolder(out), -1);
 }

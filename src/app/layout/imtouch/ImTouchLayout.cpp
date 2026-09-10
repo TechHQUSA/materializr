@@ -400,7 +400,7 @@ void Application::renderImTouchLayout() {
                 if (colorPopup("bodyColor", "Body colour",
                                m_document->getBodyColor(id), newCol)) {
                     m_document->setBodyColor(id, newCol);
-                    m_meshesDirty = true;   // colour bakes into the render mesh
+                    markBodyDirty(id);   // colour bakes into the render mesh
                     markDirty();
                 }
                 if (act.clicked) {
@@ -485,7 +485,7 @@ void Application::renderImTouchLayout() {
                             /*selected=*/false, &fcol.x);
                         if (fact.eyeToggled) {
                             m_document->setFolderVisible(fid, fvis);
-                            m_meshesDirty = true;  // cascades to member bodies (#37)
+                            markFolderBodiesDirty(fid);  // cascades to members (#37)
                             markDirty();
                         }
                         if (fact.clicked)
@@ -495,7 +495,7 @@ void Application::renderImTouchLayout() {
                         if (colorPopup("folderColor", "Folder colour",
                                        m_document->getFolderColor(fid), fNewCol)) {
                             m_document->setFolderColor(fid, fNewCol); // cascades
-                            m_meshesDirty = true;
+                            markFolderBodiesDirty(fid);
                             markDirty();
                         }
                         if (fact.rightClicked) ImGui::OpenPopup("folderCtx");
@@ -1227,10 +1227,10 @@ void Application::renderImTouchLayout() {
                             // sketch-dimension edits into later snapshots
                             // FIRST, then a transactional replay, then cascade
                             // so bodies built from the sketch follow.
+                            auto trackBodies = trackBodyChanges();
                             m_history->propagateSketchValueEdits(i, *m_document);
                             const bool applied = m_history->editStep(
                                 i, *m_document, /*transactional=*/true);
-                            m_meshesDirty = true;
                             if (applied) {
                                 if (auto* se =
                                         dynamic_cast<const SketchEditOp*>(op)) {
@@ -1261,12 +1261,16 @@ void Application::renderImTouchLayout() {
                             undoWithCascade();
                             if (m_history->currentStep() == before) break;
                         }
+                        // No scope here on purpose: redoWithCascade() opens
+                        // its own per step, so each redo already marks exactly
+                        // the bodies it re-derived. The full-rebuild flag that
+                        // used to sit after this loop was laying a whole-project
+                        // re-tessellation on top of correct partial marking.
                         while (m_history->currentStep() < i) {
                             const int before = m_history->currentStep();
                             redoWithCascade();
                             if (m_history->currentStep() == before) break;
                         }
-                        m_meshesDirty = true;
                     }
                     ImGui::EndDisabled();
                     ImGui::SameLine();
@@ -1275,12 +1279,13 @@ void Application::renderImTouchLayout() {
                                       ImVec2(bw, 44.0f * s))) {
                         // In-place toggle - preserves base bodies the op
                         // modifies (replayAll's doc.clear() would drop them).
+                        auto trackBodies = trackBodyChanges();
                         m_history->setStepEnabled(i, !op->isEnabled(),
                                                   *m_document);
-                        m_meshesDirty = true;
                     }
                     ImGui::SameLine();
                     if (ImGui::Button(materializr::tr("Delete"), ImVec2(bw, 44.0f * s))) {
+                        auto trackBodies = trackBodyChanges();
                         if (m_history->removeStep(i, *m_document)) {
                             m_imTouchHistoryEdit = -1;
                             if (m_historyPanel)
@@ -1290,7 +1295,6 @@ void Application::renderImTouchLayout() {
                             showToast(
                                 "Can't delete: a later operation depends on it.");
                         }
-                        m_meshesDirty = true;
                     }
                     ImGui::EndDisabled();
                 }

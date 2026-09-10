@@ -551,6 +551,18 @@ private:
     // leaving the rest of the (potentially 100+) bodies untouched. Critical
     // for push/pull preview smoothness on complex projects.
     void markBodyDirty(int bodyId) { if (bodyId >= 0) m_dirtyBodyIds.insert(bodyId); }
+    // A folder's colour and visibility cascade to the bodies it owns, so an
+    // edit there dirties those and nothing else. Without this the Items tree
+    // fell back to a full rebuild and a 145-body project re-tessellated
+    // everything to recolour one folder.
+    //
+    // No recursion: folders are flat, pure UI grouping over bodies with no
+    // parent of their own (see Document.h), so a folder's members are exactly
+    // what getBodiesInFolder returns.
+    void markFolderBodiesDirty(int folderId) {
+        if (folderId < 0 || !m_document) return;
+        for (int id : m_document->getBodiesInFolder(folderId)) markBodyDirty(id);
+    }
     // Drain the between-frames task queue now. Called before a session swap or
     // close, since the queued tasks point into the session that is going away.
     void runPendingHeavyTasks();

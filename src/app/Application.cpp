@@ -250,9 +250,18 @@ Application::Application(bool safeMode, float uiScaleOverride)
             if (e.bodyId < 0) return;
             if (m_shapeRenderer) m_shapeRenderer->removeBody(e.bodyId);
             if (m_edgeRenderer)  m_edgeRenderer->removeBody(e.bodyId);
-            // Also clear any pending dirty entry - the body is gone, no
-            // point asking the partial rebuild to revisit it.
-            m_dirtyBodyIds.erase(e.bodyId);
+            // KEEP the id dirty rather than clearing it. "The body is gone,
+            // no point revisiting" is wrong when it comes back: a history
+            // replay removes a body and re-adds it with the IDENTICAL shape
+            // (ReplayOp::applyDelta), and there is no added-body event to
+            // re-adopt it - BodyRemovedEvent is the only body lifecycle event
+            // there is. A BodyChangeScope around that action sees the same
+            // shape before and after and marks nothing, so the slot dropped
+            // above would never come back and the body would be invisible
+            // until the next full rebuild. The partial rebuild handles both
+            // outcomes: it removes an id whose body is really gone, and
+            // re-meshes one that returned.
+            markBodyDirty(e.bodyId);
         });
 
     // Construction-plane lifecycle is handled by ConstructionPlanePlugin -

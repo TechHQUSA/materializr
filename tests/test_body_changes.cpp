@@ -88,3 +88,41 @@ TEST(BodyChanges, ScopeMarksOnExitAndFallsBackWithoutAPerBodyMark) {
     }
     EXPECT_TRUE(all);
 }
+
+
+// The blind spot that makes Application keep removed ids dirty.
+//
+// A history replay removes a body and re-adds it with the IDENTICAL shape
+// (ReplayOp::applyDelta does exactly this for steps it is not changing). A
+// before/after diff cannot see that: the body is present with the same shape
+// at both ends, so the scope marks NOTHING. Meanwhile BodyRemovedEvent has
+// already told the renderer to drop the slot, and there is no added-body
+// event to put it back - that event is the only body lifecycle event there
+// is. Application therefore marks the id on removal instead of clearing it,
+// and the partial rebuild re-adopts the body that came back.
+//
+// If this test ever starts failing because the scope DOES mark the body, the
+// marking in the BodyRemovedEvent handler becomes belt-and-braces rather than
+// load-bearing - worth knowing before removing it.
+TEST(BodyChanges, ARemoveAndIdenticalRestoreIsInvisibleToTheDiff) {
+    Doc d;
+    const TopoDS_Shape original = d.doc.getBody(d.b);
+    std::set<int> marked;
+    {
+        BodyChangeScope scope(d.doc, [&](int id) { marked.insert(id); });
+        d.doc.removeBody(d.b);
+        d.doc.putBody(d.b, original);   // same id, same shape
+    }
+    EXPECT_TRUE(marked.empty())
+        << "the diff noticed a remove-and-restore; if that is now true, "
+           "Application's removal marking is no longer load-bearing";
+
+    // And the contrast: restoring something DIFFERENT is seen.
+    std::set<int> marked2;
+    {
+        BodyChangeScope scope(d.doc, [&](int id) { marked2.insert(id); });
+        d.doc.removeBody(d.b);
+        d.doc.putBody(d.b, box(33.0));
+    }
+    EXPECT_EQ(marked2, std::set<int>{d.b});
+}
