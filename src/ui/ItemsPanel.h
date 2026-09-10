@@ -16,6 +16,7 @@ public:
     ItemsPanel();
 
     void setDocument(Document* doc);
+    void setBodyDirtyCallback(std::function<void(int)> cb) { m_markBodyDirty = std::move(cb); }
     void setSelectionManager(SelectionManager* sel);
     void setHistory(History* hist);
     // The sketch currently being drawn, if any, can appear as a normal row
@@ -87,7 +88,7 @@ public:
     // rotate-plane-about-axis popup targeting the given plane id.
     void setRotatePlaneCallback(std::function<void(int)> cb) { m_rotatePlane = std::move(cb); }
 
-    // Returns true if a body was deleted (caller must rebuild meshes)
+    // Returns true if a body was deleted (caller must clear stale hover)
     bool render();
     // Panel body without the "Items" window wrapper - for hosting inside
     // another container (im-touch shell right panel). Same return contract.
@@ -95,6 +96,7 @@ public:
 
 private:
     Document* m_document = nullptr;
+    std::function<void(int)> m_markBodyDirty;
     SelectionManager* m_selection = nullptr;
     History* m_history = nullptr;
     std::function<void()> m_markDirty;
@@ -151,7 +153,7 @@ private:
     // Renders one body row (visibility + name + colour + context menu).
     // Pulled out of render() so it can be called both at the root level and
     // inside each folder's expanded content.
-    bool renderBodyRow(int id, bool& colorChanged);
+    bool renderBodyRow(int id);
 };
 
 } // namespace materializr

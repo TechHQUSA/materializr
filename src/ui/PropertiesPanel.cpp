@@ -1,6 +1,7 @@
 #include "ui/LengthField.h"
 #include "UiTheme.h"
 #include "PropertiesPanel.h"
+#include "core/BodyChanges.h"
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
@@ -191,22 +192,19 @@ int PropertiesPanel::getEditingStep() const {
     return m_editingStep;
 }
 
-bool PropertiesPanel::render() {
+void PropertiesPanel::render() {
     ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse);
-    const bool modified = renderContent();
+    renderContent();
     ImGui::End();
-    return modified;
 }
 
-bool PropertiesPanel::renderContent() {
-    bool modified = false;
-
+void PropertiesPanel::renderContent() {
     // Case 0: In sketch mode - show the editable size of the selected element.
     // Takes priority: while sketching, the panel is about the sketch, not the
     // history step or a 3D selection.
     if (m_inSketchMode && m_activeSketch && m_sketchTool) {
-        renderSketchElementPanel(modified);
-        return modified;
+        renderSketchElementPanel();
+        return;
     }
 
     // Case 1: Editing a history operation
@@ -248,9 +246,9 @@ bool PropertiesPanel::renderContent() {
                     m_history->propagateSketchValueEdits(m_editingStep, *m_document);
                     // Transactional: a failed replay restores the whole model
                     // rather than leaving it half-built.
+                    BodyChangeScope scope(*m_document, m_markBodyDirty);
                     m_history->editStep(m_editingStep, *m_document,
                                         /*transactional=*/true);
-                    modified = true;
                 }
             }
 
@@ -262,8 +260,8 @@ bool PropertiesPanel::renderContent() {
                 if (m_document) {
                     // In-place toggle - preserves base bodies the op modifies
                     // (replayAll's doc.clear() would delete them).
+                    BodyChangeScope scope(*m_document, m_markBodyDirty);
                     m_history->setStepEnabled(m_editingStep, enabled, *m_document);
-                    modified = true;
                 }
             }
 
@@ -313,6 +311,7 @@ bool PropertiesPanel::renderContent() {
         bool visible = m_document->isBodyVisible(bodyId);
         if (ImGui::Checkbox(materializr::tr("Visible"), &visible)) {
             m_document->setBodyVisible(bodyId, visible);
+            if (m_markBodyDirty) m_markBodyDirty(bodyId);
         }
 
         // Parametric-link hint (which sketch drives this body, and whether the
@@ -462,7 +461,7 @@ bool PropertiesPanel::renderContent() {
         }
 
         if (sketchLike && m_document && m_history && parentSketchId >= 0) {
-            renderSketchConstraintsPanel(parentSketchId, modified);
+            renderSketchConstraintsPanel(parentSketchId);
         } else if (m_document) {
             // A single selected construction plane gets its orientation panel.
             int planeCount = 0, firstPlaneId = -1, axisCount = 0, firstAxisId = -1;
@@ -476,9 +475,9 @@ bool PropertiesPanel::renderContent() {
                 }
             }
             if (planeCount == 1 && m_document->getPlane(firstPlaneId)) {
-                renderPlanePanel(firstPlaneId, modified);
+                renderPlanePanel(firstPlaneId);
             } else if (axisCount == 1 && m_document->getAxis(firstAxisId)) {
-                renderAxisPanel(firstAxisId, modified);
+                renderAxisPanel(firstAxisId);
             } else {
                 // Construction-plane CREATION actions (Midplane / Tangent /
                 // Normal-to-axis) live in the Tools panel, alongside the other
@@ -494,7 +493,6 @@ bool PropertiesPanel::renderContent() {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Select an object or operation"));
     }
 
-    return modified;
 }
 
 // Orientation readout + actions for a selected construction plane. Values are
@@ -502,7 +500,7 @@ bool PropertiesPanel::renderContent() {
 // to match every other coordinate readout. Flip Normal mutates the document
 // directly (marks dirty); Rotate About Axis… routes to Application's hinge
 // popup, which records an undoable PlaneTransformOp on Apply.
-void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
+void PropertiesPanel::renderPlanePanel(int planeId) {
     const auto* pe = m_document->getPlane(planeId);
     if (!pe) return;
 
@@ -525,8 +523,10 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Flip Normal"))) {
         m_document->flipPlaneNormal(planeId);
+        // No body-dirty call: a construction plane isn't a body and carries
+        // no mesh - nothing here needs re-tessellation. ItemsPanel's own
+        // Flip Normal/Direction menu items only call markDirty() too.
         if (m_markDirty) m_markDirty();
-        modified = true;
     }
     ImGui::SameLine();
     if (ImGui::Button(materializr::tr("Rotate About Axis..."))) {
@@ -550,8 +550,9 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
             ImGui::SameLine();
             if (ImGui::Button(materializr::tr("Remove Image"))) {
                 m_document->removeRefImage(planeId);
+                // A reference image is a plane overlay, not body geometry -
+                // no body-dirty call needed, same reasoning as Flip Normal above.
                 if (m_markDirty) m_markDirty();
-                modified = true;
             }
             ImGui::SetItemTooltip("%s", materializr::tr(
                 "Detach the image. The construction plane itself stays."));
@@ -561,7 +562,7 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
 
 // Orientation readout + Flip Direction for a selected construction axis.
 // Values shown in user Z-up convention (user Y = world Z, user Z = world Y).
-void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
+void PropertiesPanel::renderAxisPanel(int axisId) {
     const auto* ae = m_document->getAxis(axisId);
     if (!ae) return;
 
@@ -575,8 +576,9 @@ void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Flip Direction"))) {
         m_document->flipAxisDirection(axisId);
+        // No body-dirty call: a construction axis isn't a body, same
+        // reasoning as Flip Normal above.
         if (m_markDirty) m_markDirty();
-        modified = true;
     }
 }
 
@@ -587,7 +589,7 @@ void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
 // panel reads/writes the current sketch directly, so the workflow works
 // across sessions.
 //
-void PropertiesPanel::renderSketchElementPanel(bool& modified) {
+void PropertiesPanel::renderSketchElementPanel() {
     Sketch* sk = m_activeSketch;
     if (!sk) return;
 
@@ -611,7 +613,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
 
     // Apply a size edit through the host so it's snapshot/undoable + cascades.
     auto apply = [&](const std::function<void()>& mut) {
-        if (m_sketchMutate) { m_sketchMutate(mut); modified = true; }
+        if (m_sketchMutate) m_sketchMutate(mut);
     };
 
     // Resolve what was clicked to an editable element. Clicking a circle near
@@ -729,7 +731,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
 // sketch, apply the value, run the solver, and push a SketchEditOp
 // covering both states - so the change is undoable AND shows up as a
 // proper step in history.
-void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified) {
+void PropertiesPanel::renderSketchConstraintsPanel(int sketchId) {
     auto sk = m_document->getSketch(sketchId);
     if (!sk) return;
     // One-shot diagnostic (--verbose only): log when the panel first opens on
@@ -813,7 +815,6 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         m_history->pushExecuted(std::move(op));
         edit.beforeSnap.reset();
         edit.focused = false;
-        modified = true;
         // Cascade trigger: Application listens for this and re-executes any
         // ExtrudeOp downstream of `sketchId` so the body follows the new
         // constraint value. No-op when nobody's subscribed.

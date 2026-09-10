@@ -665,7 +665,6 @@ void Application::renderModernLayout() {
                 if (m_touchRightTab == 0) {
                     if (m_itemsPanel && m_itemsPanel->renderContent()) {
                         m_hoveredBodyId = -1;
-                        m_meshesDirty = true;
                     }
                 } else {
                     // History on top, Properties beneath - one tab hosts
@@ -709,8 +708,7 @@ void Application::renderModernLayout() {
                             // Undo/redo live in the shell's top bar; the panel
                             // shows its step counter beside the label instead.
                             m_historyPanel->setShowUndoRedo(false);
-                            if (m_historyPanel->renderContent())
-                                m_meshesDirty = true;
+                            m_historyPanel->renderContent();
                         }
                     }
                     ImGui::EndChild();
@@ -726,8 +724,8 @@ void Application::renderModernLayout() {
                         if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0),
                                               ImGuiChildFlags_AutoResizeY,
                                               ImGuiWindowFlags_NoScrollbar)) {
-                            if (m_propertiesPanel && m_propertiesPanel->renderContent())
-                                m_meshesDirty = true;
+                            if (m_propertiesPanel)
+                                m_propertiesPanel->renderContent();
                         }
                         ImGui::EndChild();
                         // Measure the whole footer (separator + header + box) so

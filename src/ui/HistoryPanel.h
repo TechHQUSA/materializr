@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <set>
 #include <string>
 
@@ -17,6 +18,7 @@ public:
 
     void setHistory(History* history);
     void setDocument(Document* doc);
+    void setBodyDirtyCallback(std::function<void(int)> cb) { m_markBodyDirty = std::move(cb); }
     void setEventBus(EventBus* bus) { m_eventBus = bus; }
 
     // Lock history mutation (undo/redo buttons) while a live tool preview
@@ -25,11 +27,12 @@ public:
     // last COMMITTED step (which the following push erases for good).
     void setHistoryLocked(bool locked) { m_historyLocked = locked; }
 
-    // Render the panel. Returns true if history was modified (undo/redo/edit).
-    bool render();
+    // Render the panel. Mutations mark their own affected bodies via the
+    // body-dirty callback instead of a return value - see setBodyDirtyCallback.
+    void render();
     // Panel body without the "History" window wrapper - for hosting inside
-    // another container (im-touch shell right panel). Same return contract.
-    bool renderContent();
+    // another container (im-touch shell right panel).
+    void renderContent();
     // Hide the bottom Undo/Redo button row and show the step counter inline
     // beside the "Operation History" label instead. The im-touch shell hosts
     // undo/redo in its top bar, so the row was redundant there (and its
@@ -58,6 +61,7 @@ private:
     bool m_historyLocked = false;
     bool m_showUndoRedo = true;   // see setShowUndoRedo
     Document* m_document = nullptr;
+    std::function<void(int)> m_markBodyDirty;
     materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;
     int m_highlightStep = -1; // step owning the viewport-selected sketch element

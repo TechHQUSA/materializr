@@ -384,6 +384,7 @@ add_test(NAME test_pushpull_dispatch COMMAND test_pushpull_dispatch)
 
 # test_body_changes - which bodies an edit changed, so a preview re-tessellates only those
 add_executable(test_body_changes test_body_changes.cpp)
+target_compile_definitions(test_body_changes PRIVATE MZR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(test_body_changes PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_body_changes COMMAND test_body_changes)
 

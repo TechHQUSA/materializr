@@ -239,13 +239,13 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/plugins/SketchPlugin.cpp:135 | `: materializr::parseFinite(m_dimBuf, v);` |
 | ratio | src/ui/MaterialPanel.cpp:100 | `ImGui::SliderFloat(materializr::tr("Roughness"), &m_customRoughness, 0.0f, 1.0f);` |
 | ratio | src/ui/MaterialPanel.cpp:101 | `ImGui::SliderFloat(materializr::tr("Metallic"), &m_customMetallic, 0.0f, 1.0f);` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:638 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:651 | `if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, Im` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:665 | `if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, I` |
-| angle | src/ui/PropertiesPanel.cpp:677 | `if (materializr::inputNumber(materializr::tr("Sweep (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:697 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:699 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:714 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:639 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:652 | `if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, Im` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:666 | `if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, I` |
+| angle | src/ui/PropertiesPanel.cpp:678 | `if (materializr::inputNumber(materializr::tr("Sweep (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:698 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:700 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:715 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:883 | `(void)materializr::parseFinite(edit.buf, padVal);` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:886 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,` |
 | CONVERTED | src/ui/PropertiesPanel.cpp:905 | `(void)materializr::parseFinite(edit.buf, typed);` |
@@ -262,25 +262,25 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 
 | class | file:line | code |
 |---|---|---|
-| comment | src/app/Application.cpp:902 | `// ios_platform.mm).` |
-| comment | src/app/Application.cpp:1160 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
-| comment | src/app/Application.cpp:1974 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
-| comment | src/app/Application.cpp:2048 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
-| comment | src/app/Application.cpp:4417 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
-| comment | src/app/Application.cpp:4443 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
-| comment | src/app/Application.cpp:4886 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
-| comment | src/app/Application.cpp:4894 | `// 152 mm - see 0733a59, which reverted exactly that.` |
-| comment | src/app/Application.cpp:5482 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
-| comment | src/app/Application.cpp:5544 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
-| comment | src/app/Application.cpp:5609 | `// then keeps the wrong band, landing 0.6 mm off with a` |
-| comment | src/app/Application.cpp:5658 | `// 0.64 mm off-axis at the surface origin) that WON` |
-| comment | src/app/Application.cpp:5752 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
-| comment | src/app/Application.cpp:5767 | `const double eps = 1.0; // mm` |
-| comment | src/app/Application.cpp:6395 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
-| comment | src/app/Application.cpp:6430 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
-| comment | src/app/Application.cpp:6769 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
-| comment | src/app/Application.cpp:6829 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
-| comment | src/app/Application.cpp:6830 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
+| comment | src/app/Application.cpp:905 | `// ios_platform.mm).` |
+| comment | src/app/Application.cpp:1163 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
+| comment | src/app/Application.cpp:1977 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
+| comment | src/app/Application.cpp:2051 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
+| comment | src/app/Application.cpp:4420 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
+| comment | src/app/Application.cpp:4446 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
+| comment | src/app/Application.cpp:4889 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
+| comment | src/app/Application.cpp:4897 | `// 152 mm - see 0733a59, which reverted exactly that.` |
+| comment | src/app/Application.cpp:5485 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
+| comment | src/app/Application.cpp:5547 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
+| comment | src/app/Application.cpp:5612 | `// then keeps the wrong band, landing 0.6 mm off with a` |
+| comment | src/app/Application.cpp:5661 | `// 0.64 mm off-axis at the surface origin) that WON` |
+| comment | src/app/Application.cpp:5755 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
+| comment | src/app/Application.cpp:5770 | `const double eps = 1.0; // mm` |
+| comment | src/app/Application.cpp:6398 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
+| comment | src/app/Application.cpp:6433 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
+| comment | src/app/Application.cpp:6772 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
+| comment | src/app/Application.cpp:6832 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
+| comment | src/app/Application.cpp:6833 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
 | comment | src/app/Application.h:660 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
 | comment | src/app/Application.h:939 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
 | comment | src/app/Application.h:941 | `// 300 mm because it reads as a round number in the units that needed` |
@@ -534,12 +534,12 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/plugins/DxfImportPlugin.cpp:13 | `// imports at exactly 100 mm ($INSUNITS handles inch-authored files), only` |
 | allowed-by-hand | src/plugins/SvgImportPlugin.cpp:53 | `"%.0f mm wide) on the ground plane\n",` |
 | comment | src/third_party/nanosvg.h:50 | `// The units passed to NanoSVG should be one of: 'px', 'pt', 'pc' 'mm', 'cm', or 'in'.` |
-| comment | src/ui/HistoryPanel.cpp:169 | `// dimension steps a useful caption ("Add Distance 25 mm") instead` |
-| comment | src/ui/ItemsPanel.h:72 | `// menu. Routes to Application::exportSketchAsSvg (1:1-mm polyline SVG for` |
-| comment | src/ui/PropertiesPanel.cpp:341 | `// % / mm toggle and shows live dimensions in mm mode.` |
+| comment | src/ui/HistoryPanel.cpp:170 | `// dimension steps a useful caption ("Add Distance 25 mm") instead` |
+| comment | src/ui/ItemsPanel.h:73 | `// menu. Routes to Application::exportSketchAsSvg (1:1-mm polyline SVG for` |
+| comment | src/ui/PropertiesPanel.cpp:345 | `// % / mm toggle and shows live dimensions in mm mode.` |
 | comment | src/ui/PropertiesPanel.cpp:866 | `// value to a 1 mm grid on every commit. An Angle is degrees and` |
 | comment | src/ui/PropertiesPanel.cpp:906 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
-| comment | src/ui/PropertiesPanel.h:130 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
+| comment | src/ui/PropertiesPanel.h:131 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
 | comment | src/ui/StepperRow.h:18 | `// value, and pulling an 80 mm extrude down to 50 because you pressed +1 loses` |
 | allowed-by-hand | src/ui/Toolbar.cpp:534 | `tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens` |
 | allowed-by-hand | src/ui/TouchWidgets.h:94 | `const char* suffix = "mm", int decimals = 1,` |

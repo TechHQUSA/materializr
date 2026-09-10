@@ -1,5 +1,6 @@
 #include "UiTheme.h"
 #include "HistoryPanel.h"
+#include "../core/BodyChanges.h"
 #include <cctype>
 #include "../core/History.h"
 #include "../core/Document.h"
@@ -32,22 +33,20 @@ void HistoryPanel::setDocument(Document* doc) {
     m_document = doc;
 }
 
-bool HistoryPanel::render() {
+void HistoryPanel::render() {
     m_showUndoRedo = true;   // the desktop window always shows its own row
     ImGui::Begin("History", nullptr, ImGuiWindowFlags_NoCollapse);
-    const bool modified = renderContent();
+    renderContent();
     ImGui::End();
-    return modified;
 }
 
 // Panel body without the window wrapper - see ItemsPanel::renderContent().
-bool HistoryPanel::renderContent() {
-    bool modified = false;
+void HistoryPanel::renderContent() {
     m_hoveredStep = -1; // recomputed below from whichever row the cursor is over
 
     if (!m_history || !m_document) {
         ImGui::TextColored(materializr::dimText(), "%s", materializr::tr("No history available."));
-        return false;
+        return;
     }
 
     int stepCount = m_history->stepCount();
@@ -232,21 +231,19 @@ bool HistoryPanel::renderContent() {
                 // In-place toggle - preserves base bodies the op modifies
                 // (replayAll's doc.clear() would delete them).
                 const bool enabling = !op->isEnabled();
+                BodyChangeScope scope(*m_document, m_markBodyDirty);
                 const bool okTog =
                     m_history->setStepEnabled(i, enabling, *m_document);
                 // Re-enabling a step whose references are gone re-executes,
                 // fails, and gets SKIPPED - which read as "does nothing"
                 // (#54). Say so, inline under the step.
                 m_enableFailStep = (enabling && !okTog) ? i : -1;
-                modified = true;
             }
             if (ImGui::MenuItem(materializr::tr("Set Breakpoint Here"))) {
                 m_history->setBreakpoint(i);
-                modified = true;
             }
             if (breakpoint == i && ImGui::MenuItem(materializr::tr("Clear Breakpoint"))) {
                 m_history->setBreakpoint(-1);
-                modified = true;
             }
             ImGui::Separator();
             if (ImGui::MenuItem(materializr::tr("Delete"))) {
@@ -367,6 +364,7 @@ bool HistoryPanel::renderContent() {
     // list. removeStep rebuilds in place and refuses (returns false) if a later
     // operation depends on the one being removed.
     if (deleteIndex >= 0) {
+        BodyChangeScope scope(*m_document, m_markBodyDirty);
         if (m_history->removeStep(deleteIndex, *m_document)) {
             if (m_editingStep == deleteIndex) { m_editingStep = -1; m_showProperties = false; }
             else if (m_editingStep > deleteIndex) m_editingStep--;
@@ -374,7 +372,6 @@ bool HistoryPanel::renderContent() {
         } else {
             m_deleteConflict = true; // a dependent step blocked the removal
         }
-        modified = true;
     }
 
     if (m_deleteConflict) {
@@ -442,9 +439,12 @@ bool HistoryPanel::renderContent() {
                 m_history->propagateSketchValueEdits(m_editingStep, *m_document);
                 // Transactional: a failed replay restores the model wholesale
                 // rather than leaving it half-built.
-                bool applied = m_history->editStep(m_editingStep, *m_document,
-                                                   /*transactional=*/true);
-                modified = true;
+                bool applied;
+                {
+                    BodyChangeScope scope(*m_document, m_markBodyDirty);
+                    applied = m_history->editStep(m_editingStep, *m_document,
+                                                  /*transactional=*/true);
+                }
                 if (!applied && !m_paramsSnap.empty()) {
                     // The replay was rolled back - snap the fields back to the
                     // pre-edit values too. The inputs bind live to op members,
@@ -504,9 +504,11 @@ bool HistoryPanel::renderContent() {
         if (ImGui::Button(materializr::tr("Undo"))) {
             const Operation* undone =
                 m_history->getStep(m_history->currentStep());
-            m_history->undo(*m_document);
+            {
+                BodyChangeScope scope(*m_document, m_markBodyDirty);
+                m_history->undo(*m_document);
+            }
             publishIfSketchEdit(undone);
-            modified = true;
         }
         ImGui::EndDisabled();
 
@@ -514,9 +516,11 @@ bool HistoryPanel::renderContent() {
 
         ImGui::BeginDisabled(m_historyLocked || !m_history->canRedo());
         if (ImGui::Button(materializr::tr("Redo"))) {
-            m_history->redo(*m_document);
+            {
+                BodyChangeScope scope(*m_document, m_markBodyDirty);
+                m_history->redo(*m_document);
+            }
             publishIfSketchEdit(m_history->getStep(m_history->currentStep()));
-            modified = true;
         }
         ImGui::EndDisabled();
 
@@ -528,7 +532,6 @@ bool HistoryPanel::renderContent() {
         ImGui::Text("%s", stepText);
     }
 
-    return modified;
 }
 
 } // namespace materializr

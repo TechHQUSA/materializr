@@ -1,6 +1,7 @@
 #include "UiTheme.h"
 #include "ItemsPanel.h"
 #include "../touch_mode.h"
+#include "../core/BodyChanges.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
@@ -63,8 +64,6 @@ bool ItemsPanel::renderContent() {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No document loaded."));
         return false;
     }
-
-    bool colorChanged = false; // a body colour edit also needs a mesh rebuild
 
     // Selected-body ids collected ONCE per frame - renderBodyRow used to
     // rescan the whole selection per row (O(bodies × selection) per frame).
@@ -137,8 +136,12 @@ bool ItemsPanel::renderContent() {
             // Visibility checkbox (cascades to members in Document).
             bool fvis = m_document->isFolderVisible(folderId);
             if (ImGui::Checkbox("##fvis", &fvis)) {
+                std::vector<int> changed;
+                for (int id : m_document->getBodiesInFolder(folderId))
+                    if (m_document->isBodyVisible(id) != fvis) changed.push_back(id);
                 m_document->setFolderVisible(folderId, fvis);
-                colorChanged = true; // forces mesh rebuild
+                for (int id : changed)
+                    if (m_markBodyDirty) m_markBodyDirty(id);
             }
             ImGui::SameLine();
 
@@ -199,7 +202,6 @@ bool ItemsPanel::renderContent() {
                         m_document->removeFolder(folderId);
                         ImGui::EndPopup();
                         ImGui::PopID();
-                        colorChanged = true;
                         continue;
                     }
                     ImGui::EndPopup();
@@ -212,15 +214,19 @@ bool ItemsPanel::renderContent() {
             if (ImGui::ColorEdit3("##fcolor", &fcol.x,
                     ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
                     ImGuiColorEditFlags_PickerHueWheel)) {
+                std::vector<int> changed;
+                for (int id : m_document->getBodiesInFolder(folderId))
+                    if (m_document->getBodyColor(id) != fcol) changed.push_back(id);
                 m_document->setFolderColor(folderId, fcol);
-                colorChanged = true;
+                for (int id : changed)
+                    if (m_markBodyDirty) m_markBodyDirty(id);
             }
 
             // Member bodies, only when expanded.
             if (open) {
                 ImGui::Indent();
                 for (int bid : m_document->getBodiesInFolder(folderId)) {
-                    if (!renderBodyRow(bid, colorChanged)) {
+                    if (!renderBodyRow(bid)) {
                         // Body was deleted; member list is stale. Bail to
                         // outer loop, will re-fetch next frame.
                         ImGui::Unindent();
@@ -237,7 +243,7 @@ bool ItemsPanel::renderContent() {
 
         // 2) Root-level bodies (folderId == -1).
         for (int id : m_document->getBodiesInFolder(-1)) {
-            if (!renderBodyRow(id, colorChanged)) goto end_bodies;
+            if (!renderBodyRow(id)) goto end_bodies;
         }
         end_bodies:;
 
@@ -296,8 +302,8 @@ bool ItemsPanel::renderContent() {
             bool visible = m_document->isSketchVisible(id);
             if (ImGui::Checkbox("##svis", &visible)) {
                 m_document->setSketchVisible(id, visible);
-                // NOT colorChanged: sketch visibility is read live by the
-                // viewport's sketch loop every frame - setting the flag here
+                // Sketch visibility is read live by the viewport's sketch
+                // loop every frame - setting the flag here
                 // forced a FULL re-tessellation of every visible body (a
                 // multi-second stall on a heavy project) for a toggle that
                 // doesn't touch body meshes at all.
@@ -623,20 +629,20 @@ bool ItemsPanel::renderContent() {
         }
     }
 
-    return m_bodyDeleted || colorChanged;
+    return m_bodyDeleted;
 }
 
 // One body row. Pulled out of render() so it can run at the root level OR
 // inside a folder's expanded contents (indented by the caller). Returns false
 // if this body was deleted via its context menu - caller must stop iterating
 // because the body list is now stale.
-bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
+bool ItemsPanel::renderBodyRow(int id) {
     ImGui::PushID(id);
 
     bool visible = m_document->isBodyVisible(id);
     if (ImGui::Checkbox("##vis", &visible)) {
         m_document->setBodyVisible(id, visible);
-        colorChanged = true;
+        if (m_markBodyDirty) m_markBodyDirty(id);
     }
     ImGui::SameLine();
 
@@ -770,17 +776,21 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
         }
         if (!deleted && ImGui::MenuItem(materializr::tr("Isolate"))) {
             for (int otherId : m_document->getAllBodyIds()) {
-                m_document->setBodyVisible(otherId, otherId == id);
+                if (m_document->isBodyVisible(otherId) != (otherId == id)) {
+                    m_document->setBodyVisible(otherId, otherId == id);
+                    if (m_markBodyDirty) m_markBodyDirty(otherId);
+                }
             }
-            colorChanged = true;
         }
         // The way back from Isolate in one click (mirrors the viewport
         // context menu) - beats re-ticking every checkbox above.
         if (!deleted && ImGui::MenuItem(materializr::tr("Show All Bodies"))) {
             for (int otherId : m_document->getAllBodyIds()) {
-                m_document->setBodyVisible(otherId, true);
+                if (!m_document->isBodyVisible(otherId)) {
+                    m_document->setBodyVisible(otherId, true);
+                    if (m_markBodyDirty) m_markBodyDirty(otherId);
+                }
             }
-            colorChanged = true;
         }
         // Separate: only when the body actually holds more than one
         // disconnected solid (air-gapped lumps fused into one body). Splits
@@ -797,7 +807,12 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
             if (ImGui::MenuItem(materializr::tr("Separate"))) {
                 auto op = std::make_unique<SeparateBodyOp>();
                 op->setBody(id);
-                m_history->pushOperation(std::move(op), *m_document);
+                // The resized original plus every split-off body need marking -
+                // an unknown-ahead-of-time set, same as History's undo/redo.
+                {
+                    BodyChangeScope scope(*m_document, m_markBodyDirty);
+                    m_history->pushOperation(std::move(op), *m_document);
+                }
                 if (m_markDirty) m_markDirty();
             }
         }
@@ -911,7 +926,7 @@ bool ItemsPanel::renderBodyRow(int id, bool& colorChanged) {
             ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
             ImGuiColorEditFlags_PickerHueWheel)) {
         m_document->setBodyColor(id, col);
-        colorChanged = true;
+        if (m_markBodyDirty) m_markBodyDirty(id);
     }
 
     ImGui::PopID();

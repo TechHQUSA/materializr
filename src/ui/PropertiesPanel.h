@@ -24,6 +24,7 @@ public:
 
     void setHistory(History* history);
     void setDocument(Document* doc);
+    void setBodyDirtyCallback(std::function<void(int)> cb) { m_markBodyDirty = std::move(cb); }
     void setSelectionManager(const SelectionManager* sel);
     void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
     // Per-frame sketch-mode context: while the user is editing a sketch, the
@@ -71,29 +72,29 @@ public:
     void setEditingStep(int step);
     int getEditingStep() const;
 
-    // Render. Returns true if a parameter was changed (needs history replay).
-    bool render();
+    // Render. Mutations mark their own affected bodies via the body-dirty
+    // callback instead of a return value - see setBodyDirtyCallback.
+    void render();
     // Body only, no ImGui::Begin/End - for hosts that place it themselves
-    // (the im-touch right panel's Props tab). Same return as render().
-    bool renderContent();
+    // (the im-touch right panel's Props tab).
+    void renderContent();
 
 private:
     // Constraint editor for whichever sketch is currently selected (or for
     // the parent sketch of a selected region). Walks the live sketch's
     // constraints, lets the user retune dimensional ones inline, runs the
     // solver, and pushes a SketchEditOp on commit so the change is
-    // undoable and survives save/load. `modified` is set true if a value
-    // was committed this frame so the host can dirty its mesh + history.
-    void renderSketchConstraintsPanel(int sketchId, bool& modified);
+    // undoable and survives save/load.
+    void renderSketchConstraintsPanel(int sketchId);
     // While in sketch mode: editable size of the selected element (circle
     // diameter / arc radius), or a read-only readout for a line. Writes go
     // through m_sketchMutate so they're undoable and cascade to bodies.
-    void renderSketchElementPanel(bool& modified);
+    void renderSketchElementPanel();
     // Read-only orientation readout + Flip Normal / Rotate-About-Axis actions
     // for a selected construction plane.
-    void renderPlanePanel(int planeId, bool& modified);
+    void renderPlanePanel(int planeId);
     // Origin / direction / length readout + Flip Direction for a selected axis.
-    void renderAxisPanel(int axisId, bool& modified);
+    void renderAxisPanel(int axisId);
 
     std::function<void(int)> m_rotatePlane;
     std::function<void(int)> m_attachRefImage;
@@ -101,6 +102,7 @@ private:
 
     History* m_history = nullptr;
     Document* m_document = nullptr;
+    std::function<void(int)> m_markBodyDirty;
     const SelectionManager* m_selection = nullptr;
     materializr::EventBus* m_eventBus = nullptr;
     int m_editingStep = -1;

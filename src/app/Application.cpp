@@ -385,6 +385,9 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_propertiesPanel->setAttachRefImageCallback(
         [this](int planeId) { attachRefImageToPlane(planeId); });
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
+    m_itemsPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
+    m_historyPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
+    m_propertiesPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
     m_propertiesPanel->setLinkInfoCallback(
         [this](bool isBody, int id) { return linkHintFor(isBody, id); });
     m_propertiesPanel->setRelinkCallback(
@@ -8239,23 +8242,20 @@ void Application::run() {
                     }
                     m_historyPanel->setHighlightStep(hl);
                 }
-                if (classicLayout() && !landingPageUp() && m_showHistory &&
-                    m_historyPanel->render()) {
-                    m_meshesDirty = true;
+                if (classicLayout() && !landingPageUp() && m_showHistory) {
+                    m_historyPanel->render();
                 }
 
                 if (classicLayout() && !landingPageUp() && m_showItems) {
                     if (m_itemsPanel->render()) {
                         m_hoveredBodyId = -1;
-                        m_meshesDirty = true;
                     }
                 }
                 m_propertiesPanel->setSketchContext(
                     m_inSketchMode, m_activeSketch.get(), m_activeSketchId,
                     m_sketchTool.get());
-                if (classicLayout() && !landingPageUp() && m_showProperties &&
-                    m_propertiesPanel->render()) {
-                    m_meshesDirty = true;
+                if (classicLayout() && !landingPageUp() && m_showProperties) {
+                    m_propertiesPanel->render();
                 }
             }
             // Touch edge tabs to collapse/restore each side column (drawn on top
