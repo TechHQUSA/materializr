@@ -20,6 +20,9 @@
 #include "ui/UpdateChecker.h"
 #include <TopoDS_Shape.hxx>
 #include "viewport/MeshDispatch.h"
+#ifdef MZR_PARALLEL_MESH_TESTING
+#include "viewport/ParallelMesh.h"
+#endif
 #include "core/BodyChanges.h"
 #include <gp_Trsf.hxx>
 #include <TopoDS_Face.hxx>
@@ -113,6 +116,12 @@ public:
     void run();
 
 private:
+#ifdef MZR_PARALLEL_MESH_TESTING
+    friend struct ParallelMeshTestAccess;
+    std::function<void(ParallelMeshOptions&)> m_parallelMeshTestSetup;
+    std::function<void(const ParallelMeshBatch&)> m_parallelMeshTestBeforeBookkeeping;
+    std::function<void(const ParallelMeshBatch&)> m_parallelMeshTestAfterBookkeeping;
+#endif
     void initImGui();
     void shutdownImGui();
     // Restore the default panel/dock layout live (Settings → Appearance).

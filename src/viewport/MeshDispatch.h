@@ -66,6 +66,9 @@ public:
     // answered; one in-frame mesh corrects that, not a lifetime of them).
     void meshedInFrame(int bodyId, double millis)
     {
+#ifdef MZR_PARALLEL_MESH_TESTING
+        ++m_samplesForTest[bodyId];
+#endif
         m_millis[bodyId] = millis;
         m_landed.erase(bodyId);
     }
@@ -78,8 +81,17 @@ public:
     }
 
     bool anyPending() const { return !m_pending.empty(); }
+#ifdef MZR_PARALLEL_MESH_TESTING
+    int samplesForTest(int bodyId) const {
+        auto it = m_samplesForTest.find(bodyId);
+        return it == m_samplesForTest.end() ? 0 : it->second;
+    }
+#endif
 
 private:
+#ifdef MZR_PARALLEL_MESH_TESTING
+    std::unordered_map<int, int> m_samplesForTest;
+#endif
     std::unordered_map<int, MeshRequest> m_pending; // body id -> request in flight
     std::unordered_map<int, MeshRequest> m_landed;  // body id -> last request answered
     std::unordered_map<int, double> m_millis;       // body id -> last mesher time

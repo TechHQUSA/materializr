@@ -216,6 +216,12 @@ void ShapeRenderer::notePreMeshed(const TopoDS_Shape& shape,
             materializr::makeMeshTag(shape, requestedDeflection, requestedAngularDeflection);
 }
 
+void ShapeRenderer::forgetPreMeshed(const TopoDS_Shape& shape) {
+    if (shape.IsNull()) return;
+    m_meshedAt.erase(shape.TShape().get());
+    m_meshedAtPrev.erase(shape.TShape().get());
+}
+
 int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
                               float angularDeflection)
 {
@@ -257,6 +263,9 @@ int ShapeRenderer::tessellate(const TopoDS_Shape& shape, float deflection,
         // (smoother) while flat faces stay cheap. Run in parallel to absorb
         // the extra triangles.
         const auto t0 = std::chrono::steady_clock::now();
+#ifdef MZR_PARALLEL_MESH_TESTING
+        ++m_meshCallsForTest;
+#endif
         BRepMesh_IncrementalMesh meshGen(
             shape, materializr::meshParams(deflection, angularDeflection, true));
         m_lastMeshMs = std::chrono::duration<double, std::milli>(

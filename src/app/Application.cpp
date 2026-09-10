@@ -49,6 +49,7 @@ inline void resetFpuForOcct() {
 #include "viewport/ViewCube.h"
 #include "viewport/Picker.h"
 #include "viewport/MeshWorker.h"
+#include "viewport/ParallelMesh.h"
 #include "viewport/Gizmo.h"
 #include "viewport/SelectionHighlight.h"
 #include "viewport/BoxSelect.h"
@@ -210,6 +211,17 @@ void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
 
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
+#ifdef MZR_PARALLEL_MESH_TESTING
+    // The load integration test supplies GL sinks and never opens a window.
+    m_sessions.push_back(std::make_unique<ProjectSession>());
+    m_document = m_sessions[0]->document.get();
+    m_history = m_sessions[0]->history.get();
+    m_selection = m_sessions[0]->selection.get();
+    m_shapeRenderer = std::make_unique<ShapeRenderer>();
+    m_edgeRenderer = std::make_unique<EdgeRenderer>();
+    m_viewport = std::make_unique<Viewport>();
+    return;
+#endif
     // The CLI scale has to reach the constructor: the INITIAL window size is
     // scaled by it, and setUiScaleOverride() below runs too late for that.
     m_window = std::make_unique<Window>(1600, 900, "Materializr", m_cliUiScale);
@@ -731,14 +743,23 @@ void Application::closeSession(size_t idx) {
 }
 
 Application::~Application() {
+    // The testing constructor's early return (above) never calls initAll(),
+    // but m_plugins itself is populated by static registration regardless -
+    // shutdownAll() would still call every plugin's shutdown() with no
+    // matching init(). Guarded the same way shutdownImGui() below already
+    // is for the same reason.
+#ifndef MZR_PARALLEL_MESH_TESTING
     PluginRegistry::instance().shutdownAll();
+#endif
     m_backgroundRenderer.reset();
     m_edgeRenderer.reset();
     m_sketchRenderer.reset();
     m_shapeRenderer.reset();
     m_grid.reset();
     m_viewport.reset();
+#ifndef MZR_PARALLEL_MESH_TESTING
     shutdownImGui();
+#endif
 }
 
 static const char* s_defaultLayout = R"([Window][WindowOverViewport_11111111]
@@ -2146,7 +2167,9 @@ void Application::applyAppSettings(const AppSettings& s) {
 }
 
 void Application::saveAppSettings() {
+#ifndef MZR_PARALLEL_MESH_TESTING
     SettingsIO::save(SettingsIO::defaultPath(), currentSettings());
+#endif
 }
 
 void Application::exportSettings() {
@@ -3550,6 +3573,7 @@ void Application::rebuildMeshes() {
         auto ids = m_document->getAllBodyIds();
         int meshN = static_cast<int>(ids.size()), meshI = 0;
         int visible = 0, polls = 0, draws = 0;
+        double meshMs = 0.0;
         DrawThrottle throttle;
         for (int id : ids) {
             // During a load (deferred slot), keep the window responsive: poll
@@ -3587,8 +3611,10 @@ void Application::rebuildMeshes() {
             }
             int idx = m_shapeRenderer->setBodyMesh(id, shape, deflection,
                                                    angularDeflection);
-            if (m_shapeRenderer->lastMeshMillis() >= 0.0)
+            if (m_shapeRenderer->lastMeshMillis() >= 0.0) {
+                meshMs += m_shapeRenderer->lastMeshMillis();
                 m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
+            }
             if (idx >= 0) {
                 m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
                 // Set, not only raised: the slot keeps its flags across a per-body
@@ -3620,8 +3646,8 @@ void Application::rebuildMeshes() {
             // loop's own count; each drawn frame polls once more inside the
             // reporter.
             std::fprintf(stderr, "[mesh-rebuild] bodies=%d visible=%d bodyPolls=%d "
-                                 "draws=%d ms=%u pumped=%d\n",
-                         meshN, visible, polls, draws, took,
+                                 "draws=%d ms=%u meshMs=%.1f pumped=%d\n",
+                         meshN, visible, polls, draws, took, meshMs,
                          m_pumpMeshProgress ? 1 : 0);
             if (took > 500)
                 std::fprintf(stderr, "[Perf] full mesh rebuild took %.2fs "
@@ -4503,6 +4529,67 @@ bool Application::loadProjectAt(const std::string& path) {
         std::fprintf(stderr, "Load failed: %s\n", result.errorMessage.c_str());
         return false;
     }
+#if defined(MZR_PARALLEL_MESH_SUPPORTED)
+    float deflection, angularDeflection;
+    meshQualityParams(deflection, angularDeflection);
+    ParallelMeshOptions options;
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestSetup) m_parallelMeshTestSetup(options);
+#endif
+    std::vector<ParallelMeshJob> jobs;
+    for (int id : m_document->getAllBodyIds()) {
+        if (id < 0 || !m_document->isBodyVisible(id)) continue;
+        TopoDS_Shape shape;
+        try { shape = m_document->getBody(id); } catch (...) { continue; }
+        if (!m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection))
+            jobs.push_back({id, shape});
+    }
+    DrawThrottle throttle;
+    options.onTick = [&](size_t done, size_t total) {
+        if (!m_pumpMeshProgress) return;
+        const float frac = parallelMeshFraction(done, total);
+        pumpStep(throttle, progressFrameWouldDraw(frac),
+                 [] { return DrawThrottle::clock::now(); },
+                 [&] {
+                     renderProgressFrame(frac, "Preparing view\xE2\x80\xA6");
+                     return DrawThrottle::clock::now();
+                 },
+                 [&] { if (m_window) m_window->pollEvents(); });
+    };
+    const auto batch = parallelMesh(jobs, deflection, angularDeflection, options);
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestBeforeBookkeeping) m_parallelMeshTestBeforeBookkeeping(batch);
+#endif
+    const auto bookStart = std::chrono::steady_clock::now();
+    size_t pooled = 0;
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        if (batch.results[i].ok) {
+            m_shapeRenderer->notePreMeshed(jobs[i].shape, deflection, angularDeflection);
+            // Provisional: OFF under pool contention can over-predict the
+            // in-frame cost. An adopted async result replaces this estimate.
+            m_meshDispatch.meshedInFrame(jobs[i].bodyId, batch.results[i].millis);
+            ++pooled;
+        } else {
+            m_shapeRenderer->forgetPreMeshed(jobs[i].shape);
+            // Mirrors forgetPreMeshed: a failed job leaves nothing behind in
+            // either cache that could bias a later decision for this body.
+            m_meshDispatch.forget(jobs[i].bodyId);
+        }
+    }
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestAfterBookkeeping) m_parallelMeshTestAfterBookkeeping(batch);
+#endif
+    // fallback is 0 only when every job was pooled and succeeded; an empty
+    // job list (nothing to mesh) is not a fallback and reports 0 too.
+    const bool fellBack = !jobs.empty() &&
+                         (batch.path == ParallelMeshPath::Sequential || pooled != jobs.size());
+    std::fprintf(stderr, "[load-parmesh] jobs=%zu pooled=%zu fallback=%d reason=%s "
+                         "poolMs=%.1f scanMs=%.1f bookMs=%.1f\n",
+                 jobs.size(), pooled, fellBack ? 1 : 0,
+                 batch.reason, batch.poolMs, batch.scanMs,
+                 std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - bookStart).count());
+#endif
     rebuildHistoryFromProject(hist, result.savedByVersion);
     // A reopened project should sit at the history tip with no redo stack - a
     // phantom redo tail would, e.g., block autosave (which won't save below-tip).
@@ -4554,15 +4641,19 @@ void Application::loadProjectWithProgress(const std::string& path) {
     m_progressCancelled = false;
     renderProgressFrame(-1.0f, "Loading project\xE2\x80\xA6");
 
+    struct PumpGuard {
+        bool& flag;
+        bool previous;
+        ~PumpGuard() { flag = previous; }
+    } guard{m_pumpMeshProgress, m_pumpMeshProgress};
+    m_pumpMeshProgress = true;
     auto t0 = clock::now();
     bool ok = loadProjectAt(path);   // ProjectIO::load (BREP read) + history rebuild
     auto t1 = clock::now();
     if (ok) {
         // Tessellate up front HERE (between frames) so the per-body progress
         // frames are safe, instead of letting the first render frame block.
-        m_pumpMeshProgress = true;
         rebuildMeshes();
-        m_pumpMeshProgress = false;
         m_meshesDirty = false;
     }
     auto t2 = clock::now();

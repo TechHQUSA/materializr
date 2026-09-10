@@ -20,7 +20,53 @@ All notable changes to Materializr are documented here. Format loosely follows
   Small bodies preview exactly as before. The ghost tool volume is now built
   from the profile's own triangulation instead of being meshed each frame
   (32 ms per frame on a 300-hole profile, now 1 ms), so a drag on such a body
-  costs the frame a few milliseconds.
+  costs the frame a few milliseconds. Committing no longer recomputes what the
+  drag already measured: if the last preview frame matches what commit is
+  about to do, the worker's own result is adopted instead of running the
+  operation a second time (Shell and Scale Face commits that took 2.9 s and
+  0.6 s on a 300-hole plate now land in well under a millisecond). And a
+  commit whose own preview measured itself as slow no longer freezes the
+  frame it lands on: the commit is deferred to the next frame the same way a
+  heavy Project Sketch commit already was, so a 565 ms Push/Pull commit no
+  longer stalls the UI. Both Push/Pull and Shell's commits can also be
+  cancelled mid-boolean now, the same way a long re-cut always could.
+- **Booleans ran twice.** Cut, Fuse and Common's two-shape constructor already
+  performs the operation; a trailing `Build()` on the same object ran it a
+  second time and silently discarded any setter called in between (fuzzy
+  tolerance, non-destructive mode). Every one of the 31 call sites across the
+  modeling operations now builds once. A representative cut went from 946.7 ms
+  plus a discarded 930.3 ms rebuild to 949.5 ms - about half the wall time on
+  every boolean-based operation in the app.
+- **A malformed or truncated STL import used to report success.** The reader
+  stops at the first facet it cannot parse without failing the read, so a
+  file a writer terminated early, or one whose blank lines between facets this
+  reader rejects, came back as a handful of triangles sewn into an invisible
+  sliver with no explanation (one real case: a 26,988-facet model imported as
+  one triangle). Import now cross-checks what the file itself declares -
+  the triangle count in a binary header, or a straight count of `facet`
+  tokens in an ASCII file - against what was actually read, and refuses the
+  import with a specific reason (a truncated file, or the blank-line
+  incompatibility with a suggested fix) when the shortfall is too large to be
+  the reader's normal, harmless discarding of zero-area triangles.
+- **The touch Items tree re-tessellated the whole project on every tap.**
+  Selecting, renaming or toggling visibility from the touch layout's Items
+  panel raised the full-rebuild flag like the desktop panels always have, so
+  a 145-body project repainted every body's mesh for one row's change
+  (270.9 ms). It now marks only the bodies the tap actually changed, the same
+  per-body marking every other interactive edit already uses (5.5 ms).
+- **Opening a project was slow, mostly for reasons that had nothing to do
+  with the geometry.** Two separate fixes, measured together on a 145-body
+  project: the load loop drew a full progress frame per body under vsync, so
+  a 1.9 ms body cost a 17 ms display refresh - 2453 ms of the load was
+  waiting on the screen, not doing anything. That frame is now drawn on a
+  throttle (at most every 200 ms, or four times the last frame's own cost)
+  instead of every body, which took the same load to 385 ms. The remaining
+  tessellation is now split across a worker per core instead of run one body
+  at a time - independent bodies are checked for shared geometry before they
+  are pooled, falling back to the old per-body loop for the (rare) case they
+  do - taking the same load to 229 ms, a 91% reduction from where it started.
+  The pool runs on macOS and Linux; Windows and mobile builds keep the
+  original sequential loop.
 - **Editing a sketch, undoing, or running a menu operation no longer
   re-tessellates every body.** Roughly fifty call sites raised the
   full-rebuild flag after an edit: the viewport then retired and re-adopted

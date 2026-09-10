@@ -71,6 +71,9 @@ public:
     void notePreMeshed(const TopoDS_Shape& shape, float requestedDeflection,
                        float requestedAngularDeflection);
 
+    /// A failed mesh may match an old partial tag in either generation.
+    void forgetPreMeshed(const TopoDS_Shape& shape);
+
     /// Whether tessellate() would skip the mesher for `shape` at this quality:
     /// the shape carries the pre-meshed tag for exactly these parameters.
     bool isPreMeshed(const TopoDS_Shape& shape, float deflection,
@@ -88,6 +91,9 @@ public:
     /// Wall time of the mesher run inside the last setBodyMesh(), in
     /// milliseconds, or -1 when that call reused a mesh.
     double lastMeshMillis() const { return m_lastMeshMs; }
+#ifdef MZR_PARALLEL_MESH_TESTING
+    size_t meshCallsForTest() const { return m_meshCallsForTest; }
+#endif
 
     /// Remove the mesh associated with `bodyId`. The slot is marked empty
     /// (vertexCount = 0, GL buffers freed) but kept in the array so other
@@ -197,6 +203,9 @@ private:
     std::unordered_map<const void*, MeshTag> m_meshedAt;
     std::unordered_map<const void*, MeshTag> m_meshedAtPrev;
     double m_lastMeshMs = -1.0;
+#ifdef MZR_PARALLEL_MESH_TESTING
+    size_t m_meshCallsForTest = 0;
+#endif
 
     // Mesh shader program
     unsigned int m_meshProgram = 0;
