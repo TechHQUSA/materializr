@@ -37,6 +37,7 @@ inline void resetFpuForOcct() {
 
 #include "app/Application.h"
 #include "app/DeferredTasks.h"
+#include "app/DrawThrottle.h"
 #include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
@@ -1557,9 +1558,12 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     // without a window there; returning false says "not cancelled" so it
     // still completes. Keyed on the frame, not on the drain, because
     // restoreSessionTabs drains BETWEEN frames, where a window is wanted.
+    // The same predicate the load loop consults (progressFrameWouldDraw), read
+    // before the reset below so the two can never disagree about a draw.
+    const bool would = progressFrameWouldDraw(fraction);
     if (m_imguiFrameOpen) return false;
     if (fraction == 0.0f) m_progressCancelled = false;
-    if (m_progressCancelled || !m_window) return m_progressCancelled;
+    if (!would) return m_progressCancelled;
 
     m_window->pollEvents();
     int fbw = 0, fbh = 0;
@@ -1599,6 +1603,15 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     // GL just ran - restore the FPU mode before control returns to the OCCT op.
     resetFpuForOcct();
     return m_progressCancelled;
+}
+
+bool Application::progressFrameWouldDraw(float fraction) const {
+    // Mirrors the early returns above. One side effect differs, headlessly
+    // only: without a window the reporter would still clear the latch at
+    // fraction 0, whereas the loop skips the call; loadProjectWithProgress
+    // clears the latch itself before the first frame, so nothing depends on it.
+    return materializr::progressFrameWouldDraw(m_imguiFrameOpen, m_window != nullptr,
+                                               m_progressCancelled, fraction);
 }
 
 // renderDockspace() and the shared menu-item lists live in
@@ -3536,18 +3549,36 @@ void Application::rebuildMeshes() {
         m_edgeRenderer->retireAll();
         auto ids = m_document->getAllBodyIds();
         int meshN = static_cast<int>(ids.size()), meshI = 0;
+        int visible = 0, polls = 0, draws = 0;
+        DrawThrottle throttle;
         for (int id : ids) {
-            // During a load (deferred slot), pump a per-body progress frame so
-            // tessellating a heavy model keeps the window responsive.
+            // During a load (deferred slot), keep the window responsive: poll
+            // for EVERY body, but draw the progress frame only when the
+            // throttle allows. Each draw ends in a vsync'd swap (17 ms at
+            // 60 Hz), so drawing per body made a 145-body load take 2453 ms
+            // for ~300 ms of tessellation. The fraction-0 draw is always
+            // allowed: it is what resets the cancel latch (renderProgressFrame).
             if (m_pumpMeshProgress) {
-                renderProgressFrame(meshN > 0 ? float(meshI) / float(meshN) : -1.0f,
-                                    "Preparing view\xE2\x80\xA6");
+                const float frac = float(meshI) / float(meshN); // ids is non-empty here
+                if (pumpStep(throttle, progressFrameWouldDraw(frac),
+                             [] { return DrawThrottle::clock::now(); },
+                             [&] {
+                                 renderProgressFrame(frac, "Preparing view\xE2\x80\xA6");
+                                 return DrawThrottle::clock::now();
+                             },
+                             [&] {
+                                 if (!m_window) return;
+                                 m_window->pollEvents();
+                                 ++polls;
+                             }))
+                    ++draws;
             }
             ++meshI;
             if (id < 0) continue;        // defensive: skip bad ids
             if (!m_document->isBodyVisible(id)) continue;
             TopoDS_Shape shape;
             try { shape = m_document->getBody(id); } catch (...) { continue; }
+            ++visible;
             if (meshAsync(id, shape, deflection, angularDeflection)) {
                 // The old mesh and edges stay on screen until the worker lands.
                 m_shapeRenderer->reclaimStale(id);
@@ -3582,6 +3613,16 @@ void Application::rebuildMeshes() {
         m_edgeRenderer->freeRetired();
         if (rmWasFull) {
             const uint32_t took = SDL_GetTicks() - rmStart;
+            // Every full rebuild reports itself: this is how the load routes
+            // without a [load-timing] line (Open Recent, the open dialog,
+            // recovery) are measured, and where a per-body draw count would
+            // expose a regression of the throttle above. bodyPolls is the
+            // loop's own count; each drawn frame polls once more inside the
+            // reporter.
+            std::fprintf(stderr, "[mesh-rebuild] bodies=%d visible=%d bodyPolls=%d "
+                                 "draws=%d ms=%u pumped=%d\n",
+                         meshN, visible, polls, draws, took,
+                         m_pumpMeshProgress ? 1 : 0);
             if (took > 500)
                 std::fprintf(stderr, "[Perf] full mesh rebuild took %.2fs "
                                      "on the main thread\n", took / 1000.0);
@@ -4505,6 +4546,11 @@ void Application::loadProjectWithProgress(const std::string& path) {
     // Show something immediately so the window isn't a frozen blank. Start the
     // latch clear: a Cancel/Escape left over from an earlier op would otherwise
     // make every progress frame below return without drawing OR pumping.
+    // Two clocks: tTotal spans the whole user-visible interval, from before
+    // the first frame; t0 starts after it, so parse+history excludes that
+    // frame and first-frame reports it. The four numbers reconcile within
+    // millisecond rounding (each interval is truncated independently).
+    auto tTotal = clock::now();
     m_progressCancelled = false;
     renderProgressFrame(-1.0f, "Loading project\xE2\x80\xA6");
 
@@ -4520,10 +4566,12 @@ void Application::loadProjectWithProgress(const std::string& path) {
         m_meshesDirty = false;
     }
     auto t2 = clock::now();
-    std::fprintf(stderr, "[load-timing] parse+history=%lld ms  tessellate=%lld ms  total=%lld ms\n",
+    std::fprintf(stderr, "[load-timing] first-frame=%lld ms  parse+history=%lld ms  "
+                         "tessellate=%lld ms  total=%lld ms\n",
+                 static_cast<long long>(ms(t0 - tTotal)),
                  static_cast<long long>(ms(t1 - t0)),
                  static_cast<long long>(ms(t2 - t1)),
-                 static_cast<long long>(ms(t2 - t0)));
+                 static_cast<long long>(ms(t2 - tTotal)));
 }
 
 void Application::addRecentProject(const std::string& ref, const std::string& name) {

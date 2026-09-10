@@ -144,8 +144,12 @@ private:
     void noteHeavyPumpGap();
     // Self-contained progress frame for long operations, rendered between main
     // frames (via m_deferredHeavy). Returns true if the user hit Cancel.
-    // fraction<0 = indeterminate; fraction<=0 also resets the cancel latch.
+    // fraction<0 = indeterminate; fraction==0 (a new op) resets the cancel latch.
     bool renderProgressFrame(float fraction, const char* label);
+    // Whether renderProgressFrame(fraction, ...) would draw rather than
+    // return early. Owned here so a loop that must not select a refused draw
+    // (see DrawThrottle.h) cannot drift from the reporter's own guards.
+    bool progressFrameWouldDraw(float fraction) const;
     // A left→right sweeping marquee bar at the current ImGui cursor (shared by
     // the projection progress overlay and the thread-cutting modal).
     void drawIndeterminateBar();

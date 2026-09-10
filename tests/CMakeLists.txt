@@ -330,6 +330,11 @@ add_executable(test_op_progress test_op_progress.cpp)
 target_link_libraries(test_op_progress PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_op_progress COMMAND test_op_progress)
 
+# test_draw_throttle - the load loop polls every body but draws its vsync'd progress frame only when the throttle allows
+add_executable(test_draw_throttle test_draw_throttle.cpp)
+target_link_libraries(test_draw_throttle PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_draw_throttle COMMAND test_draw_throttle)
+
 # test_iop_async_preview - the SnapshotBody engine's off-thread preview: inline until slow, trails the slider, cancel/commit mid-job
 add_executable(test_iop_async_preview test_iop_async_preview.cpp)
 target_link_libraries(test_iop_async_preview PRIVATE materializr_core gtest gtest_main)
