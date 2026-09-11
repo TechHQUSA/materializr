@@ -5948,7 +5948,7 @@ void Application::renderViewport() {
                                 auto after = std::make_shared<Sketch>(*m_activeSketch);
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
-                                m_history->pushExecuted(std::move(op));
+                                m_history->pushExecuted(std::move(op), *m_document);
                                 // Cascade the gizmo move/rotate to any body built
                                 // from this sketch. Point-drag and dimensional edits
                                 // already publish this; the gizmo path didn't, so a
@@ -6036,7 +6036,7 @@ void Application::renderViewport() {
                                 auto after = std::make_shared<Sketch>(*m_activeSketch);
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
-                                m_history->pushExecuted(std::move(op));
+                                m_history->pushExecuted(std::move(op), *m_document);
                                 // Cascade the gizmo move/rotate to any body built
                                 // from this sketch. Point-drag and dimensional edits
                                 // already publish this; the gizmo path didn't, so a
@@ -6076,7 +6076,7 @@ void Application::renderViewport() {
                             auto after = std::make_shared<Sketch>(*m_activeSketch);
                             auto op = std::make_unique<SketchEditOp>(
                                 m_activeSketch, m_sketchGizmoBefore, after);
-                            m_history->pushExecuted(std::move(op));
+                            m_history->pushExecuted(std::move(op), *m_document);
                         }
                         m_sketchGizmoHandle = SketchGizmoHandle::None;
                         m_sketchGizmoBefore.reset();
@@ -6556,7 +6556,7 @@ void Application::renderViewport() {
                             auto after_ptr = std::make_shared<Sketch>(*m_activeSketch);
                             auto op = std::make_unique<SketchEditOp>(
                                 m_activeSketch, m_sketchDragBefore, after_ptr);
-                            m_history->pushExecuted(std::move(op));
+                            m_history->pushExecuted(std::move(op), *m_document);
                             // Cascade the move to any body built from this sketch.
                             // Dimensional edits (circle Ø / constraints) publish
                             // this so the body follows; a drag-move pushed the

@@ -5,6 +5,17 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **Assembly Mates.** Position one body against another and keep the
+  relationship: pick the reference body first, then the one that should
+  move, and hit Mate. Two round faces infer Concentric, two flat faces infer
+  Planar, anything else falls back to Fasten - always overridable
+  afterwards. Moving the reference (by any op, or by another mate) carries
+  everything mated to it along; the first body you reference becomes the
+  assembly's grounded root. Mates persist through save/reload and survive
+  undo/redo of the ops that move a mated body.
+
 ### Fixed
 
 - **Move Face no longer freezes on a many-hole face.** Translating, tilting,

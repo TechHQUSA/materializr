@@ -467,6 +467,7 @@ void Application::wireDocumentConsumers() {
         m_propertiesPanel->setDocument(m_document);
         m_propertiesPanel->setSelectionManager(m_selection);
         m_propertiesPanel->setEventBus(m_eventBus.get());
+        m_propertiesPanel->setPluginContext(m_pluginContext.get());
     }
     // Core services of THIS session bind to the app-wide event bus, and the
     // per-History callbacks are re-applied (they are instance state, not
@@ -478,7 +479,8 @@ void Application::wireDocumentConsumers() {
     if (m_pluginContext && m_viewport)
         m_pluginContext->_bind(m_document, m_history, m_selection,
                                m_eventBus.get(), &m_viewport->getCamera(),
-                               &m_meshesDirty, &m_inSketchMode);
+                               &m_meshesDirty, &m_inSketchMode,
+                               [this]{ markDirty(); });
     // Tell everything that caches DOCUMENT-DERIVED state to rebuild. The
     // setters above only reach consumers Application knows by name; plugins
     // own their render caches in file-local statics this function cannot
@@ -2582,7 +2584,7 @@ void Application::handleToolAction(int action) {
             if (before->getPoints().size() != after->getPoints().size() ||
                 before->getLines().size()  != after->getLines().size()) {
                 auto op = std::make_unique<SketchEditOp>(m_activeSketch, before, after);
-                m_history->pushExecuted(std::move(op));
+                m_history->pushExecuted(std::move(op), *m_document);
             }
             break;
         }
@@ -4248,7 +4250,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
             op->setTimestamp(std::chrono::system_clock::now() -
                              std::chrono::hours{24});
         }
-        m_history->pushExecuted(std::move(op));
+        m_history->pushExecuted(std::move(op), *m_document);
     }
 
     // After all ops are rehydrated, the document bodies reflect their final state
@@ -6468,7 +6470,7 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
     // document - so a save later can serialise the snapshots even if the live
     // pointer has since been replaced (which silently froze delete steps).
     op->setSketchId(m_document->findSketchId(m_activeSketch.get()));
-    m_history->pushExecuted(std::move(op));
+    m_history->pushExecuted(std::move(op), *m_document);
 }
 
 void Application::sketchChainBack() {

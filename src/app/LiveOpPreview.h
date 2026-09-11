@@ -68,7 +68,7 @@ public:
     // Record the applied instance WITHOUT re-running it (pushExecuted), and
     // release it. Returns false if nothing was applied, in which case history
     // is untouched, which is right: the document is already unmodified.
-    bool commit(History& hist);
+    bool commit(History& hist, Document& doc);
 
 private:
     std::unique_ptr<Operation> m_op;

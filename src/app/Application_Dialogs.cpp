@@ -894,7 +894,8 @@ void Application::applyMultiBodyRotation() {
         std::string(buf),
         std::move(beforeState), std::move(afterState),
         /*fromReload=*/false);
-    m_history->pushExecuted(std::move(op));
+    m_history->pushExecuted(std::move(op), *m_document);
+    m_meshesDirty = true;
 
     // Zero the sliders so the next Apply is relative to the new orientation.
     m_multiRotate[0] = m_multiRotate[1] = m_multiRotate[2] = 0.0f;
@@ -3972,7 +3973,8 @@ void Application::applyRevolve() {
             // pushExecuted: state's already been applied directly to the
             // document above; we just want history to know it happened so
             // Ctrl+Z can roll it back via the captured before-state.
-            m_history->pushExecuted(std::move(op));
+            m_history->pushExecuted(std::move(op), *m_document);
+            m_meshesDirty = true;
             if (materializr::isVerbose())
                 std::fprintf(stderr, "[Revolve] applied: %.1f° dir(%.3f,%.3f,%.3f) "
                                      "origin(%.2f,%.2f,%.2f) over %d bodies "

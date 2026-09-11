@@ -14,6 +14,7 @@ namespace materializr {
 class Sketch;
 class EventBus;
 class SketchTool;
+class PluginContext;
 }
 
 namespace materializr {
@@ -27,6 +28,9 @@ public:
     void setBodyDirtyCallback(std::function<void(int)> cb) { m_markBodyDirty = std::move(cb); }
     void setSelectionManager(const SelectionManager* sel);
     void setEventBus(materializr::EventBus* bus) { m_eventBus = bus; }
+    // Lets the panel render registered PropertyContribution plugin sections
+    // (e.g. MatePlugin's "Mates" list) via PluginRegistry - see renderContent.
+    void setPluginContext(materializr::PluginContext* ctx) { m_pluginContext = ctx; }
     // Per-frame sketch-mode context: while the user is editing a sketch, the
     // panel shows the editable size of the currently-selected element (a
     // circle's diameter, an arc's radius). Injected each frame by Application.
@@ -105,6 +109,7 @@ private:
     std::function<void(int)> m_markBodyDirty;
     const SelectionManager* m_selection = nullptr;
     materializr::EventBus* m_eventBus = nullptr;
+    materializr::PluginContext* m_pluginContext = nullptr;
     int m_editingStep = -1;
 
     // Sketch-mode context (see setSketchContext).

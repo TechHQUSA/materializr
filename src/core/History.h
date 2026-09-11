@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include "Operation.h"
+#include "../modeling/MateSolver.h"
 #include "Document.h"
 
 #include <functional>
@@ -26,7 +27,14 @@ public:
     // Used for ops where the live mutation happened externally (e.g. sketch
     // edits performed by the SketchTool); the op snapshots before/after so
     // undo/redo can swap between them without re-running the original action.
+        // The Document-taking overload is the one to call: it re-places mates.
+    // The bare form cannot, and it is the INTERACTIVE commit path (gizmo
+    // drags, live op previews, dialogs), so leaving it unable to solve meant
+    // the feature's headline behaviour did not hold for the way users
+    // actually move bodies. Kept only for callers with no Document in scope.
     void pushExecuted(std::unique_ptr<Operation> op);
+    void pushExecuted(std::unique_ptr<Operation> op, Document& doc);
+
 
     // Undo/Redo
     bool canUndo() const;
@@ -191,6 +199,18 @@ private:
     std::vector<std::unique_ptr<Operation>> m_operations;
     int m_currentIndex = -1;
     int m_breakpoint = -1;
+    // Mates re-place after any history change. Held across calls, not created
+    // per solve: the cached base geometry is what keeps a repeat solve from
+    // compounding on its own output.
+    materializr::MateSolver m_mateSolver;
+
+    // Re-place mated bodies after geometry changed. One helper rather than
+    // reset()+solve() scattered across every entry point: the paths that
+    // rebuild from history were repeatedly forgotten, which left mates stale
+    // until some unrelated later push, and that later solve then ran against
+    // obsolete cached geometry. `regenerated` means the document was rebuilt,
+    // so cached bases are stale and must be dropped.
+    void resolveMates(Document& doc, bool regenerated);
     int m_undoFloor = -1;   // see setUndoFloor(): floor for in-sketch undo
     int m_lastEditFailStep = -1; // see lastEditFailStep()
     unsigned m_revision = 0; // see revision()

@@ -34,6 +34,10 @@ void Document::addOrPutBody(int& id, const TopoDS_Shape& shape, const std::strin
 }
 
 void Document::removeBody(int id) {
+    // Ids are re-issued by putBody on undo, so a base left behind here would be
+    // applied to a DIFFERENT body later.
+    m_mateBases.erase(id);
+
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         // Stash metadata before erasing so a later putBody with the same id
@@ -54,7 +58,16 @@ void Document::removeBody(int id) {
     }
 }
 
-void Document::updateBody(int id, const TopoDS_Shape& shape) {
+void Document::updateBody(int id, const TopoDS_Shape& shape, bool fromMateSolve) {
+    if (!fromMateSolve) {
+        m_mateBases.erase(id);
+        // A sketch whose body just changed must re-base too, or the next solve
+        // rewrites its plane from a stale one.
+        for (auto it = m_sketches.begin(); it != m_sketches.end(); ++it)
+            if (it->sketch && it->sketch->getSourceBody() == id)
+                m_mateSketchPlanes.erase(it->id);
+    }
+
     m_bodyLedgers.erase(id);  // producing op re-publishes after
     m_bodyFaceIds.erase(id);  // same lifecycle (stale lineage is worse than none)
     int idx = findBodyIndex(id);
@@ -607,6 +620,15 @@ void Document::clear() {
     m_nextAxisId = 1;
     m_nextSketchId = 1;
     m_nextFolderId = 1;
+    // Mates and their base geometry belong to the document that owned them.
+    // Leaving them across a File>Open resolved the previous project's mates
+    // against the new document's bodies, because body ids restart at 1.
+    m_mates.clear();
+    m_mateBases.clear();
+    m_mateSketchPlanes.clear();
+    m_mateSolveError.clear();
+    m_nextMateId = 1;
+    m_groundedBody = -1;
 }
 
 // ---- Folders ---------------------------------------------------------------
@@ -727,4 +749,22 @@ int Document::findBodyIndex(int id) const {
         }
     }
     return -1;
+}
+
+int Document::addMate(const materializr::Mate& m) {
+    materializr::Mate copy = m;
+    copy.id = m_nextMateId++;
+    m_mates.push_back(copy);
+    return copy.id;
+}
+
+void Document::removeMate(int id) {
+    for (size_t i = 0; i < m_mates.size(); ++i) {
+        if (m_mates[i].id != id) continue;
+        // Drop the base with the mate: leaving it means a later mate on the
+        // same body measures against geometry from before this one existed.
+        m_mateBases.erase(m_mates[i].bodyB);
+        m_mates.erase(m_mates.begin() + i);
+        return;
+    }
 }

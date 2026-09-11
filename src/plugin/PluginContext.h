@@ -23,6 +23,10 @@ public:
     const Camera& camera() const;
 
     void markMeshesDirty();
+    // For a plugin mutation outside History (e.g. MatePlugin moving a body
+    // via the solver, not an undoable op) - otherwise nothing marks the
+    // project unsaved and a quit/reopen silently drops the change.
+    void markDocumentDirty();
 
     // True while the host Application has the sketch editor active. Plugins
     // can use this to suppress decorations that would clutter the sketch
@@ -54,7 +58,8 @@ public:
 
     void _bind(Document* doc, History* hist, SelectionManager* sel,
                EventBus* bus, Camera* cam, bool* meshesDirtyFlag,
-               const bool* sketchModeFlag);
+               const bool* sketchModeFlag,
+               std::function<void()> markDirtyFn = {});
 
 private:
     Document* m_document = nullptr;
@@ -64,6 +69,7 @@ private:
     Camera* m_camera = nullptr;
     bool* m_meshesDirtyFlag = nullptr;
     const bool* m_sketchModeFlag = nullptr;
+    std::function<void()> m_markDirtyFn;
     InteractiveOp m_pendingInteractiveOp = InteractiveOp::None;
 };
 

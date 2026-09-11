@@ -255,6 +255,7 @@ add_executable(materializr
     src/plugins/BoundaryFillPlugin.cpp
     src/plugins/PatchPlugin.cpp
     src/plugins/SewPlugin.cpp
+    src/plugins/MatePlugin.cpp
     src/plugins/ConstructionAxisPlugin.cpp
     src/plugins/RevolvePlugin.cpp
     src/plugins/FilletPlugin.cpp
@@ -334,6 +335,8 @@ add_executable(materializr
     src/modeling/Unfold.cpp
     src/modeling/SketchSolver.cpp
     src/modeling/AirfoilImport.cpp
+    src/modeling/Mate.cpp
+    src/modeling/MateSolver.cpp
     src/modeling/SketchTool.cpp
     src/modeling/SketchOffset.cpp
     src/modeling/SketchEditOp.cpp

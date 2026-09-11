@@ -475,6 +475,35 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             << " " << s.kerfMm << "\n";
     }
 
+    // --- Mates ---
+    // Written after the bodies so their ids are already known on load. Field
+    // order is append-only: a reader wanting a field a writer did not emit
+    // leaves its default standing, and older readers ignore trailing tokens.
+    // Same contract as the sketch constraint "K" line.
+    //   M id type bodyA bodyB offset angle flipped suppressed
+    ofs << "GROUNDED_BODY " << doc.getGroundedBody() << "\n";
+    {
+        const auto& mates = doc.getMates();
+        ofs << "MATE_COUNT " << static_cast<int>(mates.size()) << "\n";
+        for (const auto& m : mates) {
+            // Anchor blobs last, and space-free by construction (FaceAnchor
+            // serializes with ~ and , separators), so they can ride on the
+            // same whitespace-split line. "-" stands for "no anchors" because
+            // an empty token would be invisible to the reader.
+            std::string aa = FaceAnchor::serialize(m.anchorsA);
+            std::string ab = FaceAnchor::serialize(m.anchorsB);
+            if (aa.empty()) aa = "-";
+            if (ab.empty()) ab = "-";
+            ofs << "M " << m.id << " " << static_cast<int>(m.type) << " "
+                << m.bodyA << " " << m.bodyB << " "
+                << m.offset << " " << m.angle << " "
+                << (m.flipped ? 1 : 0) << " " << (m.suppressed ? 1 : 0) << " "
+                << aa << " " << ab << " "
+                << (m.hasRelPose ? 1 : 0) << " "
+                << m.relX << " " << m.relY << " " << m.relZ << "\n";
+        }
+    }
+
     // --- Construction primitives (planes + axes) ---
     // Saved as document records (not history-derived) so they survive
     // reload even when their creating op isn't re-executed. Format is the
@@ -1113,6 +1142,57 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                 if (mt != "BODY_MESH") continue;
                 int bid = -1; ms >> bid;
                 if (bid >= 0) doc.setBodyMesh(bid, true);
+            }
+        } else if (tok == "GROUNDED_BODY") {
+            int g = -1; iss >> g;
+            doc.setGroundedBody(g);
+        } else if (tok == "MATE_COUNT") {
+            int n = 0; iss >> n;
+            for (int i = 0; i < n; ++i) {
+                std::string mline;
+                if (!std::getline(ifs, mline)) break;
+                std::istringstream ms(mline);
+                std::string mt; ms >> mt;
+                if (mt != "M") continue;
+                materializr::Mate m{};
+                int typeRaw = 0, flip = 0, supp = 0;
+                if (!(ms >> m.id >> typeRaw >> m.bodyA >> m.bodyB
+                         >> m.offset >> m.angle)) continue;
+                // Out-of-range type: drop the mate rather than index the enum
+                // out of bounds, as an unknown constraint type is dropped.
+                if (typeRaw < 0 ||
+                    typeRaw > static_cast<int>(materializr::MateType::Planar))
+                    continue;
+                m.type = static_cast<materializr::MateType>(typeRaw);
+                if (ms >> flip) m.flipped = (flip != 0);
+                if (ms >> supp) m.suppressed = (supp != 0);
+                std::string aa, ab;
+                // A truncated or hand-edited blob must be REJECTED, not
+                // half-parsed: FaceAnchor::parse leaves default field values
+                // behind on a short token, and a default anchor resolves to
+                // some arbitrary face rather than failing. Silently mating to
+                // the wrong face is worse than losing the reference, so on a
+                // parse failure the anchors are dropped and the mate is marked
+                // broken - which the panel already explains to the user.
+                if (ms >> aa && aa != "-" && !FaceAnchor::parse(aa, m.anchorsA)) {
+                    m.anchorsA.clear();
+                    m.broken = true;
+                }
+                if (ms >> ab && ab != "-" && !FaceAnchor::parse(ab, m.anchorsB)) {
+                    m.anchorsB.clear();
+                    m.broken = true;
+                }
+                int hasRel = 0;
+                if (ms >> hasRel && hasRel) {
+                    // All three or none: a half-read pose is worse than no
+                    // pose, because it silently displaces the body.
+                    double rx = 0.0, ry = 0.0, rz = 0.0;
+                    if (ms >> rx >> ry >> rz) {
+                        m.hasRelPose = true;
+                        m.relX = rx; m.relY = ry; m.relZ = rz;
+                    }
+                }
+                doc.addRawMate(m);
             }
         } else if (tok == "BODY_SHEET_COUNT") {
             int n = 0; iss >> n;

@@ -269,7 +269,7 @@ void InteractiveOpController::commit(const IopContext& ctx) {
                 ctx.history.pushOperation(std::move(alt), ctx.doc);
         } else if (m_liveApplied && m_liveOp) {
             // The preview IS the result - record it without re-running it.
-            ctx.history.pushExecuted(std::move(m_liveOp));
+            ctx.history.pushExecuted(std::move(m_liveOp), ctx.doc);
         }
         // Anything else (nothing applied - a zero-distance gesture) records
         // nothing, which is right: the document is already untouched.

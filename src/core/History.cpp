@@ -10,6 +10,26 @@
 
 History::History() = default;
 
+namespace {
+struct ReplayGuard {
+    Document& d;
+    bool prev;
+    explicit ReplayGuard(Document& doc) : d(doc), prev(doc.isReplaying()) {
+        d.setReplaying(true);
+    }
+    ~ReplayGuard() { d.setReplaying(prev); }
+};
+} // namespace
+
+void History::resolveMates(Document& doc, bool regenerated) {
+    if (regenerated) {
+        doc.clearMateBases();
+        m_mateSolver.reset();
+    }
+    const auto res = m_mateSolver.solve(doc);
+    doc.setMateSolveError(res.ok ? std::string() : res.error);
+}
+
 bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     ++m_revision;
     if (!op) {
@@ -79,7 +99,13 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     m_currentIndex = static_cast<int>(m_operations.size()) - 1;
 
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/false);
     return true;
+}
+
+void History::pushExecuted(std::unique_ptr<Operation> op, Document& doc) {
+    pushExecuted(std::move(op));
+    resolveMates(doc, /*regenerated=*/false);
 }
 
 void History::pushExecuted(std::unique_ptr<Operation> op) {
@@ -148,10 +174,20 @@ bool History::undo(Document& doc) {
     // steps they deliberately walked back past.
     m_failedReplayAt = -1;
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::redo(Document& doc) {
+    // Without this, TransformOp::execute (and anything else that checks
+    // doc.isReplaying() to refuse touching a mate-placed body outside a
+    // replay) sees a plain interactive call here, not a replay - so redoing
+    // a step on a body that got mated after it was first executed refuses,
+    // sets m_failedReplayAt, and gets stuck there: Ctrl+Y can never advance
+    // past that step again. Same fix as editStep/removeStep/setStepEnabled/
+    // replayAll/insertStepAndReplay - redo() was simply missing it.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     if (!canRedo()) {
         m_lastRedoneStep = -1;
@@ -169,7 +205,8 @@ bool History::redo(Document& doc) {
         m_lastRedoneStep = -1;
         m_currentIndex = n - 1;
         if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
-        return true;
+        resolveMates(doc, /*regenerated=*/true);
+    return true;
     }
 
     Operation* op = m_operations[idx].get();
@@ -186,6 +223,7 @@ bool History::redo(Document& doc) {
         m_failedReplayAt = -1; // the previously-failed step recomputed fine
     }
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
@@ -230,6 +268,12 @@ void History::propagateSketchValueEdits(int editedStep, Document& doc) {
 }
 
 bool History::editStep(int index, Document& doc, bool transactional) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     m_lastEditFailStep = -1;
     ++m_revision;
     if (index < 0 || index >= static_cast<int>(m_operations.size())) {
@@ -297,6 +341,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
             m_failedReplayAt = -1;
         }
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -413,10 +458,17 @@ bool History::editStep(int index, Document& doc, bool transactional) {
     // which publishes its own SketchEditedEvent when appropriate - better
     // signal-to-noise than a generic step event that also fires for
     // unrelated history shuffles (push/pull preview undos, etc).
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::removeStep(int index, Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int count = static_cast<int>(m_operations.size());
     if (index < 0 || index >= count) return false;
@@ -427,6 +479,7 @@ bool History::removeStep(int index, Document& doc) {
         m_operations.erase(m_operations.begin() + index);
         if (m_breakpoint > index) m_breakpoint--;
         else if (m_breakpoint == index) m_breakpoint = -1;
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -471,10 +524,17 @@ bool History::removeStep(int index, Document& doc) {
     }
 
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::setStepEnabled(int index, bool enabled, Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int count = static_cast<int>(m_operations.size());
     if (index < 0 || index >= count) return false;
@@ -486,6 +546,7 @@ bool History::setStepEnabled(int index, bool enabled, Document& doc) {
     // redo/replay will honor it.
     if (index > m_currentIndex) {
         target->setEnabled(enabled);
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -533,8 +594,23 @@ int History::getBreakpoint() const {
 }
 
 bool History::replayAll(Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
+
+    // Mates are document state, not history steps, so a full replay must not
+    // destroy them - doc.clear() wipes the mate list, the grounded body and the
+    // id counter along with the geometry. Mate edits are not undoable, so
+    // losing them here would be unrecoverable. Carry them across the clear.
+    std::vector<materializr::Mate> keptMates = doc.getMates();
+    int keptGrounded = doc.getGroundedBody();
+
     doc.clear();
+    m_mateSolver.reset();
 
     int limit = static_cast<int>(m_operations.size()) - 1;
     if (m_breakpoint >= 0 && m_breakpoint < limit) {
@@ -567,8 +643,14 @@ bool History::replayAll(Document& doc) {
     m_currentIndex = limit;
     if (firstFailure >= 0) {
         m_failedReplayAt = firstFailure;
+        for (const auto& km : keptMates) doc.addRawMate(km);
+        doc.setGroundedBody(keptGrounded);
+        resolveMates(doc, /*regenerated=*/true);
         return false;
     }
+    for (const auto& km : keptMates) doc.addRawMate(km);
+    doc.setGroundedBody(keptGrounded);
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
@@ -703,6 +785,12 @@ int History::shellReflowIndex(const Operation& op) const {
 
 bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
                                   Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int limit = m_currentIndex;
     if (m_breakpoint >= 0 && m_breakpoint < limit) limit = m_breakpoint;
@@ -864,5 +952,6 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
     }
     if (m_eventBus)
         m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
