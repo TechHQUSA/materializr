@@ -1,6 +1,6 @@
 #include "UiTheme.h"
 #include "HistoryPanel.h"
-#include "../core/BodyChanges.h"
+#include "../core/HistoryPanelActions.h"
 #include <cctype>
 #include "../core/History.h"
 #include "../core/Document.h"
@@ -231,9 +231,8 @@ void HistoryPanel::renderContent() {
                 // In-place toggle - preserves base bodies the op modifies
                 // (replayAll's doc.clear() would delete them).
                 const bool enabling = !op->isEnabled();
-                BodyChangeScope scope(*m_document, m_markBodyDirty);
                 const bool okTog =
-                    m_history->setStepEnabled(i, enabling, *m_document);
+                    toggleStepEnabled(*m_history, *m_document, i, enabling, m_markBodyDirty);
                 // Re-enabling a step whose references are gone re-executes,
                 // fails, and gets SKIPPED - which read as "does nothing"
                 // (#54). Say so, inline under the step.
@@ -364,8 +363,7 @@ void HistoryPanel::renderContent() {
     // list. removeStep rebuilds in place and refuses (returns false) if a later
     // operation depends on the one being removed.
     if (deleteIndex >= 0) {
-        BodyChangeScope scope(*m_document, m_markBodyDirty);
-        if (m_history->removeStep(deleteIndex, *m_document)) {
+        if (deleteStep(*m_history, *m_document, deleteIndex, m_markBodyDirty)) {
             if (m_editingStep == deleteIndex) { m_editingStep = -1; m_showProperties = false; }
             else if (m_editingStep > deleteIndex) m_editingStep--;
             m_deleteConflict = false;
@@ -439,12 +437,8 @@ void HistoryPanel::renderContent() {
                 m_history->propagateSketchValueEdits(m_editingStep, *m_document);
                 // Transactional: a failed replay restores the model wholesale
                 // rather than leaving it half-built.
-                bool applied;
-                {
-                    BodyChangeScope scope(*m_document, m_markBodyDirty);
-                    applied = m_history->editStep(m_editingStep, *m_document,
-                                                  /*transactional=*/true);
-                }
+                bool applied = applyStepEdit(*m_history, *m_document, m_editingStep,
+                                             m_markBodyDirty);
                 if (!applied && !m_paramsSnap.empty()) {
                     // The replay was rolled back - snap the fields back to the
                     // pre-edit values too. The inputs bind live to op members,
@@ -504,10 +498,7 @@ void HistoryPanel::renderContent() {
         if (ImGui::Button(materializr::tr("Undo"))) {
             const Operation* undone =
                 m_history->getStep(m_history->currentStep());
-            {
-                BodyChangeScope scope(*m_document, m_markBodyDirty);
-                m_history->undo(*m_document);
-            }
+            undoStep(*m_history, *m_document, m_markBodyDirty);
             publishIfSketchEdit(undone);
         }
         ImGui::EndDisabled();
@@ -516,10 +507,7 @@ void HistoryPanel::renderContent() {
 
         ImGui::BeginDisabled(m_historyLocked || !m_history->canRedo());
         if (ImGui::Button(materializr::tr("Redo"))) {
-            {
-                BodyChangeScope scope(*m_document, m_markBodyDirty);
-                m_history->redo(*m_document);
-            }
+            redoStep(*m_history, *m_document, m_markBodyDirty);
             publishIfSketchEdit(m_history->getStep(m_history->currentStep()));
         }
         ImGui::EndDisabled();

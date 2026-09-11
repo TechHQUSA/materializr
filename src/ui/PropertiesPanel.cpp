@@ -1,7 +1,7 @@
 #include "ui/LengthField.h"
 #include "UiTheme.h"
 #include "PropertiesPanel.h"
-#include "core/BodyChanges.h"
+#include "core/HistoryPanelActions.h"
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
@@ -244,11 +244,7 @@ void PropertiesPanel::renderContent() {
                     // Carry any inline circle-diameter edit into later snapshots
                     // of the same sketch before replaying (see HistoryPanel).
                     m_history->propagateSketchValueEdits(m_editingStep, *m_document);
-                    // Transactional: a failed replay restores the whole model
-                    // rather than leaving it half-built.
-                    BodyChangeScope scope(*m_document, m_markBodyDirty);
-                    m_history->editStep(m_editingStep, *m_document,
-                                        /*transactional=*/true);
+                    applyStepEdit(*m_history, *m_document, m_editingStep, m_markBodyDirty);
                 }
             }
 
@@ -260,8 +256,8 @@ void PropertiesPanel::renderContent() {
                 if (m_document) {
                     // In-place toggle - preserves base bodies the op modifies
                     // (replayAll's doc.clear() would delete them).
-                    BodyChangeScope scope(*m_document, m_markBodyDirty);
-                    m_history->setStepEnabled(m_editingStep, enabled, *m_document);
+                    toggleStepEnabled(*m_history, *m_document, m_editingStep, enabled,
+                                      m_markBodyDirty);
                 }
             }
 
