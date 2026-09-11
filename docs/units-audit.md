@@ -239,16 +239,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | angle | src/plugins/SketchPlugin.cpp:135 | `: materializr::parseFinite(m_dimBuf, v);` |
 | ratio | src/ui/MaterialPanel.cpp:100 | `ImGui::SliderFloat(materializr::tr("Roughness"), &m_customRoughness, 0.0f, 1.0f);` |
 | ratio | src/ui/MaterialPanel.cpp:101 | `ImGui::SliderFloat(materializr::tr("Metallic"), &m_customMetallic, 0.0f, 1.0f);` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:639 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:652 | `if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, Im` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:666 | `if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, I` |
-| angle | src/ui/PropertiesPanel.cpp:678 | `if (materializr::inputNumber(materializr::tr("Sweep (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:698 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:700 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:715 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:883 | `(void)materializr::parseFinite(edit.buf, padVal);` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:886 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,` |
-| CONVERTED | src/ui/PropertiesPanel.cpp:905 | `(void)materializr::parseFinite(edit.buf, typed);` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:636 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:649 | `if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, Im` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:663 | `if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, I` |
+| angle | src/ui/PropertiesPanel.cpp:675 | `if (materializr::inputNumber(materializr::tr("Sweep (\xC2\xB0)"), &deg, 0.0, 0.0, "%.2f",` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:695 | `bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:697 | `bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), ` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:712 | `if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, Im` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:880 | `(void)materializr::parseFinite(edit.buf, padVal);` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:883 | `materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,` |
+| CONVERTED | src/ui/PropertiesPanel.cpp:902 | `(void)materializr::parseFinite(edit.buf, typed);` |
 | CONVERTED | src/ui/SectionPanel.cpp:54 | `if (materializr::lengthSlider(` |
 | seconds | src/ui/VersionPanel.cpp:58 | `if (ImGui::SliderInt(materializr::tr("Interval (min)"), &intervalMinutes, 1, 30)) {` |
 
@@ -534,12 +534,12 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/plugins/DxfImportPlugin.cpp:13 | `// imports at exactly 100 mm ($INSUNITS handles inch-authored files), only` |
 | allowed-by-hand | src/plugins/SvgImportPlugin.cpp:53 | `"%.0f mm wide) on the ground plane\n",` |
 | comment | src/third_party/nanosvg.h:50 | `// The units passed to NanoSVG should be one of: 'px', 'pt', 'pc' 'mm', 'cm', or 'in'.` |
-| comment | src/ui/HistoryPanel.cpp:170 | `// dimension steps a useful caption ("Add Distance 25 mm") instead` |
+| comment | src/ui/HistoryPanel.cpp:168 | `// dimension steps a useful caption ("Add Distance 25 mm") instead` |
 | comment | src/ui/ItemsPanel.h:73 | `// menu. Routes to Application::exportSketchAsSvg (1:1-mm polyline SVG for` |
-| comment | src/ui/PropertiesPanel.cpp:345 | `// % / mm toggle and shows live dimensions in mm mode.` |
-| comment | src/ui/PropertiesPanel.cpp:866 | `// value to a 1 mm grid on every commit. An Angle is degrees and` |
-| comment | src/ui/PropertiesPanel.cpp:906 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
-| comment | src/ui/PropertiesPanel.h:131 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
+| comment | src/ui/PropertiesPanel.cpp:336 | `// % / mm toggle and shows live dimensions in mm mode.` |
+| comment | src/ui/PropertiesPanel.cpp:863 | `// value to a 1 mm grid on every commit. An Angle is degrees and` |
+| comment | src/ui/PropertiesPanel.cpp:903 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
+| comment | src/ui/PropertiesPanel.h:132 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
 | comment | src/ui/StepperRow.h:18 | `// value, and pulling an 80 mm extrude down to 50 because you pressed +1 loses` |
 | allowed-by-hand | src/ui/Toolbar.cpp:534 | `tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens` |
 | allowed-by-hand | src/ui/TouchWidgets.h:94 | `const char* suffix = "mm", int decimals = 1,` |

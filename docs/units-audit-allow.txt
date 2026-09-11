@@ -270,12 +270,12 @@ src/plugins/DxfImportPlugin.cpp:12:
 src/plugins/DxfImportPlugin.cpp:13:
 src/plugins/SvgImportPlugin.cpp:53:
 src/third_party/nanosvg.h:50:
-src/ui/HistoryPanel.cpp:170:
+src/ui/HistoryPanel.cpp:168:
 src/ui/ItemsPanel.h:73:
-src/ui/PropertiesPanel.cpp:345:
-src/ui/PropertiesPanel.cpp:866:
-src/ui/PropertiesPanel.cpp:906:
-src/ui/PropertiesPanel.h:131:
+src/ui/PropertiesPanel.cpp:336:
+src/ui/PropertiesPanel.cpp:863:
+src/ui/PropertiesPanel.cpp:903:
+src/ui/PropertiesPanel.h:132:
 src/ui/StepperRow.h:18:
 src/ui/Toolbar.cpp:534:
 src/ui/TouchWidgets.h:94:
