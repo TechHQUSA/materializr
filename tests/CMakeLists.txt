@@ -116,6 +116,9 @@ add_library(materializr_core STATIC
     # only Document / History / SelectionManager / Operation + imgui.
     ${CMAKE_SOURCE_DIR}/src/app/InteractiveOpController.cpp
     ${CMAKE_SOURCE_DIR}/src/app/PushPullPreview.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/MoveFacePreview.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/FaceOpControllers.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/CylindricalPick.cpp
     ${CMAKE_SOURCE_DIR}/src/app/SnapshotPreview.cpp
     ${CMAKE_SOURCE_DIR}/src/app/GhostMesh.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/TouchWidgets.cpp
@@ -305,6 +308,14 @@ add_test(NAME test_ghost_mesh COMMAND test_ghost_mesh)
 add_executable(test_pushpull_preview test_pushpull_preview.cpp)
 target_link_libraries(test_pushpull_preview PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_pushpull_preview COMMAND test_pushpull_preview)
+
+add_executable(test_move_face_preview test_move_face_preview.cpp)
+target_link_libraries(test_move_face_preview PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_move_face_preview COMMAND test_move_face_preview)
+
+add_executable(test_move_face_async test_move_face_async.cpp)
+target_link_libraries(test_move_face_async PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_move_face_async COMMAND test_move_face_async)
 
 # test_async_job - one owned worker job at a time, parked when replaced, joined by the destructor
 add_executable(test_async_job test_async_job.cpp)

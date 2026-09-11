@@ -140,16 +140,16 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/app/FaceOpControllers.cpp:888 | `materializr::amountLengthField("lenAmt", nullptr, &m_len, /*allowSign=*/false, 0.5f, std::max(m_lenMax, 1.0f))` |
 | CONVERTED | src/app/FaceOpControllers.cpp:980 | `if (materializr::amountLengthField("rcylAmt", nullptr, &v, /*allowSign=*/false)) {` |
 | CONVERTED | src/app/FaceOpControllers.cpp:1000 | `materializr::parseLength(buf, parsed) &&` |
-| angle | src/app/FaceOpControllers.cpp:2087 | `if (materializr::stepperRow("tiltStep", &deg,` |
-| angle | src/app/FaceOpControllers.cpp:2091 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
-| angle | src/app/FaceOpControllers.cpp:2110 | `if (materializr::stepperRow("twistStep", &twdeg,` |
-| angle | src/app/FaceOpControllers.cpp:2114 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2164 | `if (materializr::stepperRow("sclStep", &pct,` |
-| percent | src/app/FaceOpControllers.cpp:2169 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2176 | `if (materializr::stepperRow("sclAStep", &a,` |
-| percent | src/app/FaceOpControllers.cpp:2181 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
-| percent | src/app/FaceOpControllers.cpp:2185 | `if (materializr::stepperRow("sclBStep", &b,` |
-| percent | src/app/FaceOpControllers.cpp:2190 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:2212 | `if (materializr::stepperRow("tiltStep", &deg,` |
+| angle | src/app/FaceOpControllers.cpp:2216 | `if (materializr::inputNumber(materializr::tr("deg"), &deg, 1.0f, 5.0f, "%.1f")) ch = true;` |
+| angle | src/app/FaceOpControllers.cpp:2235 | `if (materializr::stepperRow("twistStep", &twdeg,` |
+| angle | src/app/FaceOpControllers.cpp:2239 | `if (materializr::inputNumber(materializr::tr("deg##tw"), &twdeg, 1.0f, 5.0f, "%.1f")) twch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2289 | `if (materializr::stepperRow("sclStep", &pct,` |
+| percent | src/app/FaceOpControllers.cpp:2294 | `if (materializr::inputNumber("%", &pct, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2301 | `if (materializr::stepperRow("sclAStep", &a,` |
+| percent | src/app/FaceOpControllers.cpp:2306 | `if (materializr::inputNumber("% A", &a, 5.0f, 25.0f, "%.0f")) ch = true;` |
+| percent | src/app/FaceOpControllers.cpp:2310 | `if (materializr::stepperRow("sclBStep", &b,` |
+| percent | src/app/FaceOpControllers.cpp:2315 | `if (materializr::inputNumber("% B", &b, 5.0f, 25.0f, "%.0f")) ch = true;` |
 | CONVERTED | src/app/PushPullController.cpp:757 | `if (materializr::amountLengthField("ppAmt", m_st.symmetric ? "Per side" : "Distance", &m_st.distance, /*allowS` |
 | CONVERTED | src/app/PushPullController.cpp:771 | `(void)materializr::parseLength(m_st.inputBuf, m_st.distance);` |
 | CONVERTED | src/app/PushPullController.cpp:778 | `if (materializr::parseLength(m_st.inputBuf, parsed) &&` |
@@ -373,7 +373,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/FaceOpControllers.cpp:164 | `// free-floating 3.47 mm slider value is just noise.` |
 | comment | src/app/FaceOpControllers.cpp:984 | `// in DISPLAY units. "%.2f" wrote mm into it and also fixed the` |
 | comment | src/app/FaceOpControllers.cpp:985 | `// precision at two decimals, quantising metres to 10 mm. Its` |
-| comment | src/app/FaceOpControllers.cpp:1543 | `// of the hole rather than swamping a 3 mm bore.` |
+| comment | src/app/FaceOpControllers.cpp:1565 | `// of the hole rather than swamping a 3 mm bore.` |
 | comment | src/app/PushPullController.cpp:131 | `// hundreds of mm away - a push/pull on an unlinked sketch must` |
 | diagnostic | src/app/PushPullController.cpp:601 | `std::fprintf(stdout, "Push/Pull %scommitted at %.2f mm\n",` |
 | diagnostic | src/app/PushPullController.cpp:613 | `std::fprintf(stdout, "Push/Pull committed at %.2f mm\n", m_st.distance);` |

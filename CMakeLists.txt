@@ -213,6 +213,7 @@ add_executable(materializr
     src/app/ExtrudeController.cpp
     src/app/PushPullController.cpp
     src/app/PushPullPreview.cpp
+    src/app/MoveFacePreview.cpp
     src/app/SnapshotPreview.cpp
     src/app/GhostMesh.cpp
     src/app/LiveOpPreview.cpp

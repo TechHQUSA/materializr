@@ -7,6 +7,18 @@ All notable changes to Materializr are documented here. Format loosely follows
 
 ### Fixed
 
+- **Move Face no longer freezes on a many-hole face.** Translating, tilting,
+  twisting, or scaling a face with many holes in it (a perforated plate, a
+  vented panel) ran the whole body rebuild on the main thread once per
+  mouse-release, stepper click, or keystroke - up to 15 seconds on a
+  400-hole face (measured; the cost grows faster than linear with hole
+  count, since each hole gets its own loft and boolean cut against a
+  progressively more complex body). The rebuild now runs on a worker thread
+  the same way Push/Pull's and Shell's already do; the body updates a beat
+  after you release instead of freezing the window. Dragging the face
+  itself was already cheap (only a ghost silhouette moves mid-drag) and is
+  unaffected.
+
 - **Push/Pull stays responsive while dragging on a heavy body.** The live
   preview ran the real boolean on the main thread on every drag frame; on a
   plate with 300 holes that was 1.3 s per frame, so the drag froze. Once one

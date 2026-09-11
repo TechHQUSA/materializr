@@ -2,6 +2,8 @@
 #include "InteractiveOpController.h"
 #include "CylindricalPick.h"
 #include "MoveFaceState.h"
+#include "MoveFaceDispatch.h"
+#include "MoveFacePreview.h"
 
 // Global scope, like the other modeling ops - forward-declared for
 // configureFaceOp's signature so this header stays cheap to include.
@@ -233,6 +235,8 @@ public:
     void update(const IopContext& ctx) override { updateMoveFace(ctx); }
     void commit(const IopContext& ctx) override { commitMoveFace(ctx); }
     void cancel(const IopContext& ctx) override { cancelMoveFace(ctx); }
+    void pollPreview(const IopContext& ctx) override;
+    bool previewPending() const override;
     // The panel is NOT scaffold-shaped: the banner + value wells anchor to
     // the viewport window, so renderViewport calls renderMoveFacePanel where
     // that window is current. The scaffold hook stays silent.
@@ -276,6 +280,30 @@ protected:
 
 private:
     MoveFaceState m_st;
+
+    // Off-thread preview for the general (Translate/Rotate/Scale/Twist)
+    // path. Unlike PushPull/Shell this starts async on the FIRST call of a
+    // gesture, not after measuring one slow inline frame: the cost here is
+    // already known (movefaceop-freeze memory) to reach multiple seconds
+    // well before "many holes" fixtures elsewhere in this project, so even
+    // one inline hit is worth avoiding. At most ONE worker is ever
+    // computing, checked via BOTH AsyncJob::running() (the tracked job)
+    // AND AsyncJob::abandonedCount() (a parked job not yet finished -
+    // round 4 finding 2: abandon() doesn't stop a thread, so a second
+    // launch right after abandoning one would run concurrently with it).
+    // m_mfPendingJob is a FULLY PREPARED job frozen at the moment of a real
+    // trigger call, waiting for the worker to free up - never a bare flag
+    // (round 4 finding 1: re-reading m_st at drain time would pick up
+    // mid-drag drift the trigger never committed to).
+    // beginMoveFace()/commitMoveFace()/cancelMoveFace() all reset every
+    // field here.
+    PreviewDispatch<MoveFaceKey> m_mfDispatch;
+    AsyncJob<MoveFacePreviewResult> m_mfJob;
+    std::unique_ptr<MoveFacePreviewJob> m_mfPendingJob;
+    MoveFaceKey m_mfPendingKey;
+
+    MoveFaceKey currentMoveFaceKey() const;
+    void launchMoveFacePreviewIfWanted(const IopContext& ctx);
 };
 
 } // namespace materializr

@@ -1102,6 +1102,25 @@ bool MoveFaceController::applyLocalTweak(const IopContext& ctx) {
     return true;
 }
 
+MoveFaceKey MoveFaceController::currentMoveFaceKey() const {
+    MoveFaceKey k;
+    k.bodyId = m_st.moveFaceBodyId;
+    k.kind = m_st.faceXformKind;
+    k.isTwist = m_st.moveFaceIsTwist;
+    k.moveVec = m_st.moveFaceVec;
+    k.pivot = m_st.moveFacePivot;
+    if (m_st.faceXformKind == FaceXform::Rotate && !m_st.moveFaceIsTwist)
+        k.rotMat = faceRotTotal();
+    k.twistAngle = m_st.moveFaceTwist;
+    k.scaleUniform = m_st.moveFaceScaleUniform;
+    k.scaleFactor = m_st.moveFaceScale;
+    k.scaleA = m_st.moveFaceScaleA;
+    k.scaleB = m_st.moveFaceScaleB;
+    k.scaleAxisA = m_st.moveFaceAxisA;
+    k.scaleAxisB = m_st.moveFaceAxisB;
+    return k;
+}
+
 void MoveFaceController::configureFaceOp(MoveFaceOp& op) const {
     switch (m_st.faceXformKind) {
         case FaceXform::Translate:
@@ -1171,6 +1190,9 @@ void MoveFaceController::beginMoveFace(const IopContext& ctx, FaceXform kind) {
     m_st.moveFaceDragging = false;
     m_st.moveHoleMode = false;
     m_st.moveHoleWall.Nullify();
+    m_mfJob.abandon(); // a job from the PREVIOUS gesture must never land into this one
+    m_mfDispatch.reset();
+    m_mfPendingJob.reset();
 
     // Hole move: if the Move selection is a recognizable THROUGH-HOLE wall, slide
     // the whole hole (MoveHoleOp) instead of shearing a face. buildVoid succeeds
@@ -1576,6 +1598,102 @@ bool MoveFaceController::beginMoveHoleFromEdges(const IopContext& ctx) {
     return true;
 }
 
+void MoveFaceController::launchMoveFacePreviewIfWanted(const IopContext& ctx) {
+    if (!faceXformNontrivial()) { m_mfPendingJob.reset(); return; } // nothing to preview
+    m_mfDispatch.inlinePreviewTook(PreviewDispatch<MoveFaceKey>::kAsyncPreviewMs);
+    const MoveFaceKey want = currentMoveFaceKey();
+    // Prepare NOW, from live m_st, while this call is itself the real
+    // trigger - this is what makes it safe to launch this exact job LATER
+    // without re-reading m_st at that point (round 4 finding 1).
+    std::unique_ptr<MoveFacePreviewJob> job = MoveFacePreviewJob::prepare(
+        m_st.moveFacePreviousShape, m_st.moveFaceFace,
+        [this](MoveFaceOp& op) { configureFaceOp(op); });
+    if (!job) { m_mfPendingJob.reset(); return; } // last landed shape (or the pristine snapshot) stays on screen
+    m_mfJob.reap();
+    if (m_mfJob.running() || m_mfJob.abandonedCount() > 0) {
+        // Something is still genuinely computing, tracked or merely parked
+        // (round 4 finding 2: abandon() doesn't stop a thread, so a job
+        // this controller no longer wants can still be occupying a core).
+        // Freeze this fully-configured job to run once everything clears,
+        // replacing whatever was queued before it.
+        m_mfPendingJob = std::move(job);
+        m_mfPendingKey = want;
+        return;
+    }
+    // Round 5 finding 1: this call is launching THIS request right now,
+    // which makes any OLDER frozen request in m_mfPendingJob obsolete -
+    // clear it, or a stale queued job could fire later and both waste a
+    // multi-second rebuild nobody wants and delay the NEXT real request
+    // behind it.
+    m_mfPendingJob.reset();
+    std::shared_ptr<MoveFacePreviewJob> shared = std::move(job);
+    if (m_mfJob.launch([shared] { return shared->run(); }))
+        m_mfDispatch.launched(want);
+}
+
+void MoveFaceController::pollPreview(const IopContext& ctx) {
+    m_mfJob.reap();
+    std::optional<MoveFacePreviewResult> result = m_mfJob.take();
+    if (result) {
+        // A result is UNWANTED - discard it, nothing to apply - once the
+        // gesture ended, switched to hole-move, switched to the Local
+        // rebuild, or returned to a no-op value while this job was in
+        // flight. Local's checkbox is deliberately NOT part of MoveFaceKey
+        // (see the comment on MoveFaceKey), so this check is what actually
+        // protects a landed local rebuild from a stale result overwriting
+        // it.
+        const bool wanted = m_st.moveFaceActive && !m_st.moveHoleMode &&
+                            !localTweakApplies() && faceXformNontrivial();
+        if (wanted) {
+            const MoveFaceKey now = currentMoveFaceKey();
+            if (m_mfDispatch.finished(now) && result->ok && !result->shape.IsNull()) {
+                ctx.doc.updateBody(m_st.moveFaceBodyId, result->shape);
+                ctx.markMeshesDirty();
+            }
+            // A refused result, or a stale one (key mismatch - a newer
+            // request queued behind this one), leaves whatever is
+            // currently on the document.
+        }
+    }
+    // Round 4 finding 3: this runs UNCONDITIONALLY, never behind
+    // `if (!result) return` - an abandoned job's result never reaches
+    // take() at all, so gating this on `result` being present could leave
+    // a queued job (and previewPending()) stuck forever once anything gets
+    // abandoned.
+    if (m_mfPendingJob) {
+        const bool stillWanted = m_st.moveFaceActive && !m_st.moveHoleMode &&
+                                 !localTweakApplies() && faceXformNontrivial();
+        if (!stillWanted) {
+            m_mfPendingJob.reset(); // the gesture moved on before this ever ran - drop it, not launch it
+        } else {
+            m_mfJob.reap();
+            if (!m_mfJob.running() && m_mfJob.abandonedCount() == 0) {
+                std::shared_ptr<MoveFacePreviewJob> shared = std::move(m_mfPendingJob);
+                const MoveFaceKey key = m_mfPendingKey;
+                if (m_mfJob.launch([shared] { return shared->run(); }))
+                    m_mfDispatch.launched(key);
+            }
+        }
+    }
+}
+
+bool MoveFaceController::previewPending() const {
+    // Round 5 finding 2: does NOT count AsyncJob::abandonedCount() (round
+    // 4's version did, to keep the render loop polling until an abandoned
+    // job actually finishes). That was unnecessary: per
+    // PushPullController::previewPending()'s own comment, the app's main
+    // loop already polls every controller once per iteration at an IDLE
+    // floor rate regardless of previewPending() - abandoned jobs are reaped
+    // there for free, at idle cost, exactly as Push/Pull already relies on.
+    // Forcing FULL-rate rendering (what previewPending()==true actually
+    // buys) for the remaining duration of a job nobody wants anymore, after
+    // every commit/cancel, would waste real rendering resources and
+    // compete with the abandoned worker for CPU for no benefit. This only
+    // reports true for work the controller still WANTS an answer for: a
+    // tracked job, or one frozen and waiting to launch.
+    return m_mfJob.running() || static_cast<bool>(m_mfPendingJob);
+}
+
 void MoveFaceController::updateMoveFace(const IopContext& ctx) {
     if (!m_st.moveFaceActive || m_st.moveFaceBodyId < 0) return;
 
@@ -1607,12 +1725,7 @@ void MoveFaceController::updateMoveFace(const IopContext& ctx) {
         return;
     }
 
-    // Snap an in-plane face SLIDE to the grid step (issue #24): decompose the
-    // translation onto the face's in-plane axes and round each to the step, so
-    // the face moves in grid increments (like Extrude/Push-Pull). Only for a
-    // Translate - Rotate has its own degree snap and Scale is a percentage.
-    // m_st.moveFaceVec is recomputed absolutely from the drag each frame, so this
-    // never compounds.
+    // Snap an in-plane face SLIDE to the grid step (issue #24): unchanged.
     if (m_st.faceXformKind == FaceXform::Translate && ctx.snapToGrid &&
         ctx.gridStep > 0.0f) {
         const float step = ctx.gridStep;
@@ -1621,38 +1734,47 @@ void MoveFaceController::updateMoveFace(const IopContext& ctx) {
         m_st.moveFaceVec = a * m_st.moveFaceAxisA + b * m_st.moveFaceAxisB;
     }
 
-    // Always preview from the original snapshot so transforms don't compound.
-    ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
-    ctx.markMeshesDirty();
-    if (!faceXformNontrivial()) { moveFaceSlideSketches(ctx, glm::vec3(0.0f)); return; }
-    // Local tilt previews through the FaceTweak engine directly (no op needed -
-    // the preview only has to put a shape on the document). A refusal leaves the
-    // body on its snapshot and the reason on the state for the panel; it is not
-    // quietly retried as a shear, because the two produce different bodies and
-    // the user picked one.
+    if (!faceXformNontrivial()) {
+        // Back to a no-op: take any landed preview off the body and tell the
+        // dispatch so a later non-zero value is asked for again rather than
+        // matching a stale "already applied" key.
+        m_mfJob.abandon();
+        m_mfDispatch.retracted();
+        m_mfPendingJob.reset();
+        ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
+        ctx.markMeshesDirty();
+        moveFaceSlideSketches(ctx, glm::vec3(0.0f));
+        return;
+    }
     if (localTweakApplies()) {
+        // Local rebuild bypasses the async path entirely (cheap, and must
+        // win over any in-flight general-path job - see pollPreview).
+        //
+        // ROUND 2 CORRECTION (finding 3): applyLocalTweak() resolves
+        // m_st.moveFaceFace against whatever is CURRENTLY on ctx.doc, and
+        // FaceTweak::moveFace() throws FaceNotFound when that face isn't a
+        // live sub-shape of the current body. If a general-path async result
+        // landed earlier in this gesture (or Local was on, off, then back
+        // on), the live body is no longer the pristine snapshot the original
+        // face came from - restore it FIRST, unconditionally, right here
+        // (this is the one place in the general branch that still needs an
+        // explicit restore; the async branch below deliberately does not).
+        m_mfJob.abandon();
+        m_mfPendingJob.reset();
+        ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
         if (!applyLocalTweak(ctx))
             ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
         ctx.markMeshesDirty();
         return;
     }
-    try {
-        auto op = std::make_unique<MoveFaceOp>();
-        op->setBody(m_st.moveFaceBodyId);
-        op->setFace(m_st.moveFaceFace);
-        configureFaceOp(*op);
-        if (!op->execute(ctx.doc))
-            ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
-        // Sketch follow in the preview is translate-only for now (rotate/scale
-        // sketches still follow on commit via the op's own transform).
-        if (m_st.faceXformKind == FaceXform::Translate) moveFaceSlideSketches(ctx, m_st.moveFaceVec);
-        ctx.markMeshesDirty();
-    } catch (...) {
-        ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
-    }
+    if (m_st.faceXformKind == FaceXform::Translate) moveFaceSlideSketches(ctx, m_st.moveFaceVec);
+    launchMoveFacePreviewIfWanted(ctx);
 }
 
 void MoveFaceController::commitMoveFace(const IopContext& ctx) {
+    m_mfJob.abandon();
+    m_mfDispatch.reset();
+    m_mfPendingJob.reset();
     if (!m_st.moveFaceActive) { return; }
 
     // Hole-move commit: restore the snapshot, then push one MoveHoleOp.
@@ -1763,6 +1885,9 @@ void MoveFaceController::commitMoveFace(const IopContext& ctx) {
 }
 
 void MoveFaceController::cancelMoveFace(const IopContext& ctx) {
+    m_mfJob.abandon();
+    m_mfDispatch.reset();
+    m_mfPendingJob.reset();
     if (!m_st.moveFaceActive) return;
     if (m_st.moveFaceBodyId >= 0 && !m_st.moveFacePreviousShape.IsNull())
         ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);
