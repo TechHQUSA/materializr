@@ -22,6 +22,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <set>
@@ -31,8 +33,6 @@
 #if defined(MZR_PARALLEL_MESH_SUPPORTED)
 #include "app/Application.h"
 #include "viewport/ShapeRenderer.h"
-#include <unistd.h>
-#include <signal.h>
 
 namespace materializr {
 struct ParallelMeshTestAccess {
@@ -104,7 +104,15 @@ int upload(Application& app) {
     return int(renderer.meshCallsForTest() - before);
 }
 void outerFaultLoad(const std::string& path) {
-    alarm(3);
+    // alarm(3) was POSIX-only. A detached watchdog thread that force-exits
+    // after the same 3-second deadline is the portable equivalent: if the
+    // real load call below hangs (the bug this test guards against), the
+    // watchdog fires std::_Exit(2) before ASSERT_EXIT's own timeout, so the
+    // failure is "wrong exit code" instead of an indefinite hang.
+    std::thread([] {
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        std::_Exit(2);
+    }).detach();
     Application app;
     Access::setup(app) = [](auto& options) {
         options.workerCount = 2;
@@ -118,7 +126,7 @@ void outerFaultLoad(const std::string& path) {
     EXPECT_TRUE(Access::load(app, path));
     EXPECT_EQ(upload(app), 4);
     for (auto j : jobsFrom(Access::doc(app))) EXPECT_EQ(countUnmeshedFaces(j.shape), 0);
-    _exit(::testing::Test::HasFailure() ? 1 : 0);
+    std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
 }
 #endif
 } // namespace
@@ -380,6 +388,56 @@ TEST(ParallelMesh, OuterFaultLoadReturnsBeforeDeadline) {
     ProjectFile file;
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     ASSERT_EXIT(outerFaultLoad(file.path.string()), ::testing::ExitedWithCode(0), "") << "outer-fault load must return before the 3-second deadline";
+}
+
+// 9b. Every other fault-injection test above throws a plain C++ exception.
+// This one injects a genuine hardware fault (SIGSEGV here; on Windows an
+// access violation under /EHa) to prove it is CONTAINED - the process does
+// not crash, the failing job is marked not-ok, and the worker keeps
+// draining the remaining jobs. It does not isolate which specific
+// mechanism performed the catch (OCCT's OSD::SetThreadLocalSignal
+// translator vs. MSVC's own catch(...)-under-/EHa) - both already exist in
+// the worker's catch chain (ParallelMesh.cpp:141-147) and either is
+// sufficient for the property this test checks. Verified empirically on
+// macOS before this test was written (see windows-parallel-mesh-audit.md);
+// this is what makes that verification permanent and, once the guard below
+// is flipped, gives it its first real Windows CI run.
+TEST(ParallelMesh, RealHardwareFaultInWorkerIsContainedNotFatal) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    ASSERT_EXIT({
+        // Same watchdog pattern as outerFaultLoad: if fault containment
+        // somehow deadlocks instead of completing or crashing, this forces
+        // a diagnosable exit instead of an indefinite hang - ctest's own
+        // 60s TIMEOUT (tests/CMakeLists.txt:354) does not apply when this
+        // binary is run directly, as Step 3 below does.
+        std::thread([] {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::_Exit(2);
+        }).detach();
+        auto jobs = boxes(); // kMinJobsForPool is 4; boxes() defaults to 4
+        ParallelMeshOptions options;
+        options.workerCount = 1; // deterministic: one worker drains the queue
+        options.mesh = [](const auto& j, float d, float a) {
+            if (j.bodyId == 0) {
+                // volatile: keeps /O2 and -O2 from proving this is UB and
+                // folding it away or erroring at compile time.
+                volatile std::intptr_t zero = 0;
+                *reinterpret_cast<volatile int*>(zero) = 1;
+            }
+            mesh(j, d, a);
+        };
+        const auto batch = parallelMesh(jobs, kDefl, kAng, options);
+        const bool ok = batch.path == ParallelMeshPath::Pooled &&
+            batch.results.size() == 4 && batch.completedJobs == 4 &&
+            batch.results[0].completed && !batch.results[0].ok &&
+            batch.results[1].completed && batch.results[1].ok &&
+            batch.results[2].completed && batch.results[2].ok &&
+            batch.results[3].completed && batch.results[3].ok;
+        std::_Exit(ok ? 0 : 1);
+    }, ::testing::ExitedWithCode(0), "")
+        << "a hardware fault in one job must be contained, not crash the "
+           "process, and must not stop the worker from draining the "
+           "remaining jobs";
 }
 
 // 10. The returned thread has a tail outside the pool's worker function.
