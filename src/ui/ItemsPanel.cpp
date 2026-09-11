@@ -1,7 +1,7 @@
 #include "UiTheme.h"
 #include "ItemsPanel.h"
 #include "../touch_mode.h"
-#include "../core/BodyChanges.h"
+#include "../core/ItemsPanelActions.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/SelectionManager.h"
@@ -136,12 +136,7 @@ bool ItemsPanel::renderContent() {
             // Visibility checkbox (cascades to members in Document).
             bool fvis = m_document->isFolderVisible(folderId);
             if (ImGui::Checkbox("##fvis", &fvis)) {
-                std::vector<int> changed;
-                for (int id : m_document->getBodiesInFolder(folderId))
-                    if (m_document->isBodyVisible(id) != fvis) changed.push_back(id);
-                m_document->setFolderVisible(folderId, fvis);
-                for (int id : changed)
-                    if (m_markBodyDirty) m_markBodyDirty(id);
+                setFolderVisibleAndMark(*m_document, folderId, fvis, m_markBodyDirty);
             }
             ImGui::SameLine();
 
@@ -214,12 +209,7 @@ bool ItemsPanel::renderContent() {
             if (ImGui::ColorEdit3("##fcolor", &fcol.x,
                     ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
                     ImGuiColorEditFlags_PickerHueWheel)) {
-                std::vector<int> changed;
-                for (int id : m_document->getBodiesInFolder(folderId))
-                    if (m_document->getBodyColor(id) != fcol) changed.push_back(id);
-                m_document->setFolderColor(folderId, fcol);
-                for (int id : changed)
-                    if (m_markBodyDirty) m_markBodyDirty(id);
+                setFolderColorAndMark(*m_document, folderId, fcol, m_markBodyDirty);
             }
 
             // Member bodies, only when expanded.
@@ -641,8 +631,7 @@ bool ItemsPanel::renderBodyRow(int id) {
 
     bool visible = m_document->isBodyVisible(id);
     if (ImGui::Checkbox("##vis", &visible)) {
-        m_document->setBodyVisible(id, visible);
-        if (m_markBodyDirty) m_markBodyDirty(id);
+        setBodyVisibleAndMark(*m_document, id, visible, m_markBodyDirty);
     }
     ImGui::SameLine();
 
@@ -775,22 +764,12 @@ bool ItemsPanel::renderBodyRow(int id) {
             deleted = true;
         }
         if (!deleted && ImGui::MenuItem(materializr::tr("Isolate"))) {
-            for (int otherId : m_document->getAllBodyIds()) {
-                if (m_document->isBodyVisible(otherId) != (otherId == id)) {
-                    m_document->setBodyVisible(otherId, otherId == id);
-                    if (m_markBodyDirty) m_markBodyDirty(otherId);
-                }
-            }
+            isolateBody(*m_document, id, m_markBodyDirty);
         }
         // The way back from Isolate in one click (mirrors the viewport
         // context menu) - beats re-ticking every checkbox above.
         if (!deleted && ImGui::MenuItem(materializr::tr("Show All Bodies"))) {
-            for (int otherId : m_document->getAllBodyIds()) {
-                if (!m_document->isBodyVisible(otherId)) {
-                    m_document->setBodyVisible(otherId, true);
-                    if (m_markBodyDirty) m_markBodyDirty(otherId);
-                }
-            }
+            showAllBodies(*m_document, m_markBodyDirty);
         }
         // Separate: only when the body actually holds more than one
         // disconnected solid (air-gapped lumps fused into one body). Splits
@@ -805,14 +784,7 @@ bool ItemsPanel::renderBodyRow(int id) {
                                    m_document->getBody(id)) > 1; }
                   catch (...) { return false; } }()) {
             if (ImGui::MenuItem(materializr::tr("Separate"))) {
-                auto op = std::make_unique<SeparateBodyOp>();
-                op->setBody(id);
-                // The resized original plus every split-off body need marking -
-                // an unknown-ahead-of-time set, same as History's undo/redo.
-                {
-                    BodyChangeScope scope(*m_document, m_markBodyDirty);
-                    m_history->pushOperation(std::move(op), *m_document);
-                }
+                separateBody(*m_document, *m_history, id, m_markBodyDirty);
                 if (m_markDirty) m_markDirty();
             }
         }
@@ -925,8 +897,7 @@ bool ItemsPanel::renderBodyRow(int id) {
     if (ImGui::ColorEdit3("##bodycolor", &col.x,
             ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
             ImGuiColorEditFlags_PickerHueWheel)) {
-        m_document->setBodyColor(id, col);
-        if (m_markBodyDirty) m_markBodyDirty(id);
+        setBodyColorAndMark(*m_document, id, col, m_markBodyDirty);
     }
 
     ImGui::PopID();

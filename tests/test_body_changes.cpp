@@ -470,4 +470,13 @@ TEST(PanelDirtyWiring, BothLayoutsUseTheSharedCallbacks) {
     auto items = read("/src/ui/ItemsPanel.cpp");
     EXPECT_NE(items.find("return m_bodyDeleted;"), std::string::npos);
     EXPECT_EQ(items.find("colorChanged"), std::string::npos);
+    {
+        // Scoped to the Separate menu item's own block (not just "found
+        // somewhere in the file"): guards against a future edit reintroducing
+        // inline Separate logic (the original bug) without any test noticing.
+        auto sepPos = items.find("tr(\"Separate\")");
+        ASSERT_NE(sepPos, std::string::npos);
+        auto sepBody = items.substr(sepPos, items.find('}', sepPos) - sepPos);
+        EXPECT_NE(sepBody.find("separateBody("), std::string::npos);
+    }
 }
