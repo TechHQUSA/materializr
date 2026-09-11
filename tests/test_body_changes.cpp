@@ -5,6 +5,8 @@
 #include "core/EventBus.h"
 #include "core/Events.h"
 #include "core/History.h"
+#include "core/HistoryPanelActions.h"
+#include "core/ItemsPanelActions.h"
 #include "modeling/DeleteOp.h"
 #include "modeling/ExtrudeOp.h"
 #include "modeling/SeparateBodyOp.h"
@@ -29,6 +31,18 @@ using materializr::BodyChangeScope;
 using materializr::BodySnapshot;
 using materializr::changedBodies;
 using materializr::snapshotBodies;
+using materializr::applyStepEdit;
+using materializr::deleteStep;
+using materializr::isolateBody;
+using materializr::redoStep;
+using materializr::separateBody;
+using materializr::setBodyColorAndMark;
+using materializr::setBodyVisibleAndMark;
+using materializr::setFolderColorAndMark;
+using materializr::setFolderVisibleAndMark;
+using materializr::showAllBodies;
+using materializr::toggleStepEnabled;
+using materializr::undoStep;
 
 namespace {
 
@@ -185,34 +199,20 @@ struct PanelDirtyContract : testing::Test {
     }
 
     void visibility(int id, bool visible) {
-        doc.setBodyVisible(id, visible);
-        mark(id);
+        setBodyVisibleAndMark(doc, id, visible, mark);
     }
 
     void allVisible(int isolated = -1) {
-        for (int id : doc.getAllBodyIds()) {
-            bool target = isolated < 0 || id == isolated;
-            if (doc.isBodyVisible(id) != target) {
-                doc.setBodyVisible(id, target);
-                mark(id);
-            }
-        }
+        if (isolated < 0) showAllBodies(doc, mark);
+        else isolateBody(doc, isolated, mark);
     }
 
     void folderVisible(int folder, bool target) {
-        std::vector<int> changed;
-        for (int id : doc.getBodiesInFolder(folder))
-            if (doc.isBodyVisible(id) != target) changed.push_back(id);
-        doc.setFolderVisible(folder, target);
-        for (int id : changed) mark(id);
+        setFolderVisibleAndMark(doc, folder, target, mark);
     }
 
     void folderColor(int folder, glm::vec3 target) {
-        std::vector<int> changed;
-        for (int id : doc.getBodiesInFolder(folder))
-            if (doc.getBodyColor(id) != target) changed.push_back(id);
-        doc.setFolderColor(folder, target);
-        for (int id : changed) mark(id);
+        setFolderColorAndMark(doc, folder, target, mark);
     }
 };
 
@@ -246,9 +246,9 @@ TEST_F(PanelDirtyContract, BodyAppearanceMarksOnlyItsId) {
     visibility(a, true);
     rebuild();
     EXPECT_TRUE(slots.at(a).IsEqual(doc.getBody(a)));
-    doc.setBodyColor(b, glm::vec3(1, 0, 0));
-    mark(b);
+    setBodyColorAndMark(doc, b, glm::vec3(1, 0, 0), mark);
     EXPECT_EQ(dirty, std::set<int>{b});
+    EXPECT_EQ(doc.getBodyColor(b), glm::vec3(1, 0, 0));
 }
 
 TEST_F(PanelDirtyContract, FolderFanOutMarksOnlyChangedMembers) {
@@ -324,10 +324,7 @@ TEST_F(PanelDirtyContract, DeleteUsesRemovalEventAndUndoRestoresOriginalSlot) {
     EXPECT_EQ(dirty, std::set<int>{a});
     EXPECT_EQ(slots.count(a), 0u);
     rebuild();
-    {
-        BodyChangeScope scope(doc, mark);
-        ASSERT_TRUE(history.undo(doc));
-    }
+    ASSERT_TRUE(undoStep(history, doc, mark));
     EXPECT_EQ(dirty, std::set<int>{a});
     rebuild();
     EXPECT_TRUE(slots.at(a).IsEqual(original));
@@ -340,17 +337,16 @@ TEST_F(PanelDirtyContract, DeleteUsesRemovalEventAndUndoRestoresOriginalSlot) {
 // History but never marked anything dirty at all (not even the old blanket
 // flag) - the resized original and every split-off body sat stale until an
 // unrelated action happened to force a rebuild. Fixed by wrapping the push
-// in a BodyChangeScope, same as the other data-dependent-body-set mutations.
+// in a BodyChangeScope inside materializr::separateBody (core/ItemsPanelActions.h),
+// which ItemsPanel.cpp calls directly - this test exercises that same
+// function, not a reimplementation of it.
 TEST_F(PanelDirtyContract, SeparateMarksTheResizedBodyAndEverySplitOffPiece) {
     doc.updateBody(a, twoLumpBody());
     dirty.clear();
-    auto op = std::make_unique<SeparateBodyOp>();
-    op->setBody(a);
-    auto* separate = op.get();
-    {
-        BodyChangeScope scope(doc, mark);
-        ASSERT_TRUE(history.pushOperation(std::move(op), doc));
-    }
+    ASSERT_TRUE(separateBody(doc, history, a, mark));
+    const auto* separate =
+        dynamic_cast<const SeparateBodyOp*>(history.getStep(history.currentStep()));
+    ASSERT_NE(separate, nullptr);
     ASSERT_FALSE(separate->getNewBodyIds().empty());
     std::set<int> expected{a};
     for (int id : separate->getNewBodyIds()) expected.insert(id);
@@ -364,16 +360,16 @@ TEST_F(PanelDirtyContract, HistoryMutationsLeaveUnrelatedBodiesClean) {
     ASSERT_TRUE(history.pushOperation(std::move(op), doc));
     auto check = [&](const std::function<bool()>& mutation) {
         dirty.clear();
-        { BodyChangeScope scope(doc, mark); EXPECT_TRUE(mutation()); }
+        EXPECT_TRUE(mutation());
         EXPECT_EQ(dirty, std::set<int>{a});
     };
-    check([&] { return history.undo(doc); });
-    check([&] { return history.redo(doc); });
+    check([&] { return undoStep(history, doc, mark); });
+    check([&] { return redoStep(history, doc, mark); });
     edit->after = box(14);
-    check([&] { return history.editStep(0, doc, true); });
-    check([&] { return history.setStepEnabled(0, false, doc); });
-    check([&] { return history.setStepEnabled(0, true, doc); });
-    check([&] { return history.removeStep(0, doc); });
+    check([&] { return applyStepEdit(history, doc, 0, mark); });
+    check([&] { return toggleStepEnabled(history, doc, 0, false, mark); });
+    check([&] { return toggleStepEnabled(history, doc, 0, true, mark); });
+    check([&] { return deleteStep(history, doc, 0, mark); });
 }
 
 TEST_F(PanelDirtyContract, FailedReplayRestoresSlotsEvenWhenTheDiffIsEmpty) {
@@ -387,10 +383,7 @@ TEST_F(PanelDirtyContract, FailedReplayRestoresSlotsEvenWhenTheDiffIsEmpty) {
         auto original = doc.getBody(a);
         std::set<int> diffDirty;
         edit->fail = true;
-        {
-            BodyChangeScope scope(doc, [&](int id) { diffDirty.insert(id); });
-            EXPECT_FALSE(history.editStep(0, doc, true));
-        }
+        EXPECT_FALSE(applyStepEdit(history, doc, 0, [&](int id) { diffDirty.insert(id); }));
         EXPECT_TRUE(diffDirty.empty());
         EXPECT_EQ(dirty, std::set<int>{a});
         EXPECT_EQ(slots.count(a), 0u);
