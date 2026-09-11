@@ -6,12 +6,12 @@ review-feature-compatible).
 
 Plan under review: `docs/superpowers/plans/2026-09-10-move-face-async-preview.md`
 
-## Round 1 — Codex
+## Round 1 - Codex
 
 thread_id: 01a08ea0-8356-74e2-b9fd-be34925f5a6f
 
 The gpt-6-astra model DID work for this review despite the compatibility
-note (contrary to expectation) — a substantive, source-verified critique
+note (contrary to expectation) - a substantive, source-verified critique
 came back, not an error.
 
 1. **Blocking: no worker ever launches.** `PreviewDispatch` defaults to
@@ -39,7 +39,7 @@ came back, not an error.
    and sketch-follow.
 6. **Blocking: the specified build changes are insufficient.** The app
    target has its own explicit source list (confirmed at
-   `CMakeLists.txt:205`) and does not link `materializr_core` — adding
+   `CMakeLists.txt:205`) and does not link `materializr_core` - adding
    `MoveFacePreview.cpp` only to the latter leaves the shipped app
    unlinkable. Also: `materializr_core` doesn't compile
    `FaceOpControllers.cpp`, so Task 2's test can't link either.
@@ -54,7 +54,7 @@ VERDICT: REVISE
 
 ### Claude's response
 
-All 7 findings accepted and fixed — every one held up against the actual
+All 7 findings accepted and fixed - every one held up against the actual
 source (verified the `CMakeLists.txt:205` claim directly before accepting
 finding 6). Changes, by finding:
 
@@ -63,7 +63,7 @@ finding 6). Changes, by finding:
    on every call (idempotent once already async).
 2. `pollPreview` now discards (not applies) a landed result whenever
    `localTweakApplies()` is true, rather than growing `MoveFaceKey` with
-   `moveFaceLocal` — simpler and covers hole-move by the same mechanism.
+   `moveFaceLocal` - simpler and covers hole-move by the same mechanism.
 3. Deleted the unconditional restore from `updateMoveFace`'s general path
    entirely; restore + `m_mfDispatch.retracted()` now happen only in the
    explicit `!faceXformNontrivial()` branch, mirroring
@@ -72,7 +72,7 @@ finding 6). Changes, by finding:
    active/mode check; added explicit `m_mfJob.abandon(); m_mfDispatch.reset();`
    to `commitMoveFace` and `cancelMoveFace` (previously only in
    `beginMoveFace`).
-5. Removed the "stale key → relaunch" branch from `pollPreview` entirely —
+5. Removed the "stale key → relaunch" branch from `pollPreview` entirely -
    a stale result is now just discarded; only the four real trigger sites
    (which all go through `updateMoveFace`) ever launch.
 6. Added `src/app/MoveFacePreview.cpp` to the root `CMakeLists.txt` app
@@ -85,10 +85,10 @@ finding 6). Changes, by finding:
    superseding test; added two new tests (`CommitAbandonsAnInFlightJob...`,
    `SwitchingToLocalMidFlightIsNotOverwritten...`).
 
-Nothing was rejected this round — every finding reproduced against the
+Nothing was rejected this round - every finding reproduced against the
 actual source before being accepted.
 
-## Round 2 — Codex
+## Round 2 - Codex
 
 Confirmed the async-enabling fix and explicit commit/cancel cleanup as
 correct; found new problems introduced by round 1's own fixes plus one
@@ -97,7 +97,7 @@ build gap round 1 missed:
 1. **High: newer submitted requests are lost.** Round 1's fix for finding 5
    (no auto-relaunch from `pollPreview`) combined with `PreviewDispatch::
    shouldLaunch()`'s busy-gate (unchanged from round 1) to silently drop a
-   second request submitted while the first job is still running — nothing
+   second request submitted while the first job is still running - nothing
    launches it and nothing retries it.
 2. **High: zero/Local transitions wedge dispatch or retain a stale applied
    key.** `abandon()` without a matching `finished()` leaves `m_running`
@@ -108,7 +108,7 @@ build gap round 1 missed:
 3. **High: removing the snapshot restore breaks Local rebuilding.**
    `applyLocalTweak()`/`tweak::moveFace()` resolves `m_st.moveFaceFace`
    against whatever `ctx.doc` currently holds and throws `FaceNotFound` if
-   a landed general-path result left the body without that face live —
+   a landed general-path result left the body without that face live -
    round 1's fix removed the restore that used to guarantee this.
 4. **Build integration incomplete.** `FaceOpControllers.cpp` also needs
    `CylindricalPick.cpp` (`detectCylindricalPick()` at `:906`), not just
@@ -130,7 +130,7 @@ All 6 findings accepted (verified `CylindricalPick.cpp`'s absence from
 accepting finding 4). Root-caused findings 1 and 2 to the same source:
 `PreviewDispatch::shouldLaunch()`'s busy-gate exists for Push/Pull's
 per-frame `update()` (wait for the current job before deciding whether to
-relaunch, so it doesn't spawn 60 threads/second) — Move Face's four trigger
+relaunch, so it doesn't spawn 60 threads/second) - Move Face's four trigger
 sites are discrete events with no such flood to guard against, so the gate
 only drops legitimate work here. Fixed by dropping `shouldLaunch()` entirely
 (a deliberate, documented deviation from the Push/Pull precedent, called
@@ -149,7 +149,7 @@ Finding 4: added `CylindricalPick.cpp` alongside `FaceOpControllers.cpp`.
 Finding 5: fixed the Local test to set a correct pivot and assert
 `moveFaceLocalRefusal == nullptr`; added a cancel test mirroring the
 existing commit test; added an A→zero→A test. Declined to add per-kind
-(Rotate/Scale/Twist) coverage at the controller level — Task 1's
+(Rotate/Scale/Twist) coverage at the controller level - Task 1's
 `MoveFacePreviewJob` tests already cover all four kinds, and the
 controller/dispatch logic under test here doesn't branch on which kind is
 active, so duplicating that coverage at this layer would test the same
@@ -159,13 +159,13 @@ boundary, not silently dropped.
 Finding 6: narrowed the Global Constraint to "don't change modeling
 behavior" and named the two-line async-bookkeeping exception explicitly.
 
-## Round 3 — Codex
+## Round 3 - Codex
 
 Asked specifically to stress-test round 2's "drop shouldLaunch(), always
 launch immediately" deviation for races/correctness issues the busy-gate
 was implicitly also protecting against. It found one, real and material:
 
-1. **High: "abandon" does not cancel computation — unbounded concurrent
+1. **High: "abandon" does not cancel computation - unbounded concurrent
    rebuilds.** `AsyncJob::launch()` starts another thread while `abandon()`
    only stops tracking the old one; it keeps running to completion,
    holding its own scratch Document, consuming CPU. Several rapid events
@@ -177,7 +177,7 @@ was implicitly also protecting against. It found one, real and material:
    `configureFaceOp` actually calls) and uniform `setScaleFactor()`;
    `setTwist()` was never called. Separately: worker-only tests can't
    verify `currentMoveFaceKey()` tracks controller configuration correctly
-   — the exact risk that motivated a dedicated key in the first place.
+   - the exact risk that motivated a dedicated key in the first place.
 3. **Medium: tests don't stress the replacement policy or finish lifecycle
    checks.** No assertion of a bound on concurrent workers; the Local test
    never switched back to general; the A→zero→A test didn't exercise
@@ -188,12 +188,12 @@ VERDICT: REVISE
 
 ### Claude's response
 
-Finding 1 accepted in full — this was a real, serious correctness gap in
+Finding 1 accepted in full - this was a real, serious correctness gap in
 round 2's own fix that I introduced while fixing round 1's finding 1.
 Redesigned to bound the system to at most ONE worker thread in flight at
 any time (checked via `AsyncJob::running()` directly before ever calling
 `launch()`) plus a single `m_mfPendingRelaunch` flag remembering "a real
-trigger arrived while busy" — set only inside `launchMoveFacePreviewIfWanted`
+trigger arrived while busy" - set only inside `launchMoveFacePreviewIfWanted`
 (reached exclusively from `updateMoveFace`'s real trigger sites), never
 inferred from `pollPreview` reading ambient `m_st`. This preserves round 1's
 finding-5 fix (no reading of uncommitted mid-drag state) while also fixing
@@ -201,8 +201,8 @@ the resource-pileup problem: two genuinely different mechanisms doing two
 genuinely different jobs, not a reintroduction of the busy-gate.
 
 Finding 2 accepted in full: added the missing kind coverage to Task 1
-(`ExplicitRotationNonUniformScaleAndTwistAlsoMatchADirectExecute`), and —
-the more important half — added a Task 2 test
+(`ExplicitRotationNonUniformScaleAndTwistAlsoMatchADirectExecute`), and -
+the more important half - added a Task 2 test
 (`ARealExplicitRotationGestureLandsTheCorrectGeometry`) that drives a real
 gesture through `MoveFaceController`'s actual `configureFaceOp()`/
 `currentMoveFaceKey()` rather than hand-built lambdas, verified against a
@@ -212,17 +212,17 @@ Finding 3: accepted the boundedness point as now satisfied BY CONSTRUCTION
 by finding 1's fix (a second concurrent launch is structurally impossible,
 not just discouraged), so declined to add a redundant private-state-poking
 assertion. Declined "controllable worker barriers" for deterministic test
-synchronization — no other async-preview test in this codebase uses such a
+synchronization - no other async-preview test in this codebase uses such a
 seam (bounded-deadline polling is the established pattern throughout;
 `test_pushpull_preview.cpp` doesn't use one either), and adding a
 production-code test seam isn't justified by what's actually under test
 here (key-matching and landing logic, not scheduler fairness). Logged as a
 scope boundary rather than silently dropped.
 
-**The "boundedness by construction" claim above was wrong — round 4 found
+**The "boundedness by construction" claim above was wrong - round 4 found
 the actual bug.**
 
-## Round 4 — Codex
+## Round 4 - Codex
 
 Asked directly to re-verify against source, not the plan's claims. Found
 the round-3 fix was itself broken, in three connected ways:
@@ -239,7 +239,7 @@ the round-3 fix was itself broken, in three connected ways:
 3. **High: zero/Local can leave `previewPending()` true forever.**
    `abandon()`-ed jobs never surface via `take()`, so `if (!result)
    return` (guarding the pending-flag check) fires on every subsequent
-   poll — the flag, and `previewPending()`, can get stuck true
+   poll - the flag, and `previewPending()`, can get stuck true
    indefinitely even after the abandoned thread actually finishes.
 4. **Medium: the rotation test doesn't test key discrimination.** It
    submits one unchanged rotation and waits; a constant `MoveFaceKey`
@@ -249,12 +249,12 @@ VERDICT: REVISE
 
 ### Claude's response
 
-All 4 findings accepted — root-caused 1-3 to two separate, connected
+All 4 findings accepted - root-caused 1-3 to two separate, connected
 mistakes in round 3's fix: (a) storing only a bare flag rather than the
 actual configuration, and (b) trusting `AsyncJob::running()` alone to mean
 "nothing is computing," when `abandon()` can make it lie. Fixed by:
 launches now gated on `running() || abandonedCount() > 0` (after `reap()`)
-so a second launch is refused while ANY thread — tracked or merely parked —
+so a second launch is refused while ANY thread - tracked or merely parked -
 is still genuinely active; the retry mechanism now stores a fully prepared
 `MoveFacePreviewJob` (its configuration frozen from live `m_st` at the
 moment of the real trigger call that queued it, per finding 1) instead of a
@@ -270,7 +270,7 @@ assertions to both. Added a key-discrimination step (two different angles
 submitted before either lands) to the real-rotation controller test per
 finding 4.
 
-## Round 5 — Codex
+## Round 5 - Codex
 
 Asked directly whether the round-4 design (bounded launches, prepared
 pending job) is actually correct, and to stress-test two specific
@@ -322,7 +322,7 @@ suggested fix correctly, not by Codex itself - worth noting since it means
 the discrimination test would have been silently wrong even after
 "fixing" it per the literal finding.
 
-## Round 6 — Codex
+## Round 6 - Codex
 
 Asked for a final, thorough pass and to say explicitly if nothing further
 was found rather than searching for something to flag.
@@ -386,9 +386,9 @@ precedent exactly.
 
 ---
 
-## Act 3 — Build
+## Act 3 - Build
 
-### Round 1 — Codex build
+### Round 1 - Codex build
 
 Launched via `codex-build` (`codex exec --yolo`) with a prompt contract
 derived from the approved spec, run by the user directly in their own

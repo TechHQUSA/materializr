@@ -4,26 +4,26 @@
 
 **Goal:** Move `MoveFaceOp::execute()` (the Move Face tool's Translate/Rotate/Scale/Twist rebuild) off the main thread, so a many-hole body no longer hangs the UI for seconds on every mouse-release, stepper click, or keystroke.
 
-**Architecture:** A single-body scratch-Document worker (`MoveFacePreviewJob`, mirroring the existing `PushPullPreview.h` pattern) copies just the target body, remaps the target face onto the copy, and runs the real `MoveFaceOp::execute()` on a background thread via the existing `AsyncJob<T>` primitive. `MoveFaceController` gains a `PreviewDispatch<MoveFaceKey>` (the same generic state machine `PushPullController` already uses) wired so the expensive path is **always** async from the very first call in a gesture — unlike PushPull/Shell, which measure one inline frame before switching, Move Face's cost is already known (measured, see `movefaceop-freeze` memory) to be too high to ever risk inline. Landing a result is a plain `ctx.doc.updateBody(...)`: Move Face's preview never touches History or a LiveOp instance, and `configureFaceOp` never sets `MoveFaceOp::m_sketchIds` during preview, so the op has no side effect beyond replacing the body shape — no `Precomputed`/`setPrecomputed()` needed on `MoveFaceOp` itself (unlike `PushPullOp`). One deliberate deviation from the Push/Pull precedent (Codex review rounds 2-3): `PreviewDispatch::shouldLaunch()`'s busy-gate (refuse to launch while a job is already running) is right for Push/Pull, whose `update()` runs every frame and wants to wait for the current job before deciding whether to relaunch; Move Face's four trigger sites are discrete events, not per-frame, so that all-or-nothing gate drops legitimate requests. But launching unconditionally is also wrong (round 3, finding 1): `AsyncJob::abandon()` doesn't cancel a running thread, so rapid events during one still-running multi-second computation would pile up concurrent rebuilds with no cap. The final design keeps at most ONE worker in flight (checked directly via `AsyncJob::running()`, not `PreviewDispatch::shouldLaunch()`) plus a single `m_mfPendingRelaunch` flag remembering that a real request arrived while busy, retried once the worker frees up. `PreviewDispatch` is used only for `launched()`/`finished()`'s key-matching, never `shouldLaunch()`.
+**Architecture:** A single-body scratch-Document worker (`MoveFacePreviewJob`, mirroring the existing `PushPullPreview.h` pattern) copies just the target body, remaps the target face onto the copy, and runs the real `MoveFaceOp::execute()` on a background thread via the existing `AsyncJob<T>` primitive. `MoveFaceController` gains a `PreviewDispatch<MoveFaceKey>` (the same generic state machine `PushPullController` already uses) wired so the expensive path is **always** async from the very first call in a gesture - unlike PushPull/Shell, which measure one inline frame before switching, Move Face's cost is already known (measured, see `movefaceop-freeze` memory) to be too high to ever risk inline. Landing a result is a plain `ctx.doc.updateBody(...)`: Move Face's preview never touches History or a LiveOp instance, and `configureFaceOp` never sets `MoveFaceOp::m_sketchIds` during preview, so the op has no side effect beyond replacing the body shape - no `Precomputed`/`setPrecomputed()` needed on `MoveFaceOp` itself (unlike `PushPullOp`). One deliberate deviation from the Push/Pull precedent (Codex review rounds 2-3): `PreviewDispatch::shouldLaunch()`'s busy-gate (refuse to launch while a job is already running) is right for Push/Pull, whose `update()` runs every frame and wants to wait for the current job before deciding whether to relaunch; Move Face's four trigger sites are discrete events, not per-frame, so that all-or-nothing gate drops legitimate requests. But launching unconditionally is also wrong (round 3, finding 1): `AsyncJob::abandon()` doesn't cancel a running thread, so rapid events during one still-running multi-second computation would pile up concurrent rebuilds with no cap. The final design keeps at most ONE worker in flight (checked directly via `AsyncJob::running()`, not `PreviewDispatch::shouldLaunch()`) plus a single `m_mfPendingRelaunch` flag remembering that a real request arrived while busy, retried once the worker frees up. `PreviewDispatch` is used only for `launched()`/`finished()`'s key-matching, never `shouldLaunch()`.
 
 **Tech Stack:** C++17, OCCT 7.9.3, GoogleTest, CMake. No new third-party dependencies.
 
-**Spec:** This plan document. The problem statement and all measured numbers live in `~/.claude/projects/-Users-laptop-Documents-Coding-projects-Materialzr/memory/movefaceop-freeze.md` (read it before starting — it also documents two corrections made while investigating, both binding on this plan: the cost is per-*event*, not per-frame, and `MoveFaceOp::serializeParams()` is NOT a safe dispatch key).
+**Spec:** This plan document. The problem statement and all measured numbers live in `~/.claude/projects/-Users-laptop-Documents-Coding-projects-Materialzr/memory/movefaceop-freeze.md` (read it before starting - it also documents two corrections made while investigating, both binding on this plan: the cost is per-*event*, not per-frame, and `MoveFaceOp::serializeParams()` is NOT a safe dispatch key).
 
 ## Global Constraints
 
-- Do not change the MODELING behavior of `commitMoveFace()`, `cancelMoveFace()`, hole-move mode (`m_st.moveHoleMode`), or the local-tweak path (`localTweakApplies()`/`applyLocalTweak()`) — all four already run cheap ops (`MoveHoleOp`, `FaceTweakOp`) or a full History commit, none showed up in the bench, and none are in scope. (Corrected in Codex review round 2, finding 6: `commitMoveFace()`/`cancelMoveFace()` DO get two lines of async-lifecycle bookkeeping each — `m_mfJob.abandon(); m_mfDispatch.reset();` — so an in-flight job doesn't outlive the gesture; that is not a modeling change and is required by finding 4.)
-- Only the "general" branch of `MoveFaceController::updateMoveFace()` — the one that builds a `MoveFaceOp` and calls `execute()` — is being made async (`src/app/FaceOpControllers.cpp:1639-1652` as of this plan).
+- Do not change the MODELING behavior of `commitMoveFace()`, `cancelMoveFace()`, hole-move mode (`m_st.moveHoleMode`), or the local-tweak path (`localTweakApplies()`/`applyLocalTweak()`) - all four already run cheap ops (`MoveHoleOp`, `FaceTweakOp`) or a full History commit, none showed up in the bench, and none are in scope. (Corrected in Codex review round 2, finding 6: `commitMoveFace()`/`cancelMoveFace()` DO get two lines of async-lifecycle bookkeeping each - `m_mfJob.abandon(); m_mfDispatch.reset();` - so an in-flight job doesn't outlive the gesture; that is not a modeling change and is required by finding 4.)
+- Only the "general" branch of `MoveFaceController::updateMoveFace()` - the one that builds a `MoveFaceOp` and calls `execute()` - is being made async (`src/app/FaceOpControllers.cpp:1639-1652` as of this plan).
 - Reuse `AsyncJob<T>` (`src/app/AsyncJob.h`) and `PreviewDispatch<Key>` (`src/app/PreviewDispatch.h`) as-is. Do not modify either class.
 - Do NOT add `Precomputed`/`setPrecomputed()` to `MoveFaceOp`. Verify this claim in Task 1's tests before relying on it further (see Task 1, Step 4).
-- Do NOT reuse `MoveFaceOp::serializeParams()` as a dispatch key (it round-trips only Translate/Twist parameters; Rotate's explicit transform and all of Scale are absent — see the reload-format comment at `MoveFaceOp.cpp:603-606`).
-- Every new/changed test file: run the full suite from `build/` with `ctest --output-on-failure` UNSANDBOXED after each task (project memory: sandboxed ctest fails 5-6 unrelated file-IO suites on denied `/tmp` writes — exclude `reload_edit|stl_import|topo_boolean_gen|full_replay|svg_roundtrip|test_project_thumbnail` if running sandboxed, or just run unsandboxed). No test count may drop, no new failures.
+- Do NOT reuse `MoveFaceOp::serializeParams()` as a dispatch key (it round-trips only Translate/Twist parameters; Rotate's explicit transform and all of Scale are absent - see the reload-format comment at `MoveFaceOp.cpp:603-606`).
+- Every new/changed test file: run the full suite from `build/` with `ctest --output-on-failure` UNSANDBOXED after each task (project memory: sandboxed ctest fails 5-6 unrelated file-IO suites on denied `/tmp` writes - exclude `reload_edit|stl_import|topo_boolean_gen|full_replay|svg_roundtrip|test_project_thumbnail` if running sandboxed, or just run unsandboxed). No test count may drop, no new failures.
 - No `Co-Authored-By: Claude` trailer on any commit in this repo (confirmed project convention).
-- Before writing any implementation code for Task 2 or later, this plan must clear `claudex-loop:codex-review` (CLAUDE.md hard rule — every prior async-preview conversion in this repo went through this gate, and two of them found real concurrency bugs in the design before code was written).
+- Before writing any implementation code for Task 2 or later, this plan must clear `claudex-loop:codex-review` (CLAUDE.md hard rule - every prior async-preview conversion in this repo went through this gate, and two of them found real concurrency bugs in the design before code was written).
 
 ---
 
-### Task 1: `MoveFacePreviewJob` — the off-thread worker
+### Task 1: `MoveFacePreviewJob` - the off-thread worker
 
 **Files:**
 - Create: `src/app/MoveFaceDispatch.h`
@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Produces: `materializr::MoveFaceKey` (value type, `operator==`), `materializr::MoveFacePreviewResult { bool ok; TopoDS_Shape shape; double millis; }`, `materializr::MoveFacePreviewJob` with `static std::unique_ptr<MoveFacePreviewJob> prepare(const TopoDS_Shape& originalBody, const TopoDS_Face& face, const std::function<void(MoveFaceOp&)>& configure)` and `MoveFacePreviewResult run()`.
-- Consumes: `MoveFaceOp` (`src/modeling/MoveFaceOp.h`, unchanged), `Document` (`src/core/Document.h`), `AsyncJob<T>` is NOT used in this task — that's Task 2.
+- Consumes: `MoveFaceOp` (`src/modeling/MoveFaceOp.h`, unchanged), `Document` (`src/core/Document.h`), `AsyncJob<T>` is NOT used in this task - that's Task 2.
 
 - [ ] **Step 1: Write `MoveFaceDispatch.h` with the key struct**
 
@@ -344,9 +344,9 @@ TEST(MoveFacePreview, ANoOpGestureRefusesRatherThanReturningTheUnchangedBody) {
 }
 ```
 
-- [ ] **Step 2b: Register the test and source file in CMake — BOTH targets**
+- [ ] **Step 2b: Register the test and source file in CMake - BOTH targets**
 
-This codebase double-compiles most `src/app/*.cpp` files: the app executable (`add_executable(materializr ...)` in the ROOT `CMakeLists.txt`) has its own explicit source list and does NOT link `materializr_core` — `materializr_core` is a second, separate static-library build of a subset of the same sources, built only for headless tests. `PushPullPreview.cpp`, `SnapshotPreview.cpp`, `GhostMesh.cpp` etc. all already appear in BOTH lists (confirmed at `CMakeLists.txt:205-230` and `tests/CMakeLists.txt:23-125`). Missing either one is a real, silent bug: skip the root list and the shipped app fails to link (`MoveFacePreviewJob` referenced from `FaceOpControllers.cpp` but never compiled into `materializr`); skip the `materializr_core` list and every test that touches it fails to link instead.
+This codebase double-compiles most `src/app/*.cpp` files: the app executable (`add_executable(materializr ...)` in the ROOT `CMakeLists.txt`) has its own explicit source list and does NOT link `materializr_core` - `materializr_core` is a second, separate static-library build of a subset of the same sources, built only for headless tests. `PushPullPreview.cpp`, `SnapshotPreview.cpp`, `GhostMesh.cpp` etc. all already appear in BOTH lists (confirmed at `CMakeLists.txt:205-230` and `tests/CMakeLists.txt:23-125`). Missing either one is a real, silent bug: skip the root list and the shipped app fails to link (`MoveFacePreviewJob` referenced from `FaceOpControllers.cpp` but never compiled into `materializr`); skip the `materializr_core` list and every test that touches it fails to link instead.
 
 In `CMakeLists.txt` (root), add `src/app/MoveFacePreview.cpp` to the `add_executable(materializr ...)` source list, next to `src/app/PushPullPreview.cpp`.
 
@@ -361,7 +361,7 @@ add_test(NAME test_move_face_preview COMMAND test_move_face_preview)
 - [ ] **Step 3: Run the test to verify it fails to compile / link**
 
 Run: `cmake --build build --target test_move_face_preview -j 8`
-Expected: FAIL — `app/MoveFacePreview.h` does not exist yet.
+Expected: FAIL - `app/MoveFacePreview.h` does not exist yet.
 
 - [ ] **Step 4: Write `MoveFacePreview.h`**
 
@@ -514,16 +514,16 @@ git commit -m "app: Add MoveFacePreviewJob, the off-thread worker for Move Face"
 **Files:**
 - Modify: `src/app/FaceOpControllers.h` (add members, override `pollPreview`/`previewPending`, declare `currentMoveFaceKey`, `launchMoveFacePreviewIfWanted`)
 - Modify: `src/app/FaceOpControllers.cpp` (implement the above; rewrite the general branch of `updateMoveFace`; reset dispatch state in `beginMoveFace`)
-- Modify: `tests/CMakeLists.txt` (add `src/app/FaceOpControllers.cpp` AND `src/app/CylindricalPick.cpp` to the `materializr_core` source list — `FaceOpControllers.cpp` is currently compiled only into the app's own executable target, and this task's test is the first thing in the repo to need `MoveFaceController` headlessly; `CylindricalPick.cpp` is a hard link dependency of it, confirmed via `detectCylindricalPick()` at `FaceOpControllers.cpp:906` — Codex review round 2, finding 4. `UserAxes.h`, also included by `FaceOpControllers.cpp`, is header-only and needs nothing added. Register `test_move_face_async`)
+- Modify: `tests/CMakeLists.txt` (add `src/app/FaceOpControllers.cpp` AND `src/app/CylindricalPick.cpp` to the `materializr_core` source list - `FaceOpControllers.cpp` is currently compiled only into the app's own executable target, and this task's test is the first thing in the repo to need `MoveFaceController` headlessly; `CylindricalPick.cpp` is a hard link dependency of it, confirmed via `detectCylindricalPick()` at `FaceOpControllers.cpp:906` - Codex review round 2, finding 4. `UserAxes.h`, also included by `FaceOpControllers.cpp`, is header-only and needs nothing added. Register `test_move_face_async`)
 - Test: `tests/test_move_face_async.cpp`
 
 **Interfaces:**
 - Consumes: `MoveFacePreviewJob`/`MoveFacePreviewResult` (Task 1), `MoveFaceKey` (Task 1), `AsyncJob<T>` (`src/app/AsyncJob.h`, unmodified), `PreviewDispatch<Key>` (`src/app/PreviewDispatch.h`, unmodified), `IopContext` (`src/app/InteractiveOpController.h`, unmodified).
-- Produces: `MoveFaceController::pollPreview(const IopContext&) override`, `MoveFaceController::previewPending() const override` — both already declared virtual on the base with the exact signatures used by `PushPullController`.
+- Produces: `MoveFaceController::pollPreview(const IopContext&) override`, `MoveFaceController::previewPending() const override` - both already declared virtual on the base with the exact signatures used by `PushPullController`.
 
 - [ ] **Step 1: Write the failing headless test**
 
-No prior test constructs a full `IopContext` for `MoveFaceController` (the project's own controller-level tests, e.g. `test_iop_latch.cpp`, use a stub that never reaches `IopContext`). Build the minimal real one here — every `std::function` member is required by the struct even when this test never calls it, so unused ones get empty/no-op lambdas.
+No prior test constructs a full `IopContext` for `MoveFaceController` (the project's own controller-level tests, e.g. `test_iop_latch.cpp`, use a stub that never reaches `IopContext`). Build the minimal real one here - every `std::function` member is required by the struct even when this test never calls it, so unused ones get empty/no-op lambdas.
 
 Create `tests/test_move_face_async.cpp`:
 
@@ -1079,7 +1079,7 @@ add_test(NAME test_move_face_async COMMAND test_move_face_async)
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `cmake --build build --target test_move_face_async -j 8`
-Expected: FAIL — `MoveFaceController` has no `st()`-driven async path yet; `updateMoveFace` still blocks inline, so `EXPECT_LT(callMs, 50.0)` fails once it compiles. If `IopContext`'s field order/types don't match what's declared in `InteractiveOpController.h` today, fix the struct literal to match — the field list in this plan was read from that header but a later edit to it takes priority.
+Expected: FAIL - `MoveFaceController` has no `st()`-driven async path yet; `updateMoveFace` still blocks inline, so `EXPECT_LT(callMs, 50.0)` fails once it compiles. If `IopContext`'s field order/types don't match what's declared in `InteractiveOpController.h` today, fix the struct literal to match - the field list in this plan was read from that header but a later edit to it takes priority.
 
 - [ ] **Step 3: Add the dispatch members and overrides to `FaceOpControllers.h`**
 
@@ -1118,7 +1118,7 @@ Add to the `private:` section, alongside `MoveFaceState m_st;`:
     void launchMoveFacePreviewIfWanted(const IopContext& ctx);
 ```
 
-Add the two includes near the top of the file (alongside the existing `#include "AsyncJob.h"` if `InteractiveOpController.h` doesn't already transitively provide it — check first, it does provide `AsyncJob.h` per Task 1's reading, so only these two are new):
+Add the two includes near the top of the file (alongside the existing `#include "AsyncJob.h"` if `InteractiveOpController.h` doesn't already transitively provide it - check first, it does provide `AsyncJob.h` per Task 1's reading, so only these two are new):
 
 ```cpp
 #include "MoveFaceDispatch.h"
@@ -1126,11 +1126,11 @@ Add the two includes near the top of the file (alongside the existing `#include 
 #include "PreviewDispatch.h"
 ```
 
-(`PreviewDispatch.h` is also already included transitively via `InteractiveOpController.h`'s own include of it for the base class's `m_dispatch` — verify with `grep -n PreviewDispatch src/app/InteractiveOpController.h` before adding a duplicate; if already visible, skip re-including it.)
+(`PreviewDispatch.h` is also already included transitively via `InteractiveOpController.h`'s own include of it for the base class's `m_dispatch` - verify with `grep -n PreviewDispatch src/app/InteractiveOpController.h` before adding a duplicate; if already visible, skip re-including it.)
 
 - [ ] **Step 4: Implement `currentMoveFaceKey()` in `FaceOpControllers.cpp`**
 
-Place it directly above `configureFaceOp` (they must be kept in sync — see the comment already written into `MoveFaceDispatch.h` in Task 1):
+Place it directly above `configureFaceOp` (they must be kept in sync - see the comment already written into `MoveFaceDispatch.h` in Task 1):
 
 ```cpp
 MoveFaceKey MoveFaceController::currentMoveFaceKey() const {
@@ -1155,7 +1155,7 @@ MoveFaceKey MoveFaceController::currentMoveFaceKey() const {
 
 - [ ] **Step 5: Implement `launchMoveFacePreviewIfWanted`, `pollPreview`, `previewPending`**
 
-**Round 4 correction (findings 1-3) — supersedes round 3's fix.** Round 3 correctly identified that launching unconditionally causes unbounded concurrent rebuilds, and bounded to "one worker plus a pending-retry FLAG." Two things wrong with that: (a) the flag remembered only THAT a request arrived, not WHAT it was - by the time it's drained, `launchMoveFacePreviewIfWanted` re-reads LIVE `m_st`, which the viewport drag can have moved on from since (round 1's finding 5, reintroduced); (b) `updateMoveFace`'s zero/Local branches called `m_mfJob.abandon()`, which does not stop the thread - it only makes `AsyncJob::running()` report false immediately while the abandoned thread keeps computing, so a NEW launch right after would run concurrently with it, defeating the one-worker bound entirely; and separately, `pollPreview`'s `if (!result) return;` skipped checking the pending flag on every poll where `take()` had nothing (which, after an abandon(), is every poll from then on, since an abandoned job's result is never surfaced by `take()` at all) - so the flag could never drain, `previewPending()` could get stuck true forever, and a genuinely queued request could be silently lost.
+**Round 4 correction (findings 1-3) - supersedes round 3's fix.** Round 3 correctly identified that launching unconditionally causes unbounded concurrent rebuilds, and bounded to "one worker plus a pending-retry FLAG." Two things wrong with that: (a) the flag remembered only THAT a request arrived, not WHAT it was - by the time it's drained, `launchMoveFacePreviewIfWanted` re-reads LIVE `m_st`, which the viewport drag can have moved on from since (round 1's finding 5, reintroduced); (b) `updateMoveFace`'s zero/Local branches called `m_mfJob.abandon()`, which does not stop the thread - it only makes `AsyncJob::running()` report false immediately while the abandoned thread keeps computing, so a NEW launch right after would run concurrently with it, defeating the one-worker bound entirely; and separately, `pollPreview`'s `if (!result) return;` skipped checking the pending flag on every poll where `take()` had nothing (which, after an abandon(), is every poll from then on, since an abandoned job's result is never surfaced by `take()` at all) - so the flag could never drain, `previewPending()` could get stuck true forever, and a genuinely queued request could be silently lost.
 
 The corrected design: at most one worker thread ever computing, verified by checking BOTH `AsyncJob::running()` (the tracked current job) AND `AsyncJob::abandonedCount()` (parked jobs not yet finished) after a `reap()` - `abandon()` is still used at gesture-transition points (it is still the right way to say "never apply this job's result"), but nothing launches a new job while `abandonedCount() > 0` either. The retry mechanism stores a FULLY PREPARED job (`MoveFacePreviewJob::prepare()` already runs synchronously and cheaply - a `BRepBuilderAPI_Copy` of one body, no boolean/loft yet - so capturing "what to run next" this way freezes the exact configuration at the moment of the real trigger call, immune to any later drift in `m_st`) rather than a bare flag, and `pollPreview` checks it unconditionally, never behind an `if (!result) return`. `MoveFaceKey` also gained a `bodyId` field (see its definition above) as a belt-and-suspenders guard against a job from one gesture ever landing on a different gesture's (possibly different) body.
 
@@ -1350,7 +1350,7 @@ Expected: PASS, both cases.
 - [ ] **Step 9: Run the full suite**
 
 Run (unsandboxed): `cd build && ctest --output-on-failure`
-Expected: every existing test passes, plus both new test binaries. Pay particular attention to any existing Move Face test (`test_moveface_hollow`, `test_twist_face` if it exists) — they call `MoveFaceOp::execute()` directly, not through the controller, so they should be unaffected, but confirm.
+Expected: every existing test passes, plus both new test binaries. Pay particular attention to any existing Move Face test (`test_moveface_hollow`, `test_twist_face` if it exists) - they call `MoveFaceOp::execute()` directly, not through the controller, so they should be unaffected, but confirm.
 
 - [ ] **Step 10: Commit**
 
@@ -1369,7 +1369,7 @@ git commit -m "app: Run Move Face's body rebuild off the main thread"
 
 - [ ] **Step 1: Reproduce the original bug's fixture in the running app**
 
-Use the `run-materializr` skill to build and launch the app. Create (or script via a fixture generator, matching the recipe in `load-progress-vsync` memory for reaching real timing) a body with at least 100 holes on one face — reuse the same grid pattern as `makeHolePlate()` above. Select that face, invoke Move Face (Translate), drag it, and release.
+Use the `run-materializr` skill to build and launch the app. Create (or script via a fixture generator, matching the recipe in `load-progress-vsync` memory for reaching real timing) a body with at least 100 holes on one face - reuse the same grid pattern as `makeHolePlate()` above. Select that face, invoke Move Face (Translate), drag it, and release.
 
 Expected BEFORE this plan (do this once, on a build from before Task 2's commit, to confirm the repro): the app appears to hang / beachball for roughly 1 second (100 holes, per the perf table) after mouse-up.
 
@@ -1381,7 +1381,7 @@ With the same body, use the Tilt stepper (`+10`, `+1`) and the numeric Tilt fiel
 
 - [ ] **Step 3: Commit the panel's real op still matches after Confirm**
 
-Commit the gesture (the panel's Confirm button / Enter) and confirm the resulting body's geometry matches what the async preview showed (no visible "jump" between the last preview frame and the committed result) — `commitMoveFace` is unmodified by this plan and re-runs `MoveFaceOp::execute()` synchronously on the real document, so this is a regression check on Task 2's landing logic, not new behavior.
+Commit the gesture (the panel's Confirm button / Enter) and confirm the resulting body's geometry matches what the async preview showed (no visible "jump" between the last preview frame and the committed result) - `commitMoveFace` is unmodified by this plan and re-runs `MoveFaceOp::execute()` synchronously on the real document, so this is a regression check on Task 2's landing logic, not new behavior.
 
 - [ ] **Step 4: Update the changelog**
 
@@ -1417,16 +1417,16 @@ git commit -m "docs: Note the Move Face async-preview fix in the changelog"
 
 ## Self-Review Notes
 
-- **Spec coverage:** every claim in `movefaceop-freeze` memory is addressed — the O(n^1.6) cost (Task 1/2, moved off-thread), the four trigger sites (release deferred-rebuild, stepper click, numeric field keystroke, Local checkbox toggle — all funnel through the single `updateMoveFace()` general branch rewritten in Task 2), the stale-dispatch-key risk from `serializeParams()` (avoided by hand-building `MoveFaceKey`, called out explicitly in both the memory and this plan), and manual in-app confirmation (Task 3).
+- **Spec coverage:** every claim in `movefaceop-freeze` memory is addressed - the O(n^1.6) cost (Task 1/2, moved off-thread), the four trigger sites (release deferred-rebuild, stepper click, numeric field keystroke, Local checkbox toggle - all funnel through the single `updateMoveFace()` general branch rewritten in Task 2), the stale-dispatch-key risk from `serializeParams()` (avoided by hand-building `MoveFaceKey`, called out explicitly in both the memory and this plan), and manual in-app confirmation (Task 3).
 - **Explicitly out of scope, and why:** hole-move mode and local-tweak mode were checked during investigation and do not call `MoveFaceOp::execute()` at all (they use `MoveHoleOp` and `FaceTweakOp` respectively, neither shown to be expensive) - Task 2's `pollPreview` discards a landed result while either is active, for exactly this reason.
 - **Known risk carried into implementation:** `currentMoveFaceKey()` duplicates the field list `configureFaceOp()` reads. This is the same tradeoff `PushPullKey{distance, symmetric}` already makes in this codebase, but it is a real desync risk if a future change adds a new configurable parameter to Move Face without updating the key.
 
 **Round 1 Codex review corrections (all incorporated, see inline `CORRECTION` comments in Task 2 for exactly where):**
-1. `launchMoveFacePreviewIfWanted` never actually forced async mode — `PreviewDispatch` defaults to inline and `reset()` re-disables it; fixed by calling `inlinePreviewTook(kAsyncPreviewMs)` on every launch attempt.
+1. `launchMoveFacePreviewIfWanted` never actually forced async mode - `PreviewDispatch` defaults to inline and `reset()` re-disables it; fixed by calling `inlinePreviewTook(kAsyncPreviewMs)` on every launch attempt.
 2. A stale general-path result landing after the user switched to Local mid-gesture would have overwritten the (correct) local rebuild, since `moveFaceLocal` isn't part of `MoveFaceKey`. Fixed in `pollPreview` by discarding any result while `localTweakApplies()` is true, rather than growing the key.
 3. The unconditional restore-to-snapshot at the top of the original `updateMoveFace` would erase an already-landed preview on every subsequent event and could never be un-erased (a value the user returns to would match `PreviewDispatch`'s "already applied" cache and never relaunch). Fixed by deleting the unconditional restore and only restoring (with an explicit `retracted()`) when the gesture returns to a true no-op.
 4. `pollPreview` early-returned before calling `take()` whenever the gesture was inactive, so a job still running past commit/cancel could never be reaped and `previewPending()` would stay true indefinitely (keeping the app's render loop spinning for the job's full multi-second cost). Fixed by making reap/take unconditional and adding explicit `abandon()` calls at all three lifecycle boundaries (begin/commit/cancel).
-5. `pollPreview` auto-relaunching on a stale key would have read still-changing, not-yet-committed drag state (the viewport drag defers `updateMoveFace()` to release) and started an unrequested rebuild mid-drag, bypassing grid-snap and sketch-follow. Fixed by discarding stale results instead of relaunching from inside `pollPreview` — only the four real trigger sites ever launch.
+5. `pollPreview` auto-relaunching on a stale key would have read still-changing, not-yet-committed drag state (the viewport drag defers `updateMoveFace()` to release) and started an unrequested rebuild mid-drag, bypassing grid-snap and sketch-follow. Fixed by discarding stale results instead of relaunching from inside `pollPreview` - only the four real trigger sites ever launch.
 6. The plan only added `MoveFacePreview.cpp` to the test-only `materializr_core` target; the app itself has its own separate, explicit source list (confirmed at `CMakeLists.txt:205`) and would fail to link. Fixed by adding it to both, and adding `FaceOpControllers.cpp` to `materializr_core` too (needed for Task 2's controller test, and not previously compiled into it).
 7. Test gaps: a missing `#include "modeling/MoveFaceOp.h"`, volume-only assertions that can't distinguish a stale result from a correct one on a volume-preserving Translate, no assertion that a worker actually launched, a machine-dependent fixed timing threshold, and no coverage of the commit/cancel-abandons-a-job or Local-mid-flight cases. All fixed: added `topFaceCentroidX`, a same-run measured relative timing bound, explicit `previewPending()` assertions, and two new tests.
 
@@ -1440,8 +1440,8 @@ git commit -m "docs: Note the Move Face async-preview fix in the changelog"
 
 **Round 3 Codex review corrections:**
 1. Round 2's own fix for round 1's finding 1 was itself wrong: dropping `shouldLaunch()` entirely and always calling `m_mfJob.launch()` immediately means every rapid event during one still-running multi-second computation spawns ANOTHER concurrent OCCT rebuild (`AsyncJob::abandon()` parks a thread, it does not cancel it - the abandoned computation keeps consuming CPU and holding its own scratch-Document copy until it finishes on its own). Fixed by bounding to at most one worker in flight, checked via `AsyncJob::running()` directly, plus a single `m_mfPendingRelaunch` flag capturing "a real request arrived while busy" - set only from `launchMoveFacePreviewIfWanted` (a real trigger), never inferred from `pollPreview` reading ambient state, so round 1's finding 5 stays fixed too. This also still resolves round 1's finding 2 in full (nothing to wedge: the pending flag is drained deterministically once the single worker frees up).
-2. The round-2 claim that Task 1 already covered "all four kinds" was false — only `setRotation()` (not `setRotationExplicit()`, what `configureFaceOp` actually calls) and uniform `setScaleFactor()` were exercised; `setTwist()` was never called at all. Fixed by adding `ExplicitRotationNonUniformScaleAndTwistAlsoMatchADirectExecute` to Task 1. Separately, and more importantly: every Task 1 test hand-builds `MoveFaceOp` configuration directly, so a desync between `MoveFaceController::configureFaceOp()` and `currentMoveFaceKey()` — the exact risk flagged as a "known risk" in this very section — could pass every test in the plan. Fixed by adding `ARealExplicitRotationGestureLandsTheCorrectGeometry` to Task 2, which drives a real gesture through controller state and checks the result against a reference built from the controller's own `faceRotTotal()`.
-3. Test gaps: no assertion that the design is actually bounded to one worker; the Local test didn't switch back to general afterward; the A→zero→A test didn't stress abandonment specifically; commit/cancel tests didn't verify document state after completion. Accepted the boundedness point as now true BY CONSTRUCTION (finding 1's fix makes a second concurrent launch structurally impossible — `launchMoveFacePreviewIfWanted` checks `running()` before ever calling `m_mfJob.launch()`), and did not add a private-state-poking counter to assert it redundantly. Declined the request for "controllable worker barriers" / deterministic synchronization primitives inside `MoveFacePreviewJob` purely for test purposes: no other async-preview code in this codebase (`test_pushpull_preview.cpp` included) uses such a seam, bounded-deadline polling is the established pattern throughout, and adding test-only hooks to production code isn't justified by what's actually being verified here (key-matching and landing logic, not thread-scheduling fairness). Logged as a deliberate scope boundary. **This "by construction" claim about boundedness turned out to be WRONG - see round 4.**
+2. The round-2 claim that Task 1 already covered "all four kinds" was false - only `setRotation()` (not `setRotationExplicit()`, what `configureFaceOp` actually calls) and uniform `setScaleFactor()` were exercised; `setTwist()` was never called at all. Fixed by adding `ExplicitRotationNonUniformScaleAndTwistAlsoMatchADirectExecute` to Task 1. Separately, and more importantly: every Task 1 test hand-builds `MoveFaceOp` configuration directly, so a desync between `MoveFaceController::configureFaceOp()` and `currentMoveFaceKey()` - the exact risk flagged as a "known risk" in this very section - could pass every test in the plan. Fixed by adding `ARealExplicitRotationGestureLandsTheCorrectGeometry` to Task 2, which drives a real gesture through controller state and checks the result against a reference built from the controller's own `faceRotTotal()`.
+3. Test gaps: no assertion that the design is actually bounded to one worker; the Local test didn't switch back to general afterward; the A→zero→A test didn't stress abandonment specifically; commit/cancel tests didn't verify document state after completion. Accepted the boundedness point as now true BY CONSTRUCTION (finding 1's fix makes a second concurrent launch structurally impossible - `launchMoveFacePreviewIfWanted` checks `running()` before ever calling `m_mfJob.launch()`), and did not add a private-state-poking counter to assert it redundantly. Declined the request for "controllable worker barriers" / deterministic synchronization primitives inside `MoveFacePreviewJob` purely for test purposes: no other async-preview code in this codebase (`test_pushpull_preview.cpp` included) uses such a seam, bounded-deadline polling is the established pattern throughout, and adding test-only hooks to production code isn't justified by what's actually being verified here (key-matching and landing logic, not thread-scheduling fairness). Logged as a deliberate scope boundary. **This "by construction" claim about boundedness turned out to be WRONG - see round 4.**
 
 **Round 4 Codex review corrections:** round 3's own fix was itself broken - `AsyncJob::abandon()` does not stop a thread, it only stops tracking it, so `updateMoveFace`'s zero/Local branches calling `m_mfJob.abandon()` made `running()` report false immediately while the abandoned thread kept computing; a launch right after would run concurrently with it, exactly the pileup round 3 was supposed to prevent. Separately, storing only a bare "please retry" flag (not the actual configuration) meant the eventual retry re-read live `m_st`, which the deferred viewport drag can mutate without ever calling `updateMoveFace()` - reintroducing round 1's finding 5. And `pollPreview`'s `if (!result) return` skipped checking that flag on every poll after an abandon (an abandoned job's result never reaches `take()` at all), so the flag - and `previewPending()` - could get stuck forever.
 
