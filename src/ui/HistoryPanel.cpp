@@ -7,8 +7,7 @@
 #include "../core/Operation.h"
 #include "../core/EventBus.h"
 #include "../core/Events.h"
-#include "../modeling/SketchEditOp.h"
-#include "../modeling/SketchTransformOp.h"
+#include "../core/SketchCascadeTarget.h"
 #include <imgui.h>
 #include <algorithm>
 #include <chrono>
@@ -474,32 +473,13 @@ void HistoryPanel::renderContent() {
     // Bottom section: Undo/Redo + step counter
     ImGui::Separator();
 
-    // After an undo/redo of a SketchEditOp, the body built from that sketch is
-    // updated through the cascade (editStep), which the op's own undo/redo
-    // doesn't drive - publish a SketchEditedEvent so the body follows. Mirrors
-    // the Ctrl+Z/Ctrl+Y handlers in Application.
-    auto publishIfSketchEdit = [&](const Operation* op) {
-        if (!op || !m_eventBus || !m_document) return;
-        if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
-            if (auto target = se->getTarget()) {
-                int sid = m_document->findSketchId(target.get());
-                if (sid >= 0) m_eventBus->publish(SketchEditedEvent{sid});
-            }
-        } else if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op)) {
-            // A linked 3D sketch move updated its body via the cascade - re-run it
-            // so the body follows the reverted/re-applied plane.
-            if (st->getSketchId() >= 0)
-                m_eventBus->publish(SketchEditedEvent{st->getSketchId()});
-        }
-    };
-
     if (m_showUndoRedo) {
         ImGui::BeginDisabled(m_historyLocked || !m_history->canUndo());
         if (ImGui::Button(materializr::tr("Undo"))) {
-            const Operation* undone =
-                m_history->getStep(m_history->currentStep());
             undoStep(*m_history, *m_document, m_markBodyDirty);
-            publishIfSketchEdit(undone);
+            const int idx = m_history->lastUndoneStep();
+            materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document, -1,
+                [&](int sid) { if (m_eventBus) m_eventBus->publish(SketchEditedEvent{sid}); });
         }
         ImGui::EndDisabled();
 
@@ -508,7 +488,9 @@ void HistoryPanel::renderContent() {
         ImGui::BeginDisabled(m_historyLocked || !m_history->canRedo());
         if (ImGui::Button(materializr::tr("Redo"))) {
             redoStep(*m_history, *m_document, m_markBodyDirty);
-            publishIfSketchEdit(m_history->getStep(m_history->currentStep()));
+            const int idx = m_history->lastRedoneStep();
+            materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document, -1,
+                [&](int sid) { if (m_eventBus) m_eventBus->publish(SketchEditedEvent{sid}); });
         }
         ImGui::EndDisabled();
 

@@ -118,6 +118,10 @@ public:
     // sits above the current index). -1 = none. The UI uses this to explain
     // what happened instead of leaving steps silently missing.
     int lastReplayFailure() const { return m_failedReplayAt; }
+    // currentStep() cannot identify an undo that skipped disabled steps.
+    int lastUndoneStep() const { return m_lastUndoneStep; }
+    // A successful redo may only consume disabled steps without executing any.
+    int lastRedoneStep() const { return m_lastRedoneStep; }
     // Mark a step as failed-to-recompute AFTER the replay returned - used by
     // the async thread re-cut when the worker's result lands null (the new
     // geometry can't take the thread). Shows the same explainer banner.
@@ -193,6 +197,8 @@ private:
     // Step that failed to recompute during the last editStep/redo replay;
     // cleared by manual undo, by a successful retry, or by clear().
     int m_failedReplayAt = -1;
+    int m_lastUndoneStep = -1;
+    int m_lastRedoneStep = -1;
     materializr::EventBus* m_eventBus = nullptr;
     std::function<void()> m_threadsLastDecline;
 };

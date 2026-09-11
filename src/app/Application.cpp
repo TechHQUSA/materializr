@@ -58,6 +58,7 @@ inline void resetFpuForOcct() {
 #include "viewport/BackgroundRenderer.h"
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/SketchCascadeTarget.h"
 #include "core/SelectionManager.h"
 #include "ui/Toolbar.h"
 #include "ui/TouchIcons.h"
@@ -1642,51 +1643,22 @@ bool Application::progressFrameWouldDraw(float fraction) const {
 // src/app/layout/LayoutCommon.cpp; the per-layout chrome is under
 // src/app/layout/{classic,modern,imtouch}/.
 
-// The sketch id a just-undone/redone step edited, or -1. Covers BOTH step
-// kinds that mutate a sketch: SketchTransformOp (stores its id) and
-// SketchEditOp (stores the live sketch pointer - matched back to its id).
-// Needed so undo/redo OUTSIDE sketch mode re-cascades the driven body; the
-// step's own undo only reverts sketch geometry, the cascade did the body.
-int Application::sketchIdEditedBy(const Operation* op) const {
-    if (!op || !m_document) return -1;
-    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op))
-        return st->getSketchId();
-    if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
-        auto target = se->getTarget();
-        if (target)
-            for (int sid : m_document->getAllSketchIds())
-                if (m_document->getSketch(sid) == target) return sid;
-    }
-    return -1;
-}
-
 void Application::undoWithCascade() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
-    const Operation* undone = m_history->getStep(m_history->currentStep());
+    auto trackBodies = trackBodyChanges();
     m_history->undo(*m_document);
-    // Keep a sketch-driven body in sync after undoing a sketch edit (the
-    // SketchEditOp undo only reverts geometry; the cascade did the body).
-    // Mirrors the keyboard Ctrl+Z path.
-    int cascaded = -1;
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
-        cascadeFromSketchEdit(m_activeSketchId);
-        cascaded = m_activeSketchId;
-    }
-    if (int sid = sketchIdEditedBy(undone); sid >= 0 && sid != cascaded)
-        cascadeFromSketchEdit(sid);
+    const int idx = m_history->lastUndoneStep();
+    const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+    materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document,
+        activeSketchId, [&](int sid) { cascadeFromSketchEdit(sid); });
 }
 
 void Application::redoWithCascade() {
-    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
+    auto trackBodies = trackBodyChanges();
     m_history->redo(*m_document);
-    const Operation* redone = m_history->getStep(m_history->currentStep());
-    int cascaded = -1;
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
-        cascadeFromSketchEdit(m_activeSketchId);
-        cascaded = m_activeSketchId;
-    }
-    if (int sid = sketchIdEditedBy(redone); sid >= 0 && sid != cascaded)
-        cascadeFromSketchEdit(sid);
+    const int idx = m_history->lastRedoneStep();
+    const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+    materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document,
+        activeSketchId, [&](int sid) { cascadeFromSketchEdit(sid); });
 }
 
 void Application::renderSmallScreenWarning() {
@@ -3013,37 +2985,18 @@ void Application::handleShortcuts() {
                        // sketch is live (and rendering against it) crashed.
                        (!m_inSketchMode ||
                         m_history->currentStep() > m_sketchEntryHistoryStep)) {
-                const Operation* undone =
-                    m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
-                // A sketch-mutating step (SketchTransformOp / SketchEditOp)
-                // updated its body via the cascade; re-cascade so the body
-                // follows the reverted sketch. (No-op for detached sketches -
-                // the guard in cascade returns early. In sketch mode the
-                // active-sketch branch below cascades instead.)
-                if (int sid = sketchIdEditedBy(undone);
-                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
-                    cascadeFromSketchEdit(sid);
-                // In sketch mode, the host face is the anchor for the whole
-                // sketch session - clearing the selection would drop its blue
-                // highlight even though the sketch is still active. Skip the
-                // body-selection reset (sketch-element selection inside the
-                // SketchTool is unaffected by m_selection).
+                const int idx = m_history->lastUndoneStep();
+                const Operation* undone = m_history->getStep(idx);
+                if (idx >= 0 && m_inSketchMode && m_activeSketch)
+                    m_activeSketch->pruneOrphanPoints();
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
-                } else if (m_activeSketch) {
-                    // Undoing a line restores the state to just its first-click
-                    // anchor (added before the line's history step) - a stray
-                    // point. Sweep any such orphan so undo leaves no dangling
-                    // vertex.
-                    m_activeSketch->pruneOrphanPoints();
-                    // A sketch edit's body update was applied through the cascade
-                    // (editStep) - the SketchEditOp's own undo only reverts the
-                    // sketch geometry, not the body. Re-cascade so the body follows
-                    // the now-reverted sketch instead of staying at its last shape.
-                    if (m_activeSketchId >= 0) cascadeFromSketchEdit(m_activeSketchId);
                 }
+                const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+                materializr::dispatchUndoRedoCascade(idx, undone, *m_document, activeSketchId,
+                    [&](int sid) { cascadeFromSketchEdit(sid); });
                 // The undo can remove/renumber the very entities the
                 // Dimension tool has picked or is mid-pick on - stale ids
                 // referencing geometry that may no longer exist. Drop them
@@ -3068,19 +3021,15 @@ void Application::handleShortcuts() {
             if (m_history->canRedo()) {
                 auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_history->redo(*m_document);
-                const Operation* redone =
-                    m_history->getStep(m_history->currentStep());
+                const int idx = m_history->lastRedoneStep();
+                const Operation* redone = m_history->getStep(idx);
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
-                } else if (m_activeSketch && m_activeSketchId >= 0) {
-                    // Mirror of the undo path: re-sync the body to the
-                    // re-applied sketch edit.
-                    cascadeFromSketchEdit(m_activeSketchId);
                 }
-                if (int sid = sketchIdEditedBy(redone);
-                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
-                    cascadeFromSketchEdit(sid);
+                const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+                materializr::dispatchUndoRedoCascade(idx, redone, *m_document, activeSketchId,
+                    [&](int sid) { cascadeFromSketchEdit(sid); });
                 // Same stale-pick hazard as the undo path above.
                 if (m_inSketchMode && m_sketchTool &&
                     m_sketchTool->getMode() == SketchToolMode::Dimension) {

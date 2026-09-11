@@ -413,6 +413,10 @@ add_executable(test_history test_history.cpp)
 target_link_libraries(test_history PRIVATE materializr_core gtest gtest_main)
 add_test(NAME test_history COMMAND test_history)
 
+add_executable(test_sketch_cascade_target test_sketch_cascade_target.cpp)
+target_link_libraries(test_sketch_cascade_target PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_sketch_cascade_target COMMAND test_sketch_cascade_target)
+
 # test_recovery - multi-instance recovery slots (flock claim/probe/orphan scan)
 add_executable(test_recovery test_recovery.cpp)
 target_link_libraries(test_recovery PRIVATE materializr_core gtest gtest_main)

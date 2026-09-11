@@ -110,6 +110,7 @@ bool History::undo(Document& doc) {
     if (!canUndo()) {
         std::fprintf(stderr, "[History] undo: nothing to undo (currentIndex=%d)\n",
                      m_currentIndex);
+        m_lastUndoneStep = -1;
         return false;
     }
 
@@ -122,6 +123,7 @@ bool History::undo(Document& doc) {
         // Only disabled (never-applied) steps sit above the floor - nothing to undo.
         std::fprintf(stderr, "[History] undo: only disabled steps above floor (currentIndex=%d)\n",
                      m_currentIndex);
+        m_lastUndoneStep = -1;
         return false;
     }
 
@@ -135,9 +137,11 @@ bool History::undo(Document& doc) {
         std::fprintf(stderr, "[History] undo FAILED at step %d '%s' - op->undo() "
                              "returned false; staying at this step\n",
                      idx, op->name().c_str());
+        m_lastUndoneStep = -1;
         return false;
     }
 
+    m_lastUndoneStep = idx;
     m_currentIndex = idx - 1;
     // Manual undo means the user is steering the applied range themselves -
     // drop any pending auto-recovery so a later edit doesn't surprise-redo
@@ -150,6 +154,7 @@ bool History::undo(Document& doc) {
 bool History::redo(Document& doc) {
     ++m_revision;
     if (!canRedo()) {
+        m_lastRedoneStep = -1;
         return false;
     }
 
@@ -161,6 +166,7 @@ bool History::redo(Document& doc) {
     if (idx >= n) {
         // Only disabled steps remain in the redo range - consume them (advance the
         // tip past them, no execution) so Ctrl+Y doesn't keep firing with no effect.
+        m_lastRedoneStep = -1;
         m_currentIndex = n - 1;
         if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
         return true;
@@ -169,9 +175,11 @@ bool History::redo(Document& doc) {
     Operation* op = m_operations[idx].get();
     if (!op->execute(doc)) {
         m_failedReplayAt = idx;
+        m_lastRedoneStep = -1;
         return false; // leave the tip below the failed step
     }
 
+    m_lastRedoneStep = idx;
     m_currentIndex = idx;
     op->rememberGoodParams();
     if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
