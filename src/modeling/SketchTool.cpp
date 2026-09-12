@@ -919,7 +919,10 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // hijacked the cursor within 0.3 mm of any point (Steve's report). Coarse
     // grids are unaffected (gridStep·0.6 already dominated the floor above
     // ~0.42 mm). Grid OFF: the cursor is freehand, so keep an absolute band to
-    // grab endpoints reliably.
+    // grab endpoints reliably - deliberately NOT screen-scaled here (unlike
+    // the on-line band below): widening this at low zoom would start pulling
+    // in other, genuinely distinct nearby points as if they were the one
+    // aimed at.
     // Master snap band - endpoints, midpoints, face centres, on-line and
     // extension guides all derive from it, so the touch widening flows to all.
     const bool gridSnapOnForBand = m_snapToGridEnabled && m_gridStep > 0.0f;
@@ -1329,7 +1332,20 @@ glm::vec2 SketchTool::snap(glm::vec2 pos) const {
     // horizontal/vertical guide off a point within 0.2 mm on a fine grid,
     // hijacking the cursor within one increment. Tie it to the grid instead.
     const float axisThresh   = (gridActive ? tolStep() * 0.3f : 0.2f);
-    const float onLineThresh = pointSnapThreshold * 0.7f;
+    // Unlike point-to-point snapping above, this band is testing distance to
+    // a CURVE, not to a small set of discrete candidate points - there's no
+    // "other nearby line" to confuse it with in the way a second nearby point
+    // can confuse a vertex-weld. As a flat fraction of pointSnapThreshold it
+    // shrinks to sub-pixel at low zoom (e.g. on an 80 mm part viewed whole),
+    // so a click that lands visually dead-on a line or spline can still miss
+    // the band: no split point is registered, and the loop it was meant to
+    // close never does. Floor it in screen pixels too, same shape as
+    // findCoincidentPoint's weld radius (deliberate-aim tier: kWeldRadiusPx,
+    // not the looser kPointingRadiusPx) - registering a point ON a curve
+    // joins topology, same as welding one onto another point.
+    const float onLineThresh =
+        std::max(pointSnapThreshold * 0.7f,
+                 std::min(kWeldRadiusPx * m_mmPerPixel, kWeldRadiusCapMm));
     const float extThresh    = pointSnapThreshold * 0.6f;
     // POSITIONAL cap on directional / charged inferences: fires-checks are
     // ANGULAR for those, so capture distance grows with segment length (3°
