@@ -416,6 +416,7 @@ bool PushPullOp::execute(Document& doc) {
             Message_ProgressRange bodyRange = bodies.Next();
             if (bid == excludeId) continue;
             if (!doc.isBodyVisible(bid)) continue;          // respect hidden
+            if (doc.isBodyMesh(bid)) continue;              // reference-only, never a cut target
             TopoDS_Shape body;
             try { body = doc.getBody(bid); } catch (...) { continue; }
             if (body.IsNull()) continue;
