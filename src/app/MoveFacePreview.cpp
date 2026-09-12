@@ -32,6 +32,7 @@ std::unique_ptr<MoveFacePreviewJob> MoveFacePreviewJob::prepare(
         std::unique_ptr<MoveFacePreviewJob> job(new MoveFacePreviewJob());
         job->m_scratch = std::make_unique<Document>();
         job->m_scratchBodyId = job->m_scratch->addBody(copier.Shape(), "preview");
+        job->m_scratchBase = copier.Shape();
         job->m_op = std::make_unique<MoveFaceOp>();
         job->m_op->setBody(job->m_scratchBodyId);
         job->m_op->setFace(TopoDS::Face(scratchFace));
@@ -59,7 +60,9 @@ MoveFacePreviewResult MoveFacePreviewJob::run()
         r.shape = m_scratch->getBody(m_scratchBodyId);
     } catch (...) {
         r.ok = false;
+        return r;
     }
+    r.key = m_op->previewKey(m_scratchBase);
     return r;
 }
 

@@ -235,3 +235,31 @@ TEST(MoveFacePreview, ANoOpGestureRefusesRatherThanReturningTheUnchangedBody) {
     MoveFacePreviewResult r = job->run();
     EXPECT_FALSE(r.ok); // execute() returns false; the controller must not adopt r.shape
 }
+
+TEST(MoveFacePreview, ResultCarriesAKeyMatchingTheOpsOwnPreviewKey) {
+    TopoDS_Shape body = makeHolePlate(3);
+    TopoDS_Face face = topFace(body);
+    ASSERT_FALSE(face.IsNull());
+
+    auto configure = [](MoveFaceOp& op) {
+        op.setKind(MoveFaceOp::Kind::Translate);
+        op.setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+        op.setLoopMotion(true, std::vector<bool>(9, false), std::vector<bool>(9, false));
+    };
+
+    std::unique_ptr<MoveFacePreviewJob> job = MoveFacePreviewJob::prepare(body, face, configure);
+    ASSERT_TRUE(job);
+    MoveFacePreviewResult result = job->run();
+    ASSERT_TRUE(result.ok);
+
+    // Not just non-empty: must equal what previewKey() computes independently
+    // for an equivalently-configured op on the same base - a non-empty but
+    // WRONG key (e.g. one that omitted a field) would still pass a
+    // non-empty check and silently defeat adoption's safety argument.
+    MoveFaceOp equivalent;
+    equivalent.setFace(face);
+    equivalent.setKind(MoveFaceOp::Kind::Translate);
+    equivalent.setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+    equivalent.setLoopMotion(true, std::vector<bool>(9, false), std::vector<bool>(9, false));
+    EXPECT_EQ(result.key, equivalent.previewKey(body));
+}
