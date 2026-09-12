@@ -141,14 +141,22 @@ MateSolver::Result MateSolver::solve(Document& doc) {
         if (m.bodyA < 0 || m.bodyB < 0) continue;
         if (!live.count(m.bodyA) || !live.count(m.bodyB)) {
             brokenIds.push_back(m.id);
+            // bodyA can vanish while bodyB survives with a base cached from a
+            // PRIOR successful solve (when bodyA still existed). Left in
+            // place, a future mate re-targeting bodyB would read that stale
+            // pre-loss base instead of bodyB's real current shape.
+            if (live.count(m.bodyB)) doc.clearMateBase(m.bodyB);
             continue;
         }
         auto it = placedBy.find(m.bodyB);
         if (it != placedBy.end()) {
-            res.ok = false;
-            res.error = "body " + std::to_string(m.bodyB) +
-                        " is placed by more than one mate";
-            return res;
+            // Over-constraint: mark just this mate broken (same treatment as
+            // a lost anchor reference below) instead of failing the whole
+            // solve - one bad mate anywhere in the document must not freeze
+            // every other, unrelated one. The mate that claimed the body
+            // first keeps placing it.
+            brokenIds.push_back(m.id);
+            continue;
         }
         placedBy[m.bodyB] = &m;
     }
@@ -163,11 +171,20 @@ MateSolver::Result MateSolver::solve(Document& doc) {
         // to the walk below it would either pass silently (the grounded
         // placement already exists, so the cycle is never entered) or surface
         // as a confusing "cycle" further along.
-        if (placedBy.count(grounded)) {
-            res.ok = false;
-            res.error = "body " + std::to_string(grounded) +
-                        " is grounded but is also placed by a mate";
-            return res;
+        auto git = placedBy.find(grounded);
+        if (git != placedBy.end()) {
+            // The grounded body is fixed by definition - a mate trying to
+            // place it too is broken, not a reason to freeze every other
+            // mate in the document.
+            brokenIds.push_back(git->second->id);
+            placedBy.erase(git);
+            // The grounded body is no longer in placedBy, so the apply loop
+            // below never revisits it - a base cached from BEFORE it was
+            // grounded (while this same mate still legitimately placed it)
+            // would otherwise survive and mislead any OTHER mate that later
+            // reads it as bodyA's reference frame, into using its stale
+            // pre-conflict shape instead of its real current one.
+            doc.clearMateBase(grounded);
         }
         placement[grounded] = gp_Trsf();
     }
@@ -178,12 +195,11 @@ MateSolver::Result MateSolver::solve(Document& doc) {
         std::vector<int> chain;
         std::set<int> seen;
         int cur = kv.first;
+        bool cyclic = false;
         while (placement.find(cur) == placement.end()) {
             if (seen.count(cur)) {
-                res.ok = false;
-                res.error = "mates form a cycle through body " +
-                            std::to_string(cur);
-                return res;
+                cyclic = true;
+                break;
             }
             seen.insert(cur);
             auto pit = placedBy.find(cur);
@@ -194,6 +210,23 @@ MateSolver::Result MateSolver::solve(Document& doc) {
             }
             chain.push_back(cur);
             cur = pit->second->bodyA;
+        }
+        if (cyclic) {
+            // Isolate the cycle to the bodies actually walked into it (a
+            // "tail" leading into a cycle depends on the cycle transitively,
+            // so it belongs here too - same reasoning as the descendant
+            // safety note below), not every other, unrelated mate in the
+            // document. `chain` already holds every body visited this walk;
+            // the repeated node itself was recorded on its first visit.
+            for (int bodyId : chain) {
+                auto pit = placedBy.find(bodyId);
+                if (pit != placedBy.end())
+                    brokenIds.push_back(pit->second->id);
+                placement[bodyId] = gp_Trsf();
+                skip.insert(bodyId);
+                doc.clearMateBase(bodyId);
+            }
+            continue;
         }
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
             const Mate* m = placedBy[*it];
@@ -236,7 +269,22 @@ MateSolver::Result MateSolver::solve(Document& doc) {
                     // Reading the live shape instead left a chained body
                     // measuring from the middle body's old position.
                     ga.Transform(placement[m->bodyA]);
-                    placement[*it] = alignTrsf(*m, ga, gb);
+                    // angle/flipped are forced off here regardless of what the
+                    // Mate record stores: bboxFrame is a FIXED axis convention
+                    // (always Z=(0,0,1), X=(1,0,0) at the bbox min corner), not
+                    // one derived from the shape's actual orientation the way
+                    // frameFor's real face geometry is. The panel already
+                    // disables editing these fields without real anchors (see
+                    // MatePlugin.cpp), but a project file predating that fix,
+                    // or a hand-edited one, could still carry a nonzero value
+                    // here - applying it would compound a rotation on every
+                    // base recapture (undo/redo, Suppress toggle, any History
+                    // op that clears cached mate bases) instead of reproducing
+                    // the same pose, a silent, unreported drift.
+                    Mate mNoRoll = *m;
+                    mNoRoll.angle = 0.0;
+                    mNoRoll.flipped = false;
+                    placement[*it] = alignTrsf(mNoRoll, ga, gb);
                 } else {
                     placement[*it] = fastenTrsf(*m, placement[m->bodyA]);
                 }
@@ -264,35 +312,87 @@ MateSolver::Result MateSolver::solve(Document& doc) {
         }
     }
 
-    // Apply. Always from the base shape, so a repeat solve lands in the same
-    // place instead of compounding.
+    // Apply, in two passes. VALIDATE every candidate transform first, without
+    // touching the document, then COMMIT only the survivors. placedBy is a
+    // std::map keyed by body id, so this loop's order is ascending id, not
+    // dependency order - a body chained through another (A->B->C) can be
+    // reached before or after its reference. Every placement was already
+    // computed as a pure matrix during the walk above, so a downstream body's
+    // placement is well-defined even when its reference's OWN kernel
+    // transform later fails - but committing that placement anyway would move
+    // it to where its reference WOULD be if that transform had succeeded, not
+    // where the reference actually is. A failure must therefore propagate to
+    // every mate chained through the failed body BEFORE anything is written,
+    // exactly like a lost anchor already does in the walk phase above.
+    std::map<int, TopoDS_Shape> candidates;
+    std::set<int> transformFailed;
     for (const auto& kv : placedBy) {
         int bodyId = kv.first;
         if (skip.count(bodyId)) continue;
         if (!doc.hasMateBase(bodyId)) doc.setMateBase(bodyId, doc.getBody(bodyId));
-
-        const gp_Trsf& t = placement[bodyId];
         try {
-            BRepBuilderAPI_Transform xf(doc.getMateBase(bodyId), t, /*copy=*/true);
-            if (!xf.IsDone()) {
-                res.ok = false;
-                res.error = "failed to place body " + std::to_string(bodyId);
-                return res;
+            BRepBuilderAPI_Transform xf(doc.getMateBase(bodyId), placement[bodyId],
+                                        /*copy=*/true);
+            if (xf.IsDone()) {
+                candidates[bodyId] = xf.Shape();
+            } else {
+                transformFailed.insert(bodyId);
             }
-            doc.updateBody(bodyId, xf.Shape(), /*fromMateSolve=*/true);
-        } catch (const Standard_Failure&) {
+        } catch (const std::exception&) {
             // A null or degenerate base shape throws rather than returning.
-            // Report it; do not let it escape into the history push above.
-            res.ok = false;
-            res.error = "failed to place body " + std::to_string(bodyId);
-            return res;
+            // Do not let it escape into the history push above.
+            transformFailed.insert(bodyId);
+        } catch (...) {
+            // Non-Standard_Failure / non-std::exception (e.g. deep OCCT
+            // plumbing) must not escape either - this runs after the op that
+            // triggered it has already been pushed onto history, so an
+            // escaping exception here would leave history and document
+            // permanently out of step, not just fail one mate.
+            transformFailed.insert(bodyId);
         }
+    }
+
+    // Propagate: any mate whose bodyA is a failed body was computed assuming
+    // that body's placement would be reached. Repeat until nothing new is
+    // added, so a failure two or more links down a chain still reaches C via
+    // B even though B itself is a valid transform.
+    {
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& kv : placedBy) {
+                int bodyId = kv.first;
+                if (transformFailed.count(bodyId)) continue;
+                if (!transformFailed.count(kv.second->bodyA)) continue;
+                transformFailed.insert(bodyId);
+                candidates.erase(bodyId);
+                changed = true;
+            }
+        }
+    }
+
+    for (int bodyId : transformFailed) {
+        // A kernel-level transform failure isolates to this body's own mate
+        // (and every mate chained through it) exactly like a lost anchor, a
+        // graph cycle, or an over-constraint conflict above - one bad body
+        // must not strand every other, unrelated mate still waiting in
+        // placedBy.
+        auto it = placedBy.find(bodyId);
+        if (it != placedBy.end()) brokenIds.push_back(it->second->id);
+        skip.insert(bodyId);
+        doc.clearMateBase(bodyId);
+    }
+
+    for (const auto& kv : candidates) {
+        int bodyId = kv.first;
+        doc.updateBody(bodyId, kv.second, /*fromMateSolve=*/true);
 
         // Sketches anchored to this body travel with it. TransformOp does the
         // same at src/modeling/TransformOp.cpp:138 - a sketch left behind
         // detaches from the face it was drawn on, and every feature built from
         // it regenerates in the wrong place. A detached sketch has been
         // deliberately unlinked and must not follow.
+        const gp_Trsf& t = placement[bodyId];
         for (int sid : doc.getAllSketchIds()) {
             auto sk = doc.getSketch(sid);
             if (!sk) continue;

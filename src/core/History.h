@@ -27,7 +27,7 @@ public:
     // Used for ops where the live mutation happened externally (e.g. sketch
     // edits performed by the SketchTool); the op snapshots before/after so
     // undo/redo can swap between them without re-running the original action.
-        // The Document-taking overload is the one to call: it re-places mates.
+    // The Document-taking overload is the one to call: it re-places mates.
     // The bare form cannot, and it is the INTERACTIVE commit path (gizmo
     // drags, live op previews, dialogs), so leaving it unable to solve meant
     // the feature's headline behaviour did not hold for the way users

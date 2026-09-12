@@ -34,6 +34,15 @@ public:
     // sketching in ortho so the user has a clean drawing surface.
     bool isInSketchMode() const;
 
+    // True once _bind has set a live Document - document()/history() have no
+    // null check of their own, so a caller holding a PluginContext* that
+    // might not have gone through _bind yet (a future headless/test harness
+    // path, or a refactor that changes wireDocumentConsumers()'s ordering)
+    // needs a way to tell before dereferencing. Not currently reachable in
+    // the app proper: Application always binds before any plugin render()
+    // callback can run.
+    bool isBound() const { return m_document != nullptr; }
+
     // Request that the host Application start an interactive popup-driven op
     // (which the plugin can't run on its own - those need viewport + UI plumbing
     // that lives in Application). Application picks it up via

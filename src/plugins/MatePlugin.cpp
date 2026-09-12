@@ -6,6 +6,7 @@
 #include "../modeling/MateSolver.h"
 #include "../modeling/FaceAnchor.h"
 #include "../ui/NumField.h"
+#include "../ui/LengthField.h"
 
 #include <imgui.h>
 #include <BRepAdaptor_Surface.hxx>
@@ -254,18 +255,47 @@ bool renderPanel(materializr::PluginContext& ctx) {
         }
 
         double offset = m.offset;
-        if (materializr::inputNumber("Offset (mm)", &offset)) {
+        if (materializr::lengthField("Offset", &offset)) {
             m.offset = offset;
             dirty = true;
         }
 
-        double angleDeg = m.angle * 180.0 / M_PI;
-        if (materializr::inputNumber("Angle (deg)", &angleDeg)) {
-            m.angle = angleDeg * M_PI / 180.0;
-            dirty = true;
+        // Angle and Flip need a frame that reflects the body's ACTUAL current
+        // orientation to stay correct across a base recapture (undo/redo,
+        // Suppress toggle, any History op that clears cached mate bases) -
+        // frameFor() (Concentric/Planar) reads that from the resolved face's
+        // real geometry, so it self-corrects. The anchorless-Fasten fallback
+        // (bboxFrame) cannot: it derives only a fixed axis convention at the
+        // bbox's min corner, blind to how the shape is actually rotated. A
+        // nonzero angle recaptured from an already-rotated base compounds the
+        // rotation instead of reproducing it - a silent, unreported drift.
+        //
+        // NOT gated on `anchored`: that flag is deliberately true for a
+        // BROKEN mate too (so its Type dropdown stays open for repair), but a
+        // broken mate can be Fasten with genuinely empty anchors - exactly the
+        // bboxFrame case. Gate on whether real anchors exist right now.
+        const bool hasRealAnchors = !m.anchorsA.empty() && !m.anchorsB.empty();
+        if (hasRealAnchors) {
+            double angleDeg = m.angle * 180.0 / M_PI;
+            if (materializr::inputNumber("Angle (deg)", &angleDeg)) {
+                m.angle = angleDeg * M_PI / 180.0;
+                dirty = true;
+            }
+            if (ImGui::Checkbox("Flip", &m.flipped)) dirty = true;
+        } else {
+            double angleDeg = 0.0;
+            ImGui::BeginDisabled();
+            materializr::inputNumber("Angle (deg)", &angleDeg);
+            bool flip = false;
+            ImGui::Checkbox("Flip", &flip);
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(
+                    "Only available with anchored faces: a rotation or flip "
+                    "recaptured from this body's current (already-rotated) "
+                    "position, instead of a real face's orientation, would "
+                    "silently compound on the next solve.");
         }
-
-        if (ImGui::Checkbox("Flip", &m.flipped)) dirty = true;
         ImGui::SameLine();
         if (ImGui::Checkbox("Suppress", &m.suppressed)) dirty = true;
 

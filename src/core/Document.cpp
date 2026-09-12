@@ -35,8 +35,21 @@ void Document::addOrPutBody(int& id, const TopoDS_Shape& shape, const std::strin
 
 void Document::removeBody(int id) {
     // Ids are re-issued by putBody on undo, so a base left behind here would be
-    // applied to a DIFFERENT body later.
-    m_mateBases.erase(id);
+    // applied to a DIFFERENT body later. clearMateBase also drops any sketch
+    // plane cached against this body - a direct m_mateBases.erase(id) here
+    // used to skip that and reintroduce the stale-sketch-plane bug it was
+    // centralized to prevent (review-panel finding, 2026-09).
+    clearMateBase(id);
+    // Without this, deleting the grounded/root body left every mate that
+    // chained through it correctly marked broken (MateSolver's `live` filter
+    // catches the dead id), but with no way back: m_groundedBody kept
+    // pointing at a body that no longer exists, and createMate's auto-ground
+    // fallback only fires when it is already < 0 - so it never re-triggers.
+    // The only recovery was deleting and recreating every mate in the
+    // assembly. This does not restore the old grounding on an undo of this
+    // deletion (m_groundedBody is not part of the per-body tombstone below);
+    // the next mate the user creates just re-grounds normally instead.
+    if (id == m_groundedBody) m_groundedBody = -1;
 
     int idx = findBodyIndex(id);
     if (idx >= 0) {
@@ -763,8 +776,17 @@ void Document::removeMate(int id) {
         if (m_mates[i].id != id) continue;
         // Drop the base with the mate: leaving it means a later mate on the
         // same body measures against geometry from before this one existed.
-        m_mateBases.erase(m_mates[i].bodyB);
+        // clearMateBase also drops any sketch-plane base for this body - see
+        // its doc comment in Document.h for why that pairing matters here.
+        clearMateBase(m_mates[i].bodyB);
         m_mates.erase(m_mates.begin() + i);
         return;
     }
+}
+
+void Document::clearMateBase(int bodyId) {
+    m_mateBases.erase(bodyId);
+    for (auto it = m_sketches.begin(); it != m_sketches.end(); ++it)
+        if (it->sketch && it->sketch->getSourceBody() == bodyId)
+            m_mateSketchPlanes.erase(it->id);
 }

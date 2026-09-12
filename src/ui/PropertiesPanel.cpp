@@ -497,7 +497,7 @@ void PropertiesPanel::renderContent() {
     // currently selected). This was the only consumer of
     // PluginRegistry::propertyContributions() until now; the loop was simply
     // missing, so registerPropertySection() had no reader at all.
-    if (m_pluginContext) {
+    if (m_pluginContext && m_pluginContext->isBound()) {
         for (const auto& contrib : materializr::PluginRegistry::instance().propertyContributions()) {
             if (contrib.context != materializr::SelectionContext::Always) continue;
             if (contrib.render) contrib.render(*m_pluginContext);

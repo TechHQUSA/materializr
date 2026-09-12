@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <limits>
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
@@ -221,8 +222,14 @@ public:
         // Keep the counter ahead of ids that came from a file, exactly as
         // putBody does for bodies. Without it the first mate created after a
         // load collides with a loaded id, and two panel rows share one
-        // ImGui id.
-        if (m.id >= m_nextMateId) m_nextMateId = m.id + 1;
+        // ImGui id. The id itself parses safely even when it overflows int
+        // (istream extraction sets failbit and the whole "M ..." record is
+        // rejected - see ProjectIO.cpp's `if (!(ms >> m.id >> ...))
+        // continue;`), but a file can still legitimately contain an id of
+        // EXACTLY INT_MAX (a valid parse, no overflow) - `m.id + 1` on that
+        // value is real signed-overflow UB. Stop advancing rather than wrap.
+        if (m.id >= m_nextMateId && m.id < std::numeric_limits<int>::max())
+            m_nextMateId = m.id + 1;
     }
 
     // Geometry as history produced it, before any mate placement. Held on the
@@ -238,7 +245,16 @@ public:
         return m_mateBases.at(bodyId);
     }
     void setMateBase(int bodyId, const TopoDS_Shape& s) { m_mateBases[bodyId] = s; }
-    void clearMateBase(int bodyId) { m_mateBases.erase(bodyId); }
+    // Also drops the sketch-plane bases for any sketch this body carries -
+    // defined out-of-line (Document.cpp) because it needs Sketch's full type
+    // to read getSourceBody(). Three call sites in MateSolver.cpp used to
+    // erase only m_mateBases: a later mate re-based fine, but a leftover
+    // sketch-plane entry from THIS body's earlier (now-invalidated)
+    // arrangement still described that old pose, and the next solve
+    // transformed the sketch from it - displacing the sketch relative to the
+    // body it is actually attached to. Centralized here instead of fixed at
+    // each call site so a future one can't reintroduce the same gap.
+    void clearMateBase(int bodyId);
     void clearMateBases() { m_mateBases.clear(); m_mateSketchPlanes.clear(); }
 
     // Sketch-plane bases live here for the same reason body bases do, and are

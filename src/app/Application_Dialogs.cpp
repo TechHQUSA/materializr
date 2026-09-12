@@ -828,10 +828,18 @@ void Application::applyMultiBodyRotation() {
     if (!m_selection || !m_document || !m_history) return;
     auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
 
-    // Snapshot every selected body's current state.
+    // Snapshot every selected body's current state. A mate-placed body is
+    // excluded the same way TransformOp::execute refuses one interactively
+    // (materializr::bodyIsMatePlaced) - without this, updateBody below moves
+    // it directly, and the very next mate solve (this op's own pushExecuted
+    // triggers one) recomputes it from its base and silently snaps it back,
+    // discarding the rotation the user just applied while unrelated,
+    // unmated bodies in the same multi-select keep theirs.
     std::vector<std::pair<int, TopoDS_Shape>> bodies;
     for (const auto& sel : m_selection->getSelection()) {
         if (sel.type != SelectionType::Body) continue;
+        if (!m_document->isReplaying() &&
+            materializr::bodyIsMatePlaced(*m_document, sel.bodyId)) continue;
         try {
             bodies.push_back({sel.bodyId, m_document->getBody(sel.bodyId)});
         } catch (...) {}
@@ -879,23 +887,33 @@ void Application::applyMultiBodyRotation() {
             if (xf.IsDone()) {
                 m_document->updateBody(id, xf.Shape());
                 afterState.push_back({id, xf.Shape()});
+            } else {
+                // Roll the before-entry off - a body present in `before` but
+                // absent from `after` reads as DELETED to ReplayOp (see
+                // applyRevolve's identical guard just below), so a failed
+                // transform must not leave one dangling.
+                beforeState.pop_back();
             }
-        } catch (...) {}
+        } catch (...) {
+            beforeState.pop_back();
+        }
     }
 
-    char buf[160];
-    std::snprintf(buf, sizeof(buf),
-                  "Rotate %d bodies by X %.2f° Y %.2f° Z %.2f° around centroid",
-                  static_cast<int>(bodies.size()),
-                  m_multiRotate[0], m_multiRotate[1], m_multiRotate[2]);
-    auto op = std::make_unique<ReplayOp>(
-        "multirotate",
-        std::string("Rotate (") + std::to_string(bodies.size()) + " bodies)",
-        std::string(buf),
-        std::move(beforeState), std::move(afterState),
-        /*fromReload=*/false);
-    m_history->pushExecuted(std::move(op), *m_document);
-    m_meshesDirty = true;
+    if (!afterState.empty()) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf),
+                      "Rotate %d bodies by X %.2f° Y %.2f° Z %.2f° around centroid",
+                      static_cast<int>(afterState.size()),
+                      m_multiRotate[0], m_multiRotate[1], m_multiRotate[2]);
+        auto op = std::make_unique<ReplayOp>(
+            "multirotate",
+            std::string("Rotate (") + std::to_string(afterState.size()) + " bodies)",
+            std::string(buf),
+            std::move(beforeState), std::move(afterState),
+            /*fromReload=*/false);
+        m_history->pushExecuted(std::move(op), *m_document);
+        m_meshesDirty = true;
+    }
 
     // Zero the sliders so the next Apply is relative to the new orientation.
     m_multiRotate[0] = m_multiRotate[1] = m_multiRotate[2] = 0.0f;
@@ -3935,6 +3953,11 @@ void Application::applyRevolve() {
         ReplayOp::BodyState after;
         int rotated = 0;
         for (int bid : m_revolveBodyIds) {
+            // Same guard applyMultiBodyRotation carries just above, for the
+            // same reason: skip a mate-placed body here rather than let the
+            // solve that follows this op's pushExecuted snap it back.
+            if (!m_document->isReplaying() &&
+                materializr::bodyIsMatePlaced(*m_document, bid)) continue;
             TopoDS_Shape src;
             try { src = m_document->getBody(bid); } catch (...) { continue; }
             if (src.IsNull()) continue;

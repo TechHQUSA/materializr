@@ -205,8 +205,13 @@ bool History::redo(Document& doc) {
         m_lastRedoneStep = -1;
         m_currentIndex = n - 1;
         if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
-        resolveMates(doc, /*regenerated=*/true);
-    return true;
+        // false, not true: nothing was rebuilt here (no op->execute() ran),
+        // so there is no reason to drop every cached mate/sketch-plane base
+        // in the whole document and re-solve everything from scratch - that
+        // is what true means elsewhere (undo/editStep/replayAll, where the
+        // document genuinely changed underneath the mates).
+        resolveMates(doc, /*regenerated=*/false);
+        return true;
     }
 
     Operation* op = m_operations[idx].get();
@@ -582,6 +587,7 @@ bool History::setStepEnabled(int index, bool enabled, Document& doc) {
 
     if (m_eventBus)
         m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return firstFail < 0;
 }
 

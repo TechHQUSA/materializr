@@ -1148,12 +1148,28 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
             doc.setGroundedBody(g);
         } else if (tok == "MATE_COUNT") {
             int n = 0; iss >> n;
+            // A corrupted count that runs past EOF already falls through the
+            // getline-fails break just below; a corrupted count that is
+            // merely too LARGE relative to the actual mate lines (a
+            // hand-edited or fuzzed file) is the one this guards - without
+            // it there is no bound on how many lines this loop tries to
+            // consume before giving up.
+            if (n < 0 || n > 1000000) n = 0;
             for (int i = 0; i < n; ++i) {
+                std::streampos beforeLine = ifs.tellg();
                 std::string mline;
                 if (!std::getline(ifs, mline)) break;
                 std::istringstream ms(mline);
                 std::string mt; ms >> mt;
-                if (mt != "M") continue;
+                // A non-"M" line here means MATE_COUNT no longer agrees with
+                // the file's actual content - stop consuming lines rather
+                // than `continue` (which would keep losing every line after
+                // it too, up to n total, silently swallowing the rest of the
+                // file's sections whenever a corrupted count overshoots the
+                // true mate-line count). Seek back so the outer section loop
+                // still sees this line - it may be a valid header (e.g.
+                // CPLANE_COUNT) that a mismatched count would otherwise drop.
+                if (mt != "M") { ifs.seekg(beforeLine); break; }
                 materializr::Mate m{};
                 int typeRaw = 0, flip = 0, supp = 0;
                 if (!(ms >> m.id >> typeRaw >> m.bodyA >> m.bodyB
