@@ -200,7 +200,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | CONVERTED | src/modeling/PrimitiveOp.cpp:163 | `materializr::lengthField("Y", &m_oy);` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:164 | `materializr::lengthField("Z", &m_oz);` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:537 | `materializr::lengthField(materializr::trFormat("Depth (%s)", materializr::unitSuffix()).c_str(), &m_depth);` |
-| CONVERTED | src/modeling/PushPullOp.cpp:757 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
+| CONVERTED | src/modeling/PushPullOp.cpp:758 | `materializr::lengthField(materializr::tr("Distance"), &m_distance);` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:689 | `if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia))` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:696 | `if (materializr::lengthField(materializr::trFormat("Bottom Ø (%s)", materializr::unitSuffix()).c_str(), &db)) ` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:700 | `if (materializr::lengthField(materializr::trFormat("Top Ø (%s)", materializr::unitSuffix()).c_str(), &dt)) {` |
@@ -268,19 +268,19 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/app/Application.cpp:2023 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
 | comment | src/app/Application.cpp:4369 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
 | comment | src/app/Application.cpp:4395 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
-| comment | src/app/Application.cpp:4838 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
-| comment | src/app/Application.cpp:4846 | `// 152 mm - see 0733a59, which reverted exactly that.` |
-| comment | src/app/Application.cpp:5434 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
-| comment | src/app/Application.cpp:5496 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
-| comment | src/app/Application.cpp:5561 | `// then keeps the wrong band, landing 0.6 mm off with a` |
-| comment | src/app/Application.cpp:5610 | `// 0.64 mm off-axis at the surface origin) that WON` |
-| comment | src/app/Application.cpp:5704 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
-| comment | src/app/Application.cpp:5719 | `const double eps = 1.0; // mm` |
-| comment | src/app/Application.cpp:6347 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
-| comment | src/app/Application.cpp:6382 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
-| comment | src/app/Application.cpp:6721 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
-| comment | src/app/Application.cpp:6781 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
-| comment | src/app/Application.cpp:6782 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
+| comment | src/app/Application.cpp:4840 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
+| comment | src/app/Application.cpp:4848 | `// 152 mm - see 0733a59, which reverted exactly that.` |
+| comment | src/app/Application.cpp:5436 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
+| comment | src/app/Application.cpp:5498 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
+| comment | src/app/Application.cpp:5563 | `// then keeps the wrong band, landing 0.6 mm off with a` |
+| comment | src/app/Application.cpp:5612 | `// 0.64 mm off-axis at the surface origin) that WON` |
+| comment | src/app/Application.cpp:5706 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
+| comment | src/app/Application.cpp:5721 | `const double eps = 1.0; // mm` |
+| comment | src/app/Application.cpp:6349 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
+| comment | src/app/Application.cpp:6384 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
+| comment | src/app/Application.cpp:6723 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
+| comment | src/app/Application.cpp:6783 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
+| comment | src/app/Application.cpp:6784 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
 | comment | src/app/Application.h:657 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
 | comment | src/app/Application.h:936 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
 | comment | src/app/Application.h:938 | `// 300 mm because it reads as a round number in the units that needed` |
@@ -440,7 +440,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/PatchOp.h:106 | `double g0Error() const { return m_g0Error; }  // mm` |
 | comment | src/modeling/PrimitiveOp.h:23 | `// Box: XYZ extents in mm.` |
 | comment | src/modeling/PushPullOp.cpp:404 | `// BRepAlgoAPI_Cut of coincident faces yields ~1e-3 mm³ of noise). Such` |
-| comment | src/modeling/PushPullOp.cpp:591 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
+| comment | src/modeling/PushPullOp.cpp:592 | `// leave ~1e-3 mm³ slivers, and the plug/hole pair can` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:517 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:542 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
 | comment | src/modeling/ScaleFaceOp.cpp:368 | `// they were converted display->mm on commit, so typing 100 under inches` |
@@ -598,7 +598,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/PlaneTransformOp.cpp:26 | `PlaneTransformOp` |
 | CONVERTED | src/modeling/PrimitiveOp.cpp:116 | `PrimitiveOp` |
 | CONVERTED | src/modeling/ProjectSketchOp.cpp:526 | `ProjectSketchOp` |
-| CONVERTED | src/modeling/PushPullOp.cpp:748 | `PushPullOp` |
+| CONVERTED | src/modeling/PushPullOp.cpp:749 | `PushPullOp` |
 | stored-string | src/modeling/ReplayOp.h:29 | `ReplayOp` |
 | CONVERTED | src/modeling/ResizeCylindricalOp.cpp:711 | `ResizeCylindricalOp` |
 | no-length | src/modeling/RevolveOp.cpp:267 | `RevolveOp` |
