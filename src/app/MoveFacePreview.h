@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 
 class MoveFaceOp;
 
@@ -23,6 +24,12 @@ struct MoveFacePreviewResult {
     bool ok = false;
     TopoDS_Shape shape;
     double millis = 0.0; // execute() wall time on the worker, for diagnostics
+    // The op's own previewKey(), evaluated against the worker's pre-execute
+    // scratch base AFTER execute() succeeds - so it reflects the op's own
+    // face re-bind, exactly like SnapshotPreviewJob::run() does for
+    // Shell/Taper/ScaleFace (see src/app/SnapshotPreview.cpp). Empty when
+    // the run failed or the op's previewKey() couldn't resolve a selection.
+    std::string key;
 };
 
 class MoveFacePreviewJob {
@@ -46,6 +53,8 @@ private:
     std::unique_ptr<Document> m_scratch;
     int m_scratchBodyId = -1;
     std::unique_ptr<MoveFaceOp> m_op;
+    TopoDS_Shape m_scratchBase; // the scratch body's shape BEFORE execute() ran,
+                               // for previewKey() to key against post-execute
 };
 
 } // namespace materializr
