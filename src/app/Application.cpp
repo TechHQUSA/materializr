@@ -7177,9 +7177,21 @@ void Application::writeProjectRecoveryIfDue() {
     // cut. Skip this tick - the body is mid-recompute anyway, and the next
     // tick lands right after the recut does.
     if (!m_threadRecuts.empty()) return;
-    ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
-    if (materializr::writeProjectRecovery(*m_document, &hist, m_currentProjectPath,
-                                          bodies, curStep + 1,
+    // Crash recovery only needs to restore CURRENT geometry, not the full undo
+    // stack - so skip captureProjectHistory() entirely here (it walks every
+    // step, re-serializing each op's params) and pass no history to the
+    // writer. History blocks are the dominant cost on a project with many
+    // baked steps (each carries a full per-body BRep snapshot, not a delta -
+    // see ProjectIO::save's HISTORY_COUNT block), so this is what actually
+    // keeps a recovery write fast regardless of how much undo history the
+    // session has accumulated. The real Ctrl+S / File > Save path is
+    // untouched and keeps writing full history as always; only the
+    // best-effort crash sidecar trades "restore my undo stack after a crash"
+    // for "restore my current work, fast, without stuttering the editor to
+    // get there." stepCount is reported as 0 to match what actually loads.
+    if (materializr::writeProjectRecovery(*m_document, /*history=*/nullptr,
+                                          m_currentProjectPath,
+                                          bodies, /*stepCount=*/0,
                                           currentSession().recoveryIndex)) {
         m_lastRecoveryWrite = now;
         m_lastRecoveryStep = curStep;
@@ -7195,11 +7207,10 @@ void Application::writeSessionRecoveryNow() {
     if (!isDirty() || !m_document) return;
     if (m_history && m_history->canRedo()) return;   // same below-tip guard
     if (!m_threadRecuts.empty()) return;
-    ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
+    // See writeProjectRecoveryIfDue: no history in the crash-recovery sidecar.
     materializr::writeProjectRecovery(
-        *m_document, &hist, m_currentProjectPath,
-        m_document->bodyCount(),
-        (m_history ? m_history->currentStep() : -1) + 1,
+        *m_document, /*history=*/nullptr, m_currentProjectPath,
+        m_document->bodyCount(), /*stepCount=*/0,
         currentSession().recoveryIndex);
 }
 
