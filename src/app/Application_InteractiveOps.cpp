@@ -706,7 +706,7 @@ void Application::commitPattern() {
     // The previewed instance IS the final op - record it without re-running
     // it. (It used to already BE a history step by this point, which is what
     // made the preview undoable mid-gesture.)
-    m_patternPreview.commit(*m_history);
+    m_patternPreview.commit(*m_history, *m_document);
     m_patternActive        = false;
     m_patternPickingOrigin = false;
     m_patternBodyId        = -1;
@@ -1012,7 +1012,7 @@ void Application::updateLoft() {
 void Application::commitLoft() {
     auto trackBodies = trackBodyChanges(); // marks what this edit changed
     // Record the already-applied instance without re-running it.
-    m_loftPreview.commit(*m_history);
+    m_loftPreview.commit(*m_history, *m_document);
     m_loftActive = false;
     m_loftSections.clear();
     m_loftRails.clear();
@@ -1382,7 +1382,7 @@ void Application::updateBoundaryFill() {
 
 void Application::commitBoundaryFill() {
     auto trackBodies = trackBodyChanges(); // marks what this edit changed
-    m_bfillPreview.commit(*m_history);   // record the applied instance as-is
+    m_bfillPreview.commit(*m_history, *m_document);   // record the applied instance as-is
     m_bfillActive = false;
     m_bfillProfiles.clear();
 }
@@ -1486,7 +1486,7 @@ void Application::updatePatch() {
 
 void Application::commitPatch() {
     auto trackBodies = trackBodyChanges(); // marks what this edit changed
-    m_patchPreview.commit(*m_history);   // record the applied instance as-is
+    m_patchPreview.commit(*m_history, *m_document);   // record the applied instance as-is
     m_patchActive = false;
     m_patchEdges.clear();
     m_patchSupports.clear();
@@ -1843,7 +1843,7 @@ void Application::commitConstructionPlane() {
     m_planeOpHasPendingImage = false;
     m_planeOpPendingImage = RefImageEntry{};
     m_planeOpRotX = m_planeOpRotY = m_planeOpRotZ = 0.0f;
-    m_planeOpPreview.commit(*m_history);
+    m_planeOpPreview.commit(*m_history, *m_document);
     m_planeOpActive = false;
 
     // The plane now exists and previewApply auto-selected it, so the id is the
@@ -2217,7 +2217,7 @@ void Application::updateConstructionAxis() {
 }
 
 void Application::commitConstructionAxis() {
-    m_axisOpPreview.commit(*m_history);
+    m_axisOpPreview.commit(*m_history, *m_document);
     m_axisOpActive = false;
 }
 
@@ -2353,7 +2353,7 @@ void Application::commitSketchPattern() {
          m_sketchPatternBefore->getArcs().size()    != after->getArcs().size())) {
         auto op = std::make_unique<SketchEditOp>(m_activeSketch,
                                                   m_sketchPatternBefore, after);
-        m_history->pushExecuted(std::move(op));
+        m_history->pushExecuted(std::move(op), *m_document);
     }
     m_sketchPatternActive = false;
     m_sketchPatternPickingOrigin = false;

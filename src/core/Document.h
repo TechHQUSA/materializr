@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <limits>
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
@@ -11,6 +12,7 @@
 #include "SheetSpec.h"
 #include "../modeling/FaceLineage.h"
 #include "../modeling/GenerationLedger.h"
+#include "../modeling/Mate.h"
 
 namespace materializr { class Sketch; class EventBus;
 namespace topo { struct GenerationLedger; } }
@@ -109,7 +111,11 @@ public:
     // that removeBody stashed. `id` is updated in place to the final body id.
     void addOrPutBody(int& id, const TopoDS_Shape& shape, const std::string& name = "");
     void removeBody(int id);
-    void updateBody(int id, const TopoDS_Shape& shape);
+    // fromMateSolve: only the mate solver may write a body WITHOUT dropping its
+    // mate base. Any other writer has produced new geometry, so the cached base
+    // is stale - keeping it made the next solve transform the OLD shape and
+    // silently revert the user's edit.
+    void updateBody(int id, const TopoDS_Shape& shape, bool fromMateSolve = false);
 
     // The generation ledger of the op that PRODUCED a body's current shape
     // (published by ops after updateBody; the pointer is owned by the
@@ -201,6 +207,87 @@ public:
     void setSketchVisible(int id, bool visible);
     bool isSketchVisible(int id) const;
     std::vector<int> getAllSketchIds() const;
+
+    // Mates: a persistent placement relationship between two bodies. Stored
+    // with the model rather than replayed as history steps, exactly as sketch
+    // constraints are stored on their Sketch. See
+    // docs/superpowers/specs/2026-08-16-assembly-mates-design.md
+    int addMate(const materializr::Mate& m);
+    void removeMate(int id);
+    const std::vector<materializr::Mate>& getMates() const { return m_mates; }
+    std::vector<materializr::Mate>& getMutableMates() { return m_mates; }
+    // Load path: keeps the id from the file instead of assigning a new one.
+    void addRawMate(const materializr::Mate& m) {
+        m_mates.push_back(m);
+        // Keep the counter ahead of ids that came from a file, exactly as
+        // putBody does for bodies. Without it the first mate created after a
+        // load collides with a loaded id, and two panel rows share one
+        // ImGui id. The id itself parses safely even when it overflows int
+        // (istream extraction sets failbit and the whole "M ..." record is
+        // rejected - see ProjectIO.cpp's `if (!(ms >> m.id >> ...))
+        // continue;`), but a file can still legitimately contain an id of
+        // EXACTLY INT_MAX (a valid parse, no overflow) - `m.id + 1` on that
+        // value is real signed-overflow UB. Stop advancing rather than wrap.
+        if (m.id >= m_nextMateId && m.id < std::numeric_limits<int>::max())
+            m_nextMateId = m.id + 1;
+    }
+
+    // Geometry as history produced it, before any mate placement. Held on the
+    // DOCUMENT rather than inside a solver so every solver instance shares one
+    // truth: a throwaway solver in the UI and the long-lived one in History
+    // used to keep separate caches and double-apply each other's placement.
+    // Cleared with the document, so opening a project cannot place mates
+    // against the previous one's geometry.
+    bool hasMateBase(int bodyId) const {
+        return m_mateBases.find(bodyId) != m_mateBases.end();
+    }
+    const TopoDS_Shape& getMateBase(int bodyId) const {
+        return m_mateBases.at(bodyId);
+    }
+    void setMateBase(int bodyId, const TopoDS_Shape& s) { m_mateBases[bodyId] = s; }
+    // Also drops the sketch-plane bases for any sketch this body carries -
+    // defined out-of-line (Document.cpp) because it needs Sketch's full type
+    // to read getSourceBody(). Three call sites in MateSolver.cpp used to
+    // erase only m_mateBases: a later mate re-based fine, but a leftover
+    // sketch-plane entry from THIS body's earlier (now-invalidated)
+    // arrangement still described that old pose, and the next solve
+    // transformed the sketch from it - displacing the sketch relative to the
+    // body it is actually attached to. Centralized here instead of fixed at
+    // each call site so a future one can't reintroduce the same gap.
+    void clearMateBase(int bodyId);
+    void clearMateBases() { m_mateBases.clear(); m_mateSketchPlanes.clear(); }
+
+    // Sketch-plane bases live here for the same reason body bases do, and are
+    // cleared together: a solver-local copy meant a throwaway solver in the
+    // panel captured the ALREADY-PLACED plane as its base and re-applied the
+    // full placement, so the body held still while its sketch walked away one
+    // offset per click.
+    bool hasMateSketchPlane(int sketchId) const {
+        return m_mateSketchPlanes.find(sketchId) != m_mateSketchPlanes.end();
+    }
+    const gp_Pln& getMateSketchPlane(int sketchId) const {
+        return m_mateSketchPlanes.at(sketchId);
+    }
+    void setMateSketchPlane(int sketchId, const gp_Pln& p) {
+        m_mateSketchPlanes[sketchId] = p;
+    }
+
+    // True while History is re-executing recorded steps. A guard that refuses
+    // an interactive edit must NOT refuse the replay of a step recorded before
+    // the mate existed: doing so marks the step failed and silently drops
+    // committed geometry on an unrelated action.
+    bool isReplaying() const { return m_replaying; }
+    void setReplaying(bool r) { m_replaying = r; }
+
+    // Why the last mate solve failed, empty when it succeeded. The solver's
+    // Result was discarded at every call site, so a cycle or an over-constraint
+    // produced an assembly that simply stopped responding with no message.
+    const std::string& mateSolveError() const { return m_mateSolveError; }
+    void setMateSolveError(const std::string& e) { m_mateSolveError = e; }
+
+    // The body a mate solve treats as fixed. -1 = none chosen yet.
+    int getGroundedBody() const { return m_groundedBody; }
+    void setGroundedBody(int id) { m_groundedBody = id; }
     int sketchCount() const;
     // Reverse lookup: returns the document id of the given Sketch* (compared
     // by raw pointer against the held shared_ptrs), or -1 if not found.
@@ -295,6 +382,13 @@ private:
     std::vector<RefImageEntry> m_refImages;
     std::vector<AxisEntry> m_axes;
     std::vector<SketchEntry> m_sketches;
+    std::vector<materializr::Mate> m_mates;
+    std::map<int, TopoDS_Shape> m_mateBases;
+    std::map<int, gp_Pln> m_mateSketchPlanes;
+    int m_nextMateId = 1;
+    int m_groundedBody = -1;
+    bool m_replaying = false;
+    std::string m_mateSolveError;
     // See setCascadeSketchOverride - pinned final sketch states during a
     // cascade history replay. Empty outside cascadeFromSketchEdit.
     std::map<int, std::shared_ptr<materializr::Sketch>> m_cascadeSketchOverrides;

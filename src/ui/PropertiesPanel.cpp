@@ -23,6 +23,8 @@
 #include "../core/EventBus.h"
 #include "../core/Events.h"
 #include "../core/Verbose.h"
+#include "../plugin/PluginContext.h"
+#include "../plugin/PluginRegistry.h"
 #include "../core/NumParse.h"
 #include <imgui.h>
 #include <cmath>
@@ -489,6 +491,18 @@ void PropertiesPanel::renderContent() {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Select an object or operation"));
     }
 
+    // Plugin-contributed sections (e.g. MatePlugin's "Mates" list, registered
+    // with SelectionContext::Always so it shows regardless of the case above -
+    // a mate is a document-wide relationship, not tied to whatever is
+    // currently selected). This was the only consumer of
+    // PluginRegistry::propertyContributions() until now; the loop was simply
+    // missing, so registerPropertySection() had no reader at all.
+    if (m_pluginContext && m_pluginContext->isBound()) {
+        for (const auto& contrib : materializr::PluginRegistry::instance().propertyContributions()) {
+            if (contrib.context != materializr::SelectionContext::Always) continue;
+            if (contrib.render) contrib.render(*m_pluginContext);
+        }
+    }
 }
 
 // Orientation readout + actions for a selected construction plane. Values are
@@ -808,7 +822,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId) {
         solver.solve(*sk);
         auto after = std::make_shared<Sketch>(*sk);
         auto op = std::make_unique<SketchEditOp>(sk, edit.beforeSnap, after);
-        m_history->pushExecuted(std::move(op));
+        m_history->pushExecuted(std::move(op), *m_document);
         edit.beforeSnap.reset();
         edit.focused = false;
         // Cascade trigger: Application listens for this and re-executes any

@@ -44,6 +44,8 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/modeling/DuplicateSketchOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveHoleOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/SketchSolver.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/Mate.cpp
+    ${CMAKE_SOURCE_DIR}/src/modeling/MateSolver.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ShellOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/MoveFaceOp.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ThreadOp.cpp
@@ -994,3 +996,13 @@ add_executable(test_grid_scale test_grid_scale.cpp)
 target_include_directories(test_grid_scale PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_grid_scale PRIVATE gtest gtest_main)
 add_test(NAME test_grid_scale COMMAND test_grid_scale)
+
+# Mates stored on the Document
+add_executable(test_mate_store test_mate_store.cpp)
+target_link_libraries(test_mate_store PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_mate_store COMMAND test_mate_store)
+
+# Mate solver: topological placement, not an iterative constraint system
+add_executable(test_mate_solver test_mate_solver.cpp)
+target_link_libraries(test_mate_solver PRIVATE materializr_core gtest gtest_main)
+add_test(NAME test_mate_solver COMMAND test_mate_solver)

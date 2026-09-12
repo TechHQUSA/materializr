@@ -34,9 +34,12 @@ void LiveOpPreview::clear(Document& doc) {
     m_op.reset();
 }
 
-bool LiveOpPreview::commit(History& hist) {
+bool LiveOpPreview::commit(History& hist, Document& doc) {
     if (!m_applied || !m_op) { m_op.reset(); m_applied = false; return false; }
-    hist.pushExecuted(std::move(m_op));
+    // Document-taking overload: this is a live drag commit, and a mated body
+    // must follow its reference the moment the drag lands, not at the next
+    // unrelated push.
+    hist.pushExecuted(std::move(m_op), doc);
     m_op.reset();
     m_applied = false;
     return true;

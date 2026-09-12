@@ -1,4 +1,5 @@
 #include "BatchTransformOp.h"
+#include "Mate.h"
 
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_ModifyShape.hxx>
@@ -11,6 +12,15 @@
 
 bool BatchTransformOp::execute(Document& doc) {
     if (m_bodyIds.empty()) return false;
+
+    // Same ownership rule TransformOp enforces. Without it the multi-body
+    // gizmo moved a mate-placed body, the op committed, and the next solve
+    // snapped it back - the user watching their drag undo itself. Refuse the
+    // whole batch rather than transforming some of it: a partial batch is
+    // worse than none. Replay is exempt for the same reason as TransformOp.
+    if (!doc.isReplaying())
+        for (int id : m_bodyIds)
+            if (materializr::bodyIsMatePlaced(doc, id)) return false;
     try {
         // A kernel fault inside the transform below is otherwise FATAL: OCCT
         // raises its signal-as-exception, finds no handler ("an exception was

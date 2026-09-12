@@ -23,12 +23,25 @@ public:
     const Camera& camera() const;
 
     void markMeshesDirty();
+    // For a plugin mutation outside History (e.g. MatePlugin moving a body
+    // via the solver, not an undoable op) - otherwise nothing marks the
+    // project unsaved and a quit/reopen silently drops the change.
+    void markDocumentDirty();
 
     // True while the host Application has the sketch editor active. Plugins
     // can use this to suppress decorations that would clutter the sketch
     // canvas - the Construction Plane plugin hides plane quads when
     // sketching in ortho so the user has a clean drawing surface.
     bool isInSketchMode() const;
+
+    // True once _bind has set a live Document - document()/history() have no
+    // null check of their own, so a caller holding a PluginContext* that
+    // might not have gone through _bind yet (a future headless/test harness
+    // path, or a refactor that changes wireDocumentConsumers()'s ordering)
+    // needs a way to tell before dereferencing. Not currently reachable in
+    // the app proper: Application always binds before any plugin render()
+    // callback can run.
+    bool isBound() const { return m_document != nullptr; }
 
     // Request that the host Application start an interactive popup-driven op
     // (which the plugin can't run on its own - those need viewport + UI plumbing
@@ -54,7 +67,8 @@ public:
 
     void _bind(Document* doc, History* hist, SelectionManager* sel,
                EventBus* bus, Camera* cam, bool* meshesDirtyFlag,
-               const bool* sketchModeFlag);
+               const bool* sketchModeFlag,
+               std::function<void()> markDirtyFn = {});
 
 private:
     Document* m_document = nullptr;
@@ -64,6 +78,7 @@ private:
     Camera* m_camera = nullptr;
     bool* m_meshesDirtyFlag = nullptr;
     const bool* m_sketchModeFlag = nullptr;
+    std::function<void()> m_markDirtyFn;
     InteractiveOp m_pendingInteractiveOp = InteractiveOp::None;
 };
 

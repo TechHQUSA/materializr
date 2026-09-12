@@ -246,7 +246,7 @@ private:
         if (afterSig == beforeSig) return;
         auto after = std::make_shared<Sketch>(*m_sketch);
         auto op = std::make_unique<SketchEditOp>(m_sketch, std::move(before), std::move(after));
-        ctx.history().pushExecuted(std::move(op));
+        ctx.history().pushExecuted(std::move(op), ctx.document());
     }
 
     std::shared_ptr<Sketch> m_sketch;

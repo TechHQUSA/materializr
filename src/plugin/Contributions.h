@@ -75,6 +75,13 @@ struct RenderPassContribution {
     std::function<bool()> initialize;
 };
 
+// A section the properties panel renders. Unlike ToolbarContribution/
+// MenuContribution, `context` is NOT yet selection-aware here: the panel's
+// consuming loop (PropertiesPanel::renderContent) only ever checks for
+// SelectionContext::Always - the one value MatePlugin, its only registrant
+// so far, happens to use. A future plugin registering a non-Always value
+// (e.g. "show only with a single body selected") will silently never render
+// until that loop gains the same context-matching the toolbar already has.
 struct PropertyContribution {
     std::string name;
     SelectionContext context = SelectionContext::Always;

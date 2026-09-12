@@ -1,6 +1,7 @@
 #include "ui/LengthField.h"
 #include "core/Units.h"
 #include "TransformOp.h"
+#include "Mate.h"
 #include "Sketch.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
@@ -74,6 +75,16 @@ void TransformOp::setCenter(double cx, double cy, double cz) {
 }
 
 bool TransformOp::execute(Document& doc) {
+    // A body placed by a mate has its position owned by the mate solve. A
+    // direct transform here would be silently undone the next time the solver
+    // runs, which reads as the app ignoring the user, so refuse it and let the
+    // caller offer the mate's offset instead. Operation carries no error
+    // string; ops signal refusal by returning false.
+    // Not during replay: this same op may have been recorded before the mate
+    // existed, and refusing it there marks the step failed and loses the
+    // geometry it applied.
+    if (!doc.isReplaying() && materializr::bodyIsMatePlaced(doc, m_bodyId)) return false;
+
     if (m_bodyId < 0) {
         return false;
     }

@@ -18,6 +18,10 @@ void PluginContext::markMeshesDirty() {
     if (m_meshesDirtyFlag) *m_meshesDirtyFlag = true;
 }
 
+void PluginContext::markDocumentDirty() {
+    if (m_markDirtyFn) m_markDirtyFn();
+}
+
 bool PluginContext::isInSketchMode() const {
     return m_sketchModeFlag && *m_sketchModeFlag;
 }
@@ -62,7 +66,8 @@ void PluginContext::registerOverlay(OverlayContribution contrib) {
 
 void PluginContext::_bind(Document* doc, History* hist, SelectionManager* sel,
                           EventBus* bus, Camera* cam, bool* meshesDirtyFlag,
-                          const bool* sketchModeFlag) {
+                          const bool* sketchModeFlag,
+                          std::function<void()> markDirtyFn) {
     m_document = doc;
     m_history = hist;
     m_selection = sel;
@@ -70,6 +75,7 @@ void PluginContext::_bind(Document* doc, History* hist, SelectionManager* sel,
     m_camera = cam;
     m_meshesDirtyFlag = meshesDirtyFlag;
     m_sketchModeFlag = sketchModeFlag;
+    if (markDirtyFn) m_markDirtyFn = std::move(markDirtyFn);
 }
 
 } // namespace materializr
