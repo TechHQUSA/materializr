@@ -4402,6 +4402,7 @@ int Application::findBodyUnderRegionlessPlane(const gp_Pln& pln) const {
     const gp_Dir sN = pln.Axis().Direction();
     const gp_Pnt sO = pln.Location();
     for (int bid : m_document->getAllBodyIds()) {
+        if (m_document->isBodyMesh(bid)) continue; // reference-only, never a sketch host
         TopoDS_Shape body;
         try { body = m_document->getBody(bid); } catch (...) { continue; }
         if (body.IsNull()) continue;
@@ -4437,6 +4438,7 @@ int Application::findBodyUnderRegion(const TopoDS_Face& region,
 
     for (int bid : m_document->getAllBodyIds()) {
         if (!m_document->isBodyVisible(bid)) continue;
+        if (m_document->isBodyMesh(bid)) continue; // reference-only, never a sketch host
         TopoDS_Shape body;
         try { body = m_document->getBody(bid); } catch (...) { continue; }
         if (body.IsNull()) continue;
