@@ -416,19 +416,21 @@ void MoveFaceOp::applyResult(Document& doc, const TopoDS_Shape& result,
 
 ### Step 5b: Add the static counters
 
+`MoveFacePreviewJob::run()` executes `MoveFaceOp::execute()` on a background `std::thread` (that is the entire point of the async preview), while `commitMoveFace()`'s `pushOperation` runs another `execute()` on the main thread, and a test reads the counters from the main thread too — plain `int`s here would be a real data race (undefined behavior), not just a style nit. Use `std::atomic<int>`.
+
 In `src/modeling/MoveFaceOp.cpp`, add near the top (after the includes, before the first function):
 
 ```cpp
 namespace {
-int g_moveFaceAdoptedCount = 0;
-int g_moveFaceRecomputedCount = 0;
+std::atomic<int> g_moveFaceAdoptedCount{0};
+std::atomic<int> g_moveFaceRecomputedCount{0};
 } // namespace
 
-int MoveFaceOp::adoptedCount() { return g_moveFaceAdoptedCount; }
-int MoveFaceOp::recomputedCount() { return g_moveFaceRecomputedCount; }
+int MoveFaceOp::adoptedCount() { return g_moveFaceAdoptedCount.load(std::memory_order_relaxed); }
+int MoveFaceOp::recomputedCount() { return g_moveFaceRecomputedCount.load(std::memory_order_relaxed); }
 ```
 
-Add `#include "core/Verbose.h"` to `MoveFaceOp.cpp`'s include block (check first — it is not currently included).
+Add `#include <atomic>` and `#include "../core/Verbose.h"` to `MoveFaceOp.cpp`'s include block (check both first — neither is currently included; match this codebase's established relative-include style for `src/modeling/*.cpp`, e.g. `MoveHoleOp.cpp`/`FilletOp.cpp` both use `"../core/Verbose.h"`, not `"core/Verbose.h"`).
 
 ### Step 6: Add the `takePrecomputed()` call and the adopt branch
 
@@ -467,16 +469,20 @@ insert the adopt check:
         // needs a fully-resolved topT for the sketch-slide, and the adopt
         // key needs the RE-BOUND m_face, not the pre-rebind handle.
         if (adopted && canAdopt(*adopted, m_previousShape, previewKey(m_previousShape))) {
-            ++g_moveFaceAdoptedCount;
+            g_moveFaceAdoptedCount.fetch_add(1, std::memory_order_relaxed);
             if (materializr::isVerbose())
                 std::fprintf(stderr, "[MoveFace] adopted precomputed result, skipped recompute\n");
             applyResult(doc, adopted->result, topT);
             return true;
         }
-        ++g_moveFaceRecomputedCount;
-        if (materializr::isVerbose() && adopted)
-            std::fprintf(stderr, "[MoveFace] a precomputed candidate was offered but its key/base "
-                                  "no longer matched - recomputing\n");
+        g_moveFaceRecomputedCount.fetch_add(1, std::memory_order_relaxed);
+        if (materializr::isVerbose()) {
+            if (adopted)
+                std::fprintf(stderr, "[MoveFace] a precomputed candidate was offered but its "
+                                      "key/base no longer matched - recomputing\n");
+            else
+                std::fprintf(stderr, "[MoveFace] no precomputed candidate - recomputing\n");
+        }
 
         TopoDS_Shape newFeature = isTwist ? buildTwistFeature(true) : buildFeature(true);
 ```
@@ -924,10 +930,14 @@ TEST(MoveFaceAsync, CommitFallsBackToRecomputeWhenParamsChangedAfterLanding) {
     direct.setLoopMotion(true, std::vector<bool>(25, false), std::vector<bool>(25, false));
     ASSERT_TRUE(direct.execute(ref));
     const TopoDS_Shape refShape = ref.getBody(refId);
-    const double onlyInCommitted = volume(BRepAlgoAPI_Cut(committed, refShape).Shape());
-    const double onlyInRef = volume(BRepAlgoAPI_Cut(refShape, committed).Shape());
-    EXPECT_NEAR(onlyInCommitted, 0.0, 1e-6);
-    EXPECT_NEAR(onlyInRef, 0.0, 1e-6);
+    BRepAlgoAPI_Cut cutA(committed, refShape);
+    ASSERT_TRUE(cutA.IsDone());
+    ASSERT_FALSE(cutA.Shape().IsNull());
+    BRepAlgoAPI_Cut cutB(refShape, committed);
+    ASSERT_TRUE(cutB.IsDone());
+    ASSERT_FALSE(cutB.Shape().IsNull());
+    EXPECT_NEAR(volume(cutA.Shape()), 0.0, 1e-6);
+    EXPECT_NEAR(volume(cutB.Shape()), 0.0, 1e-6);
 }
 ```
 
