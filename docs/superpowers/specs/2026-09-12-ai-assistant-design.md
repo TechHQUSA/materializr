@@ -10,19 +10,19 @@ key (or point at a local server) and go.
 
 This feature is **not built for Android**. Every backend (Anthropic,
 OpenAI, and even a local Ollama/LM Studio server on `localhost`) is a
-network call, and Android gates *all* socket access — including loopback —
+network call, and Android gates *all* socket access - including loopback -
 behind the `INTERNET` manifest permission. The app currently declares no
 such permission (`android/app/src/main/AndroidManifest.xml`), and adding
 it just for this feature is explicitly out of scope. The only mobile-native
 alternative, an on-device model bundled into the app, is a fundamentally
-different and much larger feature than "paste a key and go" — not this spec.
+different and much larger feature than "paste a key and go" - not this spec.
 
 Excluded from the Android build the same way `UpdateChecker.cpp` (this
 codebase's only other network dependency) already is:
 `android/app/jni/src/CMakeLists.txt`'s source glob gets one more
 `list(FILTER MZ_SOURCES EXCLUDE REGEX "/plugins/ai_assistant/")` line, and
 `src/plugins/ForceLink.cpp`'s call to `forceLink_AiAssistant()` (declaration
-included) is wrapped in `#if !defined(__ANDROID__)` — mirroring how
+included) is wrapped in `#if !defined(__ANDROID__)` - mirroring how
 `Application.cpp` already guards its update-check call sites. This is a
 genuinely platform-specific exclusion (the Android permission model itself),
 not a UI/touch-mode preference, so it's the correct use of `__ANDROID__`
@@ -68,11 +68,11 @@ const AiSettings& aiSettings() const; // AiSettings is the small slice of
 ```
 
 This mirrors the existing precedent of `PluginContext::markDocumentDirty()`
-being added specifically for MatePlugin's need — a narrow, justified
+being added specifically for MatePlugin's need - a narrow, justified
 extension of the plugin/host contract, not a new general settings-bus.
 
 The conversation held by `AiSessionController` is in-memory only, scoped to
-one plugin instance for the app's lifetime — it is NOT persisted to disk
+one plugin instance for the app's lifetime - it is NOT persisted to disk
 and does NOT survive an app restart. Nothing in this design requires it to;
 a fresh conversation each launch is expected v1 behavior, not a gap.
 
@@ -94,7 +94,7 @@ AiSettings ai; // one new member on AppSettings
 ```
 
 All fields under `ai` are excluded from `SettingsIO::exportJson`, the same
-way `lastProjectPath` already is — an exported settings backup must not leak
+way `lastProjectPath` already is - an exported settings backup must not leak
 a key. They persist via the same plain-text `key = value` mechanism
 everything else in `AppSettings` uses; no migration needed since unknown
 keys are already ignored and missing keys already fall back to defaults.
@@ -111,7 +111,7 @@ keys are already ignored and missing keys already fall back to defaults.
   for Ollama or LM Studio's local endpoint), model name field
 - "Test Connection" button: fires one minimal request (no tools, prompt
   "reply with OK") and shows a green check or the raw error inline. This is
-  the whole point of "quick and simple" — the user gets a yes/no on their
+  the whole point of "quick and simple" - the user gets a yes/no on their
   setup before ever touching the chat panel.
 
 ### Tool schema (`AiToolSchema.h`)
@@ -126,7 +126,7 @@ A small, fixed, provider-agnostic list, each entry a name + parameter list
 - `add_torus(major_radius, minor_radius, x, y, z)`
 - `move_body(body_id, dx, dy, dz)`
 - `rotate_body(body_id, axis_x, axis_y, axis_z, angle_degrees)`
-- `scale_body(body_id, factor)` (uniform only in v1 — `TransformOp` supports
+- `scale_body(body_id, factor)` (uniform only in v1 - `TransformOp` supports
   per-axis too, but a single factor is the common case and keeps the schema
   small; per-axis is a trivial follow-up if wanted)
 - `boolean_op(target_body_id, tool_body_id, mode)` where `mode` is one of
@@ -137,7 +137,7 @@ provider's wire shape (Anthropic's `tools` array with JSON-schema `input_schema`
 OpenAI's `tools` array with `function.parameters`). The schema itself has
 exactly one definition, shared by both.
 
-`x, y, z` on the "add" tools are optional, default 0,0,0 (world origin) —
+`x, y, z` on the "add" tools are optional, default 0,0,0 (world origin) -
 this covers the common case ("make a cube") without forcing the model to
 always guess a position, while still letting a multi-step prompt place
 things apart from each other.
@@ -167,7 +167,7 @@ validation failure. On success, builds the matching concrete `Operation`
 `{true, "<short summary, e.g. Created Box (body 7)>"}`.
 
 This is the exact same imperative shape every existing interactive
-op-commit already uses (see `Application::commitPrimitivePopup()`) — no new
+op-commit already uses (see `Application::commitPrimitivePopup()`) - no new
 document-mutation pattern, just a non-ImGui caller of the existing one.
 
 ### LlmClient
@@ -193,18 +193,18 @@ public:
 
 `AnthropicClient` and `OpenAiCompatibleClient` each: build the request JSON
 via `nlohmann::json`, POST with libcurl (mirroring `UpdateChecker.cpp`'s
-existing raw-libcurl pattern — HTTPS-pinned, capped response size, 5s
+existing raw-libcurl pattern - HTTPS-pinned, capped response size, 5s
 connect / 20s total timeout, a little more generous than the update
 checker's since an LLM completion is slower than a GitHub API hit), parse
 the response into `LlmTurnResult`. Auth header differs (`x-api-key` vs
 `Authorization: Bearer`); tool-call shape differs (`content` blocks with
-`type: tool_use` vs `choices[0].message.tool_calls`) — both isolated
+`type: tool_use` vs `choices[0].message.tool_calls`) - both isolated
 entirely inside each client, `AiSessionController` only ever sees the
 common `LlmTurnResult`.
 
 ### New dependency: nlohmann/json
 
-Header-only, pulled in via CMake `FetchContent` — the same mechanism
+Header-only, pulled in via CMake `FetchContent` - the same mechanism
 `tests/CMakeLists.txt` already uses for googletest, so no new build-setup
 step for you. Replaces nothing existing (`UpdateChecker`'s hand-rolled
 `findJsonString` stays as-is; it's sufficient for the one field it reads
@@ -237,7 +237,7 @@ Overlay's OverlayContribution::render() (already called every frame) polls:
           kick off the NEXT std::async turn with the updated messages
 ```
 
-The loop is entirely driven by the overlay's own per-frame render call —
+The loop is entirely driven by the overlay's own per-frame render call -
 no new polling infrastructure on `Application`, no cross-plugin wiring.
 
 ## Error Handling
@@ -245,7 +245,7 @@ no new polling infrastructure on `Application`, no cross-plugin wiring.
 - **No API key configured for the selected provider**: checked before the
   first `std::async` is even created; scrollback shows "Set up your API key
   in Settings -> AI Assistant" and a button that opens Settings directly.
-- **Network/HTTP failure** (timeout, DNS, non-2xx, connection refused —
+- **Network/HTTP failure** (timeout, DNS, non-2xx, connection refused -
   the last one being the common case for "Ollama isn't running"):
   scrollback error line with the concrete reason, no auto-retry.
 - **Unparseable response body**: scrollback "The AI's response couldn't be
@@ -254,26 +254,26 @@ no new polling infrastructure on `Application`, no cross-plugin wiring.
   document; the rejection reason is fed back to the model as the tool
   result (not shown as a hard error to the user), so the agentic loop lets
   the model retry with corrected arguments on its own within the step
-  budget — this is the main payoff of choosing the agentic-loop model.
+  budget - this is the main payoff of choosing the agentic-loop model.
 - **Step cap hit**: a plain scrollback note, not an error; the user can
   just continue with another prompt.
 
 ## Testing
 
 - `AiToolDispatcher`: unit tests per tool, same style as every other
-  `Operation`-construction test in this codebase — e.g.
+  `Operation`-construction test in this codebase - e.g.
   `AiToolDispatcher.AddBoxCreatesABodyWithTheGivenDimensions`,
   `AiToolDispatcher.RejectsANegativeBoxDimension`,
   `AiToolDispatcher.BooleanOpRejectsAnUnknownBodyId`. No network involved.
 - `AnthropicClient` / `OpenAiCompatibleClient`: the request-building and
-  response-parsing are pure functions of JSON in, JSON/struct out — tested
+  response-parsing are pure functions of JSON in, JSON/struct out - tested
   against hand-built request/response fixtures, not a real API call. E.g.
   `AnthropicClient.ParsesToolUseBlocksIntoToolCalls`,
   `OpenAiCompatibleClient.ParsesFunctionCallToolCalls`.
 - `AiToolSchema`: one test per provider confirming every tool definition
   formats into valid, complete JSON for that provider's shape (a
   round-trip/shape test, not a network test).
-- No GUI/overlay test — matches this project's established convention of
+- No GUI/overlay test - matches this project's established convention of
   not unit-testing plugin ImGui glue (confirmed with `MatePlugin` this
   session: zero existing tests touch `PluginContext`/`REGISTER_PLUGIN`/ImGui
   rendering anywhere in the codebase).

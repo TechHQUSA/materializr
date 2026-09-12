@@ -4,7 +4,7 @@
 
 **Goal:** Let a user type a natural-language prompt ("make a 20mm cube with a 5mm hole") that an LLM turns into real modeling operations in the app.
 
-**Architecture:** Testable logic (tool schema, tool dispatch, both LLM clients' request/response handling, the turn-loop state machine) lives under a new `src/ai/` directory so it can be added to `materializr_core`'s test-lib source list, exactly the way `MateSolver.cpp`/`Mate.cpp` (testable) are split from `MatePlugin.cpp` (untested UI glue). Only the actual plugin registration, toolbar button, and chat overlay UI live in `src/plugins/AiAssistantPlugin.cpp`. Every AI-generated document change goes through the existing `Operation`/`History::pushOperation()` path — no new mutation mechanism.
+**Architecture:** Testable logic (tool schema, tool dispatch, both LLM clients' request/response handling, the turn-loop state machine) lives under a new `src/ai/` directory so it can be added to `materializr_core`'s test-lib source list, exactly the way `MateSolver.cpp`/`Mate.cpp` (testable) are split from `MatePlugin.cpp` (untested UI glue). Only the actual plugin registration, toolbar button, and chat overlay UI live in `src/plugins/AiAssistantPlugin.cpp`. Every AI-generated document change goes through the existing `Operation`/`History::pushOperation()` path - no new mutation mechanism.
 
 **Tech Stack:** C++17, OCCT, ImGui, libcurl (already linked), nlohmann/json (new), GoogleTest.
 
@@ -17,9 +17,9 @@
 - Every AI action is a normal undoable `Operation` via `history().pushOperation()`. No preview/confirm step.
 - Agentic loop, max 8 tool-call steps per user prompt.
 - API keys stored in the existing plain-text `settings.cfg`, excluded from Settings export/import (same as `lastProjectPath`).
-- `nlohmann/json` pinned to an exact release tag via CMake `FetchContent` (this repo requires pinned tags, never branches, for every dependency — see the `imgui` `FetchContent_Declare` comment in `CMakeLists.txt:62-92` for why).
-- No GUI/overlay unit tests — matches this repo's established convention (confirmed zero existing tests touch `PluginContext`/`REGISTER_PLUGIN`/ImGui rendering anywhere in the codebase).
-- `far`/`near` are reserved words on MSVC (`<windows.h>` macros) — grep any new code for `\bfar\b|\bnear\b` before considering a task done.
+- `nlohmann/json` pinned to an exact release tag via CMake `FetchContent` (this repo requires pinned tags, never branches, for every dependency - see the `imgui` `FetchContent_Declare` comment in `CMakeLists.txt:62-92` for why).
+- No GUI/overlay unit tests - matches this repo's established convention (confirmed zero existing tests touch `PluginContext`/`REGISTER_PLUGIN`/ImGui rendering anywhere in the codebase).
+- `far`/`near` are reserved words on MSVC (`<windows.h>` macros) - grep any new code for `\bfar\b|\bnear\b` before considering a task done.
 - No em dashes (`tools/no_em_dashes.py` gate) in any new source comment or string.
 
 ---
@@ -29,7 +29,7 @@
 **Files:**
 - Modify: `CMakeLists.txt` (add `FetchContent_Declare`/`FetchContent_MakeAvailable` block, link into the `materializr` target)
 - Modify: `tests/CMakeLists.txt` (link the same target into `materializr_core`)
-- Modify: `android/app/jni/src/CMakeLists.txt` (nlohmann/json is header-only and has no network/curl dependency, so it IS needed on Android too once `AiToolSchema`/`AiToolDispatcher` end up there indirectly through `materializr_core`-shaped sources — but since Task 10 excludes the whole `src/ai/` directory from Android, this file needs NO change. Note this explicitly so a future worker doesn't add one by mistake.)
+- Modify: `android/app/jni/src/CMakeLists.txt` (nlohmann/json is header-only and has no network/curl dependency, so it IS needed on Android too once `AiToolSchema`/`AiToolDispatcher` end up there indirectly through `materializr_core`-shaped sources - but since Task 10 excludes the whole `src/ai/` directory from Android, this file needs NO change. Note this explicitly so a future worker doesn't add one by mistake.)
 - Test: none (infra-only; verified by the next task's build)
 
 **Interfaces:**
@@ -75,7 +75,7 @@ In `tests/CMakeLists.txt`, find the `target_link_libraries(materializr_core PUBL
 cmake --build build --target materializr_core -j8
 ```
 
-Expected: configures and builds clean (nlohmann/json is fetched on first configure — if CMake wasn't re-run since editing `CMakeLists.txt`, run `cmake -S . -B build` first). No new warnings.
+Expected: configures and builds clean (nlohmann/json is fetched on first configure - if CMake wasn't re-run since editing `CMakeLists.txt`, run `cmake -S . -B build` first). No new warnings.
 
 - [ ] **Step 5: Commit**
 
@@ -200,7 +200,7 @@ add_test(NAME test_ai_settings COMMAND test_ai_settings)
 cmake --build build --target test_ai_settings -j8
 ```
 
-Expected: FAIL to compile — `AppSettings` has no member `ai`, `materializr::AiProvider` does not exist.
+Expected: FAIL to compile - `AppSettings` has no member `ai`, `materializr::AiProvider` does not exist.
 
 - [ ] **Step 3: Add the struct and enum**
 
@@ -273,7 +273,7 @@ In `SettingsIO::save(...)` (the function around line 445 that writes `lastProjec
 
 - [ ] **Step 5: Exclude from JSON export/import**
 
-`SettingsIO::exportJson` already only writes the fields it explicitly lists — do NOT add any `ai*` lines to it. That is the whole exclusion; nothing else to change there.
+`SettingsIO::exportJson` already only writes the fields it explicitly lists - do NOT add any `ai*` lines to it. That is the whole exclusion; nothing else to change there.
 
 In `SettingsIO::importJson(...)`, right after the existing `kv.erase("lastProjectPath");` block, add:
 
@@ -286,7 +286,7 @@ In `SettingsIO::importJson(...)`, right after the existing `kv.erase("lastProjec
     kv.erase("aiOpenAiModel");
 ```
 
-(`parseFlatJson`, used just above this by `importJson`, already turns the imported JSON into the same `kv` map `applyKv` consumes — erasing the keys here before `applyKv(kv, s)` runs is what step 3's test asserts against.)
+(`parseFlatJson`, used just above this by `importJson`, already turns the imported JSON into the same `kv` map `applyKv` consumes - erasing the keys here before `applyKv(kv, s)` runs is what step 3's test asserts against.)
 
 - [ ] **Step 6: Run test to verify it passes**
 
@@ -335,7 +335,7 @@ In `src/plugin/PluginContext.h`, add near the other accessors (after `const Came
     const AppSettings::AiSettings& aiSettings() const;
 ```
 
-Add the forward declaration/include it needs — `#include "../io/Settings.h"` at the top of the file, next to the existing includes.
+Add the forward declaration/include it needs - `#include "../io/Settings.h"` at the top of the file, next to the existing includes.
 
 Extend `_bind()`'s signature (both declaration here and definition in the `.cpp`):
 
@@ -408,7 +408,7 @@ In `src/app/Application.cpp`, find the `_bind(...)` call (around line 480) and a
 cmake --build build --target materializr -j8
 ```
 
-Expected: builds clean. (No test here — this is pure plumbing with no independently-testable behavior; Task 9's manual smoke test is the first point it's actually exercised end to end.)
+Expected: builds clean. (No test here - this is pure plumbing with no independently-testable behavior; Task 9's manual smoke test is the first point it's actually exercised end to end.)
 
 - [ ] **Step 6: Commit**
 
@@ -525,7 +525,7 @@ Also add `${CMAKE_SOURCE_DIR}/src/ai/AiToolSchema.cpp` to the `materializr_core`
 cmake --build build --target test_ai_tool_schema -j8
 ```
 
-Expected: FAIL — `ai/AiToolSchema.h` does not exist.
+Expected: FAIL - `ai/AiToolSchema.h` does not exist.
 
 - [ ] **Step 3: Write the shared types header**
 
@@ -735,12 +735,12 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `tests/CMakeLists.txt` (add source + register test executable)
 
 **Interfaces:**
-- Consumes: `materializr::ai::ToolCall` (Task 4), `materializr::PluginContext` (existing — `document()`, `history()`).
+- Consumes: `materializr::ai::ToolCall` (Task 4), `materializr::PluginContext` (existing - `document()`, `history()`).
 - Produces: `materializr::ai::ToolResult` (fields: `bool ok`, `std::string message`), `materializr::ai::executeTool(materializr::PluginContext& ctx, const std::string& toolName, const nlohmann::json& args) -> ToolResult`.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_ai_tool_dispatcher.cpp`. This tests `executeTool` directly against a `Document`/`History` pair — no `PluginContext`/`Application` needed, since `PluginContext` only wraps references to exactly those two objects plus a few others `executeTool` never touches. Build a minimal-bound context by hand:
+Create `tests/test_ai_tool_dispatcher.cpp`. This tests `executeTool` directly against a `Document`/`History` pair - no `PluginContext`/`Application` needed, since `PluginContext` only wraps references to exactly those two objects plus a few others `executeTool` never touches. Build a minimal-bound context by hand:
 
 ```cpp
 #include "ai/AiToolDispatcher.h"
@@ -891,7 +891,7 @@ Add `${CMAKE_SOURCE_DIR}/src/ai/AiToolDispatcher.cpp` to `materializr_core`'s so
 cmake --build build --target test_ai_tool_dispatcher -j8
 ```
 
-Expected: FAIL — `ai/AiToolDispatcher.h` does not exist. (If `PluginContext::_bind` rejects an 8-argument call because Task 3 hasn't landed yet in this exact worktree, land Task 3 first — this task depends on it.)
+Expected: FAIL - `ai/AiToolDispatcher.h` does not exist. (If `PluginContext::_bind` rejects an 8-argument call because Task 3 hasn't landed yet in this exact worktree, land Task 3 first - this task depends on it.)
 
 - [ ] **Step 3: Write the dispatcher**
 
@@ -1273,7 +1273,7 @@ right after the existing `target_link_libraries(materializr_core PUBLIC ...)` bl
 cmake --build build --target test_ai_anthropic_client -j8
 ```
 
-Expected: FAIL — `ai/AnthropicClient.h` does not exist.
+Expected: FAIL - `ai/AnthropicClient.h` does not exist.
 
 - [ ] **Step 3: Write the abstract client interface**
 
@@ -1519,7 +1519,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: same as Task 6.
-- Produces: `materializr::ai::OpenAiCompatibleClient` (constructed with `apiKey`, `baseUrl`, `model`), `OpenAiCompatibleClient::buildRequestBody(...)`, `OpenAiCompatibleClient::parseResponse(...)` (both `static`, pure) — mirrors `AnthropicClient`'s shape exactly, different wire format.
+- Produces: `materializr::ai::OpenAiCompatibleClient` (constructed with `apiKey`, `baseUrl`, `model`), `OpenAiCompatibleClient::buildRequestBody(...)`, `OpenAiCompatibleClient::parseResponse(...)` (both `static`, pure) - mirrors `AnthropicClient`'s shape exactly, different wire format.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1628,7 +1628,7 @@ Add `${CMAKE_SOURCE_DIR}/src/ai/OpenAiCompatibleClient.cpp` to `materializr_core
 cmake --build build --target test_ai_openai_client -j8
 ```
 
-Expected: FAIL — `ai/OpenAiCompatibleClient.h` does not exist.
+Expected: FAIL - `ai/OpenAiCompatibleClient.h` does not exist.
 
 - [ ] **Step 3: Write `OpenAiCompatibleClient`**
 
@@ -1848,12 +1848,12 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Consumes: `materializr::ai::LlmClient` (Task 6/7, but tested here against a fake), `materializr::ai::executeTool` (Task 5), `materializr::PluginContext`.
 - Produces: `materializr::ai::AiSessionController` with:
   - `void submitPrompt(const std::string& userText)`
-  - `void poll(materializr::PluginContext& ctx)` — call once per frame; drives the async turn and any due tool calls.
+  - `void poll(materializr::PluginContext& ctx)` - call once per frame; drives the async turn and any due tool calls.
   - `bool isBusy() const`
   - `struct ScrollbackLine { enum class Kind { User, Assistant, ToolSummary, Error } kind; std::string text; }`
   - `const std::vector<ScrollbackLine>& scrollback() const`
 
-This is the one piece that genuinely needs the `std::async` + `wait_for(0)` polling shape from `UpdateChecker`'s established pattern, but structured so `poll()` (the only frame-driven entry point) is unit-testable by injecting a fake `LlmClient` that returns pre-scripted results synchronously (no real thread, no real network) — the test drives `poll()` in a loop exactly like the real overlay would, but the "async" work completes instantly.
+This is the one piece that genuinely needs the `std::async` + `wait_for(0)` polling shape from `UpdateChecker`'s established pattern, but structured so `poll()` (the only frame-driven entry point) is unit-testable by injecting a fake `LlmClient` that returns pre-scripted results synchronously (no real thread, no real network) - the test drives `poll()` in a loop exactly like the real overlay would, but the "async" work completes instantly.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2036,7 +2036,7 @@ Add `${CMAKE_SOURCE_DIR}/src/ai/AiSessionController.cpp` to `materializr_core`'s
 cmake --build build --target test_ai_session_controller -j8
 ```
 
-Expected: FAIL — `ai/AiSessionController.h` does not exist.
+Expected: FAIL - `ai/AiSessionController.h` does not exist.
 
 - [ ] **Step 3: Write `AiSessionController`**
 
@@ -2189,11 +2189,11 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `src/plugins/ForceLink.cpp` (declare + call `forceLink_AiAssistant()`)
 - Modify: `CMakeLists.txt` (add the plugin source to the `materializr` target's source list)
 - Modify: `src/app/Application_Dialogs.cpp` (`renderSettings()`: new "AI Assistant" tab)
-- Test: none (matches this repo's established convention of not unit-testing plugin ImGui glue — confirmed zero existing tests touch `PluginContext`/`REGISTER_PLUGIN`/ImGui rendering anywhere in this codebase)
+- Test: none (matches this repo's established convention of not unit-testing plugin ImGui glue - confirmed zero existing tests touch `PluginContext`/`REGISTER_PLUGIN`/ImGui rendering anywhere in this codebase)
 
 **Interfaces:**
 - Consumes: `materializr::ai::AiSessionController` (Task 8), `materializr::PluginContext::aiSettings()` (Task 3), `materializr::ai::AnthropicClient` / `OpenAiCompatibleClient` (Tasks 6/7).
-- Produces: nothing further downstream — this is the leaf.
+- Produces: nothing further downstream - this is the leaf.
 
 - [ ] **Step 1: Write the plugin**
 
@@ -2316,11 +2316,11 @@ REGISTER_PLUGIN(AiAssistant, [](materializr::PluginContext& ctx) {
 });
 ```
 
-Note the `ImGui::Begin`/`End` placeholder pair at the top of `renderOverlay` is dead and must be deleted before this step is considered done — see Step 1a below.
+Note the `ImGui::Begin`/`End` placeholder pair at the top of `renderOverlay` is dead and must be deleted before this step is considered done - see Step 1a below.
 
 - [ ] **Step 1a: Delete the placeholder Begin/End pair**
 
-Remove these two lines from `renderOverlay` (an artifact of drafting, not a real open/close toggle — the real, single `ImGui::Begin("AI Assistant")` a few lines below is the only one needed; a plain `OverlayContribution` window has no built-in close button anyway, matching how `TutorialPlugin`'s existing overlay works):
+Remove these two lines from `renderOverlay` (an artifact of drafting, not a real open/close toggle - the real, single `ImGui::Begin("AI Assistant")` a few lines below is the only one needed; a plain `OverlayContribution` window has no built-in close button anyway, matching how `TutorialPlugin`'s existing overlay works):
 
 ```cpp
     if (ImGui::Begin("AI Assistant", &open ? nullptr : nullptr)) {} // placeholder guard below
@@ -2351,7 +2351,7 @@ In `CMakeLists.txt`, add to the plugin source list (right after the last `src/pl
     src/plugins/AiAssistantPlugin.cpp
 ```
 
-Also add the four new `src/ai/*.cpp` files (from Tasks 4-8) to the SAME target's source list, since `materializr` (the app) needs them too, not just `materializr_core` (the test lib does, from earlier tasks — the app target is a separate list in the SAME `CMakeLists.txt`):
+Also add the four new `src/ai/*.cpp` files (from Tasks 4-8) to the SAME target's source list, since `materializr` (the app) needs them too, not just `materializr_core` (the test lib does, from earlier tasks - the app target is a separate list in the SAME `CMakeLists.txt`):
 
 ```cmake
     src/ai/AiToolSchema.cpp
@@ -2468,9 +2468,9 @@ if (ImGui::BeginTabItem("AI Assistant")) {
 }
 ```
 
-This needs three more includes at the top of `Application_Dialogs.cpp` (add them next to its existing includes): `#include "../ai/AnthropicClient.h"`, `#include "../ai/OpenAiCompatibleClient.h"`, and `<future>` (likely already included given the file's existing `std::async` usage patterns elsewhere in the app — check before adding a duplicate).
+This needs three more includes at the top of `Application_Dialogs.cpp` (add them next to its existing includes): `#include "../ai/AnthropicClient.h"`, `#include "../ai/OpenAiCompatibleClient.h"`, and `<future>` (likely already included given the file's existing `std::async` usage patterns elsewhere in the app - check before adding a duplicate).
 
-`changed` is the same bool the rest of `renderSettings()` already declares and checks at the end to call `saveAppSettings()` — no new plumbing needed there.
+`changed` is the same bool the rest of `renderSettings()` already declares and checks at the end to call `saveAppSettings()` - no new plumbing needed there.
 
 - [ ] **Step 5: Verify it builds**
 
@@ -2505,7 +2505,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 - Modify: `src/plugins/ForceLink.cpp` (guard the one call added in Task 9)
 - Test: none (platform-exclusion; verified by reading the resulting source list, and by a real Android build if a worker has the toolchain available)
 
-**Interfaces:** none new — this task only removes reachability, it adds nothing.
+**Interfaces:** none new - this task only removes reachability, it adds nothing.
 
 - [ ] **Step 1: Exclude the `src/ai/` directory and the plugin file from Android's source glob**
 
@@ -2568,7 +2568,7 @@ grep -rl "AiAssistantPlugin\|src/ai/" CMakeLists.txt | true
 find src/ai -name '*.cpp'
 ```
 
-Expected: `find src/ai -name '*.cpp'` lists exactly the five files from Tasks 4-8 (`AiToolSchema.cpp`, `AiToolDispatcher.cpp`, `AnthropicClient.cpp`, `OpenAiCompatibleClient.cpp`, `AiSessionController.cpp`) plus `AiAssistantPlugin.cpp` under `src/plugins/` — confirm each is matched by one of the two new regexes (`/src/ai/` matches the whole directory; `/AiAssistantPlugin\.cpp$` matches the plugin file specifically). If an Android toolchain (Android Studio + NDK, or a CI runner) IS available, additionally run:
+Expected: `find src/ai -name '*.cpp'` lists exactly the five files from Tasks 4-8 (`AiToolSchema.cpp`, `AiToolDispatcher.cpp`, `AnthropicClient.cpp`, `OpenAiCompatibleClient.cpp`, `AiSessionController.cpp`) plus `AiAssistantPlugin.cpp` under `src/plugins/` - confirm each is matched by one of the two new regexes (`/src/ai/` matches the whole directory; `/AiAssistantPlugin\.cpp$` matches the plugin file specifically). If an Android toolchain (Android Studio + NDK, or a CI runner) IS available, additionally run:
 
 ```bash
 cd android && ./gradlew assembleDebug
@@ -2592,7 +2592,7 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ### Task 11: Final integration pass
 
-**Files:** none new — this task only runs and verifies.
+**Files:** none new - this task only runs and verifies.
 
 **Interfaces:** none.
 
@@ -2621,7 +2621,7 @@ python3 tools/units_audit.py
 grep -rnE '\bfar\b|\bnear\b' src/ai/ src/plugins/AiAssistantPlugin.cpp
 ```
 
-Expected: all three Python gates report clean; the `grep` for `far`/`near` finds nothing (or only matches inside comments/strings, never an identifier — inspect any hit by hand before treating it as a pass).
+Expected: all three Python gates report clean; the `grep` for `far`/`near` finds nothing (or only matches inside comments/strings, never an identifier - inspect any hit by hand before treating it as a pass).
 
 - [ ] **Step 4: Re-run the manual smoke test from Task 9, Step 6**
 

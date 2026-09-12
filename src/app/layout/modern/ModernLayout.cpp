@@ -751,6 +751,33 @@ void Application::renderModernLayout() {
     // cover them until a focus reorder (e.g. toggling Settings) surfaced them,
     // which read as "no chevrons on first launch" on the tablet.
 
+    // ── fps readout - a small solid chip at the top-centre. Hidden entirely
+    //    via Settings → Appearance → "Show FPS counter". Mirrors
+    //    ImTouchLayout's readout (kept separate since Modern's shell doesn't
+    //    share that file's local kFloat/margin locals) - this is the ONLY
+    //    place Modern (the live desktop layout) draws it, so without this
+    //    block the setting has no visible effect at all on desktop.
+    if (m_showFps) {
+        const ImGuiWindowFlags fpsFlags =
+            (layoutui::kShellWindowFlags & ~ImGuiWindowFlags_NoBringToFrontOnFocus) |
+            ImGuiWindowFlags_AlwaysAutoResize;
+        ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x * 0.5f, wp.y + topH + 8.0f * s),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.92f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, touchui::radius(14.0f * s));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, touchui::panelBg());
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(9.0f * s, 4.0f * s));
+        if (ImGui::Begin("##ModernFps", nullptr, fpsFlags)) {
+            ImGui::SetWindowFontScale(0.82f);
+            ImGui::TextColored(touchui::textDim(), materializr::tr("%.0f fps"),
+                               ImGui::GetIO().Framerate);
+            ImGui::SetWindowFontScale(1.0f);
+        }
+        ImGui::End();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
+    }
+
     // Center rect for renderViewport()'s pin.
     m_touchVpX = wp.x + railW;
     m_touchVpY = wp.y + topH;
