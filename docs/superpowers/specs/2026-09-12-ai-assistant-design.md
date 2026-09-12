@@ -6,8 +6,31 @@ A user types what they want in plain language ("make a 20mm cube with a 5mm
 hole through it") and the app builds it. Setup must be quick: paste an API
 key (or point at a local server) and go.
 
+## Platform Scope: Desktop Only
+
+This feature is **not built for Android**. Every backend (Anthropic,
+OpenAI, and even a local Ollama/LM Studio server on `localhost`) is a
+network call, and Android gates *all* socket access — including loopback —
+behind the `INTERNET` manifest permission. The app currently declares no
+such permission (`android/app/src/main/AndroidManifest.xml`), and adding
+it just for this feature is explicitly out of scope. The only mobile-native
+alternative, an on-device model bundled into the app, is a fundamentally
+different and much larger feature than "paste a key and go" — not this spec.
+
+Excluded from the Android build the same way `UpdateChecker.cpp` (this
+codebase's only other network dependency) already is:
+`android/app/jni/src/CMakeLists.txt`'s source glob gets one more
+`list(FILTER MZ_SOURCES EXCLUDE REGEX "/plugins/ai_assistant/")` line, and
+`src/plugins/ForceLink.cpp`'s call to `forceLink_AiAssistant()` (declaration
+included) is wrapped in `#if !defined(__ANDROID__)` — mirroring how
+`Application.cpp` already guards its update-check call sites. This is a
+genuinely platform-specific exclusion (the Android permission model itself),
+not a UI/touch-mode preference, so it's the correct use of `__ANDROID__`
+per this repo's own convention.
+
 ## Non-goals (v1)
 
+- Android/mobile support of any kind (see Platform Scope above).
 - Sketching, extrude-from-sketch, mates, patterns. The AI only creates
   primitives and combines/transforms them (booleans, move/rotate/scale).
 - Multi-provider selection at runtime beyond the two shapes below. No
