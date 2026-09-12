@@ -26,7 +26,10 @@ std::unique_ptr<MoveFacePreviewJob> MoveFacePreviewJob::prepare(
 
         BRepBuilderAPI_Copy copier;
         copier.Perform(originalBody, Standard_True, Standard_False);
-        const TopoDS_Shape scratchFace = copier.ModifiedShape(face); // throws if not a sub-shape
+        // The copier maps by IsSame and hands back FORWARD copies; the op
+        // was given the sub-shape as oriented in the body.
+        const TopoDS_Shape scratchFace =
+            copier.ModifiedShape(face).Oriented(face.Orientation()); // throws if not a sub-shape
         if (scratchFace.IsNull() || scratchFace.ShapeType() != TopAbs_FACE) return nullptr;
 
         std::unique_ptr<MoveFacePreviewJob> job(new MoveFacePreviewJob());

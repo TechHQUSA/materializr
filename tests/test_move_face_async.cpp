@@ -108,6 +108,15 @@ TopoDS_Face topFace(const TopoDS_Shape& s) {
     return best;
 }
 
+TopoDS_Face bottomFace(const TopoDS_Shape& s) {
+    TopoDS_Face best; double bestZ = 1e300;
+    for (TopExp_Explorer e(s, TopAbs_FACE); e.More(); e.Next()) {
+        GProp_GProps g; BRepGProp::SurfaceProperties(e.Current(), g);
+        if (g.CentreOfMass().Z() < bestZ) { bestZ = g.CentreOfMass().Z(); best = TopoDS::Face(e.Current()); }
+    }
+    return best;
+}
+
 // The minimal real IopContext: every callback the struct requires, wired to
 // a real Document/History/SelectionManager where the test needs one and a
 // no-op everywhere MoveFaceController's Translate/Rotate/Scale/Twist path
@@ -581,6 +590,51 @@ TEST(MoveFaceAsync, CommitAdoptsTheLandedPreviewWithoutRecomputing) {
     EXPECT_TRUE(committed.IsEqual(landed))
         << "commit did not adopt the landed preview - it recomputed instead";
     EXPECT_EQ(MoveFaceOp::adoptedCount(), adoptedBefore + 1);
+    EXPECT_EQ(MoveFaceOp::recomputedCount(), recomputedBefore)
+        << "the expensive recompute path ran even though adoption should have skipped it";
+}
+
+TEST(MoveFaceAsync, CommitAdoptsTheLandedPreviewForAReversedFace) {
+    Harness h;
+    TopoDS_Shape body = makeHolePlate(5); // 25 holes
+    int bodyId = h.doc.addBody(body, "plate");
+    TopoDS_Face face = bottomFace(h.doc.getBody(bodyId));
+    ASSERT_EQ(face.Orientation(), TopAbs_REVERSED)
+        << "fixture assumption broken - the bottom face of makeHolePlate is not REVERSED";
+
+    MoveFaceController mfc;
+    IopContext ctx = h.ctx();
+    mfc.st().moveFaceActive = true;
+    mfc.st().moveFaceBodyId = bodyId;
+    mfc.st().moveFaceFace = face;
+    mfc.st().moveFacePreviousShape = h.doc.getBody(bodyId);
+    mfc.st().faceXformKind = FaceXform::Translate;
+    mfc.st().moveFaceVec = glm::vec3(1.0f, 0.5f, 0.0f);
+    mfc.st().moveFaceMoveOuter = true;
+    mfc.st().moveFaceHoleSlant.assign(25, false);
+    mfc.st().moveFaceHoleVertical.assign(25, false);
+
+    mfc.updateMoveFace(ctx);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mfc.previewPending() && std::chrono::steady_clock::now() < deadline) {
+        mfc.pollPreview(ctx);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_FALSE(mfc.previewPending()) << "worker never landed within 5s";
+
+    const TopoDS_Shape landed = h.doc.getBody(bodyId);
+    ASSERT_FALSE(landed.IsNull());
+    ASSERT_FALSE(landed.IsEqual(body))
+        << "preview never actually applied to the body (pre-existing reversed-face bug)";
+    const int adoptedBefore = MoveFaceOp::adoptedCount();
+    const int recomputedBefore = MoveFaceOp::recomputedCount();
+
+    mfc.commitMoveFace(ctx);
+    const TopoDS_Shape committed = h.doc.getBody(bodyId);
+    EXPECT_TRUE(committed.IsEqual(landed))
+        << "commit did not adopt the landed preview for a reversed face - it recomputed instead";
+    EXPECT_EQ(MoveFaceOp::adoptedCount(), adoptedBefore + 1)
+        << "adoption did not fire for a reversed target face";
     EXPECT_EQ(MoveFaceOp::recomputedCount(), recomputedBefore)
         << "the expensive recompute path ran even though adoption should have skipped it";
 }
