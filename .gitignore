@@ -52,3 +52,4 @@ android/keystore.properties
 *.appimage
 dist-apk-*
 /dist/
+.worktrees/
