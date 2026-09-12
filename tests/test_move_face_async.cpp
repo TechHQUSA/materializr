@@ -536,3 +536,122 @@ TEST(MoveFaceAsyncPreview, ARealExplicitRotationGestureLandsTheCorrectGeometry) 
     EXPECT_NEAR(volume(h.doc.getBody(bodyId)), volume(refB), 1e-6);
     EXPECT_NEAR(topFaceZSpread(h.doc.getBody(bodyId)), zB, 1e-6);
 }
+
+TEST(MoveFaceAsync, CommitAdoptsTheLandedPreviewWithoutRecomputing) {
+    Harness h;
+    TopoDS_Shape body = makeHolePlate(5); // 25 holes
+    int bodyId = h.doc.addBody(body, "plate");
+    TopoDS_Face face = topFace(h.doc.getBody(bodyId));
+
+    MoveFaceController mfc;
+    IopContext ctx = h.ctx();
+    mfc.st().moveFaceActive = true;
+    mfc.st().moveFaceBodyId = bodyId;
+    mfc.st().moveFaceFace = face;
+    mfc.st().moveFacePreviousShape = h.doc.getBody(bodyId);
+    mfc.st().faceXformKind = FaceXform::Translate;
+    mfc.st().moveFaceVec = glm::vec3(1.0f, 0.5f, 0.0f);
+    mfc.st().moveFaceMoveOuter = true;
+    mfc.st().moveFaceHoleSlant.assign(25, false);
+    mfc.st().moveFaceHoleVertical.assign(25, false);
+
+    mfc.updateMoveFace(ctx);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mfc.previewPending() && std::chrono::steady_clock::now() < deadline) {
+        mfc.pollPreview(ctx);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_FALSE(mfc.previewPending()) << "worker never landed within 5s";
+
+    // The exact TShape the worker landed - a fresh recompute would produce a
+    // DIFFERENT TShape object even if geometrically identical, so IsEqual
+    // below is direct, non-flaky proof that adoption (not recomputation)
+    // happened. Corroborated by MoveFaceOp's own counters (round 2 Codex
+    // finding 6) so the proof does not rest on IsEqual/TShape-identity
+    // reasoning alone.
+    const TopoDS_Shape landed = h.doc.getBody(bodyId);
+    const int adoptedBefore = MoveFaceOp::adoptedCount();
+    const int recomputedBefore = MoveFaceOp::recomputedCount();
+
+    mfc.commitMoveFace(ctx);
+    // commitMoveFace restores m_st.moveFacePreviousShape before the real op
+    // runs, then pushOperation re-executes it - the committed shape below is
+    // whatever that execute() actually produced.
+    const TopoDS_Shape committed = h.doc.getBody(bodyId);
+    EXPECT_TRUE(committed.IsEqual(landed))
+        << "commit did not adopt the landed preview - it recomputed instead";
+    EXPECT_EQ(MoveFaceOp::adoptedCount(), adoptedBefore + 1);
+    EXPECT_EQ(MoveFaceOp::recomputedCount(), recomputedBefore)
+        << "the expensive recompute path ran even though adoption should have skipped it";
+}
+
+TEST(MoveFaceAsync, CommitFallsBackToRecomputeWhenParamsChangedAfterLanding) {
+    Harness h;
+    TopoDS_Shape body = makeHolePlate(5);
+    int bodyId = h.doc.addBody(body, "plate");
+    TopoDS_Face face = topFace(h.doc.getBody(bodyId));
+
+    MoveFaceController mfc;
+    IopContext ctx = h.ctx();
+    mfc.st().moveFaceActive = true;
+    mfc.st().moveFaceBodyId = bodyId;
+    mfc.st().moveFaceFace = face;
+    mfc.st().moveFacePreviousShape = h.doc.getBody(bodyId);
+    mfc.st().faceXformKind = FaceXform::Translate;
+    mfc.st().moveFaceVec = glm::vec3(1.0f, 0.0f, 0.0f);
+    mfc.st().moveFaceMoveOuter = true;
+    mfc.st().moveFaceHoleSlant.assign(25, false);
+    mfc.st().moveFaceHoleVertical.assign(25, false);
+
+    mfc.updateMoveFace(ctx);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (mfc.previewPending() && std::chrono::steady_clock::now() < deadline) {
+        mfc.pollPreview(ctx);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_FALSE(mfc.previewPending()) << "worker never landed within 5s";
+    const TopoDS_Shape landedAtV1 = h.doc.getBody(bodyId);
+    const int adoptedBefore = MoveFaceOp::adoptedCount();
+    const int recomputedBefore = MoveFaceOp::recomputedCount();
+    const int stepBefore = ctx.history.currentStep();
+
+    // Simulate "Confirm clicked before the newer preview for a changed
+    // parameter landed": change the vector WITHOUT launching/landing a new
+    // preview, so the cached m_landedPreviewKey still describes V1.
+    mfc.st().moveFaceVec = glm::vec3(2.0f, 0.0f, 0.0f);
+    mfc.commitMoveFace(ctx);
+    const TopoDS_Shape committed = h.doc.getBody(bodyId);
+
+    // The commit actually pushed a step (not a silently-refused no-op) and
+    // took the fallback path, not adoption.
+    EXPECT_EQ(ctx.history.currentStep(), stepBefore + 1)
+        << "commit did not push a step";
+    EXPECT_EQ(MoveFaceOp::adoptedCount(), adoptedBefore)
+        << "commit adopted a stale candidate instead of falling back";
+    EXPECT_EQ(MoveFaceOp::recomputedCount(), recomputedBefore + 1);
+    EXPECT_FALSE(committed.IsEqual(landedAtV1))
+        << "commit adopted a shape computed for the WRONG parameters";
+
+    // Must be geometrically IDENTICAL (not just approximately so - volume
+    // and centroid alone are weak for perforated geometry, per round 2
+    // Codex finding 7) to an independent direct execute() at V2: the
+    // symmetric difference of the two shapes must have zero volume.
+    Document ref;
+    int refId = ref.addBody(body, "plate");
+    MoveFaceOp direct;
+    direct.setBody(refId);
+    direct.setFace(topFace(ref.getBody(refId)));
+    direct.setKind(MoveFaceOp::Kind::Translate);
+    direct.setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+    direct.setLoopMotion(true, std::vector<bool>(25, false), std::vector<bool>(25, false));
+    ASSERT_TRUE(direct.execute(ref));
+    const TopoDS_Shape refShape = ref.getBody(refId);
+    BRepAlgoAPI_Cut cutA(committed, refShape);
+    ASSERT_TRUE(cutA.IsDone());
+    ASSERT_FALSE(cutA.Shape().IsNull());
+    BRepAlgoAPI_Cut cutB(refShape, committed);
+    ASSERT_TRUE(cutB.IsDone());
+    ASSERT_FALSE(cutB.Shape().IsNull());
+    EXPECT_NEAR(volume(cutA.Shape()), 0.0, 1e-6);
+    EXPECT_NEAR(volume(cutB.Shape()), 0.0, 1e-6);
+}

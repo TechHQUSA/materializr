@@ -302,6 +302,16 @@ private:
     std::unique_ptr<MoveFacePreviewJob> m_mfPendingJob;
     MoveFaceKey m_mfPendingKey;
 
+    // The last off-thread preview that landed and was applied to the live
+    // document, plus what it was computed from - offered to the commit op in
+    // commitMoveFace(), which re-checks both itself before adopting (see
+    // Operation::canAdopt). Cleared in beginMoveFace() and in
+    // commitMoveFace() so a landed shape from one gesture can never leak
+    // into the next one.
+    TopoDS_Shape m_landedShape;
+    TopoDS_Shape m_landedBase;
+    std::string m_landedPreviewKey;
+
     MoveFaceKey currentMoveFaceKey() const;
     void launchMoveFacePreviewIfWanted(const IopContext& ctx);
 };
