@@ -1193,6 +1193,9 @@ void MoveFaceController::beginMoveFace(const IopContext& ctx, FaceXform kind) {
     m_mfJob.abandon(); // a job from the PREVIOUS gesture must never land into this one
     m_mfDispatch.reset();
     m_mfPendingJob.reset();
+    m_landedShape.Nullify();
+    m_landedBase.Nullify();
+    m_landedPreviewKey.clear();
 
     // Hole move: if the Move selection is a recognizable THROUGH-HOLE wall, slide
     // the whole hole (MoveHoleOp) instead of shearing a face. buildVoid succeeds
@@ -1649,6 +1652,12 @@ void MoveFaceController::pollPreview(const IopContext& ctx) {
             if (m_mfDispatch.finished(now) && result->ok && !result->shape.IsNull()) {
                 ctx.doc.updateBody(m_st.moveFaceBodyId, result->shape);
                 ctx.markMeshesDirty();
+                // The base this result was computed from is the gesture's own
+                // snapshot - it does not change mid-gesture (a new gesture
+                // resets it in beginMoveFace), so it is safe to read here.
+                m_landedShape = result->shape;
+                m_landedBase = m_st.moveFacePreviousShape;
+                m_landedPreviewKey = result->key;
             }
             // A refused result, or a stale one (key mismatch - a newer
             // request queued behind this one), leaves whatever is
@@ -1775,6 +1784,18 @@ void MoveFaceController::commitMoveFace(const IopContext& ctx) {
     m_mfJob.abandon();
     m_mfDispatch.reset();
     m_mfPendingJob.reset();
+    // Captured once, up front, so every one of this function's several exit
+    // paths below (hole-move return, local-tweak branch, general branch, or
+    // a no-op fall-through when faceXformNontrivial() is false) consumes the
+    // cache exactly once. A stale landed shape must not survive into the
+    // NEXT gesture (cleared here) or be silently re-offered to an unrelated
+    // later op (cleared here too, not just in beginMoveFace()/cancelMoveFace()).
+    const TopoDS_Shape landedShapeForCommit = m_landedShape;
+    const TopoDS_Shape landedBaseForCommit = m_landedBase;
+    const std::string landedKeyForCommit = m_landedPreviewKey;
+    m_landedShape.Nullify();
+    m_landedBase.Nullify();
+    m_landedPreviewKey.clear();
     if (!m_st.moveFaceActive) { return; }
 
     // Hole-move commit: restore the snapshot, then push one MoveHoleOp.
@@ -1825,6 +1846,23 @@ void MoveFaceController::commitMoveFace(const IopContext& ctx) {
         op->setBody(m_st.moveFaceBodyId);
         op->setFace(m_st.moveFaceFace);
         configureFaceOp(*op);
+        // The worker may already have computed exactly this. Offer it; the op
+        // adopts only if the live body is still the one the worker started
+        // from AND its own post-rebind selection matches - see
+        // Operation::canAdopt. m_mfJob.abandon() above parks (does not land)
+        // any job still in flight, so a Confirm click that races a fresher
+        // preview correctly falls back to whatever was last LANDED, and its
+        // own key check decides whether that's still valid - no wait, no race.
+        // This is a pre-existing property of this controller (today's
+        // synchronous commit already runs concurrently with an abandoned
+        // in-flight worker in the same case) - adoption makes it fire LESS
+        // often, never more, by skipping the fallback whenever the landed
+        // result still matches. Whether it actually adopts or falls back to
+        // a full recompute is logged from inside MoveFaceOp::execute() itself
+        // (see Step 6), not here - only execute() knows the real decision.
+        if (!landedShapeForCommit.IsNull() && !landedBaseForCommit.IsNull() &&
+            !landedKeyForCommit.empty())
+            op->setPrecomputedResult(landedBaseForCommit, landedShapeForCommit, landedKeyForCommit);
         op->setSketchIds(m_st.moveFaceSketchIds); // on-face sketches ride along
         committed = ctx.history.pushOperation(std::move(op), ctx.doc);
         if (committed)
@@ -1888,6 +1926,9 @@ void MoveFaceController::cancelMoveFace(const IopContext& ctx) {
     m_mfJob.abandon();
     m_mfDispatch.reset();
     m_mfPendingJob.reset();
+    m_landedShape.Nullify();
+    m_landedBase.Nullify();
+    m_landedPreviewKey.clear();
     if (!m_st.moveFaceActive) return;
     if (m_st.moveFaceBodyId >= 0 && !m_st.moveFacePreviousShape.IsNull())
         ctx.doc.updateBody(m_st.moveFaceBodyId, m_st.moveFacePreviousShape);

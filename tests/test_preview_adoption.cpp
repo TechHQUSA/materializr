@@ -13,6 +13,7 @@
 // exactly the vacuous pass this suite has to avoid.
 #include "core/Document.h"
 #include "core/MeshParams.h"
+#include "modeling/MoveFaceOp.h"
 #include "modeling/ScaleFaceOp.h"
 #include "modeling/ShellOp.h"
 #include "modeling/SubShapeIndex.h"
@@ -35,6 +36,7 @@
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_Compound.hxx>
+#include <functional>
 #include <set>
 #include <vector>
 
@@ -332,6 +334,203 @@ TEST(PreviewAdoption, ScaleFaceAdoptsAndRejectsOnTheSameTerms) {
                                  marker(), op->previewKey(base));
         EXPECT_TRUE(op->execute(doc)) << "Scale Face's fallback failed";
         EXPECT_FALSE(isMarker(doc.getBody(id))) << "Scale Face adopted a stale result";
+    }
+}
+
+TEST(PreviewAdoption, MoveFaceAdoptsAndRejectsOnTheSameTerms) {
+    const TopoDS_Shape base = plate(6, 5);
+    Document doc;
+    const int id = doc.addBody(base, "plate");
+    const TopoDS_Face f = topFace(base);
+
+    auto mk = [&] {
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(id);
+        op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Translate);
+        op->setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+        return op;
+    };
+
+    {   // Adopts when the body and selection still match.
+        auto op = mk();
+        op->setPrecomputedResult(doc.getBody(id), marker(), op->previewKey(base));
+        ASSERT_TRUE(op->execute(doc));
+        EXPECT_TRUE(isMarker(doc.getBody(id))) << "Move Face did not adopt";
+    }
+    {   // Rejects when the body changed under it (fresh Document, so this op
+        // has no minted face name yet - matches TaperOp's equivalent test).
+        Document doc2; const int id2 = doc2.addBody(base, "plate");
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(id2);
+        op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Translate);
+        op->setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+        op->setPrecomputedResult(BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape(),
+                                 marker(), op->previewKey(base));
+        EXPECT_TRUE(op->execute(doc2)) << "Move Face's fallback computation failed";
+        EXPECT_FALSE(isMarker(doc2.getBody(id2))) << "Move Face adopted a stale result";
+    }
+}
+
+TEST(PreviewAdoption, MoveFaceOneShotConsumptionAndUndo) {
+    const TopoDS_Shape base = plate(6, 5);
+    Document doc;
+    const int id = doc.addBody(base, "plate");
+    const TopoDS_Face f = topFace(base);
+
+    auto op = std::make_unique<MoveFaceOp>();
+    op->setBody(id);
+    op->setFace(f);
+    op->setKind(MoveFaceOp::Kind::Translate);
+    op->setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+    op->setPrecomputedResult(doc.getBody(id), marker(), op->previewKey(base));
+
+    ASSERT_TRUE(op->execute(doc));
+    ASSERT_TRUE(isMarker(doc.getBody(id))) << "did not adopt on first execute";
+
+    ASSERT_TRUE(op->undo(doc));
+    EXPECT_TRUE(doc.getBody(id).IsEqual(base)) << "undo did not restore the previous shape";
+}
+
+TEST(PreviewAdoption, MoveFaceDifferentKindsNeverCrossAdopt) {
+    const TopoDS_Shape base = plate(6, 5);
+    const TopoDS_Face f = topFace(base);
+
+    auto translate = std::make_unique<MoveFaceOp>();
+    translate->setBody(0);
+    translate->setFace(f);
+    translate->setKind(MoveFaceOp::Kind::Translate);
+    translate->setMoveVector(gp_Vec(2.0, 0.0, 0.0));
+
+    auto rotate = std::make_unique<MoveFaceOp>();
+    rotate->setBody(0);
+    rotate->setFace(f);
+    rotate->setKind(MoveFaceOp::Kind::Rotate);
+    rotate->setRotation(gp_Dir(1.0, 0.0, 0.0), 2.0); // numerically unrelated to
+                                                      // Translate's key on purpose -
+                                                      // the kind tag alone must
+                                                      // already make these differ
+    const std::string keyT = translate->previewKey(base);
+    const std::string keyR = rotate->previewKey(base);
+    ASSERT_FALSE(keyT.empty());
+    ASSERT_FALSE(keyR.empty());
+    EXPECT_NE(keyT, keyR) << "Translate and Rotate must never produce the same key";
+}
+
+// Table-driven: every field previewKey() reads must actually change the key
+// when it changes, for every Kind branch - an omitted field would let a
+// changed-but-unkeyed parameter silently adopt a stale shape.
+TEST(PreviewAdoption, MoveFacePreviewKeyIsSensitiveToEveryField) {
+    const TopoDS_Shape base = plate(6, 5);
+    const TopoDS_Face f = topFace(base);
+    // A second, distinct face on the same base, for the face-selection case.
+    TopoDS_Face f2;
+    { double bestZ = -1e300;
+      for (TopExp_Explorer e(base, TopAbs_FACE); e.More(); e.Next()) {
+          if (TopoDS::Face(e.Current()).IsSame(f)) continue;
+          GProp_GProps g; BRepGProp::SurfaceProperties(e.Current(), g);
+          if (g.Mass() > bestZ) { bestZ = g.Mass(); f2 = TopoDS::Face(e.Current()); }
+      }
+      ASSERT_FALSE(f2.IsNull());
+    }
+    std::vector<bool> hs9(9, false), hv9(9, false);
+
+    auto baseline = [&] {
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(0);
+        op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Translate);
+        op->setMoveVector(gp_Vec(1.0, 0.0, 0.0));
+        op->setLoopMotion(true, hs9, hv9);
+        return op;
+    };
+    const std::string baseKey = baseline()->previewKey(base);
+    ASSERT_FALSE(baseKey.empty());
+
+    struct Case { const char* name; std::function<void(MoveFaceOp&)> mutate; };
+    std::vector<Case> cases = {
+        {"move vector", [](MoveFaceOp& op) { op.setMoveVector(gp_Vec(1.0, 0.0, 1e-6)); }},
+        {"moveOuter", [&](MoveFaceOp& op) { op.setLoopMotion(false, hs9, hv9); }},
+        {"holeSlant", [&](MoveFaceOp& op) {
+            std::vector<bool> hs = hs9; hs[0] = true;
+            op.setLoopMotion(true, hs, hv9);
+        }},
+        {"holeVertical", [&](MoveFaceOp& op) {
+            std::vector<bool> hv = hv9; hv[0] = true;
+            op.setLoopMotion(true, hs9, hv);
+        }},
+        {"face selection", [&](MoveFaceOp& op) { op.setFace(f2); }},
+    };
+    for (const auto& c : cases) {
+        auto op = baseline();
+        c.mutate(*op);
+        const std::string k = op->previewKey(base);
+        EXPECT_NE(k, baseKey) << "field not reflected in key: " << c.name;
+    }
+
+    // Rotate: implicit axis, implicit angle, explicit transform, and the
+    // switch between implicit/explicit must all key differently.
+    {
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(0); op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Rotate);
+        op->setRotation(gp_Dir(1, 0, 0), 0.1);
+        const std::string k1 = op->previewKey(base);
+        op->setRotation(gp_Dir(0, 1, 0), 0.1); // axis changed, angle unchanged
+        const std::string k2 = op->previewKey(base);
+        EXPECT_NE(k1, k2) << "Rotate axis not reflected in key";
+        op->setRotation(gp_Dir(0, 1, 0), 0.2); // angle changed, axis unchanged
+        const std::string k3 = op->previewKey(base);
+        EXPECT_NE(k2, k3) << "Rotate angle not reflected in key";
+        op->setRotationExplicit(gp_Trsf());
+        const std::string k4 = op->previewKey(base);
+        EXPECT_NE(k3, k4) << "switching implicit/explicit Rotate not reflected in key";
+        gp_Trsf t2; t2.SetTranslation(gp_Vec(0, 0, 1));
+        op->setRotationExplicit(t2);
+        const std::string k5 = op->previewKey(base);
+        EXPECT_NE(k4, k5) << "explicit rotation transform not reflected in key";
+    }
+    // Twist.
+    {
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(0); op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Twist);
+        op->setTwist(0.1);
+        const std::string k1 = op->previewKey(base);
+        op->setTwist(0.2);
+        EXPECT_NE(k1, op->previewKey(base)) << "Twist angle not reflected in key";
+    }
+    // Scale: uniform factor, the switch to non-uniform, and BOTH non-uniform
+    // axes and BOTH non-uniform factors independently.
+    {
+        auto op = std::make_unique<MoveFaceOp>();
+        op->setBody(0); op->setFace(f);
+        op->setKind(MoveFaceOp::Kind::Scale);
+        op->setScaleFactor(1.1);
+        const std::string k1 = op->previewKey(base);
+        op->setScaleFactor(1.2);
+        const std::string k2 = op->previewKey(base);
+        EXPECT_NE(k1, k2) << "uniform scale factor not reflected in key";
+
+        op->setScaleNonUniform(gp_Dir(1, 0, 0), gp_Dir(0, 1, 0), 1.1, 1.3);
+        const std::string k3 = op->previewKey(base);
+        EXPECT_NE(k2, k3) << "switching uniform/non-uniform scale not reflected in key";
+
+        op->setScaleNonUniform(gp_Dir(0, 0, 1), gp_Dir(0, 1, 0), 1.1, 1.3); // axis A changed
+        const std::string k4 = op->previewKey(base);
+        EXPECT_NE(k3, k4) << "non-uniform scale axis A not reflected in key";
+
+        op->setScaleNonUniform(gp_Dir(0, 0, 1), gp_Dir(1, 0, 0), 1.1, 1.3); // axis B changed
+        const std::string k5 = op->previewKey(base);
+        EXPECT_NE(k4, k5) << "non-uniform scale axis B not reflected in key";
+
+        op->setScaleNonUniform(gp_Dir(0, 0, 1), gp_Dir(1, 0, 0), 1.2, 1.3); // factor A changed
+        const std::string k6 = op->previewKey(base);
+        EXPECT_NE(k5, k6) << "non-uniform scale factor A not reflected in key";
+
+        op->setScaleNonUniform(gp_Dir(0, 0, 1), gp_Dir(1, 0, 0), 1.2, 1.4); // factor B changed
+        EXPECT_NE(k6, op->previewKey(base)) << "non-uniform scale factor B not reflected in key";
     }
 }
 

@@ -93,6 +93,17 @@ public:
     std::string serializeParams() const override;
     bool deserializeParams(const std::string& blob) override;
     bool rehydrateFromReload(const ReloadState& state, Document& doc) override;
+    std::string previewKey(const TopoDS_Shape& base) const override;
+
+    // Diagnostic + test hook: how many times an offered Precomputed candidate
+    // was actually adopted vs how many times execute() ran the full
+    // recompute (offered-but-rejected counts as a recompute). Process-wide,
+    // never reset automatically - a caller that needs a delta captures the
+    // counts before and after. Not gated on isVerbose(): the counters
+    // themselves cost nothing at rest; only the stderr line in Step 6 below
+    // is gated.
+    static int adoptedCount();
+    static int recomputedCount();
 
 private:
     int m_bodyId = -1;
@@ -123,4 +134,8 @@ private:
     // body and MOVED the face). Sketch-anchored, so it follows the move.
     // Serialized additively as `faceref=`; absent in old files.
     materializr::topo::Ref m_faceRef;
+
+    // Shared tail for both the adopt and full-recompute paths: writes the
+    // result, records the transform for undo, and slides on-face sketches.
+    void applyResult(Document& doc, const TopoDS_Shape& result, const gp_Trsf& topT);
 };
