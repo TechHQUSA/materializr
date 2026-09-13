@@ -4940,18 +4940,22 @@ void Application::renderSavePrompt() {
 }
 
 void Application::importStepFile() {
+    // Ctrl+I's own path (see handleShortcuts) - StepIOPlugin's menu entry is
+    // the other caller of StepIO::import. Both go through queueHeavyImport so
+    // neither one freezes the window on a large assembly.
     FileDialogs::openFile("Import STEP",
         {{"STEP Files", "*.step *.stp *.STEP *.STP"}},
         [this](const std::string& path) {
             if (path.empty()) return;
-            auto result = StepIO::import(path, *m_document);
-            if (result.success) {
-                m_meshesDirty = true;
-                markDirty();
+            queueHeavyImport("Importing STEP\xE2\x80\xA6", [this, path]() {
+                auto result = StepIO::import(path, *m_document);
+                if (!result.success) {
+                    std::fprintf(stderr, "Import failed: %s\n", result.errorMessage.c_str());
+                    return false;
+                }
                 std::fprintf(stdout, "Imported %d bodies from %s\n", result.bodiesImported, path.c_str());
-            } else {
-                std::fprintf(stderr, "Import failed: %s\n", result.errorMessage.c_str());
-            }
+                return true;
+            });
         });
 }
 
@@ -4963,9 +4967,19 @@ void Application::queueHeavyImport(std::string message, std::function<bool()> im
     // thread - see the STEP-import freeze this was written for.
     m_deferredHeavy.queue([this, message, importFn]() {
         m_progressCancelled = false;
-        renderProgressFrame(-1.0f, message.c_str());
-        if (!importFn()) return;
+        // Honour Cancel on the initial indeterminate frame, same as
+        // commitStlImport: importing anyway would make the button look broken.
+        if (renderProgressFrame(-1.0f, message.c_str())) return;
+        if (!importFn()) {
+            showToast("Import failed.", 6.0);
+            return;
+        }
         markDirty();
+        // The import only touched the Document; without this, rebuildMeshes()
+        // below is a no-op (neither m_meshesDirty nor m_dirtyBodyIds is set)
+        // and the new bodies never reach the renderer until something
+        // unrelated later flips the flag.
+        m_meshesDirty = true;
         struct PumpGuard {
             bool& flag;
             bool previous;
@@ -4986,6 +5000,7 @@ void Application::queueHeavyImport(std::string message, std::function<bool()> im
         }
         DrawThrottle throttle;
         options.onTick = [&](size_t done, size_t total) {
+            if (!m_pumpMeshProgress) return; // mirrors loadProjectAt's guard
             const float frac = parallelMeshFraction(done, total);
             pumpStep(throttle, progressFrameWouldDraw(frac),
                      [] { return DrawThrottle::clock::now(); },
