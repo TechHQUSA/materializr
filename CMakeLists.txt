@@ -1,24 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
-project(Materializr VERSION 1.6.3 LANGUAGES CXX)
+project(Materializr VERSION 1.6.4 LANGUAGES CXX)
 
 # Pre-release suffix appended to the reported version (e.g. "-beta.1"). Empty on
 # stable releases. Kept here next to project() so a beta build self-identifies
-# as e.g. "1.3.0-beta.1" — that way the in-app update check (which is semver
+# as e.g. "1.3.0-beta.1" - that way the in-app update check (which is semver
 # pre-release aware) doesn't nag a beta tester to "update" to the build they're
 # already running, and hands off cleanly to the final 1.3.0.
 set(MATERIALIZR_VERSION_SUFFIX "")
 
 # macOS: deliberately do NOT pin CMAKE_OSX_DEPLOYMENT_TARGET. The bundled Homebrew
-# OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they — not our
-# compile flag — set the real floor of a packaged .dmg. Letting the binary inherit
+# OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they - not our
+# compile flag - set the real floor of a packaged .dmg. Letting the binary inherit
 # the host target keeps it consistent with those dylibs (no "built for newer
 # version" linker warnings), and packaging/macos/build-dmg.sh derives the true
 # LSMinimumSystemVersion from the actual binaries so the plist can't lie. (Override
 # with -DCMAKE_OSX_DEPLOYMENT_TARGET=… only alongside dylibs built for that target.)
 
 # macOS: deliberately do NOT pin CMAKE_OSX_DEPLOYMENT_TARGET. The bundled Homebrew
-# OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they — not our
-# compile flag — set the real floor of a packaged .dmg. Letting the binary inherit
+# OpenCASCADE/SDL2 dylibs are built for the build host's macOS, so they - not our
+# compile flag - set the real floor of a packaged .dmg. Letting the binary inherit
 # the host target keeps it consistent with those dylibs (no "built for newer
 # version" linker warnings), and packaging/macos/build-dmg.sh derives the true
 # LSMinimumSystemVersion from the actual binaries so the plist can't lie. (Override
@@ -32,10 +32,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 
-# SDL2 — the windowing/input backend on every platform (the Android port
+# SDL2 - the windowing/input backend on every platform (the Android port
 # unified desktop + touch on SDL2; src/app/Window.cpp is SDL-based, replacing
 # the old GLFW backend). Prefer the system/vcpkg package; fall back to building
-# 2.30.9 from source — the same version android/scripts/setup-deps.sh pins —
+# 2.30.9 from source - the same version android/scripts/setup-deps.sh pins -
 # which on Linux needs the X11 dev headers already required for the GL stack.
 find_package(SDL2 CONFIG QUIET)
 if(NOT SDL2_FOUND)
@@ -66,9 +66,21 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+# nlohmann/json - header-only, pinned to an exact release tag (see the imgui
+# block above for why this repo never pins a branch). Needed by the AI
+# Assistant feature's two LLM clients to build/parse request and response
+# bodies; UpdateChecker's hand-rolled findJsonString stays as-is for the one
+# field it reads.
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # ImGui (docking), pinned to a RELEASE TAG.
 #
-# GIT_TAG was `docking` — a BRANCH HEAD, so every configure resolved to whatever
+# GIT_TAG was `docking` - a BRANCH HEAD, so every configure resolved to whatever
 # that branch pointed at that day. ImGui is the entire UI and input layer,
 # compiled straight into the shipped binary, so an upstream force-push or a
 # merged malicious PR would land in the next release with no review step; and
@@ -78,12 +90,12 @@ FetchContent_MakeAvailable(glm)
 # It must be a TAG, not a branch commit. `docking` is rebased onto master
 # regularly, and every rebase orphans the commits that were on it: the SHA this
 # was first pinned to (81cfcb8c1) was unreachable in a fresh clone within hours
-# —
+# -
 #     $ git clone https://github.com/ocornut/imgui.git
 #     $ git cat-file -t 81cfcb8c1fed1e4dac8bcdc059ce811c17b6194c
 #     fatal: git cat-file: could not get object info
 #
-# — which made the whole project unbuildable from scratch. (GitHub's API still
+# - which made the whole project unbuildable from scratch. (GitHub's API still
 # serves orphaned commits, so a SHA that looks alive there can already be dead
 # to `git clone`. Check with a clone, not the API.) The same rebase is why the
 # ImGui our own build machine had cached, d460434, no longer exists either.
@@ -130,24 +142,24 @@ set(OpenGL_GL_PREFERENCE LEGACY)
 find_package(OpenGL REQUIRED)
 
 # OpenCASCADE
-if(WIN32 OR APPLE)
+if(WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     # Windows (vcpkg) and macOS (Homebrew: `brew install opencascade`) both ship a
     # clean OpenCASCADE CMake config that exports the TK* targets and sets
-    # OpenCASCADE_INCLUDE_DIR directly — no path patching needed (unlike the Debian
+    # OpenCASCADE_INCLUDE_DIR directly - no path patching needed (unlike the Debian
     # packages handled in the else branch). The Homebrew config lives under the brew
     # prefix; pass -DCMAKE_PREFIX_PATH="$(brew --prefix)" if CMake doesn't find it.
     find_package(OpenCASCADE CONFIG REQUIRED)
 elseif(DEFINED MZR_OCCT_PREFIX)
-# Linux, source-built OCCT at a custom prefix (the release AppImage path — the
+# Linux, source-built OCCT at a custom prefix (the release AppImage path - the
 # Dockerfile compiles OCCT 7.9.3 from source so every platform runs the same
 # kernel version, rather than whatever the distro's apt ships). A from-source
 # build exports a clean CMake config with correct paths and no broken libtbb
 # symlinks, so it uses the same clean find_package the Windows/macOS branch
-# does — none of the Debian path-patching below applies.
+# does - none of the Debian path-patching below applies.
 find_package(OpenCASCADE CONFIG REQUIRED
     PATHS "${MZR_OCCT_PREFIX}/lib/cmake/opencascade" NO_DEFAULT_PATH)
 else()
-# Linux (distro apt OCCT — local dev convenience): work around missing
+# Linux (distro apt OCCT - local dev convenience): work around missing
 # libtbb-dev symlinks by patching cmake files locally.
 # Auto-detect the OCCT cmake directory (differs between aarch64/x86_64).
 file(GLOB_RECURSE _occt_config_search "/usr/lib/*/cmake/opencascade/OpenCASCADEConfig.cmake")
@@ -212,6 +224,10 @@ add_executable(materializr
     src/app/FaceOpControllers.cpp
     src/app/ExtrudeController.cpp
     src/app/PushPullController.cpp
+    src/app/PushPullPreview.cpp
+    src/app/MoveFacePreview.cpp
+    src/app/SnapshotPreview.cpp
+    src/app/GhostMesh.cpp
     src/app/LiveOpPreview.cpp
     src/app/HistoryEditPreview.cpp
     src/app/EdgeOpController.cpp
@@ -249,6 +265,9 @@ add_executable(materializr
     src/plugins/ConstructionPlanePlugin.cpp
     src/plugins/RefImagePlugin.cpp
     src/plugins/BoundaryFillPlugin.cpp
+    src/plugins/PatchPlugin.cpp
+    src/plugins/SewPlugin.cpp
+    src/plugins/MatePlugin.cpp
     src/plugins/ConstructionAxisPlugin.cpp
     src/plugins/RevolvePlugin.cpp
     src/plugins/FilletPlugin.cpp
@@ -261,6 +280,13 @@ add_executable(materializr
     src/plugins/SvgImportPlugin.cpp
     src/plugins/PrimitivesPlugin.cpp
     src/plugins/TutorialPlugin.cpp
+    src/plugins/AiAssistantPlugin.cpp
+    src/ai/AiToolSchema.cpp
+    src/ai/AiToolDispatcher.cpp
+    src/ai/AnthropicClient.cpp
+    src/ai/OpenAiCompatibleClient.cpp
+    src/ai/AiSessionController.cpp
+    src/ai/AiConnectionTest.cpp
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp
@@ -268,6 +294,7 @@ add_executable(materializr
     src/core/VariableManager.cpp
     src/core/Material.cpp
     src/core/Verbose.cpp
+    src/core/UiKeepAlive.cpp
     src/core/ThrowTrace.cpp
     src/core/VersionManager.cpp
     src/modeling/ExtrudeOp.cpp
@@ -286,6 +313,7 @@ add_executable(materializr
     src/modeling/FaceLineage.cpp
     src/modeling/ThreadOp.cpp
     src/modeling/FilletOp.cpp
+    src/modeling/FilletProbe.cpp
     src/modeling/ChamferOp.cpp
     src/modeling/BlendCut.cpp
     src/modeling/ResizeCylindricalOp.cpp
@@ -307,6 +335,10 @@ add_executable(materializr
     src/modeling/LoftOp.cpp
     src/modeling/GuidedLoftOp.cpp
     src/modeling/BoundaryFillOp.cpp
+    src/modeling/PatchOp.cpp
+    src/modeling/FaceTweak.cpp
+    src/modeling/FaceTweakOp.cpp
+    src/modeling/SewOp.cpp
     src/modeling/SketchTransformOp.cpp
     src/modeling/ConstructionPlaneOp.cpp
     src/modeling/ConstructionAxisOp.cpp
@@ -322,7 +354,10 @@ add_executable(materializr
     src/modeling/Unfold.cpp
     src/modeling/SketchSolver.cpp
     src/modeling/AirfoilImport.cpp
+    src/modeling/Mate.cpp
+    src/modeling/MateSolver.cpp
     src/modeling/SketchTool.cpp
+    src/modeling/SketchOffset.cpp
     src/modeling/SketchEditOp.cpp
     src/viewport/Viewport.cpp
     src/viewport/Camera.cpp
@@ -340,6 +375,8 @@ add_executable(materializr
     src/viewport/BoxSelect.cpp
     src/viewport/SectionView.cpp
     src/viewport/SectionCap.cpp
+    src/viewport/MeshWorker.cpp
+    src/viewport/ParallelMesh.cpp
     src/viewport/SelectionHighlight.cpp
     src/ui/Toolbar.cpp
     src/ui/TouchWidgets.cpp
@@ -436,7 +473,7 @@ else()
         TKXSBase
         ${OCCT_DATAEXCHANGE_LIBS}
         # TKBin: BinTools::Write / Read (binary BREP, used by the v3
-        # .materializr format — smaller + faster than BRepTools' ASCII).
+        # .materializr format - smaller + faster than BRepTools' ASCII).
         TKBin
         # TKService + TKV3d: Font_BRepFont / Font_BRepTextBuilder (the
         # sketch Text tool renders TrueType glyphs into outline wires).
@@ -450,6 +487,11 @@ endif()
 find_package(ZLIB REQUIRED)
 target_link_libraries(materializr PRIVATE ZLIB::ZLIB)
 
+# std::thread backend: implicit on glibc (pthread symbols live in libc since
+# 2.34) but FreeBSD/libthr requires linking it explicitly.
+find_package(Threads REQUIRED)
+target_link_libraries(materializr PRIVATE Threads::Threads)
+
 # ─── Windows specifics ───────────────────────────────────────────────────────
 # Everything here is gated on Windows/MSVC, so the Linux build is unaffected.
 if(WIN32)
@@ -460,7 +502,7 @@ endif()
 
 # -Wswitch ONLY (not -Wall): a switch over an enum class that misses an
 # enumerator is a build warning. The interactive-op dispatch (see
-# plugin/InteractiveOp.h) relies on exactly this — it deliberately has no
+# plugin/InteractiveOp.h) relies on exactly this - it deliberately has no
 # `default:`, so adding an op and forgetting to handle it is caught here
 # instead of shipping a button that silently does nothing. Nothing else is
 # turned on: -Wall over 28k lines of existing code would bury the one warning
@@ -479,13 +521,13 @@ if(MSVC)
     # /EHa (asynchronous exceptions): the OCC_CONVERT_SIGNALS comment below
     # assumed this was already on ("throws from the signal handler natively")
     # but nothing ever actually passed it, so MSVC's default /EHsc only catches
-    # synchronous C++ throws — a hardware fault deep in OCCT (e.g. reading a
+    # synchronous C++ throws - a hardware fault deep in OCCT (e.g. reading a
     # truncated BREP file) surfaces as a raw SEH exception that skips every
     # OCC_CATCH_SIGNALS/try-catch in this codebase entirely (only gtest's own
     # SEH-aware runner caught it, reporting a failed test instead of OCCT's
     # handler converting it to a catchable Standard_Failure). Global, via
     # add_compile_options (not target_compile_options), so it also reaches
-    # every test executable in tests/ added below — those hit the same OCCT
+    # every test executable in tests/ added below - those hit the same OCCT
     # code paths and need the same fault-to-exception conversion.
     add_compile_options(/EHa)
 endif()
@@ -510,7 +552,7 @@ target_compile_definitions(materializr PRIVATE
 # aborting the whole app. OSD::SetSignal() (in main.cpp) installs the handler;
 # this macro is what lets a `catch` actually receive the converted exception.
 # OCCT's own cmake only exports this for the RelWithDebInfo config, so our
-# Release AppImage was shipping with it OFF — every OCC_CATCH_SIGNALS (ShellOp,
+# Release AppImage was shipping with it OFF - every OCC_CATCH_SIGNALS (ShellOp,
 # MoveFaceOp, …) silently expanded to nothing and kernel faults killed the app
 # (issue #3: Shell-on-Shell crash). Define it unconditionally on Unix/Linux.
 # Not for Windows/MSVC, which throws from the signal handler natively (/EHa).
@@ -522,6 +564,7 @@ endif()
 # GitHub's releases API). Required on both platforms.
 find_package(CURL REQUIRED)
 target_link_libraries(materializr PRIVATE CURL::libcurl)
+target_link_libraries(materializr PRIVATE nlohmann_json::nlohmann_json)
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 

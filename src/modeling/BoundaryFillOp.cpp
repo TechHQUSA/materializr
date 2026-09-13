@@ -23,7 +23,10 @@
 #include <cmath>
 #include <cstdio>
 #include <sstream>
+#include <cctype>
 #include "../i18n.h"
+#include "ParamParse.h"
+#include "BoolArgs.h"
 
 namespace {
 
@@ -117,7 +120,8 @@ bool BoundaryFillOp::execute(Document& doc) {
                 TopoDS_Shape hPrism =
                     BRepPrimAPI_MakePrism(h0, n.Multiplied(2.0 * L)).Shape();
                 if (hPrism.IsNull()) continue;
-                BRepAlgoAPI_Cut cut(prism, hPrism);
+                BRepAlgoAPI_Cut cut;
+                materializr::setBooleanShapes(cut, prism, hPrism);
                 cut.Build();
                 if (cut.IsDone() && !cut.Shape().IsNull()) prism = cut.Shape();
             }
@@ -125,7 +129,8 @@ bool BoundaryFillOp::execute(Document& doc) {
             if (acc.IsNull()) {
                 acc = prism;
             } else {
-                BRepAlgoAPI_Common common(acc, prism);
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, acc, prism);
                 common.Build();
                 if (!common.IsDone() || common.Shape().IsNull()) {
                     std::fprintf(stderr,
@@ -140,7 +145,7 @@ bool BoundaryFillOp::execute(Document& doc) {
         if (acc.IsNull() || vol(acc) < 1e-9) {
             std::fprintf(stderr,
                 "[BoundaryFill] the silhouettes don't enclose a common "
-                "volume — nothing to fill.\n");
+                "volume - nothing to fill.\n");
             return false;
         }
         if (!BRepCheck_Analyzer(acc).IsValid()) {
@@ -176,7 +181,7 @@ void BoundaryFillOp::renderProperties() {
 
 std::string BoundaryFillOp::serializeParams() const {
     // Scalars + per-profile hole counts + plane frames, then ALL geometry as
-    // one length-prefixed ASCII BREP compound (outer_i, holes_i..., repeat) —
+    // one length-prefixed ASCII BREP compound (outer_i, holes_i..., repeat) -
     // the LoftOp discipline.
     std::ostringstream head;
     head << "created=" << m_createdBodyId << ";np=" << m_outers.size();
@@ -205,7 +210,7 @@ std::string BoundaryFillOp::serializeParams() const {
 bool BoundaryFillOp::deserializeParams(const std::string& blob) {
     clearProfiles();
     int np = 0;
-    std::vector<int> holeCounts;
+    materializr::HoleCountReader holeReader;
     std::vector<gp_Pln> planes;
     bool any = false;
     size_t pos = 0;
@@ -216,13 +221,20 @@ bool BoundaryFillOp::deserializeParams(const std::string& blob) {
         if (key == "brep") {
             size_t colon = blob.find(':', eq);
             if (colon == std::string::npos) break;
-            size_t nBytes = static_cast<size_t>(
-                std::atoll(blob.substr(eq + 1, colon - eq - 1).c_str()));
-            if (colon + 1 + nBytes > blob.size()) break;
-            std::istringstream is(blob.substr(colon + 1, nBytes));
+            // Checked length, bounded by subtraction (ParamParse.h):
+            // the old `colon + 1 + nBytes > blob.size()` wrapped on a
+            // negative length and let the guard pass.
+            size_t nBytes = 0, payload = 0;
+            if (!materializr::readLenPrefix(blob, eq + 1, colon, nBytes, payload)) break;
+            std::istringstream is(blob.substr(payload, nBytes));
             TopoDS_Shape comp;
             BRep_Builder bb;
             try { BRepTools::Read(comp, is, bb); } catch (...) { return false; }
+            // Every h<N> key precedes ";brep=" in the serialized form, so the
+            // counts are complete here. finish() also refuses an index that
+            // names a profile np never declared.
+            if (!holeReader.finish(np)) return false;
+            const std::vector<int>& holeCounts = holeReader.counts();
             TopoDS_Iterator it(comp);
             for (int i = 0; i < np && it.More(); ++i) {
                 if (it.Value().ShapeType() != TopAbs_WIRE) return false;
@@ -246,16 +258,21 @@ bool BoundaryFillOp::deserializeParams(const std::string& blob) {
         std::string val = blob.substr(eq + 1, end - eq - 1);
         if      (key == "created") { m_createdBodyId = std::atoi(val.c_str()); any = true; }
         else if (key == "np")      { np = std::atoi(val.c_str()); any = true; }
+        // h<N> / p<N>: N comes from the file and SIZES the vector below, so it is
+        // bounded before the resize. Unbounded, "p2000000000=" asked for a ~200 GB
+        // allocation, and idx == INT_MAX made `idx + 1` signed-overflow (UB).
+        // The isdigit() test stays part of the BRANCH CONDITION, not the body:
+        // an unknown key that merely starts with 'h'/'p' (a field a future
+        // version adds) must fall through and be IGNORED, as it always was.
+        // Only a key that really is h<digits> is held to the bounds below.
         else if (!key.empty() && key[0] == 'h' && key.size() > 1 &&
                  std::isdigit(static_cast<unsigned char>(key[1]))) {
-            int idx = std::atoi(key.c_str() + 1);
-            if (idx >= static_cast<int>(holeCounts.size()))
-                holeCounts.resize(idx + 1, 0);
-            holeCounts[idx] = std::atoi(val.c_str());
+            if (!holeReader.add(key, val)) return false;
         }
         else if (!key.empty() && key[0] == 'p' && key.size() > 1 &&
                  std::isdigit(static_cast<unsigned char>(key[1]))) {
-            int idx = std::atoi(key.c_str() + 1);
+            int idx = materializr::parseIndexKey(key, 1);
+            if (idx < 0 || idx >= materializr::kMaxProfiles) return false;
             double v[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
             std::istringstream ps(val);
             for (int k = 0; k < 9; ++k) {
@@ -263,10 +280,18 @@ bool BoundaryFillOp::deserializeParams(const std::string& blob) {
                 if (!std::getline(ps, tokn, ',')) break;
                 v[k] = std::atof(tokn.c_str());
             }
+            // A crafted blob can spell inf/nan; those poison the OCCT constructors
+            // below rather than throwing cleanly.
+            for (double d : v) if (!std::isfinite(d)) return false;
             if (idx >= static_cast<int>(planes.size()))
                 planes.resize(idx + 1, gp_Pln());
             try {
                 gp_Dir xd(v[3], v[4], v[5]), yd(v[6], v[7], v[8]);
+                // Reject a degenerate frame explicitly. Parallel axes make the
+                // cross product ~zero, which gp_Ax3 turns into an exception we
+                // would otherwise swallow as a generic failure.
+                const gp_Vec cross = gp_Vec(xd).Crossed(gp_Vec(yd));
+                if (cross.Magnitude() < 1e-9) return false;
                 planes[idx] = gp_Pln(gp_Ax3(gp_Pnt(v[0], v[1], v[2]),
                                             xd.Crossed(yd), xd));
             } catch (...) { return false; }

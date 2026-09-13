@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <sstream>
 #include "../i18n.h"
+#include "ParamParse.h"
 
 namespace {
 
@@ -36,12 +37,12 @@ struct SideTable {
 };
 
 // A rail reduced to per-height EXTENTS along its azimuth axis. Built from the
-// whole stroke — both sides of an outline sketch participate — so at every
+// whole stroke - both sides of an outline sketch participate - so at every
 // height the loft knows the interval [cNeg(h), cPos(h)] the section must be
 // squeezed into. One-sided rails (a single silhouette curve) mirror: the
 // missing side is the negative of the drawn one, which reproduces the old
 // symmetric-scaling behaviour. Two-sided rails (a full outline: slant up, flat
-// top, vertical far side...) drive each side INDEPENDENTLY — an asymmetric
+// top, vertical far side...) drive each side INDEPENDENTLY - an asymmetric
 // outline translates the section as well as scaling it, so a vertical side
 // stays vertical while the other slants (the trapezoid-vs-symmetric-taper bug
 // from Steve's side-profile screenshot).
@@ -82,7 +83,7 @@ bool buildRailTable(const TopoDS_Wire& wire, const gp_Pnt& C, const gp_Vec& n,
         const double m = sm.ip.Magnitude();
         if (m > bestMag) { bestMag = m; bestIp = sm.ip; }
     }
-    if (bestMag < 1e-9) return false;       // rail hugs the axis — no reference
+    if (bestMag < 1e-9) return false;       // rail hugs the axis - no reference
     out.axis = bestIp.Normalized();
 
     // Bin ALL samples by (0-based) height per side, keeping the extreme signed
@@ -104,7 +105,7 @@ bool buildRailTable(const TopoDS_Wire& wire, const gp_Pnt& C, const gp_Vec& n,
         if (a.anyP) { out.pos.h.push_back(h); out.pos.c.push_back(a.cPos); }
         if (a.anyN) { out.neg.h.push_back(h); out.neg.c.push_back(a.cNeg); }
     }
-    // A side counts as "drawn" when it spans a real height range — a couple of
+    // A side counts as "drawn" when it spans a real height range - a couple of
     // stray crossings (an outline's bottom edge nicking c=0) shouldn't flip
     // the rail into two-sided mode.
     auto spans = [&](const SideTable& t) {
@@ -114,7 +115,7 @@ bool buildRailTable(const TopoDS_Wire& wire, const gp_Pnt& C, const gp_Vec& n,
     const bool hasNeg = spans(out.neg);
     if (!hasPos && !hasNeg) return false;
     out.twoSided = hasPos && hasNeg;
-    if (!hasPos) {   // drawn side is negative — flip the axis so pos is drawn
+    if (!hasPos) {   // drawn side is negative - flip the axis so pos is drawn
         out.axis.Reverse();
         std::swap(out.pos, out.neg);
         for (double& c : out.pos.c) c = -c;
@@ -188,7 +189,7 @@ bool GuidedLoftOp::execute(Document& doc) {
             if (!buildAll()) {
                 std::fprintf(stderr,
                     "[GuidedLoft] rails don't rise off the base plane (or "
-                    "start on the profile's centre) — can't derive a height "
+                    "start on the profile's centre) - can't derive a height "
                     "law.\n");
                 return false;
             }
@@ -213,14 +214,14 @@ bool GuidedLoftOp::execute(Document& doc) {
             if (std::abs(d) < 0.2) {
                 std::fprintf(stderr,
                     "[GuidedLoft] the two rails sit on nearly the same "
-                    "direction — draw them roughly 90 degrees apart around "
+                    "direction - draw them roughly 90 degrees apart around "
                     "the base.\n");
                 return false;
             }
             rail2Sign = d < 0 ? -1.0 : 1.0;
         }
 
-        // Base profile extents along each axis (about the centroid) — the
+        // Base profile extents along each axis (about the centroid) - the
         // interval the rails' intervals remap at every height.
         double b1lo = 1e300, b1hi = -1e300, b2lo = 1e300, b2hi = -1e300;
         {
@@ -241,7 +242,7 @@ bool GuidedLoftOp::execute(Document& doc) {
         // then PRUNE to the sections that actually shape the surface
         // (Douglas-Peucker on the law): a straight taper collapses to just its
         // end sections, a curve keeps only enough samples to follow its bend.
-        // This is a mesh-cost fix as much as a modelling one — skinning 24
+        // This is a mesh-cost fix as much as a modelling one - skinning 24
         // near-redundant sections made B-spline surfaces that took ~15 s PER
         // BODY to tessellate at Ultra quality (the launch/preview freeze).
         struct Law { double h, s1, o1, s2, o2; bool apex = false; };
@@ -306,7 +307,7 @@ bool GuidedLoftOp::execute(Document& doc) {
         };
         dp(0, law.size() - 1);
         // ThruSections can refuse to skin certain bases (a lone circle)
-        // straight to the final section/apex — always keep one intermediate
+        // straight to the final section/apex - always keep one intermediate
         // so every loft has at least three stations (base + mid + end).
         if (law.size() >= 2) {
             keep[law.size() - 2] = 1;
@@ -315,7 +316,7 @@ bool GuidedLoftOp::execute(Document& doc) {
 
         // RULED, not smooth: the DP-pruned stations are the corners of a
         // piecewise-LINEAR law, so ruling between them reproduces the rails
-        // exactly — a straight taper becomes a true cone like extrude+scale
+        // exactly - a straight taper becomes a true cone like extrude+scale
         // makes. Smooth skinning invented wavy curvature BETWEEN stations
         // (visible orange-peel dimpling, and far heavier to tessellate).
         // Around the profile the sections are still smooth curves, so a
@@ -345,7 +346,7 @@ bool GuidedLoftOp::execute(Document& doc) {
 
             // CONFORMAL fast path: when the station's scale is uniform
             // (s1 == s2, e.g. a circle tapering identically on both rails),
-            // use a plain gp_Trsf — scale about C + translate. That maps a
+            // use a plain gp_Trsf - scale about C + translate. That maps a
             // circle to an analytic CIRCLE; ruling between analytic circles
             // gives a clean cone, where GTransform'd B-spline copies rule
             // into micro-wrinkled surfaces (the orange-peel Steve saw).
@@ -396,7 +397,7 @@ bool GuidedLoftOp::execute(Document& doc) {
 
         thru.Build();
         if (!thru.IsDone() || thru.Shape().IsNull()) {
-            std::fprintf(stderr, "[GuidedLoft] skinning failed — try simpler "
+            std::fprintf(stderr, "[GuidedLoft] skinning failed - try simpler "
                                  "rails or fewer samples.\n");
             return false;
         }
@@ -465,10 +466,12 @@ bool GuidedLoftOp::deserializeParams(const std::string& blob) {
         if (key == "brep") {
             size_t colon = blob.find(':', eq);
             if (colon == std::string::npos) break;
-            size_t nBytes = static_cast<size_t>(
-                std::atoll(blob.substr(eq + 1, colon - eq - 1).c_str()));
-            if (colon + 1 + nBytes > blob.size()) break;
-            std::istringstream is(blob.substr(colon + 1, nBytes));
+            // Checked length, bounded by subtraction (ParamParse.h):
+            // the old `colon + 1 + nBytes > blob.size()` wrapped on a
+            // negative length and let the guard pass.
+            size_t nBytes = 0, payload = 0;
+            if (!materializr::readLenPrefix(blob, eq + 1, colon, nBytes, payload)) break;
+            std::istringstream is(blob.substr(payload, nBytes));
             TopoDS_Shape comp;
             BRep_Builder bb;
             try { BRepTools::Read(comp, is, bb); } catch (...) { return false; }
@@ -498,8 +501,14 @@ bool GuidedLoftOp::deserializeParams(const std::string& blob) {
                 if (!std::getline(ps, tokn, ',')) break;
                 v[i] = std::atof(tokn.c_str());
             }
+            // Same discipline as BoundaryFillOp: a crafted blob can spell
+            // inf/nan, which poisons the OCCT constructors rather than throwing
+            // cleanly, and parallel axes make the cross product ~zero.
+            for (double d : v) if (!std::isfinite(d)) return false;
             try {
                 gp_Dir xd(v[3], v[4], v[5]), yd(v[6], v[7], v[8]);
+                const gp_Vec cross = gp_Vec(xd).Crossed(gp_Vec(yd));
+                if (cross.Magnitude() < 1e-9) return false;
                 m_basePlane = gp_Pln(gp_Ax3(gp_Pnt(v[0], v[1], v[2]),
                                             xd.Crossed(yd), xd));
             } catch (...) { return false; }

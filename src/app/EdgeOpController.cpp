@@ -1,4 +1,6 @@
+#include "ui/LengthField.h"
 #include "EdgeOpController.h"
+#include "core/BodyChanges.h"
 #include "../core/Document.h"
 #include "../core/History.h"
 #include "../core/NumParse.h"
@@ -49,18 +51,18 @@ void refreshAllEdgeOpFaces(History& hist, Document& doc) {
         };
         // A fillet/chamfer's body may have been DELETED by a later step (e.g. a
         // filleted lid that was then deleted). getBody() throws on a missing
-        // id, which — uncaught — aborted the whole app on load ("Fatal error:
+        // id, which - uncaught - aborted the whole app on load ("Fatal error:
         // Body not found: N"). Skip any op whose body is gone.
         TopoDS_Shape own;
         try { own = doc.getBody(bodyId); } catch (...) {}
         if (!own.IsNull()) {
             try { refresh(own, bodyId); } catch (...) {}
         } else {
-            // The op's own body was CONSUMED by a downstream boolean — its
+            // The op's own body was CONSUMED by a downstream boolean - its
             // bevel faces now live on the successor body. Refresh against every
             // current body; refreshGeneratedFaces matches by the op's stable
             // face-lineage ids (exact) or blend geometry, so only the body that
-            // actually carried the faces forward updates — the rest are no-ops.
+            // actually carried the faces forward updates - the rest are no-ops.
             // Without this a filleted/chamfered body that was later unioned
             // into another lost its history-hover highlight entirely.
             for (int b : doc.getAllBodyIds()) {
@@ -110,7 +112,7 @@ void EdgeOpController::computeHandleFrame(bool outwardFromFaces) {
             // Outward handle direction = the average of the two adjacent faces'
             // OUTWARD normals at the edge, made perpendicular to the edge. This
             // points the arrow the way the fillet actually grows for BOTH
-            // convex (outer) edges AND concave inner corners — e.g. the inside
+            // convex (outer) edges AND concave inner corners - e.g. the inside
             // corners of a thin-wall hollow box, where the fillet bulges into
             // the cavity. The old "bbox centre → edge" heuristic was inverted
             // on concave edges (arrow faced out toward the wall).
@@ -177,7 +179,7 @@ void EdgeOpController::computeFaceDirs() {
 
         auto inFaceDir = [&](const TopoDS_Shape& fshape) -> glm::vec3 {
             // Centroid heuristic (perp-to-edge component of centroid − edge
-            // mid) — kept only as the last-resort fallback. It points the WRONG
+            // mid) - kept only as the last-resort fallback. It points the WRONG
             // way whenever the face wraps around other features and its
             // centroid lands on the far side of the edge (the light cover's
             // shelf face flipped the yellow A-arrow, #57).
@@ -322,8 +324,8 @@ int EdgeOpController::onBegin(const IopContext& ctx) {
         m_twoDist = false;
         m_value2 = 0.0f;
     }
-    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
-    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+    materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
+    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
 
     // Install the pre-state BEFORE computing the handle frame, which reads it.
     // CREATE: the current body (the base re-installs the same shape after
@@ -346,15 +348,15 @@ int EdgeOpController::onBegin(const IopContext& ctx) {
         m_origValue  = m_value;   // restored on cancel
         m_origValue2 = m_value2;
         // Snapshot the WHOLE document + every op's edit state BEFORE the first
-        // preview replay — see HistoryEditPreview for why both halves matter.
+        // preview replay - see HistoryEditPreview for why both halves matter.
         m_editPreview.begin(ctx.doc, ctx.history);
         // Clear the face selection so the gizmo / overlay rendering doesn't
         // fight a stale "Face Operations" panel while editing.
         ctx.selection.clear();
         // The picked body's geometry NOW, before any preview: commit compares
         // against this to spot a frozen op. Measuring it at commit instead
-        // would compare "new radius" against "new radius" — the preview has
-        // already moved the body — and always report "unchanged".
+        // would compare "new radius" against "new radius" - the preview has
+        // already moved the body - and always report "unchanged".
         m_prePickedVol = m_prePickedArea = 0.0;
         if (m_pickedBodyId >= 0) {
             try {
@@ -387,27 +389,10 @@ void EdgeOpController::update(const IopContext& ctx) {
     // editStep (the op snaps back to its last good parameters), so the preview
     // can never strand the model.
     if (m_value < 0.01f) return;   // don't preview "remove" mid-drag
-    std::map<int, TopoDS_Shape> before;
-    for (int id : ctx.doc.getAllBodyIds()) {
-        try { before[id] = ctx.doc.getBody(id); } catch (...) {}
-    }
+    // Partial remesh: re-tessellate only the bodies the replay changed.
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     writeEditedParams(ctx, m_value, m_twoDist ? m_value2 : -1.0f);
     setPreviewOk(m_editPreview.replay(m_editingIndex, ctx.doc, ctx.history));
-    // Partial remesh: re-tessellate only the bodies the replay changed.
-    if (ctx.markBodyDirty) {
-        std::set<int> now;
-        for (int id : ctx.doc.getAllBodyIds()) {
-            now.insert(id);
-            auto it = before.find(id);
-            TopoDS_Shape cur;
-            try { cur = ctx.doc.getBody(id); } catch (...) {}
-            if (it == before.end() || !it->second.IsEqual(cur))
-                ctx.markBodyDirty(id);
-        }
-        for (auto& [id, s] : before) if (!now.count(id)) ctx.markBodyDirty(id);
-    } else {
-        ctx.markMeshesDirty();
-    }
 }
 
 bool EdgeOpController::updateEdgeOp(const IopContext& ctx) {
@@ -464,7 +449,12 @@ void EdgeOpController::writeEditedParams(const IopContext& ctx, float v,
 void EdgeOpController::finish(const IopContext& ctx) {
     m_editPreview.clear();
     ctx.selection.clear();
-    ctx.markMeshesDirty();
+    // The body this gesture touched, not every visible one: commit() and
+    // cancel() hold a BodyChangeScope over the document edit, and a create
+    // gesture only ever changes its own body. An edit-mode replay marks its
+    // bodies through that scope too.
+    if (ctx.markBodyDirty && bodyId() >= 0) ctx.markBodyDirty(bodyId());
+    else if (ctx.markMeshesDirty) ctx.markMeshesDirty();
     // Base teardown clears active/dragging/snapshot and calls onCleanup(); it
     // deliberately does NOT touch the document, which commit/cancel have
     // already put where it belongs.
@@ -473,17 +463,18 @@ void EdgeOpController::finish(const IopContext& ctx) {
 
 void EdgeOpController::commit(const IopContext& ctx) {
     if (!active()) return;
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     const bool editing = m_editingIndex >= 0;
     const bool isFillet = m_kind == EdgeOpKind::Fillet;
 
-    // CREATE previews a transient op against the snapshot — restore it before
+    // CREATE previews a transient op against the snapshot - restore it before
     // pushing the real op. EDIT previews through editStep, so the document
     // already reflects history; clobbering the body here would just be churn.
     if (!editing && bodyId() >= 0 && !snapshot().IsNull())
         ctx.doc.updateBody(bodyId(), snapshot());
 
-    // Confirming with no size set is a no-op — cancel out. In EDIT mode a zero
-    // value would mean "remove this fillet" — surprising semantics, so treat it
+    // Confirming with no size set is a no-op - cancel out. In EDIT mode a zero
+    // value would mean "remove this fillet" - surprising semantics, so treat it
     // as cancel too: restore the ORIGINAL parameter (the live preview mutates
     // the real op) and replay.
     if (m_value < 0.01f) {
@@ -503,7 +494,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
         writeEditedParams(ctx, m_value, m_twoDist ? m_value2 : -1.0f);
         if (!m_editPreview.replay(m_editingIndex, ctx.doc, ctx.history)) {
             // The step couldn't rebuild on the current body (its edges
-            // reference geometry a later feature consumed — the classic case
+            // reference geometry a later feature consumed - the classic case
             // for a chamfer/fillet originally applied BEFORE those features).
             // replay() already restored the pre-edit snapshot; put the op's
             // parameter back and tell the user the honest remedy.
@@ -513,7 +504,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
             if (ctx.toast)
                 ctx.toast(std::string(isFillet ? "This fillet" : "This chamfer")
                               .append(" can't be rebuilt on the current body "
-                                      "\xE2\x80\x94 its edges reference geometry "
+                                      "- its edges reference geometry "
                                       "that a later feature changed. Left as-is; "
                                       "delete it and re-apply the feature on the "
                                       "updated body.").c_str());
@@ -522,13 +513,13 @@ void EdgeOpController::commit(const IopContext& ctx) {
         }
         // Refresh face→op mapping after the edit so ownsFace() works on the new
         // body positions. The replay re-ran EVERY op's execute(), so every
-        // fillet/chamfer (not just the edited one) needs rebinding — otherwise
+        // fillet/chamfer (not just the edited one) needs rebinding - otherwise
         // the others' faces stay at their pre-Transform positions and become
         // un-clickable until the next reload.
         refreshAllEdgeOpFaces(ctx.history, ctx.doc);
 
         // Detect a frozen op: the clicked body's geometry matches what was
-        // measured at begin — before any preview ran. If the commit didn't
+        // measured at begin - before any preview ran. If the commit didn't
         // change the body at all from its original pre-edit state, the op
         // likely drives a different/deleted body (save-corruption edge case).
         if (m_pickedBodyId >= 0 &&
@@ -547,7 +538,7 @@ void EdgeOpController::commit(const IopContext& ctx) {
             if (std::fabs(volAfter  - m_prePickedVol)  <= vtol &&
                 std::fabs(areaAfter - m_prePickedArea) <= atol && ctx.toast) {
                 ctx.toast("This fillet/chamfer is baked into the model "
-                          "\xE2\x80\x94 the geometry you clicked has no editable "
+                          "- the geometry you clicked has no editable "
                           "operation behind it. Re-apply it to make it "
                           "adjustable.");
             }
@@ -559,26 +550,31 @@ void EdgeOpController::commit(const IopContext& ctx) {
     }
 
     std::unique_ptr<Operation> op = buildOp(ctx);
-    const bool committed = op && ctx.history.pushOperation(std::move(op), ctx.doc);
-    if (committed) {
-        std::fprintf(stdout, "%s %.1f mm committed\n",
-                     isFillet ? "Fillet" : "Chamfer", m_value);
-    } else if (ctx.toast) {
-        // execute() rejected the result (invalid topology / unbuildable at this
-        // size) and left the body untouched — say so instead of silently doing
-        // nothing.
-        ctx.toast(std::string(isFillet ? "Fillet" : "Chamfer")
-                      .append(" couldn't be built on those edges \xE2\x80\x94 the "
+    // execute() rejecting the result (invalid topology / unbuildable at this
+    // size) leaves the body untouched - say so instead of silently doing
+    // nothing.
+    const auto report = [isFillet, value = m_value, toast = ctx.toast](bool committed) {
+        if (committed) {
+            std::fprintf(stdout, "%s %.1f mm committed\n",
+                         isFillet ? "Fillet" : "Chamfer", value);
+        } else if (toast) {
+            toast(std::string(isFillet ? "Fillet" : "Chamfer")
+                      .append(" couldn't be built on those edges - the "
                               "result wasn't valid geometry. Try a smaller size "
                               "or fewer edges.").c_str());
-    }
+        }
+    };
+    // Pushed inline: see InteractiveOpController::commit's LiveOp branch for
+    // why a slow gesture is not on its own a reason to defer the commit.
+    report(op && ctx.history.pushOperation(std::move(op), ctx.doc));
     finish(ctx);
 }
 
 void EdgeOpController::cancel(const IopContext& ctx) {
     if (!active()) { finish(ctx); return; }
+    materializr::BodyChangeScope trackBodies(ctx.doc, ctx.markBodyDirty, ctx.markMeshesDirty);
     if (m_editingIndex >= 0) {
-        // The live preview mutated the real op — restore the parameter it had
+        // The live preview mutated the real op - restore the parameter it had
         // when the edit began, then replay so the committed state (including
         // downstream ops) returns. Replaying at the original value can itself
         // fail for a step that no longer rebuilds; replay() falls back to the
@@ -588,7 +584,7 @@ void EdgeOpController::cancel(const IopContext& ctx) {
     } else if (bodyId() >= 0 && !snapshot().IsNull()) {
         ctx.doc.updateBody(bodyId(), snapshot());
     }
-    refreshAllEdgeOpFaces(ctx.history, ctx.doc);   // body replayed — rebind
+    refreshAllEdgeOpFaces(ctx.history, ctx.doc);   // body replayed - rebind
     finish(ctx);
 }
 
@@ -668,10 +664,10 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
                 val = std::round(val * 10.0f) / 10.0f;
                 if (m_grab == 0) {
                     m_value = val;
-                    std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", val);
+                    materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), val);
                 } else {
                     m_value2 = val;
-                    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", val);
+                    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), val);
                 }
             } else {
                 // Signed distance along the outward arrow: dragging away from
@@ -681,10 +677,10 @@ void EdgeOpController::onViewportInput(const IopViewport& vp,
                 m_value = (proj <= 0.0f) ? 0.0f : std::max(0.1f, proj);
                 // Quantise the drag to the displayed precision (0.1 mm): every
                 // readout shows %.1f, so committing the raw float stored
-                // "1.9948" behind an on-screen "2.0" — visible later in the
+                // "1.9948" behind an on-screen "2.0" - visible later in the
                 // Properties editor after a reload.
-                m_value = std::round(m_value * 10.0f) / 10.0f;
-                std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+                m_value = static_cast<float>(materializr::quantiseDragMm(m_value));   // display-unit step, not 0.1 mm
+                materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
             }
             update(ctx);
         }
@@ -747,7 +743,7 @@ void EdgeOpController::drawOverlay(const IopOverlay& ov) const {
             glm::vec2 sp;
             if (!ov.toScreen(tipW, sp)) return;
             char b[40];
-            std::snprintf(b, sizeof(b), "%s %.1f mm", tag, val);
+            std::snprintf(b, sizeof(b), "%s %s", tag, materializr::fmtLength(val).c_str());
             plate(sp, b, col, grabbed ? 2.5f : 1.5f);
         };
         twoArrow(m_faceDirA, m_value,  "A", kAmber, m_grab == 0);
@@ -759,7 +755,7 @@ void EdgeOpController::drawOverlay(const IopOverlay& ov) const {
     // clicked BEFORE any value is set.
     arrow(m_mid, m_mid + m_outDir * std::max(m_value, 1.0f), kAmber, false);
     char dbuf[40];
-    std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_value);
+    std::snprintf(dbuf, sizeof(dbuf), "%s", materializr::fmtLength(m_value).c_str());
     // The single-arrow readout follows the CURSOR, not the tip.
     plate(glm::vec2(ov.mouse.x + 4.0f, ov.mouse.y), dbuf, kAmber, 1.5f);
 }
@@ -772,7 +768,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     const bool imTouch = ctx.panel.imTouch;
     const bool isFillet = m_kind == EdgeOpKind::Fillet;
     const char* opName = isFillet ? "FILLET" : "CHAMFER";
-    const char* label  = isFillet ? "Radius (mm)" : "Distance (mm)";
+    const char* label  = isFillet ? "Radius (%s)" : "Distance (%s)";
 
     materializr::viewportBanner(
         ImVec4(0.2f, 1.0f, 0.5f, 1.0f),
@@ -782,7 +778,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         opName);
 
     // im-touch: anchor the well next to the edge being rounded/cut (latched
-    // midpoint — static while values change, same rule as the sketch fields);
+    // midpoint - static while values change, same rule as the sketch fields);
     // other layouts keep the fixed top-right spot.
     bool anchored = false;
     if (imTouch && ctx.panel.anchorValid) {
@@ -823,11 +819,9 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
     bool doCommit = false, doCancel = false;
     if (imTouch) {
         // im-touch: the panel is the value well (+ the chamfer's two-distance
-        // controls below) — no header, hint or steppers.
-        if (touchui::amountField("edgeAmt", isFillet ? "Radius" : "Distance",
-                                 &m_value, "mm", 1, /*allowSign=*/false,
-                                 0.1f, 20.0f)) {
-            std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+        // controls below) - no header, hint or steppers.
+        if (materializr::amountLengthField("edgeAmt", isFillet ? "Radius" : "Distance", &m_value, /*allowSign=*/false, 0.1f, 20.0f)) {
+            materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
             update(ctx);
         }
         // touch: raise the keyboard on TAP, not on open (see the Extrude field,
@@ -835,30 +829,35 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         if (materializr::touchMode() && ImGui::IsItemClicked())
             ImGui::SetKeyboardFocusHere(-1);
     } else {
+        // The member is the truth; the buffer follows it unless being typed in.
+        materializr::reseedLengthBufferIfIdle("##val", m_inputBuf, sizeof(m_inputBuf), m_value);
         if (ImGui::InputText("##val", m_inputBuf, sizeof(m_inputBuf),
                              ImGuiInputTextFlags_EnterReturnsTrue)) {
-            (void)materializr::parseFinite(m_inputBuf, m_value);
+            (void)materializr::parseLength(m_inputBuf, m_value);
             update(ctx);
             doCommit = true;
-        } else {
+        } else if (materializr::lengthBufferIsActive("##val")) {
+            // Only while typing - an idle re-parse wrote the buffer's rounded
+            // text back over a more precise member, and reinterpreted the old
+            // unit's text after a unit switch.
             float parsed = m_value;
-            if (materializr::parseFinite(m_inputBuf, parsed) &&
+            if (materializr::parseLength(m_inputBuf, parsed) &&
                 std::abs(parsed - m_value) > 0.01f && parsed > 0.01f) {
                 m_value = parsed;
                 update(ctx);
             }
         }
         ImGui::SameLine();
-        ImGui::Text("%s", materializr::tr("mm"));
+        ImGui::Text("%s", materializr::unitSuffix());
     }
 
     // Quick-nudge stepper (replaces the slider). Positive-only for a radius /
     // setback; 0 shows the original body mid-preview. Confirming at 0 still
-    // cancels — zero fillet = no fillet. Desktop only.
+    // cancels - zero fillet = no fillet. Desktop only.
     if (!imTouch &&
-        materializr::stepperRow("edgeStep", &m_value,
+        materializr::lengthStepperRow("edgeStep", &m_value,
                                 /*allowNegative=*/false, 0.1f, 20.0f)) {
-        std::snprintf(m_inputBuf, sizeof(m_inputBuf), "%.1f", m_value);
+        materializr::formatLengthDigits(m_inputBuf, sizeof(m_inputBuf), m_value);
         update(ctx);
     }
 
@@ -870,7 +869,7 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
         if (ImGui::Checkbox(materializr::tr("Two distances (A / B)"), &m_twoDist)) {
             if (m_twoDist && m_value2 < 0.1f) {
                 m_value2 = std::max(0.1f, m_value);   // seed B from A
-                std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+                materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
             }
             m_grab = -1;
             update(ctx);
@@ -879,34 +878,33 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             if (!imTouch)
                 ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Distance B (other face)"));
             if (imTouch) {
-                if (touchui::amountField("edgeAmt2", materializr::tr("Distance B"), &m_value2,
-                                         "mm", 1, /*allowSign=*/false,
-                                         0.1f, 20.0f)) {
-                    std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f",
-                                  m_value2);
+                if (materializr::amountLengthField("edgeAmt2", materializr::tr("Distance B"), &m_value2, /*allowSign=*/false, 0.1f, 20.0f)) {
+                    materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                     update(ctx);
                 }
             } else {
+                // The member is the truth; the buffer follows it unless being typed in.
+                materializr::reseedLengthBufferIfIdle("##val2", m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                 if (ImGui::InputText("##val2", m_inputBuf2, sizeof(m_inputBuf2),
                                      ImGuiInputTextFlags_EnterReturnsTrue)) {
-                    (void)materializr::parseFinite(m_inputBuf2, m_value2);
+                    (void)materializr::parseLength(m_inputBuf2, m_value2);
                     update(ctx);
                     doCommit = true;
-                } else {
+                } else if (materializr::lengthBufferIsActive("##val2")) {
                     float p2 = m_value2;
-                    if (materializr::parseFinite(m_inputBuf2, p2) &&
+                    if (materializr::parseLength(m_inputBuf2, p2) &&
                         std::abs(p2 - m_value2) > 0.01f && p2 > 0.01f) {
                         m_value2 = p2;
                         update(ctx);
                     }
                 }
                 ImGui::SameLine();
-                ImGui::Text("%s", materializr::tr("mm"));
+                ImGui::Text("%s", materializr::unitSuffix());
             }
             if (!imTouch &&
-                materializr::stepperRow("edgeStep2", &m_value2,
+                materializr::lengthStepperRow("edgeStep2", &m_value2,
                                         /*allowNegative=*/false, 0.1f, 20.0f)) {
-                std::snprintf(m_inputBuf2, sizeof(m_inputBuf2), "%.1f", m_value2);
+                materializr::formatLengthDigits(m_inputBuf2, sizeof(m_inputBuf2), m_value2);
                 update(ctx);
             }
         }
@@ -921,14 +919,14 @@ void EdgeOpController::renderEdgeOpPanel(const IopContext& ctx) {
             doCancel = true;
     }
     ImGui::End();
-    // Commit/cancel AFTER End() — they tear down state the window is reading.
+    // Commit/cancel AFTER End() - they tear down state the window is reading.
     if (doCommit) commit(ctx);
     else if (doCancel) cancel(ctx);
 }
 
 void EdgeOpController::confirmFromKey(const IopContext& ctx) {
     if (!active()) return;
-    (void)materializr::parseFinite(m_inputBuf, m_value);
+    (void)materializr::parseLength(m_inputBuf, m_value);
     update(ctx);
     commit(ctx);
 }

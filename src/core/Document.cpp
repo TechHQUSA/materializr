@@ -34,6 +34,23 @@ void Document::addOrPutBody(int& id, const TopoDS_Shape& shape, const std::strin
 }
 
 void Document::removeBody(int id) {
+    // Ids are re-issued by putBody on undo, so a base left behind here would be
+    // applied to a DIFFERENT body later. clearMateBase also drops any sketch
+    // plane cached against this body - a direct m_mateBases.erase(id) here
+    // used to skip that and reintroduce the stale-sketch-plane bug it was
+    // centralized to prevent (review-panel finding, 2026-09).
+    clearMateBase(id);
+    // Without this, deleting the grounded/root body left every mate that
+    // chained through it correctly marked broken (MateSolver's `live` filter
+    // catches the dead id), but with no way back: m_groundedBody kept
+    // pointing at a body that no longer exists, and createMate's auto-ground
+    // fallback only fires when it is already < 0 - so it never re-triggers.
+    // The only recovery was deleting and recreating every mate in the
+    // assembly. This does not restore the old grounding on an undo of this
+    // deletion (m_groundedBody is not part of the per-body tombstone below);
+    // the next mate the user creates just re-grounds normally instead.
+    if (id == m_groundedBody) m_groundedBody = -1;
+
     int idx = findBodyIndex(id);
     if (idx >= 0) {
         // Stash metadata before erasing so a later putBody with the same id
@@ -54,7 +71,16 @@ void Document::removeBody(int id) {
     }
 }
 
-void Document::updateBody(int id, const TopoDS_Shape& shape) {
+void Document::updateBody(int id, const TopoDS_Shape& shape, bool fromMateSolve) {
+    if (!fromMateSolve) {
+        m_mateBases.erase(id);
+        // A sketch whose body just changed must re-base too, or the next solve
+        // rewrites its plane from a stale one.
+        for (auto it = m_sketches.begin(); it != m_sketches.end(); ++it)
+            if (it->sketch && it->sketch->getSourceBody() == id)
+                m_mateSketchPlanes.erase(it->id);
+    }
+
     m_bodyLedgers.erase(id);  // producing op re-publishes after
     m_bodyFaceIds.erase(id);  // same lifecycle (stale lineage is worse than none)
     int idx = findBodyIndex(id);
@@ -73,7 +99,7 @@ void Document::putBody(int id, const TopoDS_Shape& shape, const std::string& nam
     // a non-existent body was serialized into a project's history.
     if (id < 0) {
         std::fprintf(stderr,
-                     "[doc] putBody id=%d — rejected (negative id).\n", id);
+                     "[doc] putBody id=%d - rejected (negative id).\n", id);
         return;
     }
     int idx = findBodyIndex(id);
@@ -110,7 +136,7 @@ const TopoDS_Shape& Document::getBody(int id) const {
     if (idx < 0) {
         // Record where this came from. Most callers guard this throw on
         // purpose (a body legitimately may be gone), so nothing is printed
-        // here — the frame firewall in Application::run() renders the trace
+        // here - the frame firewall in Application::run() renders the trace
         // only if the throw escapes, which is the case that is always a bug.
         materializr::captureThrowTrace();
         throw std::runtime_error("Body not found: " + std::to_string(id));
@@ -336,7 +362,7 @@ void Document::removePlane(int id) {
     for (auto it = m_planes.begin(); it != m_planes.end(); ++it) {
         if (it->id == id) {
             m_planes.erase(it);
-            // A hosted reference image can't outlive its plane — the plane IS
+            // A hosted reference image can't outlive its plane - the plane IS
             // its pose/selection/visibility. Drop it silently (the
             // PlaneRemovedEvent below is what the image renderer watches).
             removeRefImage(id);
@@ -579,7 +605,7 @@ int Document::axisCount() const {
 
 void Document::clear() {
     // Announce each entity's removal before wiping the lists. Subscribers keep
-    // caches keyed off these events — the plugin Plane/Axis renderers only
+    // caches keyed off these events - the plugin Plane/Axis renderers only
     // rebuild when a removal flips their dirty flag, and the TShape-keyed
     // selection caches evict on BodyRemovedEvent. Clearing silently left ghost
     // construction planes/axes rendered (but unclickable) after File → Close
@@ -607,6 +633,15 @@ void Document::clear() {
     m_nextAxisId = 1;
     m_nextSketchId = 1;
     m_nextFolderId = 1;
+    // Mates and their base geometry belong to the document that owned them.
+    // Leaving them across a File>Open resolved the previous project's mates
+    // against the new document's bodies, because body ids restart at 1.
+    m_mates.clear();
+    m_mateBases.clear();
+    m_mateSketchPlanes.clear();
+    m_mateSolveError.clear();
+    m_nextMateId = 1;
+    m_groundedBody = -1;
 }
 
 // ---- Folders ---------------------------------------------------------------
@@ -672,7 +707,7 @@ void Document::setFolderColor(int folderId, const glm::vec3& color) {
     int idx = findFolderIndex(folderId);
     if (idx < 0) return;
     m_folders[idx].color = color;
-    // Cascade to members — overwrites their colour. Re-customisable per body
+    // Cascade to members - overwrites their colour. Re-customisable per body
     // afterwards (per-body picker still works as before).
     for (auto& b : m_bodies) {
         if (b.folderId == folderId) b.color = color;
@@ -727,4 +762,31 @@ int Document::findBodyIndex(int id) const {
         }
     }
     return -1;
+}
+
+int Document::addMate(const materializr::Mate& m) {
+    materializr::Mate copy = m;
+    copy.id = m_nextMateId++;
+    m_mates.push_back(copy);
+    return copy.id;
+}
+
+void Document::removeMate(int id) {
+    for (size_t i = 0; i < m_mates.size(); ++i) {
+        if (m_mates[i].id != id) continue;
+        // Drop the base with the mate: leaving it means a later mate on the
+        // same body measures against geometry from before this one existed.
+        // clearMateBase also drops any sketch-plane base for this body - see
+        // its doc comment in Document.h for why that pairing matters here.
+        clearMateBase(m_mates[i].bodyB);
+        m_mates.erase(m_mates.begin() + i);
+        return;
+    }
+}
+
+void Document::clearMateBase(int bodyId) {
+    m_mateBases.erase(bodyId);
+    for (auto it = m_sketches.begin(); it != m_sketches.end(); ++it)
+        if (it->sketch && it->sketch->getSourceBody() == bodyId)
+            m_mateSketchPlanes.erase(it->id);
 }

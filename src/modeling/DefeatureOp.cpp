@@ -30,7 +30,7 @@ bool DefeatureOp::execute(Document& doc) {
 
         if (df.HasErrors() || df.Shape().IsNull()) {
             std::fprintf(stderr,
-                "[Defeature] couldn't remove %d face(s) — the surrounding faces "
+                "[Defeature] couldn't remove %d face(s) - the surrounding faces "
                 "can't be extended to close the gap.\n", m_faces.Size());
             return false;
         }
@@ -62,7 +62,7 @@ std::string DefeatureOp::description() const {
 }
 
 void DefeatureOp::renderProperties() {
-    ImGui::Text("%s", materializr::tr("Repair Geometry"));
+    ImGui::Text("%s", materializr::tr("Remove Feature"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Faces removed: %d"), m_faces.Size());
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
@@ -70,7 +70,7 @@ void DefeatureOp::renderProperties() {
 
 std::string DefeatureOp::serializeParams() const {
     // Removed faces persist as ordinal indices into the INPUT shape's canonical
-    // face map (see SubShapeIndex.h) — same scheme as Shell/Fillet/Chamfer.
+    // face map (see SubShapeIndex.h) - same scheme as Shell/Fillet/Chamfer.
     std::string blob;
     char buf[64];
     std::snprintf(buf, sizeof(buf), "body=%d", m_bodyId);
@@ -111,7 +111,7 @@ bool DefeatureOp::rehydrateFromReload(const ReloadState& state, Document& /*doc*
     if (m_previousShape.IsNull()) return false;
 
     // Re-resolve the removed faces against the reloaded input shape. No saved
-    // indices means nothing to remove — decline so it falls back to a baked op
+    // indices means nothing to remove - decline so it falls back to a baked op
     // rather than silently doing nothing.
     m_faces.Clear();
     if (m_faceIndices.empty()) return false;

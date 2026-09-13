@@ -36,6 +36,8 @@ inline void resetFpuForOcct() {
 #endif
 
 #include "app/Application.h"
+#include "app/DeferredTasks.h"
+#include "app/DrawThrottle.h"
 #include "i18n.h"
 #include "app/Window.h"
 #include "ui_scale.h"
@@ -46,6 +48,8 @@ inline void resetFpuForOcct() {
 #include "viewport/SketchRenderer.h"
 #include "viewport/ViewCube.h"
 #include "viewport/Picker.h"
+#include "viewport/MeshWorker.h"
+#include "viewport/ParallelMesh.h"
 #include "viewport/Gizmo.h"
 #include "viewport/SelectionHighlight.h"
 #include "viewport/BoxSelect.h"
@@ -54,6 +58,7 @@ inline void resetFpuForOcct() {
 #include "viewport/BackgroundRenderer.h"
 #include "core/Document.h"
 #include "core/History.h"
+#include "core/SketchCascadeTarget.h"
 #include "core/SelectionManager.h"
 #include "ui/Toolbar.h"
 #include "ui/TouchIcons.h"
@@ -75,6 +80,7 @@ inline void resetFpuForOcct() {
 #include "ui/MeasureTool.h"
 #include "ui/UpdateChecker.h"
 #include "modeling/Sketch.h"
+#include "viewport/GridScale.h"
 #include "modeling/ThreadOp.h"
 #include "modeling/CopyOp.h"
 #include "modeling/SketchSolver.h"
@@ -89,6 +95,9 @@ inline void resetFpuForOcct() {
 #include "modeling/CombineSketchesOp.h"
 #include "modeling/DuplicateSketchOp.h"
 #include "modeling/TransformOp.h"
+#include "core/Units.h"
+#include "core/LengthEdit.h"
+#include "modeling/FilletProbe.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
 #include "modeling/ChamferOp.h"
@@ -114,6 +123,7 @@ inline void resetFpuForOcct() {
 #include "core/EventBus.h"
 #include "core/Events.h"
 #include "core/Verbose.h"
+#include "core/UiKeepAlive.h"
 #include "core/ThrowTrace.h"
 #include "core/NumParse.h"
 #include "plugin/PluginContext.h"
@@ -146,6 +156,7 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <Poly_Triangle.hxx>
 #include <TopLoc_Location.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include "core/MeshParams.h"
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepGProp_Face.hxx>
@@ -174,6 +185,9 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <windows.h> // GetModuleFileNameA for exe dir (font path lookup)
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h> // _NSGetExecutablePath for exe dir (no /proc on macOS)
+#elif defined(__FreeBSD__)
+#include <sys/types.h>
+#include <sys/sysctl.h> // sysctl(KERN_PROC_PATHNAME) for exe dir (no /proc by default on FreeBSD)
 #else
 #include <unistd.h>  // readlink for resolving /proc/self/exe → exe dir (font path lookup)
 #endif
@@ -181,14 +195,14 @@ namespace materializr { namespace force_link { void linkAll(); } }
 namespace materializr {
 
 namespace {
-// Tapping the tool that is ALREADY active puts it down — back to Select/Move —
+// Tapping the tool that is ALREADY active puts it down - back to Select/Move -
 // instead of re-arming the same tool. Every sketch tool button used to call
 // setMode() unconditionally, so a drawing tool could only be left by explicitly
 // reaching for Select; on a tablet, where the reflex is to tap the lit button
 // again, that reads as the tool being stuck (#71).
 //
 // setMode() already cancels any in-progress shape and clears the placement
-// state, so a second tap on a half-drawn shape abandons it — the same outcome
+// state, so a second tap on a half-drawn shape abandons it - the same outcome
 // as Escape, which is what that reflex expects.
 void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
     if (!tool) return;
@@ -198,6 +212,17 @@ void toggleSketchMode(SketchTool* tool, SketchToolMode mode) {
 
 Application::Application(bool safeMode, float uiScaleOverride)
     : m_safeMode(safeMode), m_cliUiScale(uiScaleOverride > 0.0f ? uiScaleOverride : 0.0f) {
+#ifdef MZR_PARALLEL_MESH_TESTING
+    // The load integration test supplies GL sinks and never opens a window.
+    m_sessions.push_back(std::make_unique<ProjectSession>());
+    m_document = m_sessions[0]->document.get();
+    m_history = m_sessions[0]->history.get();
+    m_selection = m_sessions[0]->selection.get();
+    m_shapeRenderer = std::make_unique<ShapeRenderer>();
+    m_edgeRenderer = std::make_unique<EdgeRenderer>();
+    m_viewport = std::make_unique<Viewport>();
+    return;
+#endif
     // The CLI scale has to reach the constructor: the INITIAL window size is
     // scaled by it, and setUiScaleOverride() below runs too late for that.
     m_window = std::make_unique<Window>(1600, 900, "Materializr", m_cliUiScale);
@@ -231,7 +256,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
     // Document body lifecycle → renderer slot lifecycle. Without this, a
     // PushPullOp::undo (firing on every preview frame during a drag) deletes
     // the body from Document but the renderer keeps drawing its stale mesh
-    // — the "banding" effect of N overlapping preview prisms accumulating
+    // - the "banding" effect of N overlapping preview prisms accumulating
     // during a drag. We drop the slot immediately rather than waiting for
     // someone to put the id in m_dirtyBodyIds (nothing does, today).
     m_eventBus->subscribe<materializr::BodyRemovedEvent>(
@@ -239,19 +264,28 @@ Application::Application(bool safeMode, float uiScaleOverride)
             if (e.bodyId < 0) return;
             if (m_shapeRenderer) m_shapeRenderer->removeBody(e.bodyId);
             if (m_edgeRenderer)  m_edgeRenderer->removeBody(e.bodyId);
-            // Also clear any pending dirty entry — the body is gone, no
-            // point asking the partial rebuild to revisit it.
-            m_dirtyBodyIds.erase(e.bodyId);
+            // KEEP the id dirty rather than clearing it. "The body is gone,
+            // no point revisiting" is wrong when it comes back: a history
+            // replay removes a body and re-adds it with the IDENTICAL shape
+            // (ReplayOp::applyDelta), and there is no added-body event to
+            // re-adopt it - BodyRemovedEvent is the only body lifecycle event
+            // there is. A BodyChangeScope around that action sees the same
+            // shape before and after and marks nothing, so the slot dropped
+            // above would never come back and the body would be invisible
+            // until the next full rebuild. The partial rebuild handles both
+            // outcomes: it removes an id whose body is really gone, and
+            // re-meshes one that returned.
+            markBodyDirty(e.bodyId);
         });
 
-    // Construction-plane lifecycle is handled by ConstructionPlanePlugin —
+    // Construction-plane lifecycle is handled by ConstructionPlanePlugin -
     // it owns the PlaneRenderer, subscribes to PlaneAdded/Removed/Changed
     // events, and registers a render pass. Application is hands-off.
 
     // NOTE: we explicitly do NOT cascade off generic HistoryStepEvents. That
     // event also fires for in-flight push/pull preview undos (every drag
     // frame), and those undo-landings on a SketchEditOp would otherwise
-    // re-cascade every frame — piling up duplicate bodies. The cascade is
+    // re-cascade every frame - piling up duplicate bodies. The cascade is
     // driven solely by the explicit SketchEditedEvent above, published by
     // PropertiesPanel (live constraint editor) and HistoryPanel's Apply
     // Changes button. Other history mutators stay out of it.
@@ -264,6 +298,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_sketchTool = std::make_unique<SketchTool>();
     m_viewCube = std::make_unique<ViewCube>();
     m_picker = std::make_unique<Picker>();
+    m_meshWorker = std::make_unique<MeshWorker>();
     m_gizmo = std::make_unique<Gizmo>();
     m_selectionHighlight = std::make_unique<SelectionHighlight>();
     m_boxSelect = std::make_unique<BoxSelect>();
@@ -298,7 +333,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
         AppSettings early = SettingsIO::load(SettingsIO::defaultPath());
         materializr::setTouchMode(early.touchMode);
         // Desktop UI scale must be known before the font atlas is baked in
-        // initImGui() below — it's applied at the window level so uiScale()
+        // initImGui() below - it's applied at the window level so uiScale()
         // (which fonts + style read) returns it.
         //
         // Linux HiDPI is DETECTED now, not asked (Window::linuxAutoUiScale);
@@ -351,6 +386,9 @@ Application::Application(bool safeMode, float uiScaleOverride)
     m_propertiesPanel->setAttachRefImageCallback(
         [this](int planeId) { attachRefImageToPlane(planeId); });
     m_propertiesPanel->setDirtyCallback([this]() { markDirty(); });
+    m_itemsPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
+    m_historyPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
+    m_propertiesPanel->setBodyDirtyCallback([this](int id) { markBodyDirty(id); });
     m_propertiesPanel->setLinkInfoCallback(
         [this](bool isBody, int id) { return linkHintFor(isBody, id); });
     m_propertiesPanel->setRelinkCallback(
@@ -369,13 +407,14 @@ Application::Application(bool safeMode, float uiScaleOverride)
             });
             if (m_eventBus && m_activeSketchId >= 0)
                 m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-            m_meshesDirty = true;
+            // The bodies this sketch drives are re-derived (and marked) by
+            // cascadeFromSketchEdit on the event above; no full rebuild.
             markDirty();
         });
     // If no system file-dialog helper exists, Open/Save/Export would otherwise
-    // do nothing at all — surface that instead of failing silently.
+    // do nothing at all - surface that instead of failing silently.
     FileDialogs::setUnavailableNotifier([this]() {
-        showToast("No file-dialog program found \xE2\x80\x94 install 'zenity' "
+        showToast("No file-dialog program found - install 'zenity' "
                   "(GNOME) or 'kdialog' (KDE) to Open / Save / Export.", 8.0);
     });
 
@@ -396,7 +435,7 @@ Application::Application(bool safeMode, float uiScaleOverride)
 
 void Application::wireDocumentConsumers() {
     // Everything that caches a Document/History/SelectionManager pointer.
-    // Re-run in full on every adoptSession — a consumer missing from this
+    // Re-run in full on every adoptSession - a consumer missing from this
     // list keeps operating on the PREVIOUS tab's project, which is the
     // defining bug class of the tabs design. Guards allow the ctor to call
     // this before every panel exists.
@@ -428,10 +467,11 @@ void Application::wireDocumentConsumers() {
         m_propertiesPanel->setDocument(m_document);
         m_propertiesPanel->setSelectionManager(m_selection);
         m_propertiesPanel->setEventBus(m_eventBus.get());
+        m_propertiesPanel->setPluginContext(m_pluginContext.get());
     }
     // Core services of THIS session bind to the app-wide event bus, and the
     // per-History callbacks are re-applied (they are instance state, not
-    // type state — a fresh session's History has none).
+    // type state - a fresh session's History has none).
     m_document->setEventBus(m_eventBus.get());
     m_history->setEventBus(m_eventBus.get());
     m_selection->setEventBus(m_eventBus.get());
@@ -439,18 +479,20 @@ void Application::wireDocumentConsumers() {
     if (m_pluginContext && m_viewport)
         m_pluginContext->_bind(m_document, m_history, m_selection,
                                m_eventBus.get(), &m_viewport->getCamera(),
-                               &m_meshesDirty, &m_inSketchMode);
+                               &m_meshesDirty, &m_inSketchMode,
+                               &m_aiSettings,
+                               [this]{ markDirty(); });
     // Tell everything that caches DOCUMENT-DERIVED state to rebuild. The
     // setters above only reach consumers Application knows by name; plugins
     // own their render caches in file-local statics this function cannot
     // see, and no Plane/Axis/Body event fires on a tab switch (nothing about
-    // either document changed — the ACTIVE one did). Publishing here means a
+    // either document changed - the ACTIVE one did). Publishing here means a
     // future plugin gets the invalidation for free by subscribing.
     if (m_eventBus) m_eventBus->publish(ActiveDocumentChangedEvent{});
 }
 
 void Application::stashActiveSessionState() {
-    // The mirrors themselves (m_document & co) need no stashing — they
+    // The mirrors themselves (m_document & co) need no stashing - they
     // already point into the active session; only the working copies do.
     if (m_activeSession >= m_sessions.size()) return;
     ProjectSession& out = *m_sessions[m_activeSession];
@@ -475,7 +517,7 @@ void Application::applySessionState(size_t idx) {
     if (m_viewport) {
         m_viewport->getCamera() = in.camera;
         // The copied camera carries the aspect of wherever it was stashed
-        // (or a fresh session's default) — squished/stretched rendering
+        // (or a fresh session's default) - squished/stretched rendering
         // until a real resize without this (Steve's "taller and skinnier
         // mug", 2026-07-28).
         m_viewport->syncCameraAspect();
@@ -486,7 +528,7 @@ void Application::applySessionState(size_t idx) {
 void Application::adoptSession(size_t idx) {
     if (idx >= m_sessions.size()) return;
     // Snapshot the outgoing project's recovery file while its state is still
-    // live in the mirrors — inactive tabs don't tick the debounced writer.
+    // live in the mirrors - inactive tabs don't tick the debounced writer.
     if (idx != m_activeSession) writeSessionRecoveryNow();
     stashActiveSessionState();
     applySessionState(idx);
@@ -494,7 +536,7 @@ void Application::adoptSession(size_t idx) {
 
 int Application::nextFreeRecoveryIndex() const {
     // Smallest index no open session uses. Recycling keeps every snapshot
-    // inside the startup scan's namespace — the bound that makes recovery
+    // inside the startup scan's namespace - the bound that makes recovery
     // files impossible to orphan by de-linking (Steve's concern, 2026-07-28).
     // Past that many simultaneous tabs the last index is shared, best-effort.
     for (int i = 0; i < materializr::kMaxSessionsPerSlot; ++i) {
@@ -507,7 +549,7 @@ int Application::nextFreeRecoveryIndex() const {
 }
 
 bool Application::activeSessionIsScratch() const {
-    // An untouched empty workspace — the tab a fresh launch or a "+" click
+    // An untouched empty workspace - the tab a fresh launch or a "+" click
     // leaves you in. Anything else (a named project, geometry, sketches, or
     // history) counts as occupied, so opening a project from the home screen
     // gets its own tab rather than replacing what's there.
@@ -540,10 +582,10 @@ bool Application::focusExistingProject(const std::string& ref) {
     // "Untitled". Checked BEFORE the switch, while it is still active.
     const bool dropScratch = activeSessionIsScratch();
     const size_t scratchIdx = m_activeSession;
-    if (!switchToSession(idx)) return false;   // refused (mid-sketch) — it toasted
+    if (!switchToSession(idx)) return false;   // refused (mid-sketch) - it toasted
     if (dropScratch && m_sessions.size() > 1) closeSession(scratchIdx);
     if (m_landingPage) m_landingPage->setVisible(false);
-    showToast("That project is already open \xE2\x80\x94 switched to its tab.");
+    showToast("That project is already open - switched to its tab.");
     return true;
 }
 
@@ -554,11 +596,66 @@ size_t Application::createSession() {
     return m_sessions.size() - 1;
 }
 
+void Application::runPendingHeavyTasks() {
+    // Deferred tasks normally run at the top of the next frame. When the
+    // session that owns them is about to be swapped out or destroyed they
+    // have to run HERE instead: dropping one discards an operation the user
+    // confirmed, and letting one outlive its session would apply it to the
+    // wrong project or to a destroyed one. Each is taken out of the queue
+    // before it runs, so a throwing task costs only itself.
+    // Deliberately NOT touching the heavy-task counters or the progress label:
+    // the watchdog reads them only when m_heavyRanThisIter is set, which this
+    // runner never sets, and zeroing them mid-iteration made it report a
+    // main-loop task that HAD pumped as "0 UI pumps" - an invented stall.
+    while (auto task = m_deferredHeavy.takeNext()) {
+        // Per task, exactly as the main-loop runner does it. A frame of GL
+        // leaves SSE flush-to-zero set and an OCCT boolean run that way can
+        // silently degenerate; this runner is reached after a full frame of
+        // GL, the progress reporter's own restore is suppressed on the
+        // mid-frame path, and an earlier task that throws mid-paint skips
+        // that restore entirely - so resetting once above the loop would
+        // leave the second task exposed.
+        resetFpuForOcct();
+        // A stale cancel latch must not make this task give up before it
+        // starts; the main-loop runner resets it per task for the same reason.
+        m_progressCancelled = false;
+        // Whether a frame was ALREADY open decides who owns one that is open
+        // after a throw. Drained mid-frame (a commit queued by a panel, then a
+        // tab click in the same frame) the open frame belongs to the layout
+        // code still running above this call, and ending it here would tear
+        // the frame out from under it. Drained between frames - a session
+        // restore - the progress reporter opens a frame of its own, and a
+        // throw would strand both it and the flag, silencing the progress
+        // window for every heavy task afterwards.
+        const bool frameWasOpen = m_imguiFrameOpen;
+        auto unwindOwnFrame = [this, frameWasOpen]() {
+            if (frameWasOpen || !m_imguiFrameOpen) return;   // not ours to end
+            if (ImGuiContext* g = ImGui::GetCurrentContext()) {
+                if (g->WithinFrameScope) {
+                    try { ImGui::EndFrame(); } catch (...) {}
+                }
+            }
+            m_imguiFrameOpen = false;
+        };
+        try {
+            task();
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[Session] a confirmed operation failed while "
+                                 "draining before a tab switch: %s\n", e.what());
+            unwindOwnFrame();
+        } catch (...) {
+            std::fprintf(stderr, "[Session] a confirmed operation failed while "
+                                 "draining before a tab switch.\n");
+            unwindOwnFrame();
+        }
+    }
+}
+
 bool Application::switchToSession(size_t idx) {
     if (idx >= m_sessions.size()) return false;
     if (idx == m_activeSession) return true;
     // Mid-gesture state doesn't survive a document swap. A half-drawn sketch
-    // is the user's call to resolve — refuse loudly rather than silently
+    // is the user's call to resolve - refuse loudly rather than silently
     // committing or dropping it. A thread re-cut owns its body until it
     // lands; blocking on it here would freeze the switch for seconds.
     if (m_inSketchMode) {
@@ -570,6 +667,16 @@ bool Application::switchToSession(size_t idx) {
         return false;
     }
     cancelAllInteractivePreviews();
+    // Anything queued for the between-frames slot belongs to the OUTGOING
+    // session and captured its document and history. Run it now, before the
+    // swap.
+    runPendingHeavyTasks();
+    // A drained task can itself open or close tabs (restoreSessionTabs does),
+    // so the index this switch was asked for may no longer mean what it did.
+    // The two outcomes are not the same answer: a vanished index is a refusal,
+    // but "already active" is success, and callers close the tab on a refusal.
+    if (idx >= m_sessions.size()) return false;
+    if (idx == m_activeSession) return true;
     // The section cut is view state aimed at the OUTGOING project's geometry;
     // carried across it would carve the wrong model. Off on every switch.
     m_sectionEnabled = false;
@@ -578,10 +685,11 @@ bool Application::switchToSession(size_t idx) {
     adoptSession(idx);
 
     // Shelve the outgoing tab's GPU meshes on EVERY platform (uniform by
-    // design — an invisible tab holds no GPU memory) and queue the incoming
+    // design - an invisible tab holds no GPU memory) and queue the incoming
     // tab's full rebuild for the next frame. Same discipline as project load.
     if (m_shapeRenderer) m_shapeRenderer->clear();
     if (m_edgeRenderer) m_edgeRenderer->clear();
+    m_meshDispatch = materializr::MeshDispatch{}; // body ids restart with the document
     if (m_selectionHighlight) m_selectionHighlight->clearCaches();
     if (m_sketchRenderer) m_sketchRenderer->clearCache();
     m_dirtyBodyIds.clear();
@@ -591,10 +699,23 @@ bool Application::switchToSession(size_t idx) {
 
 void Application::closeSession(size_t idx) {
     if (idx >= m_sessions.size()) return;
+    const bool wasActive = (idx == m_activeSession);
+    // The preview cancel reaches the closing session through m_document, which
+    // keeps pointing into it until applySessionState repoints it below, so it
+    // must happen BEFORE the erase (doing it after dereferenced freed memory).
+    //
+    // Queued tasks are DROPPED here rather than run: every producer targets
+    // the document this close is about to destroy, so running them would be a
+    // silent multi-second freeze whose result is thrown away a line later.
+    // The operation is held in a shared_ptr, so clearing releases it.
+    // switchToSession is the case that must actually run them.
+    if (wasActive) {
+        cancelAllInteractivePreviews();
+        m_deferredHeavy.clear();
+    }
     // The closing tab's snapshot is no longer unfinished work, and its
     // recovery index returns to the pool by virtue of the session vanishing.
     materializr::clearProjectRecovery(m_sessions[idx]->recoveryIndex);
-    const bool wasActive = (idx == m_activeSession);
     m_sessions.erase(m_sessions.begin() + static_cast<long>(idx));
     bool closedLast = false;
     if (m_sessions.empty()) {
@@ -603,20 +724,21 @@ void Application::closeSession(size_t idx) {
         closedLast = true;
     }
     if (wasActive) {
-        // No stash — the outgoing session is gone. Apply a neighbor and run
-        // the same GPU-shelving discipline as a normal switch.
-        cancelAllInteractivePreviews();
+        // No stash - the outgoing session is gone. Apply a neighbor and run
+        // the same GPU-shelving discipline as a normal switch. (The preview
+        // cancel happened above, while its document was still alive.)
         m_sectionEnabled = false;
         m_sectionDirty = true;
         applySessionState(std::min(idx, m_sessions.size() - 1));
         if (m_shapeRenderer) m_shapeRenderer->clear();
         if (m_edgeRenderer) m_edgeRenderer->clear();
+        m_meshDispatch = materializr::MeshDispatch{};
         if (m_selectionHighlight) m_selectionHighlight->clearCaches();
         if (m_sketchRenderer) m_sketchRenderer->clearCache();
         m_dirtyBodyIds.clear();
         m_meshesDirty = true;
-        // An intentional close — clean, or dirty-and-discarded through the
-        // prompt — with no other project open lands on the HOME PAGE, not in
+        // An intentional close - clean, or dirty-and-discarded through the
+        // prompt - with no other project open lands on the HOME PAGE, not in
         // a bare untitled workspace (Steve, 2026-07-28). With other tabs
         // still open, the neighbor takes over instead, browser-style.
         if (closedLast) showLandingPage(/*fromStartup=*/true);
@@ -628,14 +750,23 @@ void Application::closeSession(size_t idx) {
 }
 
 Application::~Application() {
+    // The testing constructor's early return (above) never calls initAll(),
+    // but m_plugins itself is populated by static registration regardless -
+    // shutdownAll() would still call every plugin's shutdown() with no
+    // matching init(). Guarded the same way shutdownImGui() below already
+    // is for the same reason.
+#ifndef MZR_PARALLEL_MESH_TESTING
     PluginRegistry::instance().shutdownAll();
+#endif
     m_backgroundRenderer.reset();
     m_edgeRenderer.reset();
     m_sketchRenderer.reset();
     m_shapeRenderer.reset();
     m_grid.reset();
     m_viewport.reset();
+#ifndef MZR_PARALLEL_MESH_TESTING
     shutdownImGui();
+#endif
 }
 
 static const char* s_defaultLayout = R"([Window][WindowOverViewport_11111111]
@@ -702,7 +833,7 @@ DockSpace       ID=0x08BD597D Window=0x1BBC0F80 Pos=0,19 Size=1600,881 Split=X
 // splits grow (the central viewport shrinks to compensate); heights and the
 // 1600×881 canvas are unchanged. At scale ≤ 1 this returns s_defaultLayout
 // verbatim. Panel growth is capped at 2× so an extreme --ui-scale can't squash
-// the viewport. Note: only applied when writing a FRESH layout (no imgui.ini) —
+// the viewport. Note: only applied when writing a FRESH layout (no imgui.ini) -
 // an existing saved layout keeps its widths.
 static std::string defaultLayoutScaled(float scale) {
     if (scale <= 1.01f) return s_defaultLayout;
@@ -739,7 +870,7 @@ static std::string defaultLayoutScaled(float scale) {
 }
 
 void Application::resetLayout() {
-    // Restore the default panel arrangement live (no restart) — the recovery
+    // Restore the default panel arrangement live (no restart) - the recovery
     // for a panel dragged off-screen or a docking mess, and it re-applies the
     // DPI-scaled widths so a scale change takes proper effect too. Loading a
     // full ini string into ImGui rebuilds every window's dock assignment; we
@@ -753,7 +884,7 @@ void Application::resetLayout() {
 // Where to read/write imgui.ini. On Linux we keep the relative "imgui.ini" path
 // (the AppImage runs from a user-writable cwd, which is the existing behaviour
 // the user prefers). On Windows the exe usually launches from Program Files,
-// which is read-only without admin — the write would silently fail and ImGui
+// which is read-only without admin - the write would silently fail and ImGui
 // would fall back to its tiny "everything stacked at (0,0)" defaults. Anchor
 // the file under %APPDATA% there so it's both writable and per-user.
 static std::string s_imguiIniPath;
@@ -773,7 +904,7 @@ static const char* computeImguiIniPath() {
     s_imguiIniPath = base + "\\imgui.ini";
 #elif defined(MZ_IOS)
     // cwd is the read-only .app bundle (iosInitRuntime chdirs there for the
-    // asset lookups) — a relative path would silently never save the layout.
+    // asset lookups) - a relative path would silently never save the layout.
     // Anchor next to the settings ($HOME -> <container>/Library, see
     // ios_platform.mm).
     if (const char* home = std::getenv("HOME"); home && *home) {
@@ -796,7 +927,7 @@ static const char* computeImguiIniPath() {
 //   3. <exe>/../assets/fonts/             (dev: binary in build/)
 //   4. <exe>/assets/fonts/                (Windows portable zip: assets next to exe)
 //   5. <cwd>/assets/fonts/                (dev: launched from repo root)
-// Returns "" when the font isn't found anywhere — callers degrade gracefully.
+// Returns "" when the font isn't found anywhere - callers degrade gracefully.
 std::string Application::resolveBundledFont(const std::string& fname) const {
     char exePath[4096];
     std::string exeDir;
@@ -809,10 +940,18 @@ std::string Application::resolveBundledFont(const std::string& fname) const {
         if (slash != std::string::npos) exeDir = p.substr(0, slash);
     }
 #elif defined(__APPLE__)
-    // No /proc on macOS — ask dyld for the executable path. The buffer is sized
+    // No /proc on macOS - ask dyld for the executable path. The buffer is sized
     // generously; _NSGetExecutablePath fills it and NUL-terminates on success.
     uint32_t n = sizeof(exePath);
     if (_NSGetExecutablePath(exePath, &n) == 0) {
+        std::string p(exePath);
+        auto slash = p.find_last_of('/');
+        if (slash != std::string::npos) exeDir = p.substr(0, slash);
+    }
+#elif defined(__FreeBSD__)
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
+    size_t len = sizeof(exePath);
+    if (sysctl(mib, 4, exePath, &len, nullptr, 0) == 0) {
         std::string p(exePath);
         auto slash = p.find_last_of('/');
         if (slash != std::string::npos) exeDir = p.substr(0, slash);
@@ -883,13 +1022,13 @@ void Application::initImGui() {
     // the same chord to its window-cycling overlay by default, so both fired
     // on one press: the project switched AND the dock-window ring came up.
     // Claim the key by clearing ImGui's binding rather than leaving two
-    // handlers racing — panel focus is a click away, project tabs are not.
+    // handlers racing - panel focus is a click away, project tabs are not.
     if (ImGuiContext* gc = ImGui::GetCurrentContext()) {
         gc->ConfigNavWindowingKeyNext = ImGuiKey_None;
         gc->ConfigNavWindowingKeyPrev = ImGuiKey_None;
     }
     // loadAppSettings() ran before the ImGui context existed, so its
-    // applyAppSettings couldn't reach io yet — push the loaded double-click
+    // applyAppSettings couldn't reach io yet - push the loaded double-click
     // window now that there's a context.
     io.MouseDoubleClickTime = m_doubleClickTime;
 
@@ -919,7 +1058,7 @@ void Application::initImGui() {
         // resize against is only a couple px wide (even ×uiScale), so grabbing
         // it on a touchscreen is a near-miss; widen it and add a general touch
         // hit-padding so window borders / grips are reachable too. (Kept modest
-        // — TouchExtraPadding grows ALL reactive boxes, so overgrowing it makes
+        // - TouchExtraPadding grows ALL reactive boxes, so overgrowing it makes
         // overlapping widgets fight for the touch.)
         style.DockingSeparatorSize = 12.0f;
         style.TouchExtraPadding = ImVec2(8.0f, 8.0f);
@@ -932,7 +1071,7 @@ void Application::initImGui() {
         io.ConfigWindowsMoveFromTitleBarOnly = true;
     }
 
-    // Swap ImGui's default ProggyClean for JetBrains Mono — slashed zero,
+    // Swap ImGui's default ProggyClean for JetBrains Mono - slashed zero,
     // distinct 0/8/B/6, designed for engineering UIs. resolveBundledFont() tries
     // the AppImage, macOS .app Resources/, dev-build, and cwd layouts (see its
     // candidate list). Falls through to the bundled default if the TTF isn't
@@ -954,7 +1093,7 @@ void Application::initImGui() {
         // Merge the Iconoir glyphs (PUA E000..) into the text font so any
         // string can inline an ICON_IC_* / MZ_ICON_* macro (im-touch shell
         // chrome; later the tool catalogue). Merging only works onto an
-        // already-added font, so skip when JetBrains Mono itself is missing —
+        // already-added font, so skip when JetBrains Mono itself is missing -
         // icons then render as '?' rather than bricking the atlas.
         std::string icons = resolveBundledFont(FONT_ICON_FILE_NAME_IC);
         if (fnt && !icons.empty()) {
@@ -1015,7 +1154,7 @@ void Application::initRenderers() {
         std::fprintf(stderr, "Failed to initialize section view\n");
     }
     // Plugin-provided render passes (e.g. ConstructionPlanePlugin's plane
-    // renderer). Each pass declares its own initialize() callback — run them
+    // renderer). Each pass declares its own initialize() callback - run them
     // on the GL thread now, before the first frame, so the plugin can compile
     // shaders / allocate GL resources.
     for (auto& pass : materializr::PluginRegistry::instance().renderPasses()) {
@@ -1025,7 +1164,7 @@ void Application::initRenderers() {
         }
     }
 
-    // Create a demo box so there's something to see (a 20 mm cube) — but only
+    // Create a demo box so there's something to see (a 20 mm cube) - but only
     // on a truly empty launch. If loadAppSettings already auto-opened the
     // user's last project, the document is populated and dropping the demo
     // box in on top would surprise them.
@@ -1035,8 +1174,8 @@ void Application::initRenderers() {
         m_meshesDirty = true;
     }
 
-    // Frame whatever the document holds — the demo box on a fresh launch, or
-    // the auto-opened project's bodies — so nothing is clipped by the default
+    // Frame whatever the document holds - the demo box on a fresh launch, or
+    // the auto-opened project's bodies - so nothing is clipped by the default
     // camera distance.
     try {
         Bnd_Box bbox;
@@ -1061,7 +1200,7 @@ void Application::setupCommands() {
 
 void Application::showThreadsLastToast() {
     // Fallback only: the normal path REFLOWS the op beneath the Thread step
-    // (History::pushOperation) — this fires when that reflow can't land.
+    // (History::pushOperation) - this fires when that reflow can't land.
     m_toastText = "Couldn't reorder this change beneath the Thread step. "
                   "Delete the Thread step, make the change, then re-thread.";
     m_toastExpiry = ImGui::GetTime() + 5.0;
@@ -1078,7 +1217,7 @@ void Application::renderTransientToast() {
     ImGuiViewport* vp = ImGui::GetMainViewport();
     // 80px clears classic's menu bar and modern's tab strip. im-touch floats
     // taller chrome over the viewport and scales it by uiScale, so on a tablet
-    // the fixed offset is not guaranteed to clear it — take whichever is lower.
+    // the fixed offset is not guaranteed to clear it - take whichever is lower.
     const float y = std::max(vp->WorkPos.y + 80.0f,
                              materializr::viewportTopChromeBottom() + 12.0f);
     ImGui::SetNextWindowPos(
@@ -1102,7 +1241,7 @@ void Application::renderTransientToast() {
 }
 
 // Renderer-only slot for a controller's ghost preview (Push/Pull's tinted tool
-// volume). Negative and far outside any real body id — there is no Document
+// volume). Negative and far outside any real body id - there is no Document
 // body behind it, and nothing else may claim it.
 static constexpr int kGhostPreviewId = -7777;
 
@@ -1111,10 +1250,14 @@ materializr::IopContext Application::iopContext() {
         *m_document, *m_history, *m_selection,
         [this] { m_meshesDirty = true; },
         [this](float f, const char* l) { return renderProgressFrame(f, l); },
-        [this](std::function<void()> t) { m_deferredHeavyTask = std::move(t); },
-        // im-touch hosts the Confirm/Cancel as corner FABs — the scaffold
+        // Commits are APPENDED to the queue: dropping an already-queued one
+        // would lose an operation the user confirmed. (The startup auto-open
+        // and session-restore paths call replaceAll instead, because only one
+        // of them owns the startup load.)
+        [this](std::function<void()> t) { m_deferredHeavy.queue(std::move(t)); },
+        // im-touch hosts the Confirm/Cancel as corner FABs - the scaffold
         // then skips its in-panel buttons (Enter/Esc still work).
-        // NOTE: aggregate init, so this list must stay in DECLARATION order —
+        // NOTE: aggregate init, so this list must stay in DECLARATION order -
         // cornerCommitUi sits before toast/refuseMesh in IopContext.
         imTouchLayout() && !m_inSketchMode,
         [this](const char* m) { showToast(m); },
@@ -1133,7 +1276,10 @@ materializr::IopContext Application::iopContext() {
         },
         [this](const TopoDS_Shape& tool, bool cut) {
             if (!m_shapeRenderer) return;
-            int slot = m_shapeRenderer->setBodyMesh(kGhostPreviewId, tool);
+            // The ghost is a translucent tint rebuilt every drag frame: mesh
+            // it with a coarse angular deflection. On a 300-hole profile the
+            // default 0.2 rad took 46 ms per frame, 0.5 rad takes 26.
+            int slot = m_shapeRenderer->setBodyMesh(kGhostPreviewId, tool, 0.1f, 0.5f);
             if (slot < 0) return;
             m_shapeRenderer->setSubtractPreview(slot, cut);
             m_shapeRenderer->setColor(slot, glm::vec3(0.55f, 0.75f, 1.0f));
@@ -1143,11 +1289,18 @@ materializr::IopContext Application::iopContext() {
             for (const auto& [sid, bodies] : sketchBodyLinks())
                 if (bodies.count(bid)) return sid;
             return -1;
+        },
+        [this](const std::vector<float>& verts, bool cut) {
+            if (!m_shapeRenderer) return;
+            int slot = m_shapeRenderer->setBodyVertices(kGhostPreviewId, verts);
+            if (slot < 0) return;
+            m_shapeRenderer->setSubtractPreview(slot, cut);
+            m_shapeRenderer->setColor(slot, glm::vec3(0.55f, 0.75f, 1.0f));
         }};
 }
 
 // Seed the placement rotation (shared by the Text and SVG tools) so the
-// artwork reads upright in the CURRENT view — some sketch planes have
+// artwork reads upright in the CURRENT view - some sketch planes have
 // their 2D axes pointing away from the camera's right/up, and unrotated
 // placements came out sideways or upside-down. Projects the camera's
 // right vector into sketch space and snaps to the nearest 90°.
@@ -1188,7 +1341,7 @@ void Application::cancelAllInteractivePreviews() {
     if (m_ppCtl.active()) cancelPushPull();
     if (m_patternActive) cancelPattern();
     if (m_threadActive) cancelThread();
-    // Fillet / chamfer preview — was missing from this list, so switching
+    // Fillet / chamfer preview - was missing from this list, so switching
     // tools mid-fillet left the previewed body stuck (the new op then
     // snapshotted it as its "pre-state" and Cancel restored the preview,
     // not the original). (Steve: "switching tools, the action that was
@@ -1196,7 +1349,7 @@ void Application::cancelAllInteractivePreviews() {
     if (m_edgeCtl.active()) cancelInteractiveEdgeOp();
 }
 
-// im-touch corner-hosted action commit UI — see Application.h. The EdgeOp
+// im-touch corner-hosted action commit UI - see Application.h. The EdgeOp
 // preview isn't in anyInteractivePreviewActive(), so it's listed explicitly
 // here (same set cancelAllInteractivePreviews covers).
 bool Application::imTouchActionCorner() const {
@@ -1238,6 +1391,11 @@ void Application::beginIop(materializr::InteractiveOpController& ctl) {
 }
 
 void Application::beginFrame() {
+    // A frame is open from here until endFrame. renderProgressFrame reads this
+    // to refuse to nest one (see its comment): a heavy task drained mid-frame
+    // by runPendingHeavyTasks would otherwise open a second frame inside this
+    // one.
+    m_imguiFrameOpen = true;
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     // Touch tooltip timeout. A finger lift leaves io.MousePos parked on the last
@@ -1271,7 +1429,7 @@ void Application::beginFrame() {
             // way BeginViewportSideBar claims the menu bar's strip: the main
             // menu bar positions itself from GetBuildWorkRect() this frame,
             // and WorkPos/WorkSize (dockspace, status bar) pick it up next
-            // frame — ImGui's normal one-frame work-rect latency.
+            // frame - ImGui's normal one-frame work-rect latency.
             ImGuiViewportP* vp = static_cast<ImGuiViewportP*>(ImGui::GetMainViewport());
             vp->BuildWorkInsetMin.x += l;
             vp->BuildWorkInsetMin.y += t;
@@ -1307,18 +1465,29 @@ void Application::endFrame() {
     // Raise/dismiss the soft keyboard to match the focused text field. The
     // retap pulse: a tap this frame with a field STILL focused afterwards
     // (a defocusing tap would have dropped WantTextInput by now) re-raises a
-    // keyboard the OS dismissed behind the latch's back — see updateTextInput.
+    // keyboard the OS dismissed behind the latch's back - see updateTextInput.
     if (m_window) {
         ImGuiIO& kio = ImGui::GetIO();
         const bool want = kio.WantTextInput || m_softKeyboardForced;
         m_window->updateTextInput(want,
                                   kio.MouseClicked[0] && kio.WantTextInput);
     }
+    m_imguiFrameOpen = false;
+}
+
+// Fold the stretch since the previous pump into the heavy task's worst gap.
+void Application::noteHeavyPumpGap() {
+    const auto now = std::chrono::steady_clock::now();
+    const int gap = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - m_lastHeavyPump).count());
+    if (gap > m_heavyWorstGapMs) m_heavyWorstGapMs = gap;
+    m_lastHeavyPump = now;
 }
 
 void Application::renderSplashFrame(const char* status) {
     // One self-contained frame shown while startup blocks (auto-opening a
-    // big project takes ~10 s on slower machines — this used to be a blank
+    // big project takes ~10 s on slower machines - this used to be a blank
     // window). Polls events so the WM doesn't flag us unresponsive.
     if (!m_window) return;
 
@@ -1406,12 +1575,23 @@ void Application::drawIndeterminateBar() {
 
 bool Application::renderProgressFrame(float fraction, const char* label) {
     // Called from inside a long op's execute() via the progress reporter. Must
-    // run BETWEEN main frames (the op is deferred to m_deferredHeavyTask), so a
+    // run BETWEEN main frames (the op is deferred to m_deferredHeavy), so a
     // fresh ImGui frame here is safe. fraction==0 marks a new op → reset the
     // cancel latch so a prior cancel doesn't carry over. (fraction<0 is the
     // indeterminate spinner and must NOT reset it.)
+    //
+    // The exception is a task drained mid-frame by runPendingHeavyTasks (a
+    // commit queued by a panel, then a tab click in the same frame): a frame
+    // is already open, and beginFrame() below would nest one. The op runs
+    // without a window there; returning false says "not cancelled" so it
+    // still completes. Keyed on the frame, not on the drain, because
+    // restoreSessionTabs drains BETWEEN frames, where a window is wanted.
+    // The same predicate the load loop consults (progressFrameWouldDraw), read
+    // before the reset below so the two can never disagree about a draw.
+    const bool would = progressFrameWouldDraw(fraction);
+    if (m_imguiFrameOpen) return false;
     if (fraction == 0.0f) m_progressCancelled = false;
-    if (m_progressCancelled || !m_window) return m_progressCancelled;
+    if (!would) return m_progressCancelled;
 
     m_window->pollEvents();
     int fbw = 0, fbh = 0;
@@ -1448,60 +1628,40 @@ bool Application::renderProgressFrame(float fraction, const char* label) {
     ImGui::End();
     endFrame();
     m_window->swapBuffers();
-    // GL just ran — restore the FPU mode before control returns to the OCCT op.
+    // GL just ran - restore the FPU mode before control returns to the OCCT op.
     resetFpuForOcct();
     return m_progressCancelled;
+}
+
+bool Application::progressFrameWouldDraw(float fraction) const {
+    // Mirrors the early returns above. One side effect differs, headlessly
+    // only: without a window the reporter would still clear the latch at
+    // fraction 0, whereas the loop skips the call; loadProjectWithProgress
+    // clears the latch itself before the first frame, so nothing depends on it.
+    return materializr::progressFrameWouldDraw(m_imguiFrameOpen, m_window != nullptr,
+                                               m_progressCancelled, fraction);
 }
 
 // renderDockspace() and the shared menu-item lists live in
 // src/app/layout/LayoutCommon.cpp; the per-layout chrome is under
 // src/app/layout/{classic,modern,imtouch}/.
 
-// The sketch id a just-undone/redone step edited, or -1. Covers BOTH step
-// kinds that mutate a sketch: SketchTransformOp (stores its id) and
-// SketchEditOp (stores the live sketch pointer — matched back to its id).
-// Needed so undo/redo OUTSIDE sketch mode re-cascades the driven body; the
-// step's own undo only reverts sketch geometry, the cascade did the body.
-int Application::sketchIdEditedBy(const Operation* op) const {
-    if (!op || !m_document) return -1;
-    if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op))
-        return st->getSketchId();
-    if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
-        auto target = se->getTarget();
-        if (target)
-            for (int sid : m_document->getAllSketchIds())
-                if (m_document->getSketch(sid) == target) return sid;
-    }
-    return -1;
-}
-
 void Application::undoWithCascade() {
-    const Operation* undone = m_history->getStep(m_history->currentStep());
+    auto trackBodies = trackBodyChanges();
     m_history->undo(*m_document);
-    // Keep a sketch-driven body in sync after undoing a sketch edit (the
-    // SketchEditOp undo only reverts geometry; the cascade did the body).
-    // Mirrors the keyboard Ctrl+Z path.
-    int cascaded = -1;
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
-        cascadeFromSketchEdit(m_activeSketchId);
-        cascaded = m_activeSketchId;
-    }
-    if (int sid = sketchIdEditedBy(undone); sid >= 0 && sid != cascaded)
-        cascadeFromSketchEdit(sid);
-    m_meshesDirty = true;
+    const int idx = m_history->lastUndoneStep();
+    const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+    materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document,
+        activeSketchId, [&](int sid) { cascadeFromSketchEdit(sid); });
 }
 
 void Application::redoWithCascade() {
+    auto trackBodies = trackBodyChanges();
     m_history->redo(*m_document);
-    const Operation* redone = m_history->getStep(m_history->currentStep());
-    int cascaded = -1;
-    if (m_inSketchMode && m_activeSketch && m_activeSketchId >= 0) {
-        cascadeFromSketchEdit(m_activeSketchId);
-        cascaded = m_activeSketchId;
-    }
-    if (int sid = sketchIdEditedBy(redone); sid >= 0 && sid != cascaded)
-        cascadeFromSketchEdit(sid);
-    m_meshesDirty = true;
+    const int idx = m_history->lastRedoneStep();
+    const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+    materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document,
+        activeSketchId, [&](int sid) { cascadeFromSketchEdit(sid); });
 }
 
 void Application::renderSmallScreenWarning() {
@@ -1514,7 +1674,7 @@ void Application::renderSmallScreenWarning() {
     // into DisplaySize). The reference tablet sits around 893x558 and is roomy;
     // phones land well under, especially in height. Tunable constants.
     // NB: `small` is a macro in <rpcndr.h> (#define small char), reachable via
-    // <windows.h> — renamed to avoid the MSVC collision (see the `far` note in
+    // <windows.h> - renamed to avoid the MSVC collision (see the `far` note in
     // Unfold.cpp; OCCT 7.9.3 leaks these Windows macros where 8.0 doesn't).
     const bool tiny = io.DisplaySize.x < 640.0f || io.DisplaySize.y < 470.0f;
     if (!tiny) return;
@@ -1525,7 +1685,7 @@ void Application::renderSmallScreenWarning() {
     if (ImGui::BeginPopupModal("Small screen", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(uiW(440));
-        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach — a tablet or larger is strongly recommended."));
+        ImGui::TextWrapped("%s", materializr::tr("Materializr is designed for tablets and larger displays. On a small screen the panels and toolbars are cramped and some controls may be hard to reach - a tablet or larger is strongly recommended."));
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
         static bool dontShow = false;
@@ -1554,7 +1714,7 @@ void Application::loadAppSettings() {
         m_lightHeadlight          = false;
         m_lightFill               = true;
         m_msaaSamples             = 0;   // disable multisample buffers entirely
-        m_meshQuality             = 0;   // Low — coarsest tessellation
+        m_meshQuality             = 0;   // Low - coarsest tessellation
         m_autosaveEnabled         = false;
         m_autoOpenLastProject     = false;
         m_checkForUpdatesOnLaunch = false;
@@ -1575,10 +1735,10 @@ void Application::loadAppSettings() {
     if (m_autoOpenLastProject && !s.lastProjectPath.empty()) {
         // Defer to the first main-loop iteration so the load runs in the
         // between-frames slot where a loading bar can pump (and the window is
-        // already up) — otherwise the synchronous load froze startup with the
+        // already up) - otherwise the synchronous load froze startup with the
         // OS flagging "not responding".
         std::string p = s.lastProjectPath;
-        m_deferredHeavyTask = [this, p]() {
+        m_deferredHeavy.replaceAll([this, p]() {
 #if defined(__ANDROID__)
             if (p.rfind("content:", 0) == 0) {
                 // A persisted document URI (quick-save identity). Resolve it
@@ -1607,7 +1767,7 @@ void Application::loadAppSettings() {
             }
 #endif
             loadProjectWithProgress(p);
-        };
+        });
     }
 
     // Auto check for updates: hit the GitHub releases API and, if a newer
@@ -1616,7 +1776,7 @@ void Application::loadAppSettings() {
     // timeout, so the worst case here is a few seconds of startup delay on
     // a broken network. Suppressed by --safe-mode.
     if (m_checkForUpdatesOnLaunch && !m_safeMode) {
-        // Run on a worker thread — the synchronous version blocked startup for
+        // Run on a worker thread - the synchronous version blocked startup for
         // up to its 10 s network timeout ("not responding"). The main loop
         // polls m_updateCheckFuture each frame and pops the popup when it's in.
         m_updateCheckFuture = std::async(std::launch::async, [pre = m_includePrereleases]() {
@@ -1645,8 +1805,8 @@ void Application::loadAppSettings() {
             saveAppSettings();
         });
     // Welcome screen: every launch until the user becomes a Supporter.
-    // Suppressed by --safe-mode — no asking for coffee while the user is
-    // recovering from a crash — and on the VERY FIRST launch, where the
+    // Suppressed by --safe-mode - no asking for coffee while the user is
+    // recovering from a crash - and on the VERY FIRST launch, where the
     // Getting Started tour (layout picker first) owns the moment; the welcome
     // starts recurring from the second launch. Same marker the tutorial
     // plugin writes.
@@ -1664,7 +1824,7 @@ void Application::loadAppSettings() {
     // Landing page vs. session restore. "Open last project on launch" now means
     // RESTORE MY TABS: with it on, every project that was open when you quit
     // comes back in its own tab and the home screen is skipped entirely (Steve,
-    // 2026-07-28 — the setting had become dead weight once the landing page
+    // 2026-07-28 - the setting had become dead weight once the landing page
     // started superseding the old single-project auto-open, and a tab-aware
     // resume is what it should have meant all along). With it off, the landing
     // page is the start screen. Safe mode gets neither: recovery owns the
@@ -1685,21 +1845,21 @@ void Application::loadAppSettings() {
                 restore.push_back(p);
             }
             // Settings written by a build that predates tabs have no
-            // sessionPaths — fall back to the single last project.
+            // sessionPaths - fall back to the single last project.
             if (restore.empty() && !s.lastProjectPath.empty())
                 restore.push_back(s.lastProjectPath);
         }
         if (restore.empty()) {
-            m_deferredHeavyTask = nullptr;  // nothing to resume; home screen
+            m_deferredHeavy.clear();  // nothing to resume; home screen
             showLandingPage(/*fromStartup=*/true);
         } else {
             // Replaces the single-project auto-open queued above; same deferred
             // slot, so the loads run between frames with the window already up
             // and the loading bar able to pump.
             size_t active = static_cast<size_t>(s.sessionActive);
-            m_deferredHeavyTask = [this, restore, active]() {
+            m_deferredHeavy.replaceAll([this, restore, active]() {
                 restoreSessionTabs(restore, active);
-            };
+            });
         }
     }
 }
@@ -1707,7 +1867,7 @@ void Application::loadAppSettings() {
 // Reopen a previous session's tabs. The FIRST project loads into the startup
 // session (there is always exactly one, empty); each later one gets a new tab.
 // A project that no longer exists is skipped with a toast rather than aborting
-// the whole restore — a moved file should cost you that tab, not the session.
+// the whole restore - a moved file should cost you that tab, not the session.
 void Application::restoreSessionTabs(const std::vector<std::string>& paths,
                                      size_t activeIndex) {
     if (paths.empty()) return;
@@ -1720,7 +1880,7 @@ void Application::restoreSessionTabs(const std::vector<std::string>& paths,
         }
         bool ok = false;
 #if defined(MZ_MOBILE)
-        // A persisted SAF document URI, not a filesystem path — resolve it
+        // A persisted SAF document URI, not a filesystem path - resolve it
         // through the grant first, then restore the URI as the live identity
         // so quick-save still writes back to the real document. A backup copy
         // (original gone) leaves the tab unlinked, same rule as Open Recent.
@@ -1740,7 +1900,7 @@ void Application::restoreSessionTabs(const std::vector<std::string>& paths,
 #endif
         {
             loadProjectWithProgress(paths[i]);
-            // loadProject* leaves m_currentProjectPath empty on failure —
+            // loadProject* leaves m_currentProjectPath empty on failure -
             // that's the only signal it reports.
             ok = !m_currentProjectPath.empty();
         }
@@ -1806,6 +1966,7 @@ AppSettings Application::currentSettings() const {
     s.touchMode = m_touchMode;
     s.uiLayout = m_uiLayout;
     s.language = m_language;
+    s.displayUnit = m_displayUnit;
     s.imTouchTree = m_imTouchTree;
     s.imTouchTimeline = m_imTouchTimeline;
     s.touchRightTab = m_touchRightTab;
@@ -1819,6 +1980,7 @@ AppSettings Application::currentSettings() const {
     s.autosaveIntervalSec = static_cast<int>(m_autosaveIntervalSec);
     s.invertCubeDrag = m_invertCubeDrag;
     s.doubleClickTimeSec = m_doubleClickTime;
+    s.filletProbeSeconds = m_filletProbeSeconds;
     s.lightAmbient = m_lightAmbient;
     s.lightHeadlight = m_lightHeadlight;
     s.lightFill = m_lightFill;
@@ -1855,10 +2017,19 @@ AppSettings Application::currentSettings() const {
     s.sessionActive = static_cast<int>(m_activeSession);
     s.lastFileDir = materializr::FileDialogs::getLastDir();
     s.checkForUpdatesOnLaunch = m_checkForUpdatesOnLaunch;
+    s.ai = m_aiSettings;
     s.includePrereleases = m_includePrereleases;
     s.supporter = m_supporter;
     s.snapToGrid = m_snapToGrid;
-    s.sketchGridStep = m_sketchGridStep;
+    // Stored as the DISPLAY NUMBER, not millimetres. The step is chosen from
+    // presets labelled 0.1 / 0.5 / 1 / 10, and "1" means one of whatever unit
+    // is showing. Saved as millimetres, picking "1" under feet wrote 304.8 -
+    // or, from before the presets converted, wrote 1 and reloaded as a 1 mm
+    // grid inside a 40 ft view: 12192 lines, which the renderer fades to
+    // nothing, so the grid simply vanished. What persists is this BASE; the
+    // step the sketch actually draws and snaps to is the base scaled by zoom
+    // (Application.h m_effectiveGridStepMm), and only the base round-trips.
+    s.sketchGridStep = static_cast<float>(materializr::toDisplay(m_sketchGridStep));
     // Mirror the live sketch-tool inference level back into the saved settings
     // so cycling the toolbar Full→Reduced→Off button persists across launches.
     s.inferenceLevel = m_sketchTool
@@ -1870,7 +2041,7 @@ AppSettings Application::currentSettings() const {
     return s;
 }
 
-// Push a settings struct onto the live members. Preferences only — session
+// Push a settings struct onto the live members. Preferences only - session
 // state (lastProjectPath) and one-shot startup actions (auto-open, update
 // check) are deliberately not handled here; loadAppSettings/importSettings
 // layer those on top as appropriate. Camera buttons land on both the active
@@ -1883,13 +2054,14 @@ void Application::applyAppSettings(const AppSettings& s) {
     // reads a consistent value within the run.
     materializr::setTouchMode(s.touchMode);
     m_touchMode = s.touchMode;   // staged value for the Settings dialog
-    m_uiLayout = s.uiLayout;     // interface layout — live, no restart needed
-    // UI language — also live. -1 means the user has never chosen, which the
+    m_uiLayout = s.uiLayout;     // interface layout - live, no restart needed
+    // UI language - also live. -1 means the user has never chosen, which the
     // setup wizard turns into its opening question; until then, English.
     m_language = s.language;
     setLanguage((s.language > 0 && s.language < languageCount())
                     ? static_cast<Lang>(s.language)
                     : Lang::English);
+    applyDisplayUnitChange(s.displayUnit);
     m_imTouchTree = s.imTouchTree;
     m_imTouchTimeline = s.imTouchTimeline;
     m_showFps = s.showFps;
@@ -1903,7 +2075,7 @@ void Application::applyAppSettings(const AppSettings& s) {
     // Camera button bindings are honoured on every platform. Android defaults to
     // trackpad mode (AppSettings sets orbit/pan = Left there) so one-finger touch
     // orbits out of the box, but an attached mouse/trackpad can be rebound via the
-    // Settings dialog and the choice persists — touch pan/zoom stays on two-finger
+    // Settings dialog and the choice persists - touch pan/zoom stays on two-finger
     // gestures regardless, and sketch-mode drawing still overrides orbit.
     m_orbitButton = s.orbitButton;
     m_panButton = s.panButton;
@@ -1917,6 +2089,10 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_doubleClickTime = s.doubleClickTimeSec;
     if (ImGui::GetCurrentContext())
         ImGui::GetIO().MouseDoubleClickTime = m_doubleClickTime;
+    m_filletProbeSeconds = s.filletProbeSeconds;
+    // The only bound on an uninterruptible OCCT blend, so it must reach the
+    // probe on every apply - not just at construction.
+    materializr::fillet::setProbeBudget(m_filletProbeSeconds);
     m_lightAmbient = s.lightAmbient;
     m_lightHeadlight = s.lightHeadlight;
     m_lightFill = s.lightFill;
@@ -1941,10 +2117,13 @@ void Application::applyAppSettings(const AppSettings& s) {
     m_autoOpenLastProject = s.autoOpenLastProject;
     m_recentProjects = s.recentProjects;
     m_checkForUpdatesOnLaunch = s.checkForUpdatesOnLaunch;
+    m_aiSettings = s.ai;
     m_includePrereleases = s.includePrereleases;
     m_supporter = s.supporter;
     m_snapToGrid = s.snapToGrid;
-    m_sketchGridStep = s.sketchGridStep;
+    // Display number -> millimetres. Safe here because the display unit is
+    // applied above (applyDisplayUnitChange) before this runs.
+    m_sketchGridStep = static_cast<float>(materializr::toMm(s.sketchGridStep));
     m_showInferenceToolbarToggle = s.showInferenceToolbarToggle;
     m_stlImportAccuracy = s.stlImportAccuracy;
     m_meshShowWireframe = s.meshShowWireframe;
@@ -1962,13 +2141,15 @@ void Application::applyAppSettings(const AppSettings& s) {
     // values right away rather than waiting for the first frame's sync.
     if (m_toolbar) {
         m_toolbar->setSnapToGrid(s.snapToGrid);
-        m_toolbar->setGridStep(s.sketchGridStep);
+        m_toolbar->setGridStep(m_sketchGridStep);   // millimetres, not the stored number
         m_toolbar->setShowInferenceToggle(s.showInferenceToolbarToggle);
     }
 }
 
 void Application::saveAppSettings() {
+#ifndef MZR_PARALLEL_MESH_TESTING
     SettingsIO::save(SettingsIO::defaultPath(), currentSettings());
+#endif
 }
 
 void Application::exportSettings() {
@@ -1997,7 +2178,13 @@ void Application::importSettings() {
             // Apply the imported preferences live, then persist them to the
             // regular settings file so they survive the next launch. Theme is
             // applied explicitly since applyAppSettings only stages it.
+            // AI settings are session-local and excluded from the portable
+            // import/export flow entirely - SettingsIO::importJson strips them to
+            // defaults (so a shared backup can't leak/inject an API key), but that
+            // must not wipe the user's OWN live AI config on an ordinary import.
+            AppSettings::AiSettings savedAiSettings = m_aiSettings;
             applyAppSettings(s);
+            m_aiSettings = savedAiSettings;
             m_themeManager->apply();
             m_orbitButton = m_settingsOrbitButton; // commit staged camera buttons
             m_panButton = m_settingsPanButton;
@@ -2019,7 +2206,7 @@ void Application::handleToolAction(int action) {
         // this Y-up world: XY = Top, XZ = Front, YZ = Right. gp_Ax3(origin, normal,
         // xDir); YDirection (the camera up) = normal × xDir.
         // For the explicit base-plane buttons we prime the camera with the
-        // canonical Top / Front / Right "up" first — without it, alignCamera
+        // canonical Top / Front / Right "up" first - without it, alignCamera
         // ToActiveSketch's continuity-preservation logic snaps the up vector
         // to whichever in-plane axis happened to project from the previous
         // view (e.g. world +X), making XY / XZ visually indistinguishable
@@ -2057,13 +2244,13 @@ void Application::handleToolAction(int action) {
             // leave sketch mode. Drops every line / circle / arc / etc. the
             // user drew, plus any in-progress placement state.
             if (m_inSketchMode && m_history && m_sketchTool) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_sketchTool->onCancel(); // clear m_isPlacing etc.
                 while (m_history->currentStep() > m_sketchEntryHistoryStep &&
                        m_history->canUndo()) {
                     m_history->undo(*m_document);
                 }
                 m_sketchEntryHistoryStep = -1;
-                m_meshesDirty = true;
                 // After undo'ing everything we did since entry, also remove
                 // the sketch from the document if it ended up empty.
                 if (m_activeSketch && m_activeSketch->elementCount() == 0 &&
@@ -2071,7 +2258,7 @@ void Application::handleToolAction(int action) {
                     m_document->removeSketch(m_activeSketchId);
                 }
             }
-            // Use the same exit path the close-without-saving flow uses —
+            // Use the same exit path the close-without-saving flow uses -
             // leaves the camera where it is and clears sketch state.
             if (m_inSketchMode) exitSketchMode();
             break;
@@ -2097,11 +2284,11 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::ExtrudeSketch: {
-            // "Extrude From" — always creates a new body (Push/Pull is the
+            // "Extrude From" - always creates a new body (Push/Pull is the
             // modify-in-place tool). Priority: selected region(s) > whole
             // sketch > face silhouette. The region branch is what makes a
             // single letter of a text sketch (or the circle inside a
-            // rectangle) extrudable on its own — clicking a region selects
+            // rectangle) extrudable on its own - clicking a region selects
             // it, so the explicit pick must win over the whole profile.
             const auto& sel = m_selection->getSelection();
             bool started = false;
@@ -2236,6 +2423,9 @@ void Application::handleToolAction(int action) {
         case ToolAction::Trim:
             if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Trim);
             break;
+        case ToolAction::SketchOffset:
+            if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Offset);
+            break;
         case ToolAction::SketchDimension:
             if (m_inSketchMode) toggleSketchMode(m_sketchTool.get(), SketchToolMode::Dimension);
             break;
@@ -2338,9 +2528,9 @@ void Application::handleToolAction(int action) {
         case ToolAction::SketchCopy: {
             if (!m_inSketchMode || !m_activeSketch || !m_sketchTool) break;
 
-            // Operate on the current sketch-element selection, or — if nothing
+            // Operate on the current sketch-element selection, or - if nothing
             // is selected (the common case when the user hasn't switched into
-            // Select mode yet) — on the whole sketch.
+            // Select mode yet) - on the whole sketch.
             std::set<int> involved;
             std::set<int> selLines;
             if (m_sketchTool->hasElementSelection()) {
@@ -2391,7 +2581,7 @@ void Application::handleToolAction(int action) {
                 }
             }
             // Record + select the duplicates. setMode FIRST, then select, so the
-            // mode switch can't clear the selection — that leaves the copies
+            // mode switch can't clear the selection - that leaves the copies
             // selected in Select mode, which auto-shows the move gizmo over them
             // so the user can drag them straight off the originals.
             std::set<int> newPointIds;
@@ -2403,7 +2593,7 @@ void Application::handleToolAction(int action) {
             if (before->getPoints().size() != after->getPoints().size() ||
                 before->getLines().size()  != after->getLines().size()) {
                 auto op = std::make_unique<SketchEditOp>(m_activeSketch, before, after);
-                m_history->pushExecuted(std::move(op));
+                m_history->pushExecuted(std::move(op), *m_document);
             }
             break;
         }
@@ -2425,7 +2615,7 @@ void Application::handleToolAction(int action) {
                                              : IL::Max;
                 m_sketchTool->setInferenceLevel(next);
                 // Persist immediately. The settings combo saves on change, but
-                // this toolbar button didn't — so a level picked here was lost on
+                // this toolbar button didn't - so a level picked here was lost on
                 // restart (Android kills the process on swipe-away, so there's no
                 // exit-save to fall back on). inferenceLevel is a saved setting.
                 saveAppSettings();
@@ -2455,9 +2645,9 @@ void Application::handleToolAction(int action) {
             break;
 
         case ToolAction::Move: {
-            // A selected face turns Move into Move Face — same verb to the user,
+            // A selected face turns Move into Move Face - same verb to the user,
             // the selection picks body-vs-face. Trigger whenever a face is in the
-            // selection (even if a hole edge / wall is the *primary* pick — those
+            // selection (even if a hole edge / wall is the *primary* pick - those
             // refine hole behavior), so the edge doesn't route us to body-move.
             bool moveFaceSel = false;
             for (const auto& e : m_selection->getSelection())
@@ -2470,7 +2660,7 @@ void Application::handleToolAction(int action) {
             // (tilt / reshape / slide). Same button, as with faces.
             if (beginMoveHoleFromEdges()) break;
             // Bodies / standalone sketches / construction planes all get the
-            // Move gizmo — the viewport gizmo-visibility block handles whichever
+            // Move gizmo - the viewport gizmo-visibility block handles whichever
             // selection type is active. SketchRegion picks count as the parent
             // sketch. For sketches the click "arms" the gizmo for the current
             // sketch id; selection-change clears the arm so the next sketch
@@ -2507,14 +2697,14 @@ void Application::handleToolAction(int action) {
         }
         case ToolAction::Rotate: {
             // A selected face turns Rotate into a face TILT (the loft engine
-            // with a rotation about the face centre — same mechanic as Move).
+            // with a rotation about the face centre - same mechanic as Move).
             {
                 bool faceSel = false;
                 for (const auto& e : m_selection->getSelection())
                     if (e.type == SelectionType::Face && !e.shape.IsNull()) { faceSel = true; break; }
                 if (faceSel) { beginMoveFace(FaceXform::Rotate); break; }
             }
-            // Axis doesn't get Rotate — an infinite line has no meaningful
+            // Axis doesn't get Rotate - an infinite line has no meaningful
             // rotation handle. Rotate is body / sketch / plane only.
             const bool isPlane =
                 m_selection->primaryType() == SelectionType::Plane;
@@ -2540,13 +2730,13 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Scale: {
-            // A selected face routes to Scale Face — the ONE face-scale tool.
+            // A selected face routes to Scale Face - the ONE face-scale tool.
             // This used to run MoveFaceOp::Scale as a separate thing, on the
             // theory that scaling the face and re-sloping the walls toward a
             // scaled copy were different operations. Measured, they are not:
             // a 20mm box top scaled to 50% gives the identical 4666.667
             // frustum either way, because MoveFaceOp::Scale IS ScaleFaceOp
-            // with the blend length at the full depth — which is already what
+            // with the blend length at the full depth - which is already what
             // ScaleFaceController defaults to. The face rails no longer offer
             // a Scale button at all; classic's shared Transform row still
             // shows one, and this is what keeps it honest.
@@ -2605,7 +2795,7 @@ void Application::handleToolAction(int action) {
             break;
         }
         case ToolAction::Thread: {
-            // Same detector as Edit Diameter, and now the same VALUE — Thread
+            // Same detector as Edit Diameter, and now the same VALUE - Thread
             // used to read the resize state's members as its input.
             const auto pick = detectCylindricalResizeCandidate();
             if (pick.ok) beginThread(pick);
@@ -2638,6 +2828,7 @@ void Application::handleToolAction(int action) {
         }
 
         case ToolAction::MergeFaces: {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             // The repair half of #81, for geometry that was ALREADY split when
             // it arrived (imported STEP) or was edited before the ops started
             // preventing new seams.
@@ -2645,7 +2836,7 @@ void Application::handleToolAction(int action) {
             // Picked faces beat picked bodies. A face selection is the user
             // saying "these two are one face", which bounds the merge to those
             // faces and lets the op try a much looser tolerance than is ever
-            // safe body-wide — the seams left on a real imported part are
+            // safe body-wide - the seams left on a real imported part are
             // near-coplanar, not exactly coplanar. With no faces picked it is
             // the conservative whole-body pass.
             if (refuseMeshSelection("Merge Faces")) break;
@@ -2678,24 +2869,24 @@ void Application::handleToolAction(int action) {
                     const char* msg = nullptr;
                     switch (why) {
                         case MergeFacesOp::Refusal::OppositeNormals:
-                            msg = "Those faces point in opposite directions \xE2\x80\x94 they "
+                            msg = "Those faces point in opposite directions - they "
                                   "lie in the same plane, but the material is on opposite "
                                   "sides, so they are different surfaces of the part rather "
                                   "than two halves of one. Merging can't join them, and "
                                   "wouldn't add material to either.";
                             break;
                         case MergeFacesOp::Refusal::NotAdjacent:
-                            msg = "Those faces don't touch \xE2\x80\x94 merging dissolves the "
+                            msg = "Those faces don't touch - merging dissolves the "
                                   "edge between two faces, and there isn't one. If a small "
                                   "step separates them, level it first, then merge.";
                             break;
                         case MergeFacesOp::Refusal::Unsafe:
                             msg = "That merge would have moved material, so it was refused "
-                                  "\xE2\x80\x94 the faces are one surface, but joining them "
+                                  "- the faces are one surface, but joining them "
                                   "would reshape the part rather than tidy it.";
                             break;
                         case MergeFacesOp::Refusal::FacesNotFound:
-                            msg = "Couldn't find those faces on the body any more \xE2\x80\x94 "
+                            msg = "Couldn't find those faces on the body any more - "
                                   "they may already have been merged.";
                             break;
                         default: break;   // NotSameSurface and friends: the tolerance text below is right
@@ -2703,7 +2894,7 @@ void Application::handleToolAction(int action) {
                     showToast(attempted == 0
                         ? "Pick two or more faces on the SAME body to merge them."
                         : (msg ? msg
-                               : "Couldn't merge those \xE2\x80\x94 they aren't close enough "
+                               : "Couldn't merge those - they aren't close enough "
                                  "to one surface, or the merge wouldn't hold together."));
                 }
             } else {
@@ -2718,15 +2909,14 @@ void Application::handleToolAction(int action) {
                 // the user at the face-picking route rather than implying the
                 // part is as merged as it can get.
                 if (merged == 0)
-                    showToast("Nothing exactly coplanar left to merge \xE2\x80\x94 pick "
+                    showToast("Nothing exactly coplanar left to merge - pick "
                               "the faces either side of a seam and try again.");
             }
-            // The picked faces are gone — they were replaced by the face they
+            // The picked faces are gone - they were replaced by the face they
             // merged into. Holding on to them would leave the highlight drawing
             // shapes the body no longer has, and hand the next op dead
             // references.
             if (merged > 0) m_selection->clear();
-            m_meshesDirty = true;
             break;
         }
 
@@ -2746,10 +2936,10 @@ void Application::handleToolAction(int action) {
                 }
             }
             if (pickedFace.IsNull()) break;
-            // Remember which body's face was clicked — the edit path uses it to
+            // Remember which body's face was clicked - the edit path uses it to
             // detect a baked feature (clicked body doesn't change after edit).
             m_edgeOpPickedBodyId = pickedBodyId;
-            // Edit the op that BEST owns the picked face — highest
+            // Edit the op that BEST owns the picked face - highest
             // ownsFaceScore (exact IsSame beats the geometric fallback), latest
             // on ties. The old first-match loop opened an earlier fuzzy
             // over-matching fillet instead of the actual chamfer under the
@@ -2774,95 +2964,88 @@ void Application::handleToolAction(int action) {
 
 void Application::handleShortcuts() {
     // A threaded thread-cut compute is in flight (its modal popup is up). Suppress
-    // shortcuts until it resolves: undo/redo/delete would mutate the document — and
-    // the worker's target body — out from under the in-flight op, whose result is
+    // shortcuts until it resolves: undo/redo/delete would mutate the document - and
+    // the worker's target body - out from under the in-flight op, whose result is
     // pushed on the main thread when the future lands.
     if (m_threadComputing) return;
 
     ImGuiIO& io = ImGui::GetIO();
 
-    // Undo/Redo — poll the hardware Ctrl state directly so it works even when
+    // Undo/Redo - poll the hardware Ctrl state directly so it works even when
     // ImGui has text input focus. Always false on Android (no modifier keys).
     bool ctrlHeld = Window::isCtrlDown();
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
+        // Also blocked while a confirmed operation is still QUEUED. A
+        // deferred commit runs between frames, and cleanup() has already
+        // cleared active() by then, so without this an undo in the same frame
+        // as Confirm pops the PREVIOUS history step and the queued operation
+        // then executes against that altered document. The window is one
+        // frame, and Confirm-then-Ctrl+Z is exactly the sequence a user
+        // hammering undo produces.
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active() &&
+            m_deferredHeavy.empty()) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             // Mid-placement Ctrl+Z cancels the IN-PROGRESS shape first (the
-            // editor convention — and Steve's muscle memory); the next
+            // editor convention - and Steve's muscle memory); the next
             // Ctrl+Z then undoes committed elements as usual.
             if (m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing()) {
                 m_sketchTool->onCancel();
             } else if (m_history->canUndo() &&
                        // In sketch mode, NEVER undo past the sketch's own edits
-                       // into the host body — rolling the body back while the
+                       // into the host body - rolling the body back while the
                        // sketch is live (and rendering against it) crashed.
                        (!m_inSketchMode ||
                         m_history->currentStep() > m_sketchEntryHistoryStep)) {
-                const Operation* undone =
-                    m_history->getStep(m_history->currentStep());
                 m_history->undo(*m_document);
-                // A sketch-mutating step (SketchTransformOp / SketchEditOp)
-                // updated its body via the cascade; re-cascade so the body
-                // follows the reverted sketch. (No-op for detached sketches —
-                // the guard in cascade returns early. In sketch mode the
-                // active-sketch branch below cascades instead.)
-                if (int sid = sketchIdEditedBy(undone);
-                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
-                    cascadeFromSketchEdit(sid);
-                // In sketch mode, the host face is the anchor for the whole
-                // sketch session — clearing the selection would drop its blue
-                // highlight even though the sketch is still active. Skip the
-                // body-selection reset (sketch-element selection inside the
-                // SketchTool is unaffected by m_selection).
+                const int idx = m_history->lastUndoneStep();
+                const Operation* undone = m_history->getStep(idx);
+                if (idx >= 0 && m_inSketchMode && m_activeSketch)
+                    m_activeSketch->pruneOrphanPoints();
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
-                } else if (m_activeSketch) {
-                    // Undoing a line restores the state to just its first-click
-                    // anchor (added before the line's history step) — a stray
-                    // point. Sweep any such orphan so undo leaves no dangling
-                    // vertex.
-                    m_activeSketch->pruneOrphanPoints();
-                    // A sketch edit's body update was applied through the cascade
-                    // (editStep) — the SketchEditOp's own undo only reverts the
-                    // sketch geometry, not the body. Re-cascade so the body follows
-                    // the now-reverted sketch instead of staying at its last shape.
-                    if (m_activeSketchId >= 0) cascadeFromSketchEdit(m_activeSketchId);
                 }
+                const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+                materializr::dispatchUndoRedoCascade(idx, undone, *m_document, activeSketchId,
+                    [&](int sid) { cascadeFromSketchEdit(sid); });
                 // The undo can remove/renumber the very entities the
-                // Dimension tool has picked or is mid-pick on — stale ids
+                // Dimension tool has picked or is mid-pick on - stale ids
                 // referencing geometry that may no longer exist. Drop them
                 // rather than let the next click resolve against ghosts.
                 if (m_inSketchMode && m_sketchTool &&
                     m_sketchTool->getMode() == SketchToolMode::Dimension) {
                     m_sketchTool->clearDimState();
                 }
-                m_meshesDirty = true;
             }
         }
     }
     if (ctrlHeld && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
-        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active()) {
+        // Also blocked while a confirmed operation is still QUEUED. A
+        // deferred commit runs between frames, and cleanup() has already
+        // cleared active() by then, so without this an undo in the same frame
+        // as Confirm pops the PREVIOUS history step and the queued operation
+        // then executes against that altered document. The window is one
+        // frame, and Confirm-then-Ctrl+Z is exactly the sequence a user
+        // hammering undo produces.
+        if (!m_edgeCtl.active() && !m_extrudeCtl.active() && !m_ppCtl.active() &&
+            m_deferredHeavy.empty()) {
             if (m_history->canRedo()) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 m_history->redo(*m_document);
-                const Operation* redone =
-                    m_history->getStep(m_history->currentStep());
+                const int idx = m_history->lastRedoneStep();
+                const Operation* redone = m_history->getStep(idx);
                 if (!m_inSketchMode) {
                     m_selection->clear();
                     m_hoveredBodyId = -1;
-                } else if (m_activeSketch && m_activeSketchId >= 0) {
-                    // Mirror of the undo path: re-sync the body to the
-                    // re-applied sketch edit.
-                    cascadeFromSketchEdit(m_activeSketchId);
                 }
-                if (int sid = sketchIdEditedBy(redone);
-                    sid >= 0 && !(m_inSketchMode && sid == m_activeSketchId))
-                    cascadeFromSketchEdit(sid);
+                const int activeSketchId = (m_inSketchMode && m_activeSketch) ? m_activeSketchId : -1;
+                materializr::dispatchUndoRedoCascade(idx, redone, *m_document, activeSketchId,
+                    [&](int sid) { cascadeFromSketchEdit(sid); });
                 // Same stale-pick hazard as the undo path above.
                 if (m_inSketchMode && m_sketchTool &&
                     m_sketchTool->getMode() == SketchToolMode::Dimension) {
                     m_sketchTool->clearDimState();
                 }
-                m_meshesDirty = true;
             }
         }
     }
@@ -2896,8 +3079,8 @@ void Application::handleShortcuts() {
                         SelectionEntry e;
                         e.type = targetType;
                         e.bodyId = bodyId;
-                        // subShapeIndex isn't strictly needed for findEntry —
-                        // it falls back to IsSame(shape) — but populating it
+                        // subShapeIndex isn't strictly needed for findEntry -
+                        // it falls back to IsSame(shape) - but populating it
                         // for faces matches what the picker does.
                         if (targetType == SelectionType::Face) e.subShapeIndex = idx;
                         e.shape = it.Current();
@@ -2925,7 +3108,7 @@ void Application::handleShortcuts() {
         exportStepFile();
     }
     // Ctrl+S = SAVE, matching what the File menu has always advertised next to
-    // "Save Project". It used to call saveProject() — the Save-As picker — so
+    // "Save Project". It used to call saveProject() - the Save-As picker - so
     // the shortcut popped a file dialog for a project that already had a file,
     // while the menu item it was printed beside saved in place (Steve,
     // 2026-07-28). saveProjectQuick falls back to the picker on its own when
@@ -2937,7 +3120,7 @@ void Application::handleShortcuts() {
         loadProject();
     }
     // Ctrl+Tab cycles the open tabs (Shift reverses). No-op with one tab, and
-    // inert while the landing page owns the screen — switching the session
+    // inert while the landing page owns the screen - switching the session
     // behind a full-screen page changes nothing visible but leaves the next
     // click acting on a tab the user can't see (Steve, 2026-07-28).
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Tab) && m_sessions.size() > 1 &&
@@ -2946,13 +3129,13 @@ void Application::handleShortcuts() {
         switchToSession(io.KeyShift ? (m_activeSession + n - 1) % n
                                     : (m_activeSession + 1) % n);
     }
-    // Plain D — Dimension tool in sketch mode (Onshape-style). Ctrl+D stays
+    // Plain D - Dimension tool in sketch mode (Onshape-style). Ctrl+D stays
     // Duplicate (handled below); text-input focus swallows the key.
     if (m_inSketchMode && m_sketchTool && !io.KeyCtrl && !io.WantTextInput &&
         ImGui::IsKeyPressed(ImGuiKey_D, false)) {
         m_sketchTool->setMode(SketchToolMode::Dimension);
     }
-    // Ctrl+D — Duplicate in place. Branches on selection type:
+    // Ctrl+D - Duplicate in place. Branches on selection type:
     //   Body   → CopyOp (full history support, undoable via Ctrl+Z)
     //   Axis   → Document::addAxis with the source's origin/direction
     //   Plane  → Document::addPlane with the source's gp_Pln
@@ -2968,6 +3151,7 @@ void Application::handleShortcuts() {
         if (!sel.empty()) {
             const auto& first = sel[0];
             if (first.type == SelectionType::Body && first.bodyId >= 0) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 int srcFolder = m_document->getBodyFolder(first.bodyId);
                 auto op = std::make_unique<CopyOp>();
                 op->setSourceBodyId(first.bodyId);
@@ -2984,7 +3168,6 @@ void Application::handleShortcuts() {
                         try { e.shape = m_document->getBody(newId); } catch (...) {}
                         m_selection->select(e);
                     }
-                    m_meshesDirty = true;
                 }
             } else if (first.type == SelectionType::Axis && first.axisId >= 0) {
                 if (const auto* a = m_document->getAxis(first.axisId)) {
@@ -3023,7 +3206,7 @@ void Application::handleShortcuts() {
                     // Re-add points first, build an id remap so derived
                     // elements (lines / circles / arcs) can reference the
                     // new point ids. Constraints carry point/line ids
-                    // too — skipped for now; deferred until id remapping
+                    // too - skipped for now; deferred until id remapping
                     // for constraints lands.
                     std::map<int, int> pmap;
                     for (const auto& p : src->getPoints())
@@ -3055,14 +3238,13 @@ void Application::handleShortcuts() {
                         m_selection->select(e);
                     }
                     markDirty();
-                    m_meshesDirty = true;
                 }
             }
-            // Face / Edge / etc.: no-op intentionally — duplicating a
+            // Face / Edge / etc.: no-op intentionally - duplicating a
             // face / edge has no clean standalone interpretation.
         }
     }
-    // Backspace during spline placement removes the last control point —
+    // Backspace during spline placement removes the last control point -
     // the natural "oops, one back" while clicking out a curve.
     if (m_inSketchMode && m_sketchTool &&
         m_sketchTool->getMode() == SketchToolMode::Spline &&
@@ -3072,7 +3254,7 @@ void Application::handleShortcuts() {
         recordSketchMutation([&] { m_sketchTool->removeLastSplinePoint(); });
     }
     // Backspace while the Text / SVG / Airfoil tool is active removes the
-    // WHOLE last stamp — re-place a misjudged logo or section without leaving
+    // WHOLE last stamp - re-place a misjudged logo or section without leaving
     // the tool. (The panels all advertise Backspace, so every stamp mode has
     // to honour it.)
     if (m_inSketchMode && m_sketchTool &&
@@ -3100,11 +3282,11 @@ void Application::handleShortcuts() {
             m_mirrorPickFace = false; // cancel "mirror across a face" mode
         } else if (m_gizmoDragging) {
             // Cancel the drag. The live preview is GPU-only (model matrices on
-            // the mesh slots — the document never moved), so reverting the
+            // the mesh slots - the document never moved), so reverting the
             // bodies is just resetting the matrices: no doc write, no remesh.
             // Sketch planes / construction planes / axes WERE live-written
             // during the drag, so restore those from their captured
-            // before-poses (the old cancel missed them — and missed every
+            // before-poses (the old cancel missed them - and missed every
             // body but the primary in a multi-drag).
             gizmoPreviewReset();
             try {
@@ -3126,7 +3308,7 @@ void Application::handleShortcuts() {
             m_sketchGizmoDragSketches.clear();
             m_planeGizmoDrag.clear();
             m_axisGizmoDrag.clear();
-        } else if (anyIopActive()) {   // push/pull included — it's in m_iops now
+        } else if (anyIopActive()) {   // push/pull included - it's in m_iops now
             for (auto* c : m_iops)
                 if (c->active()) { c->cancel(iopContext()); break; }
         } else if (false) {
@@ -3143,7 +3325,7 @@ void Application::handleShortcuts() {
             //   2nd press (or 1st press when nothing is in progress) →
             //      exit sketch mode entirely (same as Finish Sketch but
             //      without an explicit click).
-            // Dimension mode is picking entities, not "placing" a shape —
+            // Dimension mode is picking entities, not "placing" a shape -
             // isPlacing() never goes true for it, so without this branch
             // Escape here always fell straight through to exitSketchMode()
             // and SketchTool::onCancel's Dimension branch (clear picks /
@@ -3159,7 +3341,7 @@ void Application::handleShortcuts() {
             // value, staying in Dimension/idle-picking, per spec). It runs
             // during renderViewport(), which happens before this shortcut
             // handler each frame, and it clears m_dimEditingId as part of
-            // closing — so by the time we get here a naive check can no
+            // closing - so by the time we get here a naive check can no
             // longer tell the popup was even open. m_dimPopupConsumedEsc is
             // set by that render pass on any Escape seen while the popup was
             // up; consume it here and do NOTHING else, so this press closes
@@ -3178,16 +3360,14 @@ void Application::handleShortcuts() {
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_edgeCtl.active()) {
         m_edgeCtl.confirmFromKey(iopContext());
-        m_meshesDirty = true;
     }
     // Extrude has no scaffold panel (which is where the other iops catch
-    // Enter), so its Enter-to-confirm lives here — same as Move Face's.
+    // Enter), so its Enter-to-confirm lives here - same as Move Face's.
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_extrudeCtl.active()) {
         m_extrudeCtl.confirmFromKey(iopContext());
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) && m_ppCtl.active()) {
         m_ppCtl.confirmFromKey(iopContext());
-        m_meshesDirty = true;
     }
     // Move Face has no scaffold panel (which is where the other iops catch
     // Enter), so its Enter-to-confirm lives here.
@@ -3207,7 +3387,7 @@ void Application::handleShortcuts() {
     // F = Frame: zoom-fit to the current selection, or to visible bodies if
     // nothing's selected. The whole point is the user can hide everything
     // they don't care about, hit F, and have the camera snap onto the
-    // remaining part — no more pan-zoom-tilt dance to reach a small off-
+    // remaining part - no more pan-zoom-tilt dance to reach a small off-
     // origin object. Suppressed in sketch mode + while a text field has
     // focus so it doesn't fire while typing constraint values.
     if (!m_inSketchMode && !ImGui::IsAnyItemActive() &&
@@ -3220,10 +3400,11 @@ void Application::handleShortcuts() {
     // Delete still removes selected bodies / sketches through history.
     if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
         if (m_inSketchMode && m_activeSketch && m_sketchTool) {
-            // Delete the sketch-element selection only — the host body (which
+            // Delete the sketch-element selection only - the host body (which
             // stays selected to keep its face highlighted) must not get nuked.
             deleteSelectedSketchElements();
         } else if (m_selection->hasSelection()) {
+            auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
             const auto& sel = m_selection->getSelection();
             std::vector<int> bodiesToDelete;
             std::vector<int> sketchesToDelete;
@@ -3233,7 +3414,7 @@ void Application::handleShortcuts() {
                 // A selected sketch (or sketch region) deletes the whole
                 // sketch; a body/face/edge selection deletes its body;
                 // planes and axes delete directly (same as the Items
-                // panel's right-click — the Delete key used to silently
+                // panel's right-click - the Delete key used to silently
                 // ignore them).
                 if (entry.type == SelectionType::Sketch || entry.type == SelectionType::SketchRegion) {
                     if (entry.sketchId >= 0) {
@@ -3266,11 +3447,10 @@ void Application::handleShortcuts() {
             }
             m_selection->clear();
             m_hoveredBodyId = -1;
-            m_meshesDirty = true;
         }
     }
     // Gizmo mode switching. WantTextInput is true while an InputText (rename
-    // field, dimension input, etc.) has focus — letting W/E/R fire there both
+    // field, dimension input, etc.) has focus - letting W/E/R fire there both
     // switches gizmo mode AND inserts the character, which is rude.
     if (!m_inSketchMode && !io.KeyCtrl && !io.WantTextInput) {
         bool changed = false;
@@ -3288,43 +3468,125 @@ void Application::handleShortcuts() {
     }
 }
 
+void Application::landMeshes() {
+    if (!m_meshWorker) return;
+    float deflection, angularDeflection;
+    meshQualityParams(deflection, angularDeflection);
+    for (const MeshWorker::Result& r : m_meshWorker->collect()) {
+        const MeshRequest req{r.tshape, r.deflection, r.angularDeflection};
+        TopoDS_Shape cur;
+        try { cur = m_document->getBody(r.bodyId); } catch (...) {}
+        // Stale if the body was edited again or the quality changed meanwhile;
+        // the newer request owns the body now.
+        const bool current = !cur.IsNull() && cur.TShape().get() == r.tshape &&
+                             r.deflection == deflection && r.angularDeflection == angularDeflection;
+        m_meshDispatch.finished(r.bodyId, req, r.millis, current);
+        if (!current) continue;
+        const int landed = MeshWorker::land(r);
+        // The tag records the faces the mesher left bare (if any), so
+        // tessellate() reuses this mesh instead of Cleaning and re-meshing.
+        // Nothing landed (every face bare): no tag, tessellate() meshes it in
+        // the frame as before the worker existed, and the dispatch will not
+        // ask the worker for this request again.
+        if (landed > 0 && m_shapeRenderer)
+            m_shapeRenderer->notePreMeshed(cur, r.deflection, r.angularDeflection);
+        // A face selected while its body was pending was cached as "nothing
+        // to draw"; the cache keys on the face, not its triangulation.
+        if (landed > 0 && m_selectionHighlight) m_selectionHighlight->clearCaches();
+        m_dirtyBodyIds.insert(r.bodyId);
+        m_sectionDirty = true; // the section overlay sliced unmeshed faces
+    }
+}
+
+bool Application::meshAsync(int bodyId, const TopoDS_Shape& shape, float deflection,
+                            float angularDeflection) {
+    if (!m_meshWorker || m_pumpMeshProgress) return false; // load meshes behind its progress frames
+    if (m_document->isBodyMesh(bodyId)) return false;      // 100k-face imports: the copy costs more than the mesh
+    // Only when there is an old mesh to keep on screen: a body shown again
+    // after being hidden has none, and would blink absent for a worker pass.
+    if (!m_shapeRenderer->hasMeshFor(bodyId)) return false;
+    if (m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection)) return false;
+    const MeshRequest req{shape.TShape().get(), deflection, angularDeflection};
+    switch (m_meshDispatch.decide(bodyId, req)) {
+    case MeshPath::InFrame: return false;
+    case MeshPath::Pending: return true; // already in flight: keep the old mesh
+    case MeshPath::Worker: break;
+    }
+    if (!m_meshWorker->request(bodyId, shape, deflection, angularDeflection))
+        return false; // the copy failed: mesh in the frame as before
+    m_meshDispatch.requested(bodyId, req);
+    return true;
+}
+
 void Application::rebuildMeshes() {
     float deflection, angularDeflection;
     meshQualityParams(deflection, angularDeflection);
 
     // Diagnostic: a full rebuild that takes seconds on the MAIN thread is a
-    // freeze — say so, with the trigger state.
+    // freeze - say so, with the trigger state.
     const uint32_t rmStart = m_meshesDirty ? SDL_GetTicks() : 0;
     const bool rmWasFull = m_meshesDirty;
 
     if (m_meshesDirty) {
-        // Full rebuild — clear everything and re-tessellate every visible
+        // Full rebuild - clear everything and re-tessellate every visible
         // body. Used on project load, mesh-quality change, theme switch.
-        m_shapeRenderer->clear();
-        m_edgeRenderer->clear();
+        if (m_picker) m_picker->invalidate(); // meshes change under the same TShapes
+        m_shapeRenderer->retireAll();
+        m_edgeRenderer->retireAll();
         auto ids = m_document->getAllBodyIds();
         int meshN = static_cast<int>(ids.size()), meshI = 0;
+        int visible = 0, polls = 0, draws = 0;
+        double meshMs = 0.0;
+        DrawThrottle throttle;
         for (int id : ids) {
-            // During a load (deferred slot), pump a per-body progress frame so
-            // tessellating a heavy model keeps the window responsive.
+            // During a load (deferred slot), keep the window responsive: poll
+            // for EVERY body, but draw the progress frame only when the
+            // throttle allows. Each draw ends in a vsync'd swap (17 ms at
+            // 60 Hz), so drawing per body made a 145-body load take 2453 ms
+            // for ~300 ms of tessellation. The fraction-0 draw is always
+            // allowed: it is what resets the cancel latch (renderProgressFrame).
             if (m_pumpMeshProgress) {
-                renderProgressFrame(meshN > 0 ? float(meshI) / float(meshN) : -1.0f,
-                                    "Preparing view\xE2\x80\xA6");
+                const float frac = float(meshI) / float(meshN); // ids is non-empty here
+                if (pumpStep(throttle, progressFrameWouldDraw(frac),
+                             [] { return DrawThrottle::clock::now(); },
+                             [&] {
+                                 renderProgressFrame(frac, "Preparing view\xE2\x80\xA6");
+                                 return DrawThrottle::clock::now();
+                             },
+                             [&] {
+                                 if (!m_window) return;
+                                 m_window->pollEvents();
+                                 ++polls;
+                             }))
+                    ++draws;
             }
             ++meshI;
             if (id < 0) continue;        // defensive: skip bad ids
             if (!m_document->isBodyVisible(id)) continue;
             TopoDS_Shape shape;
             try { shape = m_document->getBody(id); } catch (...) { continue; }
+            ++visible;
+            if (meshAsync(id, shape, deflection, angularDeflection)) {
+                // The old mesh and edges stay on screen until the worker lands.
+                m_shapeRenderer->reclaimStale(id);
+                m_edgeRenderer->reclaimStale(id);
+                continue;
+            }
             int idx = m_shapeRenderer->setBodyMesh(id, shape, deflection,
                                                    angularDeflection);
+            if (m_shapeRenderer->lastMeshMillis() >= 0.0) {
+                meshMs += m_shapeRenderer->lastMeshMillis();
+                m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
+            }
             if (idx >= 0) {
                 m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-                if (m_extrudeCtl.active() &&
-                    m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
-                    id == m_extrudeCtl.previewBodyId()) {
-                    m_shapeRenderer->setSubtractPreview(idx, true);
-                }
+                // Set, not only raised: the slot keeps its flags across a per-body
+                // rebuild, so a tint raised in Subtract must drop when the mode
+                // changes or the preview commits.
+                m_shapeRenderer->setSubtractPreview(
+                    idx, m_extrudeCtl.active() &&
+                             m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                             id == m_extrudeCtl.previewBodyId());
             }
             // Imported meshes have a facet edge per triangle; only draw that
             // wireframe when the user wants it (clean shaded body otherwise).
@@ -3334,8 +3596,22 @@ void Application::rebuildMeshes() {
                 m_edgeRenderer->setBodyEdges(id, shape, deflection);
         }
         m_dirtyBodyIds.clear();
+        // Every visible body has been visited, so whatever the renderers still
+        // hold retired is dead: free it now rather than at the next commit.
+        m_shapeRenderer->freeRetired();
+        m_edgeRenderer->freeRetired();
         if (rmWasFull) {
             const uint32_t took = SDL_GetTicks() - rmStart;
+            // Every full rebuild reports itself: this is how the load routes
+            // without a [load-timing] line (Open Recent, the open dialog,
+            // recovery) are measured, and where a per-body draw count would
+            // expose a regression of the throttle above. bodyPolls is the
+            // loop's own count; each drawn frame polls once more inside the
+            // reporter.
+            std::fprintf(stderr, "[mesh-rebuild] bodies=%d visible=%d bodyPolls=%d "
+                                 "draws=%d ms=%u meshMs=%.1f pumped=%d\n",
+                         meshN, visible, polls, draws, took, meshMs,
+                         m_pumpMeshProgress ? 1 : 0);
             if (took > 500)
                 std::fprintf(stderr, "[Perf] full mesh rebuild took %.2fs "
                                      "on the main thread\n", took / 1000.0);
@@ -3343,7 +3619,7 @@ void Application::rebuildMeshes() {
         return;
     }
 
-    // Partial rebuild — only the bodies in m_dirtyBodyIds need new meshes.
+    // Partial rebuild - only the bodies in m_dirtyBodyIds need new meshes.
     // The other (potentially 100+) bodies are left untouched, which is the
     // whole point of this path: interactive ops like push/pull stay smooth
     // on a complex project.
@@ -3353,24 +3629,32 @@ void Application::rebuildMeshes() {
     // to iterate a snapshot.
     std::vector<int> ids(m_dirtyBodyIds.begin(), m_dirtyBodyIds.end());
     m_dirtyBodyIds.clear();
+    if (m_picker) m_picker->invalidate();
     for (int id : ids) {
         bool exists = false;
         try { (void)m_document->getBody(id); exists = true; } catch (...) {}
         if (!exists || !m_document->isBodyVisible(id)) {
             m_shapeRenderer->removeBody(id);
             m_edgeRenderer->removeBody(id);
+            if (!exists) m_meshDispatch.forget(id);
             continue;
         }
         const TopoDS_Shape& shape = m_document->getBody(id);
+        if (meshAsync(id, shape, deflection, angularDeflection))
+            continue; // the old mesh and edges keep their slots until the worker lands
         int idx = m_shapeRenderer->setBodyMesh(id, shape, deflection,
                                                angularDeflection);
+        if (m_shapeRenderer->lastMeshMillis() >= 0.0)
+            m_meshDispatch.meshedInFrame(id, m_shapeRenderer->lastMeshMillis());
         if (idx >= 0) {
             m_shapeRenderer->setColor(idx, m_document->getBodyColor(id));
-            if (m_extrudeCtl.active() &&
-                m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
-                id == m_extrudeCtl.previewBodyId()) {
-                m_shapeRenderer->setSubtractPreview(idx, true);
-            }
+            // Set, not only raised: the slot keeps its flags across a per-body
+            // rebuild, so a tint raised in Subtract must drop when the mode
+            // changes or the preview commits.
+            m_shapeRenderer->setSubtractPreview(
+                idx, m_extrudeCtl.active() &&
+                         m_extrudeCtl.mode() == ExtrudeMode::Subtract &&
+                         id == m_extrudeCtl.previewBodyId());
         }
         // See note above: skip the facet wireframe for imported meshes unless on.
         if (m_document->isBodyMesh(id) && !m_meshShowWireframe)
@@ -3394,7 +3678,7 @@ void Application::handleViewCubeAction(int action) {
 
         // Roll: rotate the camera's "up" vector around the view direction by
         // 90°. Doesn't change camera position / target, so a snapped ortho
-        // view stays snapped — just spins in place.
+        // view stays snapped - just spins in place.
         case ViewCubeAction::Home:
             // Default 3/4 isometric view (FrontTopRight). Camera offset along
             // (+1,+1,+1) so all three labelled faces (Front, Top, Right) are
@@ -3430,7 +3714,7 @@ void Application::handleViewCubeAction(int action) {
         cmax = glm::vec3(static_cast<float>(x1), static_cast<float>(y1), static_cast<float>(z1));
     }
     // An in-progress sketch isn't in the Document yet, so the body loop above
-    // can't see it. Frame it too — otherwise a ViewCube click during the very
+    // can't see it. Frame it too - otherwise a ViewCube click during the very
     // first sketch snaps to the tiny default cube instead of the drawing.
     if (m_activeSketch) {
         glm::vec3 smin, smax;
@@ -3453,7 +3737,7 @@ void Application::handleViewCubeAction(int action) {
         case ViewCubeAction::Left:   dir = {-1, 0, 0}; up = {0, 1, 0}; break;
         // Top + Bottom: the "up" direction is computed from the CURRENT
         // camera's horizontal forward so the snap respects turntable
-        // orientation — i.e. whatever was "ahead of you" in the orbiting
+        // orientation - i.e. whatever was "ahead of you" in the orbiting
         // view ends up at the top of the screen when you look straight
         // down. Without this the view always snaps to the same up
         // direction regardless of where you'd yawed to, which feels
@@ -3477,7 +3761,7 @@ void Application::handleViewCubeAction(int action) {
         case ViewCubeAction::BackBottomRight:  dir = { 1,-1,-1}; break;
         case ViewCubeAction::BackBottomLeft:   dir = {-1,-1,-1}; break;
         // Edge (two-face) views: look down the seam of two faces (one zero
-        // component) so both are visible. up stays world +Y — never parallel to
+        // component) so both are visible. up stays world +Y - never parallel to
         // an edge dir since each has a non-zero horizontal component.
         case ViewCubeAction::TopFront:     dir = { 0, 1, 1}; break;
         case ViewCubeAction::TopBack:      dir = { 0, 1,-1}; break;
@@ -3515,8 +3799,8 @@ std::string Application::projectDisplayName() const {
 //
 // m_activeSketch is a live shared_ptr the Document does not know about until
 // sketch mode ENDS (the registration in exitSketchMode). Saving straight from
-// sketch mode therefore serialised SKETCH_COUNT 0 — the geometry was simply
-// absent from the file — and the accompanying SketchEditOp step serialised with
+// sketch mode therefore serialised SKETCH_COUNT 0 - the geometry was simply
+// absent from the file - and the accompanying SketchEditOp step serialised with
 // no params, because SketchEditOp::serializeWithDocument resolves its target via
 // Document::findSketchId, which cannot resolve an unregistered pointer. The
 // result reloaded as a frozen ReplayOp that reproduces nothing. Drawing a circle
@@ -3524,7 +3808,7 @@ std::string Application::projectDisplayName() const {
 //
 // Registering here rather than force-finishing the sketch is deliberate: a save
 // should never change what the user is editing, and they stay in sketch mode.
-// exitSketchMode stays correct afterwards — its add is guarded on
+// exitSketchMode stays correct afterwards - its add is guarded on
 // m_activeSketchId < 0, so it will not add the same sketch twice, and its
 // "existing sketch emptied during this edit" branch still removes it.
 void Application::flushActiveSketchToDocument() {
@@ -3536,7 +3820,7 @@ void Application::flushActiveSketchToDocument() {
 }
 
 // Call ONLY after ProjectIO::save() reports success. The crash-recovery draft
-// is a promise "if we crash, restore this" — clearing it here, not inside
+// is a promise "if we crash, restore this" - clearing it here, not inside
 // flushActiveSketchToDocument(), means a failed/interrupted disk write still
 // leaves the draft in place to recover from. Clearing it right after the
 // in-memory Document registration (the original shape of this fix) deleted
@@ -3568,7 +3852,7 @@ void Application::saveProject() {
         [this](const std::string& chosenPath) {
             if (chosenPath.empty()) return;
             // Only commit the in-progress sketch once the user has actually
-            // confirmed a destination — flushing before the picker opened
+            // confirmed a destination - flushing before the picker opened
             // meant merely opening-then-cancelling Save As permanently
             // registered the sketch and flipped the dirty flag with no file
             // ever written.
@@ -3594,7 +3878,7 @@ void Application::saveProject() {
             if (result.success) {
 #if !defined(MZ_MOBILE)
                 // On mobile (Android SAF / iOS export sheet) `path` here is
-                // only a temp cache file — FileDialogs::poll() commits it to
+                // only a temp cache file - FileDialogs::poll() commits it to
                 // the user's actual chosen document in a SEPARATE step
                 // AFTER this callback returns (mobileCommitSave(), whose
                 // result isn't even threaded back here). Clearing the
@@ -3664,7 +3948,7 @@ void Application::saveProject() {
 
 void Application::saveProjectQuick() {
     flushActiveSketchToDocument();
-    // An explicit save expresses "keep what's committed" — captureProjectHistory
+    // An explicit save expresses "keep what's committed" - captureProjectHistory
     // cancels any live preview first, so a mid-preview save can't persist the
     // preview body and its phantom history step. (Historically that leaked and
     // crashed at least once.)
@@ -3674,7 +3958,7 @@ void Application::saveProjectQuick() {
     }
     // Android: the project identity is a content:// document URI. Write to a
     // private temp, then commit into the document through the persisted write
-    // grant — in-place overwrite, no picker, no "name (1)" copies.
+    // grant - in-place overwrite, no picker, no "name (1)" copies.
     if (m_currentProjectPath.rfind("content:", 0) == 0) {
         const char* home = std::getenv("HOME");
         std::string tmp = std::string(home ? home : ".") + "/.mz_qsave.materializr";
@@ -3739,7 +4023,7 @@ ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
     // A live preview writes the previewed geometry straight into the document
     // body every frame. Since we seed the snapshot from the current body
     // (below), an uncommitted preview would leak into the last committed step's
-    // snapshot — the shell-preview-not-cancelled leak that produced a hollow,
+    // snapshot - the shell-preview-not-cancelled leak that produced a hollow,
     // un-re-shellable body with no shell op in the history. Cancel first so the
     // capture reflects only committed operations. (Recovery opts out to avoid
     // reverting the user's in-progress drag on a background autosave tick.)
@@ -3756,6 +4040,13 @@ ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
     // Walk the steps backward, reading each op's stored before-shapes. This is
     // non-destructive (unlike undo()) and never recomputes geometry.
     std::vector<ProjectHistoryStep> steps(n);
+    // Descriptions go INTO THE FILE (ProjectIO writes them as DESC), and
+    // Operation::description() now formats lengths in the display unit. Saved
+    // under inches, a step read "Extrude 2.000 in" forever after - on any
+    // machine, whatever its unit setting - because a step that reloads as a
+    // baked ReplayOp returns the stored string verbatim. Capture in
+    // millimetres so what reaches disk is canonical and portable.
+    const materializr::ScopedUnit canonicalForFile(materializr::LengthUnit::Mm);
     for (int i = n - 1; i >= 0; --i) {
         const Operation* op = m_history->getStep(i);
         if (!op) continue;
@@ -3765,7 +4056,7 @@ ProjectHistory Application::captureProjectHistory(bool cancelPreviews) {
         steps[i].enabled = op->isEnabled();
         // SketchEditOp's params blob needs the live document to look up the
         // sketch id its m_target belongs to. Other ops use the parameterless
-        // serializeParams() — base Operation returns "" so they're a no-op.
+        // serializeParams() - base Operation returns "" so they're a no-op.
         if (auto* sk = dynamic_cast<const materializr::SketchEditOp*>(op)) {
             steps[i].params = sk->serializeWithDocument(*m_document);
         } else {
@@ -3807,7 +4098,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
 
     // Health report: count steps that reload as baked (non-editable) ReplayOps.
     // A body-affecting baked step means geometry the user can see but can't edit
-    // (e.g. frozen by an older save) — surfaced after the loop so the parametric
+    // (e.g. frozen by an older save) - surfaced after the loop so the parametric
     // state of a project is visible up front instead of discovered mid-edit.
     int bakedBodySteps = 0;     // baked steps that change/delete a body
     int bakedSketchSteps = 0;   // baked sketch-only steps (benign)
@@ -3823,7 +4114,28 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         return v;
     };
 
+    // Replaying a step RE-RUNS its geometry: on a slower machine four extrude
+    // booleans in one real project cost ~6 s each, 24 s of the 24.4 s load, all
+    // inside a single main-loop iteration. Offer the keep-alive a step count
+    // so the load shows honest progress instead of a frozen window; it decides
+    // how often that is actually worth drawing. Within a step, the ops' own
+    // OCCT progress callbacks keep it fed - see core/UiKeepAlive.h.
+    const size_t totalSteps = hist.steps.size();
+    size_t stepNo = 0;
     for (const auto& st : hist.steps) {
+        ++stepNo;
+        if (totalSteps > 1) {
+            char lbl[96];
+            std::snprintf(lbl, sizeof(lbl), "Rebuilding history - step %d of %d",
+                          static_cast<int>(stepNo), static_cast<int>(totalSteps));
+            m_heavyProgressLabel = lbl;
+            m_heavyProgressFrac =
+                static_cast<float>(stepNo - 1) / static_cast<float>(totalSteps);
+            // Through the keep-alive, NOT straight to renderProgressFrame: it
+            // is what rate-limits the drawing. A frame per step is 52 frames
+            // whether or not the machine can afford them.
+            materializr::uiKeepAlive();
+        }
         ReplayOp::BodyState before = toVec(running);
 
         // While `running` still holds the pre-step state, derive what this
@@ -3849,7 +4161,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         ReplayOp::BodyState after = toVec(running);
 
         // First, try to reconstruct a real op type from typeId + params blob
-        // — this is how reloaded steps stay editable (live-Properties panel
+        // - this is how reloaded steps stay editable (live-Properties panel
         // works on the sketch, but the History → click-step → Properties
         // path needs an actual SketchEditOp, not a ReplayOp). Falls through
         // to the generic ReplayOp path on any parse failure.
@@ -3862,7 +4174,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         // params have an empty blob, so they'd reload as baked ReplayOps and
         // silently overwrite any edit made to an UPSTREAM step (e.g. a fillet
         // feeding a union). Synthesise a params blob from the step's body diff
-        // — target = the modified body, tool/victim = the deleted body — plus
+        // - target = the modified body, tool/victim = the deleted body - plus
         // the boolean mode parsed from the saved description. New projects carry
         // real params and skip this path.
         std::string params = st.params;
@@ -3947,7 +4259,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
             op->setTimestamp(std::chrono::system_clock::now() -
                              std::chrono::hours{24});
         }
-        m_history->pushExecuted(std::move(op));
+        m_history->pushExecuted(std::move(op), *m_document);
     }
 
     // After all ops are rehydrated, the document bodies reflect their final state
@@ -3958,7 +4270,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
 
     // Retrofit generative anchors onto fillets/chamfers loaded from a project
     // that predates the feature (their saved params carry no anchor= key). Do
-    // it now, while their edges are still valid against the loaded body — the
+    // it now, while their edges are still valid against the loaded body - the
     // user's next sketch edit would otherwise break the rebind before anchors
     // could ever be captured. Source sketch is derived from the body links.
     if (m_history) {
@@ -3982,7 +4294,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
     // Health report. Two sources of non-editable geometry:
     //  • baked body-affecting STEPS (an op that didn't round-trip), and
     //  • base bodies in the INITIAL STATE that are not touched by any history
-    //    step — geometry with no construction history (truly imported or frozen).
+    //    step - geometry with no construction history (truly imported or frozen).
     //
     // A body in initialState that IS later modified by a step (common when the
     // project was saved mid-undo, causing a push/pull to lose its created-body
@@ -4005,7 +4317,7 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
     const int nonEditable = bakedBodySteps + frozenBodies;
     // Only warn about frozen geometry if the file predates version tagging
     // (no SAVED_BY line). A file that WAS saved by a versioned build is current
-    // — phantom initialState bodies in it are save-tracking artifacts, not a
+    // - phantom initialState bodies in it are save-tracking artifacts, not a
     // true format downgrade, so we must not call it "older format".
     if (nonEditable > 0 && savedByVersion.empty()) {
         const int n        = frozenBodies > 0 ? frozenBodies : bakedBodySteps;
@@ -4013,8 +4325,8 @@ void Application::rebuildHistoryFromProject(const ProjectHistory& hist,
         std::string msg =
             "This project was saved in an older format: " + std::to_string(n) + " " +
             what + " are frozen and can't be edited by value. The shapes are intact "
-            "\xE2\x80\x94 to change a baked round/chamfer, select its face and use "
-            "Repair Geometry to restore the sharp edge, then redo it. New saves "
+            "- to change a baked round/chamfer, select its face and use "
+            "Remove Feature to restore the sharp edge, then redo it. New saves "
             "won't have this.";
         showToast(msg, 9.0);
     }
@@ -4032,7 +4344,7 @@ void Application::ensureSketchSourceFace(int sketchId) {
     int bid = sk->getSourceBody();
     if (bid < 0) {
         // Severed link (a pick that failed body attribution saved
-        // sourceBody=-1): try to re-adopt — the body owning a planar face
+        // sourceBody=-1): try to re-adopt - the body owning a planar face
         // coplanar with the sketch plane is the host. Heals old files.
         bid = findBodyUnderRegionlessPlane(sk->getPlane());
         if (bid < 0) return;
@@ -4048,7 +4360,7 @@ void Application::ensureSketchSourceFace(int sketchId) {
     gp_Pnt sO = sketchPln.Location();
     gp_Dir sN = sketchPln.Axis().Direction();
 
-    // Two passes — first prefer faces that have inner wires (i.e., faces with
+    // Two passes - first prefer faces that have inner wires (i.e., faces with
     // holes) since those are usually what the user sketched on; second pass
     // accepts the first geometric match. Tolerances loose enough to survive
     // a save/load + history-replay round trip without being so loose that
@@ -4071,7 +4383,7 @@ void Application::ensureSketchSourceFace(int sketchId) {
             double dist = std::abs(d.Dot(gp_Vec(fN)));
             if (dist > 0.05) continue;
             if (requireHoles) {
-                // Walk wires — need at least one beyond the outer wire to
+                // Walk wires - need at least one beyond the outer wire to
                 // qualify as a face-with-hole.
                 TopoDS_Wire outer = BRepTools::OuterWire(f);
                 int wireCount = 0;
@@ -4092,13 +4404,14 @@ void Application::ensureSketchSourceFace(int sketchId) {
 
 // The body owning a planar face coplanar with `pln` (normals parallel,
 // origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose
-// body link was severed. First match wins — coplanar-face ambiguity across
+// body link was severed. First match wins - coplanar-face ambiguity across
 // bodies is rare and any match beats a dead link.
 int Application::findBodyUnderRegionlessPlane(const gp_Pln& pln) const {
     if (!m_document) return -1;
     const gp_Dir sN = pln.Axis().Direction();
     const gp_Pnt sO = pln.Location();
     for (int bid : m_document->getAllBodyIds()) {
+        if (m_document->isBodyMesh(bid)) continue; // reference-only, never a sketch host
         TopoDS_Shape body;
         try { body = m_document->getBody(bid); } catch (...) { continue; }
         if (body.IsNull()) continue;
@@ -4126,7 +4439,7 @@ int Application::findBodyUnderRegion(const TopoDS_Face& region,
     // sketch actually sits OVER the candidate face rather than merely sharing
     // its infinite plane. A bounding-box overlap is robust to the region being
     // centred on an existing hole (a centroid/point-in-face test would fail
-    // there, since the hole's centre is empty space — which is exactly the
+    // there, since the hole's centre is empty space - which is exactly the
     // "fill the hole" case we must support).
     Bnd_Box regionBox;
     try { BRepBndLib::Add(region, regionBox); } catch (...) { return -1; }
@@ -4134,6 +4447,7 @@ int Application::findBodyUnderRegion(const TopoDS_Face& region,
 
     for (int bid : m_document->getAllBodyIds()) {
         if (!m_document->isBodyVisible(bid)) continue;
+        if (m_document->isBodyMesh(bid)) continue; // reference-only, never a sketch host
         TopoDS_Shape body;
         try { body = m_document->getBody(bid); } catch (...) { continue; }
         if (body.IsNull()) continue;
@@ -4149,7 +4463,7 @@ int Application::findBodyUnderRegion(const TopoDS_Face& region,
             if (std::abs(sN.Dot(fN)) < 0.9999) continue;
             gp_Vec d(fPln.Location(), sO);
             if (std::abs(d.Dot(gp_Vec(fN))) > 0.05) continue;
-            // The region's footprint must overlap this face's footprint —
+            // The region's footprint must overlap this face's footprint -
             // otherwise it's a coplanar sketch sitting off to the side of the
             // body, which should stay free-floating.
             Bnd_Box faceBox;
@@ -4167,7 +4481,7 @@ bool Application::loadProjectAt(const std::string& path) {
     m_history->clear();
     m_selection->clear();
     // Every cached highlight tessellation belongs to the outgoing project's
-    // shapes — drop them (the entries pin their TShapes alive; see
+    // shapes - drop them (the entries pin their TShapes alive; see
     // SelectionHighlight::clearCaches).
     if (m_selectionHighlight) m_selectionHighlight->clearCaches();
     // Same for the static-sketch GPU buffers (keyed on the outgoing
@@ -4180,8 +4494,69 @@ bool Application::loadProjectAt(const std::string& path) {
         std::fprintf(stderr, "Load failed: %s\n", result.errorMessage.c_str());
         return false;
     }
+#if defined(MZR_PARALLEL_MESH_SUPPORTED)
+    float deflection, angularDeflection;
+    meshQualityParams(deflection, angularDeflection);
+    ParallelMeshOptions options;
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestSetup) m_parallelMeshTestSetup(options);
+#endif
+    std::vector<ParallelMeshJob> jobs;
+    for (int id : m_document->getAllBodyIds()) {
+        if (id < 0 || !m_document->isBodyVisible(id)) continue;
+        TopoDS_Shape shape;
+        try { shape = m_document->getBody(id); } catch (...) { continue; }
+        if (!m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection))
+            jobs.push_back({id, shape});
+    }
+    DrawThrottle throttle;
+    options.onTick = [&](size_t done, size_t total) {
+        if (!m_pumpMeshProgress) return;
+        const float frac = parallelMeshFraction(done, total);
+        pumpStep(throttle, progressFrameWouldDraw(frac),
+                 [] { return DrawThrottle::clock::now(); },
+                 [&] {
+                     renderProgressFrame(frac, "Preparing view\xE2\x80\xA6");
+                     return DrawThrottle::clock::now();
+                 },
+                 [&] { if (m_window) m_window->pollEvents(); });
+    };
+    const auto batch = parallelMesh(jobs, deflection, angularDeflection, options);
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestBeforeBookkeeping) m_parallelMeshTestBeforeBookkeeping(batch);
+#endif
+    const auto bookStart = std::chrono::steady_clock::now();
+    size_t pooled = 0;
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        if (batch.results[i].ok) {
+            m_shapeRenderer->notePreMeshed(jobs[i].shape, deflection, angularDeflection);
+            // Provisional: OFF under pool contention can over-predict the
+            // in-frame cost. An adopted async result replaces this estimate.
+            m_meshDispatch.meshedInFrame(jobs[i].bodyId, batch.results[i].millis);
+            ++pooled;
+        } else {
+            m_shapeRenderer->forgetPreMeshed(jobs[i].shape);
+            // Mirrors forgetPreMeshed: a failed job leaves nothing behind in
+            // either cache that could bias a later decision for this body.
+            m_meshDispatch.forget(jobs[i].bodyId);
+        }
+    }
+#ifdef MZR_PARALLEL_MESH_TESTING
+    if (m_parallelMeshTestAfterBookkeeping) m_parallelMeshTestAfterBookkeeping(batch);
+#endif
+    // fallback is 0 only when every job was pooled and succeeded; an empty
+    // job list (nothing to mesh) is not a fallback and reports 0 too.
+    const bool fellBack = !jobs.empty() &&
+                         (batch.path == ParallelMeshPath::Sequential || pooled != jobs.size());
+    std::fprintf(stderr, "[load-parmesh] jobs=%zu pooled=%zu fallback=%d reason=%s "
+                         "poolMs=%.1f scanMs=%.1f bookMs=%.1f\n",
+                 jobs.size(), pooled, fellBack ? 1 : 0,
+                 batch.reason, batch.poolMs, batch.scanMs,
+                 std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - bookStart).count());
+#endif
     rebuildHistoryFromProject(hist, result.savedByVersion);
-    // A reopened project should sit at the history tip with no redo stack — a
+    // A reopened project should sit at the history tip with no redo stack - a
     // phantom redo tail would, e.g., block autosave (which won't save below-tip).
     m_history->dropRedoTail();
     m_currentProjectPath = path;
@@ -4195,7 +4570,7 @@ bool Application::loadProjectAt(const std::string& path) {
     handleViewCubeAction(static_cast<int>(ViewCubeAction::FrontTopRight));
 
     // m_sourceFace (the TopoDS_Face the sketch was drawn on) isn't part of
-    // the project file — only the plane and sourceBodyId are. Re-derive it
+    // the project file - only the plane and sourceBodyId are. Re-derive it
     // for every loaded sketch so Sketch::buildRegions can union the host
     // face's wires (holes, fillets) into the sketch profile.
     for (int sid : m_document->getAllSketchIds()) {
@@ -4205,12 +4580,12 @@ bool Application::loadProjectAt(const std::string& path) {
     std::fprintf(stdout, "Loaded %d bodies, %d history steps from %s\n",
                  result.bodiesLoaded, static_cast<int>(hist.steps.size()),
                  path.c_str());
-    // (Plane re-sync happens automatically — ConstructionPlanePlugin's
+    // (Plane re-sync happens automatically - ConstructionPlanePlugin's
     // PlaneAddedEvent subscriber flips its own dirty flag during the
     // history replay above.)
     // Persist as the last-open project so the next launch can auto-reopen it.
     saveAppSettings();
-    // A project is on screen now — the landing page's job is done.
+    // A project is on screen now - the landing page's job is done.
     if (m_landingPage) m_landingPage->setVisible(false);
     return true;
 }
@@ -4220,25 +4595,39 @@ void Application::loadProjectWithProgress(const std::string& path) {
     auto ms = [](clock::duration d) {
         return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
     };
-    // Show something immediately so the window isn't a frozen blank.
+    // Show something immediately so the window isn't a frozen blank. Start the
+    // latch clear: a Cancel/Escape left over from an earlier op would otherwise
+    // make every progress frame below return without drawing OR pumping.
+    // Two clocks: tTotal spans the whole user-visible interval, from before
+    // the first frame; t0 starts after it, so parse+history excludes that
+    // frame and first-frame reports it. The four numbers reconcile within
+    // millisecond rounding (each interval is truncated independently).
+    auto tTotal = clock::now();
+    m_progressCancelled = false;
     renderProgressFrame(-1.0f, "Loading project\xE2\x80\xA6");
 
+    struct PumpGuard {
+        bool& flag;
+        bool previous;
+        ~PumpGuard() { flag = previous; }
+    } guard{m_pumpMeshProgress, m_pumpMeshProgress};
+    m_pumpMeshProgress = true;
     auto t0 = clock::now();
     bool ok = loadProjectAt(path);   // ProjectIO::load (BREP read) + history rebuild
     auto t1 = clock::now();
     if (ok) {
         // Tessellate up front HERE (between frames) so the per-body progress
         // frames are safe, instead of letting the first render frame block.
-        m_pumpMeshProgress = true;
         rebuildMeshes();
-        m_pumpMeshProgress = false;
         m_meshesDirty = false;
     }
     auto t2 = clock::now();
-    std::fprintf(stderr, "[load-timing] parse+history=%lld ms  tessellate=%lld ms  total=%lld ms\n",
+    std::fprintf(stderr, "[load-timing] first-frame=%lld ms  parse+history=%lld ms  "
+                         "tessellate=%lld ms  total=%lld ms\n",
+                 static_cast<long long>(ms(t0 - tTotal)),
                  static_cast<long long>(ms(t1 - t0)),
                  static_cast<long long>(ms(t2 - t1)),
-                 static_cast<long long>(ms(t2 - t0)));
+                 static_cast<long long>(ms(t2 - tTotal)));
 }
 
 void Application::addRecentProject(const std::string& ref, const std::string& name) {
@@ -4281,20 +4670,20 @@ void Application::openRecentProject(const AppSettings::RecentProject& r) {
     // which may be the vector backing the reference `r`.
     const std::string ref  = r.ref;
     const std::string name = r.name;
-    // One project, one tab. Every recent-open route lands here — the home
-    // screen's tiles, the "+" dropdown, the File menu — so the guard sits here
+    // One project, one tab. Every recent-open route lands here - the home
+    // screen's tiles, the "+" dropdown, the File menu - so the guard sits here
     // rather than at each of them.
     if (focusExistingProject(ref)) return;
     guardedOpen([this, ref, name]() {
 #if defined(MZ_MOBILE)
-        // ref is a persisted SAF content:// URI — resolve to a temp file, no picker.
+        // ref is a persisted SAF content:// URI - resolve to a temp file, no picker.
         std::string tmp = materializr::mobileOpenUri(ref);
         if (tmp.empty()) {
             showToast("Couldn't open \"" + name + "\" - access may have been revoked.");
             removeRecentProject(ref);
             return;
         }
-        // A BACKUP copy, served because the document is gone or disowned —
+        // A BACKUP copy, served because the document is gone or disowned -
         // real content, but not what that URI holds now. Keeping the URI as
         // the save target would let the next quick-save truncate a document
         // we never read (or recreate one the user deliberately deleted), so
@@ -4303,7 +4692,7 @@ void Application::openRecentProject(const AppSettings::RecentProject& r) {
         if (loadProjectAt(tmp)) {
             addRecentProject(ref, name);  // bump to front
             // The resolved temp is peekable even though the content: ref is
-            // not — harvest the embedded thumbnail into the cache so this
+            // not - harvest the embedded thumbnail into the cache so this
             // project's landing tile fills in from the next show onward.
             {
                 std::vector<uint8_t> png;
@@ -4347,7 +4736,7 @@ void Application::loadProject() {
             // because that is the first moment the file is known.
             //
             // Compare on the same IDENTITY a tab stores. On mobile that is the
-            // SAF content:// URI, not `path` — the picker hands back a cache
+            // SAF content:// URI, not `path` - the picker hands back a cache
             // temp it copied the document into, and a fresh temp per open would
             // never match anything. The URI is already readable here: the
             // poll that produced `path` only fires once the Java side has
@@ -4398,7 +4787,7 @@ void Application::closeProject() {
     // already has a path, autosave quietly before closing. Otherwise (dirty +
     // no autosave) route through the save-prompt with CloseProject intent.
     if (!isDirty()) { doCloseProject(); return; }
-    // The quiet-autosave shortcut only applies at the history tip — saving in
+    // The quiet-autosave shortcut only applies at the history tip - saving in
     // an undone state would silently drop the redo tail from the file (only
     // applied steps persist). Below the tip, fall through to the explicit
     // prompt so losing those steps is the user's call, not autosave's.
@@ -4430,6 +4819,59 @@ void Application::doCloseProject() {
 bool Application::isDirty() const {
     return (m_history && m_history->currentStep() != m_savedAtHistoryStep)
         || m_unsavedNonHistoryChanges;
+}
+
+void Application::applyDisplayUnitChange(int unit) {
+    // Clamp here too: Settings clamps on load, but the combo and any future
+    // caller should not be able to hand the table an index it cannot serve.
+    if (unit < 0 || unit >= materializr::kLengthUnitCount) unit = 0;
+    // A text field mid-edit was showing the OLD unit; letting it commit after
+    // the switch would interpret those digits in the NEW one. Drop the edit.
+    // Guarded: settings are applied before the ImGui context exists.
+    if (ImGui::GetCurrentContext()) ImGui::ClearActiveID();
+
+    // ClearActiveID drops FOCUS, and the sketch dimension field only ever
+    // grabs focus once per placement - m_sketchDimWasShown latches true on the
+    // first frame and is cleared only on commit or on leaving placement. So
+    // switching units mid-placement left that popup on screen with an input
+    // nothing could type into, and no way to finish the shape by keyboard.
+    // Whoever clears the active ID has to clear the latch that guards
+    // re-focusing, or the two disagree about whether a field is live.
+    //
+    // The buffer goes too, and not just for tidiness: it still holds digits
+    // meant as the OLD unit. Clearing the active ID stops THIS frame's commit,
+    // but the characters survive, so clicking back into the field and pressing
+    // Enter would commit them as the new unit - the exact misreading the
+    // ClearActiveID above exists to prevent.
+    m_sketchDimBuf[0] = '\0';
+    m_sketchDimValue = 0.0f;
+    m_sketchDimWasShown = false;   // re-seeds and re-grabs focus next frame
+
+    // Carry the grid step's DISPLAYED NUMBER across, not its millimetres. The
+    // step is the snap lattice and the visible grid, so leaving it at 1 mm
+    // while the view frames 40 ft draws 12192 lines (the renderer fades them
+    // to nothing: the grid vanishes) and offers a lattice 1/300th of a usable
+    // one. Working "in feet" means a grid of one foot.
+    //
+    // Safe only because SketchTool::tolStep() now caps what POINTING
+    // tolerances take from the step. Rescaling it while trim, pick, inference
+    // and hover distances derived from it directly put the trim threshold at
+    // 152 mm - see 0733a59, which reverted exactly that.
+    const auto next = static_cast<materializr::LengthUnit>(unit);
+    if (next != materializr::currentUnit() && m_sketchGridStep > 0.0f) {
+        const double shownStep = materializr::toDisplay(m_sketchGridStep);
+        materializr::setCurrentUnit(next);
+        m_sketchGridStep = static_cast<float>(materializr::toMm(shownStep));
+        if (m_toolbar)    m_toolbar->setGridStep(m_sketchGridStep);
+        // NOT m_sketchTool->setGridStep here. renderViewport is the single
+        // writer of the tool's snap lattice, because that lattice is the BASE
+        // SCALED BY ZOOM and only the viewport knows the zoom. Pushing the raw
+        // base from here would leave the cursor snapping to a lattice the grid
+        // is not drawing until the next frame corrected it.
+    } else {
+        materializr::setCurrentUnit(next);
+    }
+    m_displayUnit = unit;
 }
 
 void Application::markDirty() {
@@ -4524,7 +4966,7 @@ void Application::exportStepFile() {
         {{"STEP Files", "*.step *.stp"}},
         [this](std::string path) {
             if (path.empty()) return;
-            // Keep a STEP extension — accept either .step or .stp; append
+            // Keep a STEP extension - accept either .step or .stp; append
             // .step only when the typed name has neither.
             std::string ext = std::filesystem::path(path).extension().string();
             if (ext != ".step" && ext != ".stp") path += ".step";
@@ -4572,7 +5014,7 @@ void Application::exportBodyAsStl(int bodyId) {
         {{"STL Files", "*.stl"}},
         [shape](std::string path) {
             if (path.empty()) return;
-            // Keep the .stl extension — pfd/zenity don't force it, so a typed
+            // Keep the .stl extension - pfd/zenity don't force it, so a typed
             // name with no extension saved a valid but extensionless file
             // (mirrors the .materializr project-save enforcement).
             if (std::filesystem::path(path).extension() != ".stl")
@@ -4603,7 +5045,7 @@ void Application::exportBodiesAs(const std::vector<int>& bodyIds,
     if (!fmt) { showToast("Can't export to " + formatName + "."); return; }
 
     // A scratch document holding BAKED copies of the chosen bodies, at their
-    // real positions — that's what makes a print-in-place assembly come out
+    // real positions - that's what makes a print-in-place assembly come out
     // as one file with the parts still where they belong. shared_ptr because
     // the dialog's callback runs frames later.
     auto scratch = std::make_shared<Document>();
@@ -4615,7 +5057,7 @@ void Application::exportBodiesAs(const std::vector<int>& bodyIds,
         scratch->setBodyColor(nid, m_document->getBodyColor(id));
     }
     if (scratch->getAllBodyIds().empty()) {
-        showToast("Nothing to export — those bodies have no geometry.");
+        showToast("Nothing to export - those bodies have no geometry.");
         return;
     }
 
@@ -4686,7 +5128,7 @@ void Application::exportSketchAsSvg(int sketchId) {
         {{"SVG Files", "*.svg"}},
         [sk](std::string path) {
             if (path.empty()) return;
-            // Keep the .svg extension — the picker doesn't force it.
+            // Keep the .svg extension - the picker doesn't force it.
             if (std::filesystem::path(path).extension() != ".svg") path += ".svg";
             auto result = materializr::SvgExport::exportSketch(path, *sk);
             if (result.success) {
@@ -4784,7 +5226,6 @@ void Application::combineSketches(const std::vector<int>& ids) {
     if (m_history->pushOperation(std::move(op), *m_document)) {
         m_selection->clear();
         markDirty();
-        m_meshesDirty = true;
         std::fprintf(stdout, "Combined %d sketch(es) into %d\n",
                      static_cast<int>(coplanar.size()), ids.front());
     }
@@ -4798,7 +5239,7 @@ void Application::duplicateSketch(int sketchId) {
     // Independent deep copy: geometry, constraints and plane come along. The
     // deep copy also carries the source's body/face link, but
     // DuplicateSketchOp::execute severs it (issue #21) so the copy is a
-    // standalone sketch with its own id — editing, push/pull or extrude never
+    // standalone sketch with its own id - editing, push/pull or extrude never
     // touches the original or the body built from it, and instead makes a new one.
     auto copy = std::make_shared<Sketch>(*src);
 
@@ -4811,10 +5252,9 @@ void Application::duplicateSketch(int sketchId) {
     DuplicateSketchOp* raw = op.get();  // valid while History owns the op
     if (m_history->pushOperation(std::move(op), *m_document)) {
         markDirty();
-        m_meshesDirty = true;
         std::fprintf(stdout, "Duplicated sketch %d -> %d\n",
                      sketchId, raw->newSketchId());
-        showToast("Duplicated \"" + base + "\" \xE2\x80\x94 edit the copy freely "
+        showToast("Duplicated \"" + base + "\" - edit the copy freely "
                   "(e.g. resize holes); the original is untouched.");
     }
 }
@@ -4894,7 +5334,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     // A pick that failed body attribution (bodyId -1) severs the sketch-body
     // link for the sketch's whole life: sourceFace can't rebind after
     // reload, the centroid/centre snaps die, and Subtract loses its target
-    // (Steve's cap sketch saved with sourceBody=-1 — every centre fix was
+    // (Steve's cap sketch saved with sourceBody=-1 - every centre fix was
     // inert on it). Recover the link: the body CONTAINING the picked face
     // is the source.
     if (sourceBodyId < 0 && m_document) {
@@ -4907,16 +5347,16 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             }
             if (sourceBodyId >= 0) break;
         }
-        std::fprintf(stderr, "[Sketch] on-face pick had no body id — "
+        std::fprintf(stderr, "[Sketch] on-face pick had no body id - "
                              "recovered body=%d\n", sourceBodyId);
     }
     // Sketching needs a FLAT face. A curved face (cylinder / sphere / fillet)
-    // has no single plane — we'd otherwise drop the sketch onto a tangent plane
+    // has no single plane - we'd otherwise drop the sketch onto a tangent plane
     // at an arbitrary point on the curve, which isn't useful and a construction
     // plane (Add Plane…) covers properly. Refuse with guidance.
     //
     // Detect planarity GEOMETRICALLY, not by surface type: a face can be flat
-    // while backed by a non-Geom_Plane surface — e.g. a slanted side face
+    // while backed by a non-Geom_Plane surface - e.g. a slanted side face
     // produced by scaling a box's top into a frustum is a planar trapezoid on a
     // ruled/BSpline surface. A literal Geom_Plane type-check called those
     // "curved" by mistake. GeomLib_IsPlanarSurface accepts the flat ones (and
@@ -4935,7 +5375,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             }
         }
         if (!planar) {
-            showToast("Can't sketch on a curved face \xE2\x80\x94 use Add "
+            showToast("Can't sketch on a curved face - use Add "
                       "Plane\xE2\x80\xA6 to place a construction plane.");
             return;
         }
@@ -4944,15 +5384,14 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     // For an imported MESH face, the recovered plane is an arbitrary seed
     // triangle's plane (UnifySameDomain keeps a seed, it doesn't best-fit), which
     // at low import accuracy can be visibly tilted from the flat you picked. Best-
-    // fit the plane to the face's actual triangulation — an area-weighted normal +
-    // centroid — so the sketch lands on the region's true average plane. This is
+    // fit the plane to the face's actual triangulation - an area-weighted normal +
+    // centroid - so the sketch lands on the region's true average plane. This is
     // what makes "sketch on a flat-ish face" reliable regardless of import accuracy.
     if (sourceBodyId >= 0 && m_document && m_document->isBodyMesh(sourceBodyId)) {
         TopLoc_Location loc;
         Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
         if (tri.IsNull()) {
-            BRepMesh_IncrementalMesh mesher(face, 0.1);
-            mesher.Perform();
+            BRepMesh_IncrementalMesh mesher(face, materializr::meshParams(0.1, 0.5, false));
             tri = BRep_Tool::Triangulation(face, loc);
         }
         if (!tri.IsNull() && tri->NbTriangles() > 0) {
@@ -4982,7 +5421,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     // recovered from the surface uses the surface's intrinsic parametric X,
     // which a boolean or a loft can leave rotated any which way.
     //
-    // The rule lives in modeling/SketchPlaneAxis.h so it can be tested — ctest
+    // The rule lives in modeling/SketchPlaneAxis.h so it can be tested - ctest
     // cannot see src/app, and this heuristic has now misfired twice: once on a
     // lofted cap (fixed by following the longest edge) and once on a symmetric
     // taper, whose two LONGEST edges are its diagonals, so the grid rotated to
@@ -4994,18 +5433,18 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         pln = gp_Pln(gp_Ax3(cur.Location(), cur.Direction(), x));
     }
 
-    // Whether the plane origin below ends up on the face's true centre —
+    // Whether the plane origin below ends up on the face's true centre -
     // the refs builder then adds (0,0) as a snappable point so the centre
     // is directly clickable.
     bool faceCenterAnchored = false;
 
     // THREADED body cap: the Thread step in history knows the TRUE axis
     // (kept accurate through resize/move/cascade by the face-ref and
-    // coaxial re-resolution), so anchor there DIRECTLY — it outranks any
+    // coaxial re-resolution), so anchor there DIRECTLY - it outranks any
     // geometric fitting. Fitting is unreliable on threaded caps: a cap cut
     // inside the groove span has NO crest arc on its boundary, and the
     // only exact circle left is the sweep's construction arc, centred at
-    // the surface's parametric origin ~0.3 mm off-axis — the fitted anchor
+    // the surface's parametric origin ~0.3 mm off-axis - the fitted anchor
     // adopted it and the true centre stopped snapping (2026-07-21
     // regression, Steve's second poke).
     {
@@ -5027,8 +5466,8 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     // generated plane's origin is arbitrary, and everything hangs off it:
     // typed coordinates, the snap-to-grid lattice, the drawn face grid. If
     // the face boundary is dominated by concentric circular edges (a rod
-    // cap — including a threaded one, whose crest arcs survive the groove
-    // runout — or an annulus), their shared centre is the body axis: put
+    // cap - including a threaded one, whose crest arcs survive the groove
+    // runout - or an annulus), their shared centre is the body axis: put
     // (0,0) there. Faces without a dominant circle keep the surface origin.
     if (!faceCenterAnchored) {
         const gp_Ax3& ax = pln.Position();
@@ -5068,7 +5507,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         // is a BSPLINE even when geometrically circular (probe_capface: a
         // swept-thread rod's top face is 4 BSplines with the plane origin
         // 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then
-        // TRIM to the outermost band — the crest arcs lie exactly on the
+        // TRIM to the outermost band - the crest arcs lie exactly on the
         // body radius while the groove runout dips inward, so the trimmed
         // refit converges on the true axis.
         if (!faceCenterAnchored) {
@@ -5134,13 +5573,13 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             // the one-sided groove dip biases the initial fit, and trimming
             // then keeps the wrong band, landing 0.6 mm off with a
             // plausible residual). But the boundary CONTAINS exact circular
-            // arcs — the crest flat crosses the top plane as a true arc of
-            // the body radius (and the root flat as a concentric one) — so
+            // arcs - the crest flat crosses the top plane as a true arc of
+            // the body radius (and the root flat as a concentric one) - so
             // circles through nearby sample triples hit the axis exactly.
             // Best-inlier circle wins at a TIGHT tolerance (the samples are
             // exact BRep evaluations); Kasa-refit the inliers. Straight
-            // edges produce near-infinite radii — capped against the
-            // boundary size — and sloppy fits die on the tight RMS gate.
+            // edges produce near-infinite radii - capped against the
+            // boundary size - and sloppy fits die on the tight RMS gate.
             const size_t np = pts.size();
             if (np >= 24) {
                 double xLo = 1e300, xHi = -1e300, yLo = 1e300, yHi = -1e300;
@@ -5177,7 +5616,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                         const double r = std::hypot(p1.first - ux,
                                                     p1.second - uy);
                         if (r < 0.1 || r > 2.0 * diag) continue;
-                        // Only ENCLOSING circles qualify — no boundary
+                        // Only ENCLOSING circles qualify - no boundary
                         // sample may lie outside. Steve's real cap carries
                         // TWO exact arcs: the crest arc on the true axis
                         // AND a sweep-construction arc (r 7.38, centred
@@ -5200,7 +5639,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                     }
                 }
                 // The winning circle must be a DOMINANT boundary feature,
-                // not an incidental one — a rounded-rectangle face's corner
+                // not an incidental one - a rounded-rectangle face's corner
                 // fillet is a perfect exact arc (12% of samples) whose
                 // centre is NOT where anyone wants the origin. The threaded
                 // cap's crest arc carries ~26% of samples; a plain circular
@@ -5243,8 +5682,8 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
     //
     // EXCEPT on a mesh body, which is a REFERENCE body: an imported STL is a
     // tessellation, not a modelled solid. You sketch on it to trace and snap
-    // against real geometry — that still works, the face references gathered
-    // below are what provide it — but it is not a modelling host. It has no
+    // against real geometry - that still works, the face references gathered
+    // below are what provide it - but it is not a modelling host. It has no
     // analytic topology to cut into, and it can never be re-derived, so a
     // parametric link to it is a promise we cannot keep.
     //
@@ -5270,7 +5709,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         }
         // STEP-imported faces sometimes carry an orientation flag that doesn't
         // match the geometric outward direction, so the orientation check
-        // alone isn't enough — we end up with a sketch plane pointing INTO
+        // alone isn't enough - we end up with a sketch plane pointing INTO
         // the body and push/pull goes the wrong way. Verify by probing the
         // body's solid classifier on BOTH sides of the face: one direction
         // should be OUT and the other IN. If the directions are reversed
@@ -5317,7 +5756,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
         }
         m_activeSketch->setPlane(pln);
         m_activeSketch->setSourceFace(face);
-        // The plane origin IS the true centre when anchored — publish it as
+        // The plane origin IS the true centre when anchored - publish it as
         // the sketch's centre snap (outranks + suppresses the area
         // centroid; see SketchTool).
         if (faceCenterAnchored)
@@ -5383,10 +5822,10 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             // each neighbouring face so the cursor can snap to the body's
             // nearby corners / edges (Fusion-style projected geometry).
             auto processFace = [&](const TopoDS_Face& f3d) {
-                // Vertices — the face's corner points. IN-PLANE ONLY: a
+                // Vertices - the face's corner points. IN-PLANE ONLY: a
                 // neighbouring face's out-of-plane vertex (e.g. where two
                 // fillets meet ABOVE the sketch face) projected straight down
-                // becomes an invisible magnet inside the sketch area — it
+                // becomes an invisible magnet inside the sketch area - it
                 // hover-charges and pulls clicks off the grid even though the
                 // cursor never went near the real 3D edge (Steve's report).
                 const double kPlaneTol = 1e-3;
@@ -5395,7 +5834,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                     if (std::abs(planeDist(p)) > kPlaneTol) continue;
                     dedup(refs.points, project(p));
                 }
-                // Edges — straight edges become reference lines (+ midpoint);
+                // Edges - straight edges become reference lines (+ midpoint);
                 // in-plane circles become true circle refs for continuous
                 // perimeter snapping; everything else is sampled to points.
                 for (TopExp_Explorer ex(f3d, TopAbs_EDGE); ex.More(); ex.Next()) {
@@ -5486,7 +5925,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                             dedup(refs.points, project(p));
                         }
                     } else {
-                        // Splines / hyperbolas / etc. — just sample perimeter
+                        // Splines / hyperbolas / etc. - just sample perimeter
                         // points so something snappable exists along the curve.
                         const int samples = 8;
                         for (int i = 1; i < samples; ++i) {
@@ -5503,7 +5942,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
             processFace(face);
 
             // The re-anchored plane origin IS the face's true centre (the
-            // circular-boundary axis) — make it a snappable point so
+            // circular-boundary axis) - make it a snappable point so
             // "start the circle at the centre" is one click.
             if (faceCenterAnchored) dedup(refs.points, glm::vec2(0.0f));
 
@@ -5522,7 +5961,7 @@ void Application::enterSketchOnFace(const TopoDS_Face& face, int sourceBodyId) {
                             const TopoDS_Shape& he = ex.Current();
                             if (!edgeFaceMap.Contains(he)) continue;
                             // Range-based loop instead of
-                            // TopTools_ListIteratorOfListOfShape — vcpkg OCCT
+                            // TopTools_ListIteratorOfListOfShape - vcpkg OCCT
                             // drops that standalone iterator header on Windows.
                             for (const TopoDS_Shape& nf : edgeFaceMap.FindFromKey(he)) {
                                 if (nf.IsSame(face)) continue;
@@ -5614,7 +6053,7 @@ void Application::applySketchConstraint(ConstraintType type) {
         }
         case ConstraintType::Equal: {
             // Equal binds LINES (equal length) or CIRCLES/ARCS (equal radius),
-            // whichever the selection holds — each subsequent entity bound to
+            // whichever the selection holds - each subsequent entity bound to
             // the first of its kind. A mixed selection constrains lines to
             // lines and curves to curves independently.
             std::vector<int> lns(selLns.begin(), selLns.end());
@@ -5644,7 +6083,7 @@ void Application::applySketchConstraint(ConstraintType type) {
             break;
         }
         case ConstraintType::Distance: {
-            // Pairwise from the first selected point — initial value is the
+            // Pairwise from the first selected point - initial value is the
             // geometry's current distance, so the constraint isn't immediately
             // destructive (it just locks the present distance in place).
             std::vector<int> v(selPts.begin(), selPts.end());
@@ -5767,23 +6206,23 @@ void Application::applyPendingDimension() {
     // Label offset = placed position minus the auto anchor the renderer uses.
     // The renderer resolves anchor per type; store the raw placed position
     // relative to the dimension's geometric anchor (computed the same way the
-    // label pass does — see dimensionAutoAnchor in Application_Viewport.cpp).
+    // label pass does - see dimensionAutoAnchor in Application_Viewport.cpp).
     glm::vec2 anchor = dimensionAutoAnchor(pd);
     glm::vec2 off = m_sketchTool->getDimLabelPos() - anchor;
 
     int editId = -1;
     // Popup prefill value: the new-add path prefills from the freshly
     // measured geometry (pd.measured). A dedup MATCH instead keeps whatever
-    // value the constraint already carried (see the loop below) — so
+    // value the constraint already carried (see the loop below) - so
     // re-picking an existing dimension just to move its label doesn't
-    // clobber a value the user hand-typed earlier — EXCEPT a reversed-order
+    // clobber a value the user hand-typed earlier - EXCEPT a reversed-order
     // Angle match, which must renegotiate the value for correctness (see
     // the angleSwapped comment below); that path prefills from the fresh
     // pd.measured like a new add.
     double prefillValue = pd.measured;
     recordSketchMutation([&] {
         // Dedup: same type on the same (unordered) entity pair replaces the
-        // label placement instead of stacking a duplicate constraint —
+        // label placement instead of stacking a duplicate constraint -
         // matches applyDimension's policy. Deliberately does NOT overwrite
         // c.value with pd.measured on a match: pd.measured is a live
         // re-measurement of the CURRENT geometry, which can differ from a
@@ -5797,7 +6236,7 @@ void Application::applyPendingDimension() {
         // pick resolves to (point = second line's start endpoint, line =
         // first line). Picking the SAME two lines in the opposite order
         // resolves to the mirror pair (point = first line's start endpoint,
-        // line = second line) — a different (point,line) id pair driving
+        // line = second line) - a different (point,line) id pair driving
         // the geometrically same gap between the two lines. Recognise that
         // as the same dimension so re-picking in reversed order updates the
         // existing constraint instead of stacking a duplicate.
@@ -5821,7 +6260,7 @@ void Application::applyPendingDimension() {
             // turn (P-on-L2 then P-on-L1, sharing no special relationship
             // beyond "each point happens to be an endpoint of the other
             // line") satisfies the membership check above but is NOT the
-            // same physical gap — treating it as a match would silently
+            // same physical gap - treating it as a match would silently
             // overwrite the first dimension's constraint with the second
             // pick's entity ids while keeping the first's stale value.
             // Mirrored derivation is only actually the same measurement
@@ -5837,7 +6276,7 @@ void Application::applyPendingDimension() {
                                  c.entityA == pd.entityB && c.entityB == pd.entityA);
             bool angleSwapped = (c.type == ConstraintType::Angle &&
                                   c.entityA == pd.entityB && c.entityB == pd.entityA);
-            // CircleGap is symmetric in its two circles — a reversed re-pick
+            // CircleGap is symmetric in its two circles - a reversed re-pick
             // of the same pair is the same dimension.
             bool gapSwapped = (c.type == ConstraintType::CircleGap &&
                                 c.entityA == pd.entityB && c.entityB == pd.entityA);
@@ -5861,7 +6300,7 @@ void Application::applyPendingDimension() {
                 }
                 // Value: left untouched everywhere the stored number stays
                 // geometrically correct under the (possibly new) entity
-                // order — same-order matches, a swapped Distance/mirrored
+                // order - same-order matches, a swapped Distance/mirrored
                 // DPL (both are order-independent magnitudes: a distance or
                 // a perpendicular gap reads the same regardless of which
                 // point/line ended up as entityA/entityB). Angle is NOT
@@ -5869,7 +6308,7 @@ void Application::applyPendingDimension() {
                 // relative to entityA's", so swapping which line is which
                 // without renegotiating the number would have the solver
                 // enforce the NEGATED relative angle against the wrong
-                // reference line — a silent geometry flip, not just a label
+                // reference line - a silent geometry flip, not just a label
                 // move. pd.measured was freshly computed for the NEW order,
                 // so it's the only value consistent with the swapped roles.
                 if (angleSwapped) c.value = pd.measured;
@@ -5896,7 +6335,7 @@ void Application::applyPendingDimension() {
             // has a "Driving" checkbox to promote it when the user actually
             // wants the number to control the geometry.
             //
-            // Only here — Constraint::isDriving defaults to true, so the
+            // Only here - Constraint::isDriving defaults to true, so the
             // right-click Add Constraint menu and every geometric constraint
             // are unaffected.
             c.isDriving = false;
@@ -5909,7 +6348,7 @@ void Application::applyPendingDimension() {
     });
     m_sketchTool->clearDimState();
 
-    // Open the existing edit popup, prefilled from prefillValue — the
+    // Open the existing edit popup, prefilled from prefillValue - the
     // freshly measured geometry for a new dimension, or the KEPT existing
     // value for a dedup match (see the comment above; a match never writes
     // pd.measured into c.value, so the popup must prefill from what's
@@ -5917,24 +6356,31 @@ void Application::applyPendingDimension() {
     // geometry, Esc keeps the prefilled value.
     if (editId >= 0) {
         m_dimEditingId = editId;
-        if (pd.type == ConstraintType::Angle)
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                          prefillValue * 180.0 / M_PI);
-        else if (pd.type == ConstraintType::Radius)
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                          prefillValue * 2.0); // edited as diameter
-        else
-            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f", prefillValue);
+        // Seed through the SAME helper the click-to-edit path uses. These three
+        // lines wrote raw millimetres: placing a dimension under any non-mm unit
+        // showed the millimetre number in the popup while the label beside it
+        // read the display unit - 29.70 in the field against "O 2.970 cm".
+        const auto dimKind = pd.type == ConstraintType::Angle  ? materializr::DimKind::Angle
+                           : pd.type == ConstraintType::Radius ? materializr::DimKind::Radius
+                                                               : materializr::DimKind::Length;
+        bool dimIsArc = false;
+        if (dimKind == materializr::DimKind::Radius && m_activeSketch)
+            for (const auto& c : m_activeSketch->getConstraints())
+                if (c.id == editId) {
+                    dimIsArc = materializr::constraintIsArcRadius(*m_activeSketch, c);
+                    break;
+                }
+        materializr::seedDimensionText(m_dimEditingBuf, sizeof(m_dimEditingBuf),
+                                       dimKind, dimIsArc, prefillValue);
         m_dimEditingFocus = true;
         m_dimOpenEditRequested = true; // viewport calls OpenPopup("##DimEdit") next frame
-        // No m_meshesDirty here: for a new dimension pd.measured is the
+        // Nothing to invalidate here: for a new dimension pd.measured is the
         // geometry's CURRENT value (resolveDimension reads it off the live
         // picks) so this commit never moves anything for the solver to
-        // re-tessellate — same as applySketchConstraint's Distance/Angle
-        // path just above, which doesn't set it either. For a dedup match
-        // the value is untouched entirely. The ##DimEdit popup's own commit
-        // handler sets m_meshesDirty when a typed value actually changes
-        // geometry.
+        // re-tessellate - same as applySketchConstraint's Distance/Angle
+        // path just above. For a dedup match the value is untouched
+        // entirely. Neither does the ##DimEdit popup's own commit handler:
+        // it edits sketch geometry, which no body mesh depends on.
         markDirty();
     }
 }
@@ -5947,8 +6393,8 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
         size_t h = 1469598103934665603ull;
         auto mix = [&](size_t v) { h = (h ^ v) * 1099511628211ull; };
         // Hash point positions and circle/arc radii too (quantised to 1e-4 mm)
-        // so a pure move/resize — a line length, rectangle W×H, or arc sweep
-        // edit that keeps every id and count fixed — still registers as a
+        // so a pure move/resize - a line length, rectangle W×H, or arc sweep
+        // edit that keeps every id and count fixed - still registers as a
         // mutation and gets its own undoable history step.
         auto mixPos = [&](glm::vec2 p) {
             mix(static_cast<size_t>(std::llround(p.x * 1e4)));
@@ -5972,7 +6418,7 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
         for (const auto& sp : s.getSplines()) mix(static_cast<size_t>(sp.id));
         mix(s.getPolygons().size());
         for (const auto& p : s.getPolygons()) mix(static_cast<size_t>(p.id));
-        // Constraints too — including their values so an edit (not just an
+        // Constraints too - including their values so an edit (not just an
         // add / remove) registers as a mutation and pushes a history step.
         mix(s.getConstraints().size());
         for (const auto& c : s.getConstraints()) {
@@ -5991,7 +6437,7 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
             mix(vb);
             std::memcpy(&vb, &c.labelOffY, sizeof(vb));
             mix(vb);
-            // Driving/reference too — promoting a dimension changes no
+            // Driving/reference too - promoting a dimension changes no
             // number, so without this the toggle hashes identically and
             // recordSketchMutation skips the history push entirely.
             mix(static_cast<size_t>(c.isDriving ? 1 : 0));
@@ -6032,10 +6478,10 @@ void Application::recordSketchMutation(const std::function<void()>& mutator) {
     auto after = std::make_shared<Sketch>(*m_activeSketch);
     auto op = std::make_unique<SketchEditOp>(m_activeSketch, std::move(before), std::move(after));
     // Stamp the sketch id now, while m_activeSketch is definitively in the
-    // document — so a save later can serialise the snapshots even if the live
+    // document - so a save later can serialise the snapshots even if the live
     // pointer has since been replaced (which silently froze delete steps).
     op->setSketchId(m_document->findSketchId(m_activeSketch.get()));
-    m_history->pushExecuted(std::move(op));
+    m_history->pushExecuted(std::move(op), *m_document);
 }
 
 void Application::sketchChainBack() {
@@ -6044,7 +6490,7 @@ void Application::sketchChainBack() {
     if (m == SketchToolMode::Line) {
         if (m_sketchTool->lineSegmentCount() < 1) return;
         // dropLineChainTail removes EXACTLY the tracked last segment; wrapping
-        // it makes the removal one undoable step. (Don't prune here — backing
+        // it makes the removal one undoable step. (Don't prune here - backing
         // to the lone start vertex should KEEP it as the chain's live anchor.)
         recordSketchMutation([&]{ m_sketchTool->dropLineChainTail(); });
     } else if (m == SketchToolMode::Spline) {
@@ -6054,7 +6500,6 @@ void Application::sketchChainBack() {
     } else {
         return;
     }
-    m_meshesDirty = true;
 }
 
 void Application::sketchChainCancel() {
@@ -6068,7 +6513,6 @@ void Application::sketchChainCancel() {
     // now-disconnected start vertex is swept below.
     m_sketchTool->onCancel();
     if (m_activeSketch) m_activeSketch->pruneOrphanPoints();
-    m_meshesDirty = true;
 }
 
 void Application::deleteSelectedSketchElements() {
@@ -6082,7 +6526,7 @@ void Application::deleteSelectedSketchElements() {
         for (int lid : lns) m_activeSketch->removeElement(lid);
         for (int pid : pts) m_activeSketch->removeElement(pid);
         // Deleting a line leaves its two endpoints behind (they weren't in
-        // the selection) — sweep up the now-unreferenced points so no orphan
+        // the selection) - sweep up the now-unreferenced points so no orphan
         // vertices linger.
         m_activeSketch->pruneOrphanPoints();
     });
@@ -6127,7 +6571,7 @@ bool Application::threadAxisCenter2d(int bodyId, const gp_Pln& pln,
                                      glm::vec2& out) const {
     if (!m_history) return false;
     // bodyId < 0 = "any threaded body": a sketch whose body link was severed
-    // (saved with sourceBody=-1) still deserves its centre — among all
+    // (saved with sourceBody=-1) still deserves its centre - among all
     // thread axes piercing the plane, the one closest to the plane origin
     // is the host (the sketch was created ON that face).
     const gp_Ax3& ax = pln.Position();
@@ -6166,7 +6610,7 @@ void Application::editSketch(int sketchId) {
     if (!sketch) return;
 
     // For sketches loaded from a previous session, sourceFace isn't part of
-    // the project file — re-bind it from the host body before the user
+    // the project file - re-bind it from the host body before the user
     // starts editing / using sketch regions.
     ensureSketchSourceFace(sketchId);
 
@@ -6176,7 +6620,7 @@ void Application::editSketch(int sketchId) {
 
     // Recompute the host body's TRUE-centre snap for this session. The
     // centre marker (and face references) aren't serialized, so a RE-EDITED
-    // sketch otherwise only offers the area-centroid snap — off-axis on a
+    // sketch otherwise only offers the area-centroid snap - off-axis on a
     // threaded cap, and immune to every fresh-sketch fix ("nothing changed
     // at all": Steve was re-editing an existing sketch). The stored plane
     // must NOT be re-anchored (geometry lives in it); the centre lands at
@@ -6185,7 +6629,7 @@ void Application::editSketch(int sketchId) {
     {
         glm::vec2 c2;
         // sourceBody may legitimately be -1 (severed link, e.g. a pick
-        // that failed body attribution) — threadAxisCenter2d then matches
+        // that failed body attribution) - threadAxisCenter2d then matches
         // any thread axis piercing the plane.
         if (threadAxisCenter2d(sketch->getSourceBody(), sketch->getPlane(),
                                c2)) {
@@ -6225,7 +6669,7 @@ void Application::editSketch(int sketchId) {
 void Application::extrudeSketchById(int sketchId, ExtrudeMode mode) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
-    // Even-odd island compound — multi-shape sketches (SVG, text) extrude
+    // Even-odd island compound - multi-shape sketches (SVG, text) extrude
     // every island with its proper holes instead of feeding OCCT one face
     // with disjoint "holes" (which came out non-manifold).
     TopoDS_Shape profile = sketch->buildProfileShape();
@@ -6251,7 +6695,7 @@ void Application::subtractSketchRegion(int sketchId, int regionIndex) {
     auto sketch = m_document->getSketch(sketchId);
     if (!sketch) return;
 
-    // Preferred host only — see extrudeSketchById: with no attachment the cut
+    // Preferred host only - see extrudeSketchById: with no attachment the cut
     // target comes from the swept volume at commit, not from the sketch's
     // provenance, and a detached sketch's former host gets no special claim.
     const int targetBody = sketch->isDetachedFromBody() ? -1
@@ -6284,9 +6728,25 @@ void Application::alignCameraToActiveSketch() {
     // context) with the sketch geometry's own world bounds, then target that
     // union's centre and size the ortho box to its diagonal. Framing the face
     // alone left off-face or off-origin drawings shoved into a corner; framing
-    // the plane origin (the no-source-face case) was worse — the origin sits
+    // the plane origin (the no-source-face case) was worse - the origin sits
     // at a corner of the drawing, so the whole sketch landed in one quadrant.
-    float orthoSize = std::max(20.0f, m_sketchGridStep * 40.0f);
+    // Frame a sensible number of DISPLAY UNITS, not a fixed number of
+    // millimetres. 40 mm is a reasonable first view in millimetres and an
+    // absurd one in feet, where it makes the whole visible sketch 0.13 ft and
+    // every number on screen a fraction. Reported from testing: a line most of
+    // the way across the screen measured 0.24 ft.
+    //
+    // Only the FRAMING is unit-aware here. The BASE step is left alone: the
+    // tolerance decoupling this comment used to defer has since happened -
+    // SketchTool takes the zoom-scaled step for SNAPPING (setGridStep) and the
+    // base for TOLERANCES (setToleranceStep) - but the base is still the value
+    // the user chose, and framing has no business rewriting it.
+    // Bounded - see openingSketchSpanMm. 40 of a large unit is a twelve-metre
+    // opening view, which is how geometry ended up drawn metres from the plane
+    // origin and floating above the ground grid on exit.
+    const float unitSpan = static_cast<float>(materializr::toMm(40.0));
+    float orthoSize = materializr::openingSketchSpanMm(
+        unitSpan, m_sketchGridStep, 20.0f, kOpeningSketchSpanCapMm);
     glm::vec3 lookAt = planeOrigin;
     {
         glm::vec3 bmin( std::numeric_limits<float>::max());
@@ -6322,21 +6782,21 @@ void Application::alignCameraToActiveSketch() {
     // viewport passes through the positions clicks actually land on. The
     // rounding has to happen in the sketch plane's own (u,v) frame, because
     // that is the frame both halves are defined in: SketchTool::snap() rounds
-    // sketch coordinates — measured from the PLANE ORIGIN along XDirection /
-    // YDirection — to multiples of the step, and the grid shader lays its
+    // sketch coordinates - measured from the PLANE ORIGIN along XDirection /
+    // YDirection - to multiples of the step, and the grid shader lays its
     // lines at multiples of the step measured from this anchor.
     //
     // Rounding world XYZ and projecting onto the plane (what this did) is not
     // the same thing: the projection of a world lattice point is not a lattice
     // point in-plane, so the drawn grid ended up offset from the snap lattice
-    // by (plane origin mod step) — an arbitrary fraction of a cell, since a
+    // by (plane origin mod step) - an arbitrary fraction of a cell, since a
     // face's plane origin sits at whatever world coords the geometry put it.
     // Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as
     // slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a
     // line on the snap grid" (Steve, 2026-07-31).
     //
     // The anchor doubles as the camera target, and staying on the lattice
-    // keeps that just as stable — it moves by at most half a cell.
+    // keeps that just as stable - it moves by at most half a cell.
     {
         gp_Pnt a = Sketch::latticeAnchor(
             pln, gp_Pnt(lookAt.x, lookAt.y, lookAt.z),
@@ -6355,7 +6815,7 @@ void Application::alignCameraToActiveSketch() {
     // First try projecting the camera's current up onto the sketch plane;
     // works for vertical / tilted faces where the previous up has a useful
     // component in-plane. For HORIZONTAL faces (top / bottom), the camera's
-    // up axis is parallel to the plane normal so the projection is zero —
+    // up axis is parallel to the plane normal so the projection is zero -
     // fall back to projecting the camera's horizontal FORWARD direction
     // instead. That preserves turntable continuity: whichever way the user
     // was facing before clicking the face ends up at the top of the new
@@ -6375,7 +6835,7 @@ void Application::alignCameraToActiveSketch() {
     }
     // Snap the chosen up to the nearest 90° of the face's natural axes so the
     // view always lands axis-aligned. Without this the up vector inherits any
-    // arbitrary yaw the user had before clicking the face — the sketch comes
+    // arbitrary yaw the user had before clicking the face - the sketch comes
     // out "cocked" at whatever orbit angle they happened to be in.
     glm::vec3 faceY = up;
     glm::vec3 faceX = glm::cross(faceY, normal); // in-plane, perpendicular to faceY
@@ -6389,9 +6849,9 @@ void Application::alignCameraToActiveSketch() {
     }
 
     // Stand off on the face's OUTWARD side. The sketch plane's normal is
-    // the underlying surface's — a REVERSED face stores it pointing INTO
+    // the underlying surface's - a REVERSED face stores it pointing INTO
     // the body, which used to fling the camera to the far side of the part
-    // ("still flat with it, but opposite side" — Steve, on a narrow side
+    // ("still flat with it, but opposite side" - Steve, on a narrow side
     // face). BRepGProp_Face::Normal applies the orientation flag.
     glm::vec3 standDir = normal;
     if (!m_activeSketch->getSourceFace().IsNull()) {
@@ -6496,6 +6956,12 @@ glm::vec2 Application::screenToSketch(float sx, float sy, float vpW, float vpH) 
 
 
 void Application::exitSketchMode() {
+    // Saving or discarding the sketch can add or remove one, and on the
+    // discard path the caller has already rolled history back; only a body
+    // that actually moved needs a new mesh. The flag this replaced
+    // re-tessellated every visible body to refresh sketch rendering, which
+    // does not read it at all.
+    auto trackBodies = trackBodyChanges();
     m_inSketchMode = false;
     if (m_history) m_history->clearUndoFloor();  // undo is unrestricted again
     m_toolbar->setSketchMode(false);
@@ -6529,15 +6995,14 @@ void Application::exitSketchMode() {
     m_activeSketch.reset();
     m_sketchSolver.reset();
     m_activeSketchId = -1;
-    m_meshesDirty = true; // refresh sketch rendering set
 
     // The sketch is resolved (committed to the document or discarded), so the
-    // crash-recovery draft is no longer "unfinished" — drop it. A draft only
+    // crash-recovery draft is no longer "unfinished" - drop it. A draft only
     // survives to the next launch when the app exits WITHOUT reaching here.
     materializr::clearSketchDraft();
     m_lastDraftElemCount = -1;
 
-    // Stay where the user is — don't yank them back to the pre-sketch camera.
+    // Stay where the user is - don't yank them back to the pre-sketch camera.
     // Exiting sketch should feel like leaving ortho-snap mode: the area being
     // looked at remains framed, only the sketch grid disappears. Any orbit
     // they do drops ortho mode and returns to perspective with a level
@@ -6576,8 +7041,8 @@ void Application::renderSketchRecoveryPrompt() {
     ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     // NoSavedSettings: this window's geometry is meaningless across launches
     // (it's re-centred every frame above), so never let a degenerate Pos/Size
-    // — e.g. from some future popup-stack collision like the update-popup one
-    // this class of bug already caused once — get written to imgui.ini and
+    // - e.g. from some future popup-stack collision like the update-popup one
+    // this class of bug already caused once - get written to imgui.ini and
     // self-perpetuate as the window's starting size on the next launch.
     if (ImGui::BeginPopupModal("Recover Sketch?", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize |
@@ -6593,7 +7058,7 @@ void Application::renderSketchRecoveryPrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
-            materializr::clearSketchDraft();
+            materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
             m_pendingSketchRecovery = false;
             ImGui::CloseCurrentPopup();
         }
@@ -6605,14 +7070,44 @@ void Application::restoreSketchDraftNow() {
     Sketch draft;
     materializr::SketchDraftMeta meta;
     if (!materializr::readSketchDraft(draft, meta) || !meta.valid) {
-        materializr::clearSketchDraft();
+        // Unreadable: drop the ORPHAN we were offered (not our own live draft
+        // path, which after the per-instance split is a different file), so a
+        // corrupt leftover isn't re-offered at every launch.
+        materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
         return;
     }
+    // Put it back in the TAB it came from before restoring anything. Without
+    // this the draft was grafted onto whatever session happened to be active,
+    // which after project recovery is always tab 0 - so a sketch begun in an
+    // untitled tab reappeared on top of an unrelated restored project (Steve,
+    // 2026-09-04). sketchDraftTargetSession holds the whole decision.
+    std::vector<std::string> paths;
+    paths.reserve(m_sessions.size());
+    for (size_t i = 0; i < m_sessions.size(); ++i)
+        paths.push_back(i == m_activeSession ? m_currentProjectPath
+                                             : m_sessions[i]->projectPath);
+    const size_t want = materializr::sketchDraftTargetSession(
+        meta.projectPath, paths, m_activeSession, activeSessionIsScratch());
+    size_t target = want;
+    bool madeTab = false;
+    if (want >= m_sessions.size()) {
+        target = createSession();            // its own tab, as it had been in
+        madeTab = true;
+    }
+    if (target != m_activeSession && !switchToSession(target)) {
+        // Refused (mid-sketch / thread re-cut). Can't happen at startup, but
+        // keep the draft rather than restore it into the wrong project - it
+        // will be offered again next launch.
+        if (madeTab) closeSession(target);
+        showToast("Couldn't reopen the unfinished sketch's tab; it's still saved.");
+        return;
+    }
+
     // Re-enter sketch mode on the draft's plane (empty sketch; sets the undo
     // boundary here), then graft the geometry in AS A RECORDED MUTATION so the
     // restore is one undoable history step. Without this the restored geometry
     // had no history behind it, so Ctrl+Z couldn't touch it (the per-stroke
-    // history from before the crash isn't in the draft — only the final shape).
+    // history from before the crash isn't in the draft - only the final shape).
     // (Face sketches re-bind their host face at Finish via ensureSketchSourceFace;
     // here we just restore the drawing on its plane so no work is lost.)
     enterSketchOnPlane(draft.getPlane());
@@ -6625,12 +7120,18 @@ void Application::restoreSketchDraftNow() {
     alignCameraToActiveSketch();
     m_meshesDirty = true;
     m_lastDraftElemCount = -1; // force a fresh draft write going forward
-    std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)\n",
-                 m_activeSketch->elementCount());
+    // Consumed. The orphan lives in the DEAD instance's slot; from here we
+    // autosave into our own, so leaving it would re-offer this sketch at every
+    // future launch.
+    materializr::clearSketchDraftAt(materializr::sketchDraftRestorePath());
+    std::fprintf(stdout, "[Recovery] restored in-progress sketch (%d elements)"
+                         " into tab %zu%s\n",
+                 m_activeSketch->elementCount(), m_activeSession,
+                 madeTab ? " (new)" : "");
 }
 
 void Application::writeProjectRecoveryIfDue() {
-    // Snapshot the whole project to the crash-recovery sidecar — including an
+    // Snapshot the whole project to the crash-recovery sidecar - including an
     // UNSAVED one, which the user-facing autosave can't touch (it needs a path).
     // Snapshots immediately when a new step commits (so a hang in the NEXT op's
     // preview loses nothing), else throttled for non-structural dirtiness.
@@ -6649,8 +7150,8 @@ void Application::writeProjectRecoveryIfDue() {
     const double now = SDL_GetTicks() / 1000.0;
 
     // Debounce, not a metronome (Steve's call, #48): snapshot once ~5 s AFTER
-    // the last committed change settles — "time to save a good copy in case
-    // the NEXT change crashes the program" — then go quiet until something
+    // the last committed change settles - "time to save a good copy in case
+    // the NEXT change crashes the program" - then go quiet until something
     // changes again. The old scheme re-serialized + re-gzipped the whole
     // project every 5 s for as long as it sat dirty (a periodic multi-MB
     // CPU/disk hit forever, even backgrounded).
@@ -6661,7 +7162,7 @@ void Application::writeProjectRecoveryIfDue() {
     // Nothing new since the last snapshot → nothing to protect; stay quiet.
     if (m_lastRecoveryWrite >= m_lastChangeSeenAt) return;
     // First change of a new episode: remember when the oldest UNSNAPSHOTTED
-    // change landed — the burst backstop below is measured from here, not
+    // change landed - the burst backstop below is measured from here, not
     // from the last write, or the first change after a long quiet spell
     // would trip it instantly instead of settling for 5 s.
     if (m_pendingChangeSince <= m_lastRecoveryWrite)
@@ -6669,20 +7170,20 @@ void Application::writeProjectRecoveryIfDue() {
     if (now - m_lastChangeSeenAt < 5.0) {
         // Still inside the settle window. Backstop: during a long BURST of
         // rapid changes (each < 5 s apart) a pure debounce would never fire
-        // and a crash mid-burst would lose the whole run — strictly worse
+        // and a crash mid-burst would lose the whole run - strictly worse
         // than the old metronome. Write anyway once the oldest pending
         // change has waited a minute.
         if (now - m_pendingChangeSince < 60.0) return;
     }
 
-    // Don't cancel a live preview on a background recovery tick — that would
+    // Don't cancel a live preview on a background recovery tick - that would
     // revert the user's in-progress drag. The recovery file may then capture a
     // preview, which is acceptable for crash recovery (best-effort snapshot).
     //
     // And don't BLOCK on an in-flight async thread re-cut: capture drains
     // recuts (flushThreadRecuts), which on a background tick reads as the
     // whole app going "not responding" for the length of a boolean thread
-    // cut. Skip this tick — the body is mid-recompute anyway, and the next
+    // cut. Skip this tick - the body is mid-recompute anyway, and the next
     // tick lands right after the recut does.
     if (!m_threadRecuts.empty()) return;
     ProjectHistory hist = captureProjectHistory(/*cancelPreviews=*/false);
@@ -6695,7 +7196,7 @@ void Application::writeProjectRecoveryIfDue() {
 }
 
 void Application::writeSessionRecoveryNow() {
-    // Forced (undebounced) snapshot of the ACTIVE session — called when a tab
+    // Forced (undebounced) snapshot of the ACTIVE session - called when a tab
     // is about to deactivate. An inactive session cannot change, so this one
     // write keeps its recovery file exact until it becomes active again;
     // combined with the debounced writer above, EVERY open project survives a
@@ -6713,14 +7214,14 @@ void Application::writeSessionRecoveryNow() {
 
 void Application::renderProjectRecoveryPrompt() {
     if (!m_pendingProjectRecovery) return;
-    // Wait for the Welcome screen — same popup-stack turn-taking as the
+    // Wait for the Welcome screen - same popup-stack turn-taking as the
     // sketch-recovery prompt (see renderSketchRecoveryPrompt).
     if (m_welcomeScreen && m_welcomeScreen->isVisible()) return;
     ImGui::OpenPopup("Recover Project?");
-    // Pinned centred every frame — see the Android note on the sketch prompt.
+    // Pinned centred every frame - see the Android note on the sketch prompt.
     ImVec2 c = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(c, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    // NoSavedSettings — see the identical note on renderSketchRecoveryPrompt.
+    // NoSavedSettings - see the identical note on renderSketchRecoveryPrompt.
     if (ImGui::BeginPopupModal("Recover Project?", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize |
                                ImGuiWindowFlags_NoSavedSettings)) {
@@ -6735,11 +7236,11 @@ void Application::renderProjectRecoveryPrompt() {
         ImGui::TextDisabled(materializr::tr("%d bodies, %d history steps."),
                             meta.bodyCount, meta.stepCount);
         ImGui::TextDisabled("%s", materializr::tr("Materializr didn't close cleanly (a crash, hang, or restart)."));
-        // One snapshot per tab the dead instance had open — the summary above
+        // One snapshot per tab the dead instance had open - the summary above
         // describes the newest; all of them come back, a tab each.
         const int nOrphans = materializr::projectRecoveryOrphanCount();
         if (nOrphans > 1)
-            ImGui::TextDisabled(materializr::tr("%d projects in total — each reopens in its own tab."), nOrphans);
+            ImGui::TextDisabled(materializr::tr("%d projects in total - each reopens in its own tab."), nOrphans);
         ImGui::Spacing();
         if (ImGui::Button(nOrphans > 1 ? "Restore all" : "Restore it",
                           materializr::uiSz(140, 0))) {
@@ -6749,7 +7250,7 @@ void Application::renderProjectRecoveryPrompt() {
         }
         ImGui::SameLine();
         if (ImGui::Button(materializr::tr("Discard"), materializr::uiSz(140, 0))) {
-            // These are the dead session's orphaned snapshots — our own live
+            // These are the dead session's orphaned snapshots - our own live
             // slot is separate and untouched. Discard means ALL of them, to
             // match the restore: leaving the rest to resurface on the next
             // launch after the user said no is just nagging.
@@ -6764,7 +7265,7 @@ void Application::renderProjectRecoveryPrompt() {
 }
 
 void Application::restoreProjectRecoveryNow() {
-    // EVERY orphan comes back, one per tab — a crash with four tabs open used
+    // EVERY orphan comes back, one per tab - a crash with four tabs open used
     // to hand them back one launch at a time (Steve, 2026-07-28). The newest
     // (the prompt's candidate) goes first so it lands in the tab the user is
     // already looking at.
@@ -6792,7 +7293,7 @@ void Application::restoreProjectRecoveryNow() {
         }
         // Load through the normal project loader (rebuilds bodies + editable
         // history). loadProjectAt sets m_currentProjectPath to the sidecar and
-        // marks it saved — override both with the project's ORIGINAL identity
+        // marks it saved - override both with the project's ORIGINAL identity
         // so the user can't overwrite the sidecar and unsaved work stays
         // unsaved/dirty.
         if (!loadProjectAt(recPath)) {
@@ -6829,10 +7330,10 @@ void Application::restoreProjectRecoveryNow() {
 
 void Application::run() {
     // A draft surviving from a previous session means it ended mid-sketch
-    // (crash / kill / quit while drawing) — offer to restore on first frame.
+    // (crash / kill / quit while drawing) - offer to restore on first frame.
     m_pendingSketchRecovery = materializr::hasSketchDraft();
     // A whole-project recovery snapshot surviving means the last session ended
-    // unexpectedly with unsaved work — offer to restore that too.
+    // unexpectedly with unsaved work - offer to restore that too.
     m_pendingProjectRecovery = materializr::hasProjectRecovery();
     if (materializr::isVerbose())
         std::fprintf(stderr,
@@ -6858,7 +7359,7 @@ void Application::run() {
     // main() wraps app.run() in a catch that returns 1. On desktop that reads
     // as a crash; on Android it is far worse and far more confusing: SDL_main
     // returning makes SDLActivity finish itself, so the window simply vanishes
-    // with NO signal, NO tombstone and NO ANR — Android logs it as
+    // with NO signal, NO tombstone and NO ANR - Android logs it as
     // "app-request". It looks exactly like a crash and is impossible to
     // diagnose from the outside. One real instance: tapping Apply Changes on a
     // recovery-restored project let a std::runtime_error("Body not found: 1")
@@ -6871,45 +7372,71 @@ void Application::run() {
     // aborting the app on load). So: one escaped exception costs a FRAME, not
     // the session. The loop re-enters and the user gets a toast.
     //
-    // The catch is not a licence to ignore these — it logs to stderr (logcat on
+    // The catch is not a licence to ignore these - it logs to stderr (logcat on
     // Android), which is how the caller gets found. Anything appearing here is
     // a bug to fix at its source.
     for (;;) {
       try {
         while (true) {
         // Main-loop stall watchdog: a gap of seconds between iterations IS
-        // the "not responding" freeze — print it so the journal names the
+        // the "not responding" freeze - print it so the journal names the
         // stall instead of us guessing which subsystem blocked.
         {
             static uint32_t lastIterMs = 0;
             const uint32_t nowMs = SDL_GetTicks();
-            if (lastIterMs != 0 && nowMs - lastIterMs > 1000)
-                std::fprintf(stderr, "[Perf] main loop stalled %.2fs\n",
-                             (nowMs - lastIterMs) / 1000.0);
+            if (lastIterMs != 0 && nowMs - lastIterMs > 1000) {
+                // A heavy task deliberately owns the loop for as long as it
+                // takes; that is not the freeze this watchdog hunts for, as
+                // long as it kept answering the compositor. Say which one it
+                // was, or the loading of a big project reads as the bug.
+                if (m_heavyRanThisIter)
+                    std::fprintf(stderr, "[Perf] heavy task held the loop %.2fs "
+                                 "(%d UI pumps, %d frames, worst gap %.2fs)\n",
+                                 (nowMs - lastIterMs) / 1000.0,
+                                 m_heavyPumps, m_heavyDraws,
+                                 m_heavyWorstGapMs / 1000.0);
+                else
+                    std::fprintf(stderr, "[Perf] main loop stalled %.2fs\n",
+                                 (nowMs - lastIterMs) / 1000.0);
+            }
+            m_heavyRanThisIter = false;
             lastIterMs = nowMs;
         }
         // Apply/discard any landed async thread re-cuts before this frame.
         pollThreadRecuts();
+        // Land a finished off-thread preview (push/pull, or a snapshot-body op
+        // that went async), or relaunch it; also reaps abandoned jobs, so it
+        // runs whether or not a gesture is active.
+        {
+            IopContext ictx = iopContext();
+            for (auto* c : m_iops) c->pollPreview(ictx);
+        }
 
         // True while any interactive tool or animation is in flight and needs
         // continuous rendering even with no user input.
         auto hasActiveWork = [&]() -> bool {
-            // Always-on: self-completing work that needs frames to FINISH —
+            // Always-on: self-completing work that needs frames to FINISH -
             // a pending heavy task to run, a toast that must tick down and clear
             // (regressed once as "toast never clears"), a modal popup, or an
             // extension tool that may animate on its own.
-            if (m_deferredHeavyTask || m_showUpdatePopup || !m_toastText.empty())
+            if (!m_deferredHeavy.empty() || m_showUpdatePopup || !m_toastText.empty())
                 return true;
             if (!m_threadRecuts.empty()) return true; // async re-cut in flight
+            if (m_meshDispatch.anyPending()) return true; // off-thread mesh in flight: land it when it finishes
+            for (auto* c : m_iops)
+                if (c->previewPending()) return true; // off-thread preview in flight
+            // A rebuild is waiting for a frame (a landed worker result marked
+            // its body dirty): render it rather than idle on the stale mesh.
+            if (m_meshesDirty || !m_dirtyBodyIds.empty()) return true;
             if (PluginRegistry::instance().activeTool()) return true;
             // Interactive manipulation states (sketch + every live preview/op)
             // are INPUT-driven: they only need continuous frames while the user
             // is acting on them. Render for a short grace window after the last
             // input (m_interactiveGraceUntil, refreshed on any event below), then
-            // idle — the preview stays on screen, frozen, and wakes instantly on
+            // idle - the preview stays on screen, frozen, and wakes instantly on
             // the next drag/keypress. The grace also covers the ~0.3s sketch
             // hover-dwell charge. Previously each of these pinned a flat 60fps
-            // the whole time it was open (e.g. a push/pull left mid-edit) —
+            // the whole time it was open (e.g. a push/pull left mid-edit) -
             // wasteful on the iGPU, a battery/thermal sink on mobile.
             bool interactive =
                 m_inSketchMode || m_ppCtl.active() || m_gizmoDragging ||
@@ -6933,7 +7460,7 @@ void Application::run() {
                 if (m_edgeCtl.active())            st += "edgeop ";
                 if (m_moveFaceCtl.active())       st += "moveface ";
                 if (m_revolveActive)           st += "revolve ";
-                if (m_deferredHeavyTask)       st += "heavy ";
+                if (!m_deferredHeavy.empty())  st += "heavy ";
                 if (!m_toastText.empty())      st += "toast ";
                 if (m_showUpdatePopup)         st += "update ";
                 bool iop = false;
@@ -6958,7 +7485,7 @@ void Application::run() {
         // there's no input event (m_wakeFrames == 0) and no active work, so the
         // idle-skip below would otherwise leave the first real UI frame undrawn
         // behind the loading screen until the user clicks or moves the mouse.
-        // This is a hard override of BOTH the focus gate and the idle-skip — the
+        // This is a hard override of BOTH the focus gate and the idle-skip - the
         // earlier "foreground for 3 s" only neutralised the focus term, leaving
         // the idle term to still skip (the splash-hang regression).
         const bool launchGrace = (SDL_GetTicks() - runStartMs < 3000u);
@@ -6970,7 +7497,7 @@ void Application::run() {
         const bool foreground = !materializr::iosInBackground();
 #elif defined(MZ_MOBILE)
         // Android exemption: the OS already pauses the activity (and SDL the GL
-        // surface) when backgrounded, so the gate buys nothing here — and
+        // surface) when backgrounded, so the gate buys nothing here - and
         // SDL_WINDOW_INPUT_FOCUS isn't set until the first touch, so gating on it
         // froze the startup splash→UI handoff until the user tapped the screen.
         const bool foreground = true;
@@ -6979,18 +7506,18 @@ void Application::run() {
         const bool foreground = m_window->isForeground() || launchGrace;
 #endif
 
-        // Frame pacing. Active (recent input / live work): no wait — render at
+        // Frame pacing. Active (recent input / live work): no wait - render at
         // vsync rate. Idle in the FOREGROUND: render at a low FLOOR rate
         // instead of stopping. The old hard 0 fps idle made every first tap
         // pay a wake-up round trip and left system-side effects (the iOS
         // soft-keyboard raise, whose request we can only issue at the end of
-        // a rendered frame) stranded between bursts — on the tablet the
+        // a rendered frame) stranded between bursts - on the tablet the
         // keyboard prompt felt seconds late no matter what counted as "active
         // work". A ~15 fps floor keeps the first tap, the keyboard, and every
         // overlay live at a quarter of the full-rate GPU cost; the wait still
         // returns EARLY on any event, so activity ramps to full rate with no
         // added latency. Backgrounded (desktop) still parks completely in
-        // 500 ms waits. During the launch grace we never block — keep frames
+        // 500 ms waits. During the launch grace we never block - keep frames
         // flowing for the splash→UI handoff.
         constexpr int kIdleFloorMs = 66;   // idle frame interval ≈ 15 fps
         int waitMs = 0;
@@ -6999,12 +7526,12 @@ void Application::run() {
         else if (!launchGrace && m_wakeFrames == 0 && !hasActiveWork())
             waitMs = kIdleFloorMs;
         int eventLevel = m_window->pollEvents(waitMs);
-        // Start of this iteration's frame budget — read by the frame-rate cap
+        // Start of this iteration's frame budget - read by the frame-rate cap
         // at the bottom of the loop (measured after the event wait so the
         // idle floor's own sleep doesn't count against the budget).
         const Uint32 frameLoopStartMs = SDL_GetTicks();
         // Significant events (click, key, scroll, resize, focus): 5 frames.
-        // Trivial events (mouse motion, expose): 25 frames — at 60 fps that is
+        // Trivial events (mouse motion, expose): 25 frames - at 60 fps that is
         // ~416 ms, enough for ImGui's default 300 ms hover-tooltip delay to fire
         // AFTER the cursor stops moving. Without this extra tail, the tooltip
         // timer freezes the moment we stop rendering (ImGui time only advances
@@ -7045,8 +7572,8 @@ void Application::run() {
         }
 
         // Last frame's GL (driver/ImGui render) can leave the SSE FPU in
-        // flush-to-zero / denormals-are-zero mode, which makes OCCT geometry —
-        // including SVG import tessellation and wire-building done mid-frame —
+        // flush-to-zero / denormals-are-zero mode, which makes OCCT geometry -
+        // including SVG import tessellation and wire-building done mid-frame -
         // come out subtly different run to run (a different region degenerates
         // into an uncuttable sliver each re-import). Put the FPU back to OCCT's
         // expected mode at the top of EVERY frame so all geometry is stable.
@@ -7055,14 +7582,68 @@ void Application::run() {
         // Run a heavy op deferred from last frame's commit HERE, between frames,
         // so its progress reporter (renderProgressFrame) can pump its own frames
         // without nesting ImGui frames.
-        if (m_deferredHeavyTask) {
-            auto task = std::move(m_deferredHeavyTask);
-            m_deferredHeavyTask = nullptr;
-            task();
-            m_wakeFrames = 5; // task finished — repaint the result
+        // Taken out of the queue BEFORE it runs: a task that throws must not
+        // take the ones queued behind it down with it.
+        if (auto task = m_deferredHeavy.takeNext()) {
+            // Arm the UI keep-alive for the duration of the task, and ONLY for
+            // that duration. Between frames is the one place where repainting
+            // from deep inside an op is safe (no ImGui frame is in flight), and
+            // scoping it here is what lets the same ops call uiKeepAlive() from
+            // an OCCT callback during a live drag preview and get a harmless
+            // no-op. See core/UiKeepAlive.h.
+            // A new task starts uncancelled. The latch is otherwise only
+            // cleared by a reporter call with fraction==0, and this block
+            // starts indeterminate (-1), so one Cancel used to silence the
+            // progress window for every heavy task afterwards.
+            m_progressCancelled = false;
+            m_heavyProgressFrac = -1.0f;
+            m_heavyProgressLabel.clear();
+            m_heavyPumps = m_heavyDraws = m_heavyWorstGapMs = 0;
+            m_nextHeavyDraw = m_lastHeavyPump = std::chrono::steady_clock::now();
+            // Disarmed on EVERY exit. The task can throw out to the frame-level
+            // firewall, and a keep-alive left armed would repaint from deep
+            // inside every later operation - the exact thing scoping it here
+            // is meant to prevent.
+            struct KeepAliveGuard {
+                ~KeepAliveGuard() { materializr::setUiKeepAlive(nullptr); }
+            } keepAliveGuard;
+            materializr::setUiKeepAlive([this]() {
+                using clock = std::chrono::steady_clock;
+                ++m_heavyPumps;
+                noteHeavyPumpGap();
+                // Pump FIRST and unconditionally. This is the part that keeps
+                // the compositor's ping answered, it touches no GL, and it must
+                // not be hostage to the draw below -- which is throttled, and
+                // which renderProgressFrame skips entirely once the cancel
+                // latch is set.
+                if (m_window) m_window->pollEvents();
+
+                const auto now = clock::now();
+                if (now < m_nextHeavyDraw) return;
+                // No bookkeeping for a frame that was refused: while a frame
+                // is already open the reporter paints nothing, and counting it
+                // both inflates the draw count and applies the backoff below
+                // to a cost that was never paid.
+                if (m_imguiFrameOpen) return;
+                renderProgressFrame(m_heavyProgressFrac,
+                                    m_heavyProgressLabel.c_str());
+                ++m_heavyDraws;
+                // Back off from the draw's OWN cost, so a cheap frame animates
+                // smoothly and an expensive one (see m_nextHeavyDraw) can never
+                // eat more than a fifth of the wall clock.
+                const auto after = clock::now();
+                const auto cost = after - now;
+                m_nextHeavyDraw = after + std::max(
+                    std::chrono::duration_cast<clock::duration>(
+                        std::chrono::milliseconds(200)), cost * 4);
+            });
+            task();                // keepAliveGuard disarms on every exit
+            noteHeavyPumpGap();   // close the books on the tail of the task
+            m_heavyRanThisIter = true;   // the watchdog reads this next time round
+            m_wakeFrames = 5; // task finished - repaint the result
         }
 
-        // Apply the launch-time update check once its worker finishes — never
+        // Apply the launch-time update check once its worker finishes - never
         // block waiting for it.
         if (m_updateCheckFuture.valid() &&
             m_updateCheckFuture.wait_for(std::chrono::seconds(0)) ==
@@ -7097,7 +7678,7 @@ void Application::run() {
             if (m_confirmedClose) break;
         }
 
-        // Autosave — MUST run before the idle short-circuit below. A change
+        // Autosave - MUST run before the idle short-circuit below. A change
         // wakes only a brief render burst, then the loop idles and `continue`s
         // past everything down-stream; if autosave lived after the skip it
         // would essentially never fire for a model you edit and then leave
@@ -7115,17 +7696,17 @@ void Application::run() {
                 // tail from the project. Resume once they redo back to the
                 // tip or push a new op (which discards the tail anyway).
                 if (m_history && m_history->canRedo()) {
-                    // hold off — keep checking each interval
+                    // hold off - keep checking each interval
                 } else if (anyInteractivePreviewActive() || m_inSketchMode ||
                            m_edgeCtl.active()) {
-                    // hold off — an autosave must never cancel (or serialize) a
+                    // hold off - an autosave must never cancel (or serialize) a
                     // live tool preview / an in-progress sketch out from under
                     // the user (a half-baked uncommitted-sketch state has
                     // crashed before). Resume once the tool / sketch closes.
                 } else if (now - m_lastAutosaveTime >= m_autosaveIntervalSec) {
                     // Defensive: a serialization failure (OCCT throw, bad
                     // state) must never take the whole app down on a background
-                    // autosave — log and skip, try again next interval.
+                    // autosave - log and skip, try again next interval.
                     try { saveProjectQuick(); }
                     catch (...) {
                         std::fprintf(stderr, "[Autosave] failed - skipped\n");
@@ -7139,7 +7720,7 @@ void Application::run() {
             m_lastAutosaveTime = SDL_GetTicks() / 1000.0;
         }
 
-        // Only a BACKGROUNDED window skips rendering now — foreground idle
+        // Only a BACKGROUNDED window skips rendering now - foreground idle
         // renders at the floor rate above (see kIdleFloorMs; the old idle
         // skip is what made first-taps and the mobile keyboard feel dead).
         if (!launchGrace && !foreground) continue;
@@ -7161,7 +7742,7 @@ void Application::run() {
         // the soft rounded look (each widget's own default).
         touchui::setCornerRadius(imTouchLayout() ? 4.0f : -1.0f);
         if (frameTouchTheme) touchui::pushChrome();
-        // Always submit the dockspace host — under every layout. ImGui only
+        // Always submit the dockspace host - under every layout. ImGui only
         // keeps a dock node alive while its DockSpace() is submitted each frame;
         // skipping it (the old else-only path) dropped the classic nodes, so on
         // switch-BACK the panels returned FLOATING at their last spot instead of
@@ -7169,9 +7750,9 @@ void Application::run() {
         // the ViewCube behind the panel. Kept alive here, the layout restores
         // exactly. In modern/im-touch the host sits behind the shell + pinned
         // viewport (NoBringToFrontOnFocus) and its panels aren't submitted, so
-        // it's invisible — it only preserves the node tree.
+        // it's invisible - it only preserves the node tree.
         renderDockspace();
-        // Synced unconditionally, once per frame, before any layout reads it —
+        // Synced unconditionally, once per frame, before any layout reads it -
         // ItemsPanel's Delete/Edit-Sketch/Combine gating on the sketch being
         // drawn must never see a stale value from a frame where the panel (or
         // a different layout) didn't render.
@@ -7180,11 +7761,11 @@ void Application::run() {
         // here; everything below this dispatch is layout-agnostic or gated on
         // the layout helpers. While the landing page is up the modern and
         // im-touch shells stand down completely (their floating chrome would
-        // draw over the page); classic keeps its menu bar — the one piece of
-        // chrome that is useful above the page — and drops the rest below.
+        // draw over the page); classic keeps its menu bar - the one piece of
+        // chrome that is useful above the page - and drops the rest below.
         // No floating chrome until a layout says otherwise. Reset HERE, in the
         // one place every layout passes through, rather than in each layout's
-        // else-branch — a third layout that forgot would inherit im-touch's
+        // else-branch - a third layout that forgot would inherit im-touch's
         // inset from the frame before the user switched.
         materializr::viewportTopChromeBottom() = 0.0f;
         switch (m_uiLayout) {
@@ -7200,7 +7781,7 @@ void Application::run() {
 
         if (m_renderersReady) {
             renderViewport();
-            // Modern's panel pop-in/out edge tabs go on top of the viewport —
+            // Modern's panel pop-in/out edge tabs go on top of the viewport -
             // submit them AFTER it (they'd otherwise render under the
             // NoBringToFrontOnFocus Viewport window until a focus reorder).
             if (m_uiLayout == UiLayout::Modern) renderModernEdgeTabs();
@@ -7210,14 +7791,14 @@ void Application::run() {
             m_toolbar->setCameraOrtho(m_viewport->getCamera().isOrthographic());
             // "Edit Diameter" button only appears when the picked face is a
             // cylinder on a solid-cylinder or tube body. Detection populates
-            // m_resizeCyl* fields as a side effect — we throw the result away
+            // m_resizeCyl* fields as a side effect - we throw the result away
             // here, those are only used by the actual begin path (which
             // re-runs the detection itself when the button is pressed).
             //
             // Both this detection (OCCT surface queries + a whole-body face
             // walk for edge picks) and the frozen-round scan below (surface
             // query + an ownsFace() history walk) used to run EVERY rendered
-            // frame while a face was selected — the normal working state.
+            // frame while a face was selected - the normal working state.
             // They only depend on the selection and the history, so memoize
             // on those revisions and recompute only when one changes.
             {
@@ -7231,7 +7812,7 @@ void Application::run() {
                 static bool s_selEdgeIsHoleRim = false;
                 // Tab switches swap in a DIFFERENT SelectionManager/History
                 // whose revision counters can coincide with the memoized ones
-                // (they all start at 0) — key the memo on the session too.
+                // (they all start at 0) - key the memo on the session too.
                 static size_t s_memoSession = ~size_t(0);
                 if (s_memoSession != m_activeSession) {
                     s_memoSession = m_activeSession;
@@ -7249,7 +7830,7 @@ void Application::run() {
                                         detectCylindricalResizeCandidate().ok;
                     // "Frozen round" hint: a selected fillet-shaped face
                     // (cylinder / torus) that NO enabled op owns reloaded as
-                    // baked geometry — there's no editable FilletOp behind it.
+                    // baked geometry - there's no editable FilletOp behind it.
                     // The toolbar surfaces a one-liner pointing at Repair
                     // Geometry. A FULL 2π cylinder is a hole / pin (Edit
                     // Diameter handles it), not a round, so it's excluded.
@@ -7268,7 +7849,7 @@ void Application::run() {
                             s_selFacePlanar = faceIsPlanar(f);  // gates Push (#28)
                             // A round hole's WALL: #28 hides Move on curved
                             // faces, so a full-cylinder bore could never be
-                            // moved by clicking its inside — probe buildVoid,
+                            // moved by clicking its inside - probe buildVoid,
                             // and offer whole-hole Move when it recognizes one.
                             // (A square hole's walls are planar, so they reach
                             // the same slide through the ordinary Move gate.)
@@ -7304,11 +7885,11 @@ void Application::run() {
                     // still driving a body? Push/Pull is offered for those (it
                     // edits the host body); a standalone sketch offers Extrude
                     // instead (a new body). A detached sketch counts as
-                    // standalone — it was deliberately unlinked (issue #21).
+                    // standalone - it was deliberately unlinked (issue #21).
                     // Do the selected edges form one hole's rim? Only then
                     // does Move mean anything for an edge selection. In the
                     // memo because classifyRimEdges walks the body and probes
-                    // buildVoid — per-frame it burned time and (pre-verbose-
+                    // buildVoid - per-frame it burned time and (pre-verbose-
                     // gate) flooded the journal with refusals.
                     s_selEdgeIsHoleRim = false;
                     {
@@ -7336,7 +7917,7 @@ void Application::run() {
                             // ...and the host must still EXIST. Attachment is
                             // an either/or here (attached => Push/Pull, else
                             // Extrude), so a stale id offered the one tool that
-                            // cannot work and hid the one that can — delete a
+                            // cannot work and hid the one that can - delete a
                             // sketch's body and it still claimed to be attached.
                             if (sk && sk->getSourceBody() >= 0 &&
                                 !sk->isDetachedFromBody() &&
@@ -7371,7 +7952,7 @@ void Application::run() {
             // sketch toolbar; default is on (the live toggle is visible).
             m_toolbar->setShowInferenceToggle(m_showInferenceToolbarToggle);
             // Pass the active sketch tool mode so the matching button gets
-            // a highlight border — disambiguates which tool is currently in
+            // a highlight border - disambiguates which tool is currently in
             // use (Line vs Circle vs etc.) when in sketch mode.
             m_toolbar->setActiveSketchMode(m_inSketchMode && m_sketchTool
                 ? static_cast<int>(m_sketchTool->getMode()) : 0);
@@ -7406,10 +7987,10 @@ void Application::run() {
                 action = m_toolbar->render();
                 m_sketchGridStep = m_toolbar->getGridStep();
                 m_snapToGrid = m_toolbar->getSnapToGrid();
-                if (m_sketchTool) {
-                    m_sketchTool->setGridStep(m_sketchGridStep);
-                    m_sketchTool->setSnapToGridEnabled(m_snapToGrid);
-                }
+                // The toolbar owns neither the step nor the toggle any more -
+                // renderViewport pushes both, for every layout. It still READS
+                // the toolbar's widgets above, which is what makes a classic
+                // user's click take effect.
             }
             if (action != ToolAction::None) {
                 handleToolAction(static_cast<int>(action));
@@ -7419,9 +8000,9 @@ void Application::run() {
             // needs Application's popup machinery (e.g. PatternPlugin asking for
             // the Linear / Radial pattern popup). Dispatch any pending request.
             if (m_pluginContext) {
-                // Typed dispatch (was a chain of string compares — see
+                // Typed dispatch (was a chain of string compares - see
                 // plugin/InteractiveOp.h and discussion #72). NO default: on
-                // purpose — a new InteractiveOp that nobody handles here is a
+                // purpose - a new InteractiveOp that nobody handles here is a
                 // -Wswitch warning at build time, where the string version
                 // silently produced a button that did nothing.
                 const InteractiveOp pending =
@@ -7432,6 +8013,8 @@ void Application::run() {
                     case InteractiveOp::RadialPattern:  beginPattern(PatternKind::Radial); break;
                     case InteractiveOp::Loft:           beginLoft();           break;
                     case InteractiveOp::BoundaryFill:   beginBoundaryFill();   break;
+                    case InteractiveOp::Patch:          beginPatch();          break;
+                    case InteractiveOp::Sew:            beginSew();            break;
                     case InteractiveOp::LoftPickSecond: m_loftPickHintPending = true; break;
                     case InteractiveOp::ConstructionPlane: beginConstructionPlane(); break;
                     case InteractiveOp::ImportRefImage: beginRefImageImport(); break;
@@ -7459,7 +8042,7 @@ void Application::run() {
             if (auto* tool = PluginRegistry::instance().activeTool()) {
                 if (!tool->update(*m_pluginContext)) {
                     // The tool finished (it ran its own commit()/cancel()); just
-                    // clear it. Do NOT call deactivateTool() here — that cancels,
+                    // clear it. Do NOT call deactivateTool() here - that cancels,
                     // which would undo a just-committed operation (e.g. push/pull).
                     PluginRegistry::instance().finishActiveTool();
                 } else {
@@ -7481,7 +8064,7 @@ void Application::run() {
             // picking the second sketch, so we render it as a non-blocking
             // floating window pinned near the top of the viewport instead.
             // Auto-dismisses once the selection covers two sketches (or
-            // two sketch regions from distinct sketches) — at which point a
+            // two sketch regions from distinct sketches) - at which point a
             // second click on Loft will commit. Manual dismiss via the X.
             if (m_loftPickHintPending) {
                 m_loftPickHintVisible = true;
@@ -7520,7 +8103,7 @@ void Application::run() {
                     bool open = true;
                     if (ImGui::Begin("Pick more sketches", &open, flags)) {
                         ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.35f, 1.0f), "%s", materializr::tr("Loft needs at least two profiles."));
-                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order — as many as you like — then click Loft again."));
+                        ImGui::TextWrapped("%s", materializr::tr("Ctrl-click the other sketches (or their regions) in loft order - as many as you like - then click Loft again."));
                     }
                     ImGui::End();
                     if (!open) m_loftPickHintVisible = false;
@@ -7532,7 +8115,7 @@ void Application::run() {
             m_helpPanel->render();
             m_shortcutsPanel->render();
             m_aboutDialog->render();
-            // Startup dialogs take turns — two dialogs that each OpenPopup
+            // Startup dialogs take turns - two dialogs that each OpenPopup
             // every frame at the same stack level close each other endlessly:
             // neither ever draws, while the modal dim eats every touch (the
             // iPad "second launch locks up" bug). Welcome goes FIRST; sketch
@@ -7545,7 +8128,7 @@ void Application::run() {
                 saveAppSettings();
             }
 #if defined(MZ_IOS)
-            // A completed or restored Supporter purchase — from the Welcome
+            // A completed or restored Supporter purchase - from the Welcome
             // screen, or an interrupted transaction redelivered at launch.
             if (iosStoreConsumeEntitled() && !m_supporter) {
                 m_supporter = true;
@@ -7567,8 +8150,10 @@ void Application::run() {
             renderSvgToolPanel();
             renderAirfoilToolPanel();
             renderMirrorToolPanel();
+            renderOffsetToolPanel();
             renderLoftPanel();
             renderBoundaryFillPanel();
+            renderPatchPanel();
             renderRefImagePanel();
             renderConstructionPlanePanel();
             renderConstructionAxisPanel();
@@ -7619,30 +8204,27 @@ void Application::run() {
                     }
                     m_historyPanel->setHighlightStep(hl);
                 }
-                if (classicLayout() && !landingPageUp() && m_showHistory &&
-                    m_historyPanel->render()) {
-                    m_meshesDirty = true;
+                if (classicLayout() && !landingPageUp() && m_showHistory) {
+                    m_historyPanel->render();
                 }
 
                 if (classicLayout() && !landingPageUp() && m_showItems) {
                     if (m_itemsPanel->render()) {
                         m_hoveredBodyId = -1;
-                        m_meshesDirty = true;
                     }
                 }
                 m_propertiesPanel->setSketchContext(
                     m_inSketchMode, m_activeSketch.get(), m_activeSketchId,
                     m_sketchTool.get());
-                if (classicLayout() && !landingPageUp() && m_showProperties &&
-                    m_propertiesPanel->render()) {
-                    m_meshesDirty = true;
+                if (classicLayout() && !landingPageUp() && m_showProperties) {
+                    m_propertiesPanel->render();
                 }
             }
             // Touch edge tabs to collapse/restore each side column (drawn on top
             // of the panels, and still visible when a side is collapsed).
             if (classicLayout() && !landingPageUp()) renderPanelCollapseHandles();
 
-            // Plugin overlays — free-floating per-frame ImGui windows (e.g. the
+            // Plugin overlays - free-floating per-frame ImGui windows (e.g. the
             // Tutorial). Drawn after the panels so they float on top; non-modal,
             // so they never block the panels or the viewport.
             for (auto& ov : PluginRegistry::instance().overlayContributions()) {
@@ -7662,7 +8244,7 @@ void Application::run() {
                 m_statusBar->setProjectName(pn);
             }
             // Spline placement is the one tool that needs a keyboard step
-            // to finish — without this hint it reads as "adds dots and
+            // to finish - without this hint it reads as "adds dots and
             // then nothing" (Steve, verbatim).
             if (m_inSketchMode && m_sketchTool &&
                 m_sketchTool->getMode() == SketchToolMode::Spline) {
@@ -7679,7 +8261,7 @@ void Application::run() {
             renderTransientToast();
             FileDialogs::render();
             renderSavePrompt();
-            // Project recovery takes precedence — one modal at a time, and a
+            // Project recovery takes precedence - one modal at a time, and a
             // restored project supersedes any leftover sketch draft anyway.
             renderProjectRecoveryPrompt();
             if (!m_pendingProjectRecovery) renderSketchRecoveryPrompt();
@@ -7698,7 +8280,7 @@ void Application::run() {
 
         // Hard frame-rate cap. Desktop GL blocks in swapBuffers on vsync, but
         // iOS's presentRenderbuffer returns immediately (no CADisplayLink in
-        // this loop) — so any continuously-"active" state (a focused text
+        // this loop) - so any continuously-"active" state (a focused text
         // field, a live preview) spun this loop at uncapped rate, starving
         // the UIKit main runloop that keyboard raise, keyboard animation and
         // touch delivery all run on: focusing ANY field froze the app.
@@ -7722,9 +8304,14 @@ void Application::run() {
                 try { ImGui::EndFrame(); } catch (...) {}
             }
         }
+        // endFrame() never ran, so clear what it would have. Unconditional and
+        // outside the scope check: a stale "a frame is open" silences the
+        // progress window for every heavy task afterwards, and a backgrounded
+        // window skips beginFrame entirely, so it would never self-clear.
+        m_imguiFrameOpen = false;
         std::fprintf(stderr,
                      "[Recovered] exception escaped a frame: %s\n"
-                     "[Recovered]   this is a BUG — the frame was abandoned and "
+                     "[Recovered]   this is a BUG - the frame was abandoned and "
                      "the session kept alive; fix it at the throw site.\n",
                      e.what());
         // The stack is already unwound here, so this is the trace captured AT
@@ -7747,7 +8334,7 @@ void Application::run() {
     // Clean exit → clear the recovery snapshots, with one deliberate
     // exception: a DIRTY INACTIVE tab keeps its file. The quit prompt only
     // covers the active project, so an unsaved background tab was never
-    // offered a save — deleting its snapshot here would silently destroy its
+    // offered a save - deleting its snapshot here would silently destroy its
     // only copy. It is offered back on the next launch instead. (The active
     // session always clears: if it was dirty, the user answered the prompt.)
     for (size_t i = 0; i < m_sessions.size(); ++i) {

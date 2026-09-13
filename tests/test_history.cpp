@@ -225,7 +225,7 @@ TEST(HistoryTest, UndoRedoSkipDisabledSteps) {
     ASSERT_EQ(doc.bodyCount(), 3);
     ASSERT_EQ(history.currentStep(), 2);
 
-    // Disable the TIP step (2) and rebuild — replayAll re-executes only 0 and 1,
+    // Disable the TIP step (2) and rebuild - replayAll re-executes only 0 and 1,
     // but lands currentIndex on the (disabled) tip at index 2.
     const_cast<Operation*>(history.getStep(2))->setEnabled(false);
     history.replayAll(doc);
@@ -250,4 +250,93 @@ TEST(HistoryTest, UndoRedoSkipDisabledSteps) {
     EXPECT_EQ(doc.bodyCount(), 2);
     EXPECT_EQ(history.currentStep(), 2);
     EXPECT_FALSE(history.canRedo());
+}
+
+class MockRefuseUndoOp : public MockAddBodyOp {
+public:
+    bool undo(Document&) override { return false; }
+};
+
+class MockFailExecuteOp : public MockAddBodyOp {
+public:
+    bool execute(Document&) override { return false; }
+};
+
+TEST(HistoryTest, UndoRedoExposeTheActuallyAppliedStep) {
+    Document doc;
+    History history;
+    EXPECT_EQ(history.lastUndoneStep(), -1);
+    EXPECT_EQ(history.lastRedoneStep(), -1);
+    for (int i = 0; i < 3; i++)
+        ASSERT_TRUE(history.pushOperation(std::make_unique<MockAddBodyOp>(10.0 + i), doc));
+    const_cast<Operation*>(history.getStep(2))->setEnabled(false);
+    ASSERT_TRUE(history.replayAll(doc));
+
+    ASSERT_TRUE(history.undo(doc));
+    EXPECT_EQ(history.lastUndoneStep(), 1);
+    EXPECT_EQ(history.currentStep(), 0);
+    EXPECT_EQ(doc.bodyCount(), 1);
+    ASSERT_TRUE(history.undo(doc));
+    EXPECT_EQ(history.lastUndoneStep(), 0);
+    EXPECT_EQ(doc.bodyCount(), 0);
+    EXPECT_FALSE(history.undo(doc));
+    EXPECT_EQ(history.lastUndoneStep(), -1);
+
+    ASSERT_TRUE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), 0);
+    ASSERT_TRUE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), 1);
+    EXPECT_EQ(doc.bodyCount(), 2);
+    ASSERT_TRUE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), -1);
+    EXPECT_EQ(history.currentStep(), 2);
+    EXPECT_EQ(doc.bodyCount(), 2);
+    EXPECT_FALSE(history.canRedo());
+
+    ASSERT_TRUE(history.undo(doc));
+    ASSERT_TRUE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), 1);
+    history.dropRedoTail();
+    EXPECT_FALSE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), -1);
+
+    ASSERT_TRUE(history.pushOperation(std::make_unique<MockRefuseUndoOp>(), doc));
+    ASSERT_GE(history.lastUndoneStep(), 0);
+    const int current = history.currentStep();
+    const int bodies = doc.bodyCount();
+    EXPECT_FALSE(history.undo(doc));
+    EXPECT_EQ(history.lastUndoneStep(), -1);
+    EXPECT_EQ(history.currentStep(), current);
+    EXPECT_EQ(doc.bodyCount(), bodies);
+
+    ASSERT_TRUE(history.pushOperation(std::make_unique<MockAddBodyOp>(), doc));
+    ASSERT_TRUE(history.undo(doc));
+    ASSERT_TRUE(history.redo(doc));
+    ASSERT_GE(history.lastRedoneStep(), 0);
+    history.pushExecuted(std::make_unique<MockFailExecuteOp>());
+    ASSERT_TRUE(history.undo(doc));
+    EXPECT_FALSE(history.redo(doc));
+    EXPECT_EQ(history.lastRedoneStep(), -1);
+}
+
+TEST(HistoryTest, UndoRespectsFloorWithAllDisabledStepsAbove) {
+    Document doc;
+    History history;
+    for (int i = 0; i < 3; i++)
+        ASSERT_TRUE(history.pushOperation(std::make_unique<MockAddBodyOp>(10.0 + i), doc));
+    ASSERT_TRUE(history.undo(doc));
+    ASSERT_EQ(history.lastUndoneStep(), 2);
+    history.setUndoFloor(0);
+    for (int i = 1; i <= history.currentStep(); i++)
+        ASSERT_TRUE(history.setStepEnabled(i, false, doc));
+    ASSERT_TRUE(history.canUndo());
+    const int current = history.currentStep();
+    const auto bodyIds = doc.getAllBodyIds();
+    const int bodies = doc.bodyCount();
+
+    EXPECT_FALSE(history.undo(doc));
+    EXPECT_EQ(history.lastUndoneStep(), -1);
+    EXPECT_EQ(history.currentStep(), current);
+    EXPECT_EQ(doc.bodyCount(), bodies);
+    EXPECT_EQ(doc.getAllBodyIds(), bodyIds);
 }

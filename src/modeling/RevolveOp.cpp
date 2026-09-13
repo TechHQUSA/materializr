@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "RevolveOp.h"
 #include "Sketch.h"
 #include <Bnd_Box.hxx>
@@ -15,6 +16,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 #include "../i18n.h"
+#include "BoolArgs.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -101,7 +103,8 @@ bool RevolveOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
-                BRepAlgoAPI_Fuse fuse(m_previousTargetShape, revolvedShape);
+                BRepAlgoAPI_Fuse fuse;
+                materializr::setBooleanShapes(fuse, m_previousTargetShape, revolvedShape);
                 fuse.Build();
                 if (!fuse.IsDone()) {
                     return false;
@@ -115,7 +118,8 @@ bool RevolveOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
-                BRepAlgoAPI_Cut cut(m_previousTargetShape, revolvedShape);
+                BRepAlgoAPI_Cut cut;
+                materializr::setBooleanShapes(cut, m_previousTargetShape, revolvedShape);
                 cut.Build();
                 if (!cut.IsDone()) {
                     return false;
@@ -129,7 +133,8 @@ bool RevolveOp::execute(Document& doc) {
                     return false;
                 }
                 m_previousTargetShape = doc.getBody(m_targetBodyId);
-                BRepAlgoAPI_Common common(m_previousTargetShape, revolvedShape);
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, m_previousTargetShape, revolvedShape);
                 common.Build();
                 if (!common.IsDone()) {
                     return false;
@@ -170,7 +175,7 @@ bool RevolveOp::rebuildProfileFromSketch(Document& doc) {
     auto sk = doc.getSketch(m_sketchId);
     if (!sk) return false;
     auto regions = sk->buildRegions();
-    // Outermost region (largest outer bbox) — mirrors the Revolve popup's
+    // Outermost region (largest outer bbox) - mirrors the Revolve popup's
     // creation pick, so a reload re-derives the same profile (its face
     // carries any inner boundaries as holes).
     int bestIdx = -1;
@@ -280,9 +285,9 @@ void RevolveOp::renderProperties() {
 
     ImGui::Separator();
     ImGui::Text("%s", materializr::tr("Axis Origin"));
-    materializr::inputNumber(materializr::tr("Origin X"), &m_axisOriginX, 0.1, 1.0, "%g");
-    materializr::inputNumber(materializr::tr("Origin Y"), &m_axisOriginY, 0.1, 1.0, "%g");
-    materializr::inputNumber(materializr::tr("Origin Z"), &m_axisOriginZ, 0.1, 1.0, "%g");
+    materializr::lengthField(materializr::tr("Origin X"), &m_axisOriginX);
+    materializr::lengthField(materializr::tr("Origin Y"), &m_axisOriginY);
+    materializr::lengthField(materializr::tr("Origin Z"), &m_axisOriginZ);
 
     ImGui::Separator();
     ImGui::Text("%s", materializr::tr("Axis Direction"));

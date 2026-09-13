@@ -1,4 +1,5 @@
 #include "BatchTransformOp.h"
+#include "Mate.h"
 
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_ModifyShape.hxx>
@@ -11,10 +12,19 @@
 
 bool BatchTransformOp::execute(Document& doc) {
     if (m_bodyIds.empty()) return false;
+
+    // Same ownership rule TransformOp enforces. Without it the multi-body
+    // gizmo moved a mate-placed body, the op committed, and the next solve
+    // snapped it back - the user watching their drag undo itself. Refuse the
+    // whole batch rather than transforming some of it: a partial batch is
+    // worse than none. Replay is exempt for the same reason as TransformOp.
+    if (!doc.isReplaying())
+        for (int id : m_bodyIds)
+            if (materializr::bodyIsMatePlaced(doc, id)) return false;
     try {
         // A kernel fault inside the transform below is otherwise FATAL: OCCT
         // raises its signal-as-exception, finds no handler ("an exception was
-        // raised, but no catch was found") and aborts the process — the app
+        // raised, but no catch was found") and aborts the process - the app
         // vanishing mid-drag with no dialog. This macro arms the translation
         // for the catch at the bottom, matching ShellOp / MoveFaceOp.
         OCC_CATCH_SIGNALS
@@ -26,7 +36,7 @@ bool BatchTransformOp::execute(Document& doc) {
         // gets used:
         //
         //   BRepBuilderAPI_GTransform::Perform runs BRepBuilderAPI_NurbsConvert
-        //   on the shape FIRST — unconditionally, whatever the transform is —
+        //   on the shape FIRST - unconditionally, whatever the transform is -
         //   rebuilding every surface and pcurve as a NURBS. For a Move or a
         //   Rotate that work is pure loss: it costs a full geometry rebuild per
         //   body (Steve's multi-body drags logged 1.2 s main-loop stalls), it
@@ -35,7 +45,7 @@ bool BatchTransformOp::execute(Document& doc) {
         //   with it (Steve, 2026-07-31: "moving objects... is just outright
         //   closing", SIGSEGV at address 0 under NewCurve2d).
         //
-        //   BRepBuilderAPI_Transform relocates the shape instead — no rebuild,
+        //   BRepBuilderAPI_Transform relocates the shape instead - no rebuild,
         //   nothing for the converter to choke on. It's what the single-body
         //   TransformOp has always used, which is why moving ONE body was
         //   instant and safe while moving two was neither.
@@ -49,7 +59,7 @@ bool BatchTransformOp::execute(Document& doc) {
             try { before = doc.getBody(id); } catch (...) { continue; }
             if (before.IsNull()) continue;
 
-            // Face lineage in — carried 1:1 through the move so a downstream
+            // Face lineage in - carried 1:1 through the move so a downstream
             // fillet/chamfer keeps resolving its edges; restored by undo.
             materializr::topo::FaceIdMap inMap;
             if (const auto* im = doc.bodyFaceIds(id)) inMap = *im;
@@ -130,7 +140,7 @@ std::string BatchTransformOp::serializeParams() const {
         m_gtrsf.Value(2,1), m_gtrsf.Value(2,2), m_gtrsf.Value(2,3), m_gtrsf.Value(2,4),
         m_gtrsf.Value(3,1), m_gtrsf.Value(3,2), m_gtrsf.Value(3,3), m_gtrsf.Value(3,4));
     s += buf;
-    // label/desc last — they carry no ';' or '=' (Move/Rotate/Scale strings).
+    // label/desc last - they carry no ';' or '=' (Move/Rotate/Scale strings).
     if (!m_label.empty()) s += ";label=" + m_label;
     if (!m_desc.empty())  s += ";desc="  + m_desc;
     return s;

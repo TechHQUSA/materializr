@@ -2,7 +2,7 @@
 
 namespace materializr {
 
-// No default: — a new enumerator without a name here is a -Wswitch warning.
+// No default: - a new enumerator without a name here is a -Wswitch warning.
 const char* interactiveOpName(InteractiveOp op) {
     switch (op) {
         case InteractiveOp::None:              return "None";
@@ -11,6 +11,8 @@ const char* interactiveOpName(InteractiveOp op) {
         case InteractiveOp::Loft:              return "Loft";
         case InteractiveOp::LoftPickSecond:    return "LoftPickSecond";
         case InteractiveOp::BoundaryFill:      return "BoundaryFill";
+        case InteractiveOp::Patch:             return "Patch";
+        case InteractiveOp::Sew:               return "Sew";
         case InteractiveOp::Revolve:           return "Revolve";
         case InteractiveOp::ConstructionPlane: return "ConstructionPlane";
         case InteractiveOp::Midplane:          return "Midplane";

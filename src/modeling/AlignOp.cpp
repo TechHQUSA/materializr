@@ -1,3 +1,5 @@
+#include "ui/LengthField.h"
+#include "core/Units.h"
 #include "AlignOp.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <gp_Trsf.hxx>
@@ -63,13 +65,10 @@ bool AlignOp::undo(Document& doc) {
 }
 
 std::string AlignOp::description() const {
-    return "Align body " + std::to_string(m_bodyId) +
-           " from (" + std::to_string(m_source.X()) + ", " +
-           std::to_string(m_source.Y()) + ", " +
-           std::to_string(m_source.Z()) + ") to (" +
-           std::to_string(m_target.X()) + ", " +
-           std::to_string(m_target.Y()) + ", " +
-           std::to_string(m_target.Z()) + ")";
+    return "Align body " + std::to_string(m_bodyId) + " from " +
+           materializr::fmtVec3(m_source.X(), m_source.Y(), m_source.Z()) +
+           " to " +
+           materializr::fmtVec3(m_target.X(), m_target.Y(), m_target.Z());
 }
 
 void AlignOp::renderProperties() {
@@ -82,16 +81,16 @@ void AlignOp::renderProperties() {
     double tx = m_target.X(), ty = m_target.Y(), tz = m_target.Z();
 
     ImGui::Text("%s", materializr::tr("Source Point"));
-    if (materializr::inputNumber(materializr::tr("Src X"), &sx, 0.1, 1.0, "%g") ||
-        materializr::inputNumber(materializr::tr("Src Y"), &sy, 0.1, 1.0, "%g") ||
-        materializr::inputNumber(materializr::tr("Src Z"), &sz, 0.1, 1.0, "%g")) {
+    if (materializr::lengthField(materializr::tr("Src X"), &sx) ||
+        materializr::lengthField(materializr::tr("Src Y"), &sy) ||
+        materializr::lengthField(materializr::tr("Src Z"), &sz)) {
         m_source.SetCoord(sx, sy, sz);
     }
 
     ImGui::Text("%s", materializr::tr("Target Point"));
-    if (materializr::inputNumber(materializr::tr("Tgt X"), &tx, 0.1, 1.0, "%g") ||
-        materializr::inputNumber(materializr::tr("Tgt Y"), &ty, 0.1, 1.0, "%g") ||
-        materializr::inputNumber(materializr::tr("Tgt Z"), &tz, 0.1, 1.0, "%g")) {
+    if (materializr::lengthField(materializr::tr("Tgt X"), &tx) ||
+        materializr::lengthField(materializr::tr("Tgt Y"), &ty) ||
+        materializr::lengthField(materializr::tr("Tgt Z"), &tz)) {
         m_target.SetCoord(tx, ty, tz);
     }
 

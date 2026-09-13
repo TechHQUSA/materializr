@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <limits>
 #include <glm/glm.hpp>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pln.hxx>
@@ -11,6 +12,7 @@
 #include "SheetSpec.h"
 #include "../modeling/FaceLineage.h"
 #include "../modeling/GenerationLedger.h"
+#include "../modeling/Mate.h"
 
 namespace materializr { class Sketch; class EventBus;
 namespace topo { struct GenerationLedger; } }
@@ -26,16 +28,16 @@ struct BodyEntry {
     // An imported tessellated mesh (e.g. STL): the shape is a sewn solid built
     // from many small facets, not analytic CAD geometry. The viewport uses this
     // to take a mesh-aware path (cached picking, optional wireframe). Serialized
-    // to project files since it can't be re-derived from the shape — see ProjectIO.
+    // to project files since it can't be re-derived from the shape - see ProjectIO.
     bool isMesh = false;
     // Set once the user marks this body as a fabrication sheet part (foam board,
     // sheet metal, plywood, …). Drives the unfold/flatten engine. Serialized to
-    // project files (can't be re-derived from the shape) — see ProjectIO.
+    // project files (can't be re-derived from the shape) - see ProjectIO.
     materializr::SheetSpec sheet;
 };
 
 // Bodies can be grouped under a folder for organisation in the Items panel.
-// Folder visibility and colour CASCADE to its bodies — toggling the folder
+// Folder visibility and colour CASCADE to its bodies - toggling the folder
 // hides/shows every body inside; setting the colour overwrites every body's
 // colour (which can still be re-customised per body afterwards).
 struct FolderEntry {
@@ -43,7 +45,7 @@ struct FolderEntry {
     std::string name;
     bool visible = true;
     glm::vec3 color = glm::vec3(0.80f, 0.80f, 0.82f);
-    bool expanded = true; // UI-only — collapsed folders hide children in panel
+    bool expanded = true; // UI-only - collapsed folders hide children in panel
 };
 
 struct PlaneEntry {
@@ -57,7 +59,7 @@ struct PlaneEntry {
     double halfSize = 50.0;
 };
 
-// Reference image — a photo carried on a construction plane so a real object
+// Reference image - a photo carried on a construction plane so a real object
 // can be traced without a 3D scanner. 1:1 with a host PlaneEntry (keyed by
 // planeId): the plane contributes pose / selection / visibility / gizmo /
 // sketch-on-plane; this entry carries the raster payload plus physical size
@@ -72,7 +74,7 @@ struct RefImageEntry {
     float opacity = 0.6f;      // underlay strength for tracing
 };
 
-// Construction axis — a stored ray (origin + unit direction). Used as the
+// Construction axis - a stored ray (origin + unit direction). Used as the
 // rotation axis for Revolve (post-0.6) and any other "around a line"
 // operation. Same plumbing shape as PlaneEntry: id / name / visibility /
 // a render-extent (halfLength for the drawn segment in mm).
@@ -109,12 +111,16 @@ public:
     // that removeBody stashed. `id` is updated in place to the final body id.
     void addOrPutBody(int& id, const TopoDS_Shape& shape, const std::string& name = "");
     void removeBody(int id);
-    void updateBody(int id, const TopoDS_Shape& shape);
+    // fromMateSolve: only the mate solver may write a body WITHOUT dropping its
+    // mate base. Any other writer has produced new geometry, so the cached base
+    // is stale - keeping it made the next solve transform the OLD shape and
+    // silently revert the user's edit.
+    void updateBody(int id, const TopoDS_Shape& shape, bool fromMateSolve = false);
 
     // The generation ledger of the op that PRODUCED a body's current shape
     // (published by ops after updateBody; the pointer is owned by the
     // history-held op). Lets a downstream op's topo::Ref resolve a sub-shape
-    // by lineage — e.g. a fillet re-finding a boolean SEAM edge, which no
+    // by lineage - e.g. a fillet re-finding a boolean SEAM edge, which no
     // geometric scheme can name. updateBody clears the entry (a stale ledger
     // is worse than none); the producing op re-publishes right after.
     // Stored BY VALUE (copied from the op): a non-owning pointer dangled the
@@ -131,7 +137,7 @@ public:
 
     // Face-lineage map of a body's CURRENT shape (see FaceLineage.h): face →
     // stable ancestry ids. Published by ops after updateBody, same lifecycle
-    // as the ledger — updateBody clears it (stale lineage is worse than none;
+    // as the ledger - updateBody clears it (stale lineage is worse than none;
     // an op that doesn't re-publish leaves consumers on their geometric
     // fallback, which is exactly the pre-lineage behaviour). Persisted in new
     // saves; absent in old ones.
@@ -167,7 +173,7 @@ public:
     void setBodyColor(int id, const glm::vec3& color);
     std::vector<int> getAllBodyIds() const;
 
-    // Folder management. Folders are pure UI grouping over bodies — they
+    // Folder management. Folders are pure UI grouping over bodies - they
     // don't own bodies (a body keeps its id and is only assigned a folderId).
     int addFolder(const std::string& name = "");
     void removeFolder(int folderId); // bodies in it return to root (folderId=-1)
@@ -190,8 +196,8 @@ public:
     // Sketch management
     int addSketch(std::shared_ptr<materializr::Sketch> sketch, const std::string& name = "");
     // Insert/replace a sketch under a SPECIFIC id (mirrors putBody). Used by
-    // project load to preserve saved sketch ids so SketchEditOps — and extrude/
-    // push-pull ops — that reference a sketch by id rebind correctly on reload.
+    // project load to preserve saved sketch ids so SketchEditOps - and extrude/
+    // push-pull ops - that reference a sketch by id rebind correctly on reload.
     void putSketch(int id, std::shared_ptr<materializr::Sketch> sketch,
                    const std::string& name = "");
     void removeSketch(int id);
@@ -201,6 +207,87 @@ public:
     void setSketchVisible(int id, bool visible);
     bool isSketchVisible(int id) const;
     std::vector<int> getAllSketchIds() const;
+
+    // Mates: a persistent placement relationship between two bodies. Stored
+    // with the model rather than replayed as history steps, exactly as sketch
+    // constraints are stored on their Sketch. See
+    // docs/superpowers/specs/2026-08-16-assembly-mates-design.md
+    int addMate(const materializr::Mate& m);
+    void removeMate(int id);
+    const std::vector<materializr::Mate>& getMates() const { return m_mates; }
+    std::vector<materializr::Mate>& getMutableMates() { return m_mates; }
+    // Load path: keeps the id from the file instead of assigning a new one.
+    void addRawMate(const materializr::Mate& m) {
+        m_mates.push_back(m);
+        // Keep the counter ahead of ids that came from a file, exactly as
+        // putBody does for bodies. Without it the first mate created after a
+        // load collides with a loaded id, and two panel rows share one
+        // ImGui id. The id itself parses safely even when it overflows int
+        // (istream extraction sets failbit and the whole "M ..." record is
+        // rejected - see ProjectIO.cpp's `if (!(ms >> m.id >> ...))
+        // continue;`), but a file can still legitimately contain an id of
+        // EXACTLY INT_MAX (a valid parse, no overflow) - `m.id + 1` on that
+        // value is real signed-overflow UB. Stop advancing rather than wrap.
+        if (m.id >= m_nextMateId && m.id < std::numeric_limits<int>::max())
+            m_nextMateId = m.id + 1;
+    }
+
+    // Geometry as history produced it, before any mate placement. Held on the
+    // DOCUMENT rather than inside a solver so every solver instance shares one
+    // truth: a throwaway solver in the UI and the long-lived one in History
+    // used to keep separate caches and double-apply each other's placement.
+    // Cleared with the document, so opening a project cannot place mates
+    // against the previous one's geometry.
+    bool hasMateBase(int bodyId) const {
+        return m_mateBases.find(bodyId) != m_mateBases.end();
+    }
+    const TopoDS_Shape& getMateBase(int bodyId) const {
+        return m_mateBases.at(bodyId);
+    }
+    void setMateBase(int bodyId, const TopoDS_Shape& s) { m_mateBases[bodyId] = s; }
+    // Also drops the sketch-plane bases for any sketch this body carries -
+    // defined out-of-line (Document.cpp) because it needs Sketch's full type
+    // to read getSourceBody(). Three call sites in MateSolver.cpp used to
+    // erase only m_mateBases: a later mate re-based fine, but a leftover
+    // sketch-plane entry from THIS body's earlier (now-invalidated)
+    // arrangement still described that old pose, and the next solve
+    // transformed the sketch from it - displacing the sketch relative to the
+    // body it is actually attached to. Centralized here instead of fixed at
+    // each call site so a future one can't reintroduce the same gap.
+    void clearMateBase(int bodyId);
+    void clearMateBases() { m_mateBases.clear(); m_mateSketchPlanes.clear(); }
+
+    // Sketch-plane bases live here for the same reason body bases do, and are
+    // cleared together: a solver-local copy meant a throwaway solver in the
+    // panel captured the ALREADY-PLACED plane as its base and re-applied the
+    // full placement, so the body held still while its sketch walked away one
+    // offset per click.
+    bool hasMateSketchPlane(int sketchId) const {
+        return m_mateSketchPlanes.find(sketchId) != m_mateSketchPlanes.end();
+    }
+    const gp_Pln& getMateSketchPlane(int sketchId) const {
+        return m_mateSketchPlanes.at(sketchId);
+    }
+    void setMateSketchPlane(int sketchId, const gp_Pln& p) {
+        m_mateSketchPlanes[sketchId] = p;
+    }
+
+    // True while History is re-executing recorded steps. A guard that refuses
+    // an interactive edit must NOT refuse the replay of a step recorded before
+    // the mate existed: doing so marks the step failed and silently drops
+    // committed geometry on an unrelated action.
+    bool isReplaying() const { return m_replaying; }
+    void setReplaying(bool r) { m_replaying = r; }
+
+    // Why the last mate solve failed, empty when it succeeded. The solver's
+    // Result was discarded at every call site, so a cycle or an over-constraint
+    // produced an assembly that simply stopped responding with no message.
+    const std::string& mateSolveError() const { return m_mateSolveError; }
+    void setMateSolveError(const std::string& e) { m_mateSolveError = e; }
+
+    // The body a mate solve treats as fixed. -1 = none chosen yet.
+    int getGroundedBody() const { return m_groundedBody; }
+    void setGroundedBody(int id) { m_groundedBody = id; }
     int sketchCount() const;
     // Reverse lookup: returns the document id of the given Sketch* (compared
     // by raw pointer against the held shared_ptrs), or -1 if not found.
@@ -208,7 +295,7 @@ public:
     // into the serialized snapshot.
     int findSketchId(const materializr::Sketch* sk) const;
 
-    // Cascade sketch override — the EDITED sketch's final state, pinned for
+    // Cascade sketch override - the EDITED sketch's final state, pinned for
     // the duration of a history replay. During History::editStep the replayed
     // SketchEditOp snapshots roll the LIVE sketch back through its history, so
     // an op that re-finds geometry from "the sketch the user just edited"
@@ -225,7 +312,7 @@ public:
         return it == m_cascadeSketchOverrides.end() ? nullptr : it->second;
     }
 
-    // Construction planes — first-class document objects parallel to sketches.
+    // Construction planes - first-class document objects parallel to sketches.
     // PlaneAddedEvent / PlaneRemovedEvent let the renderer + Items panel
     // react without polling each frame.
     // `reuseId` >= 0 re-adds the plane under that id (redo of a plane-creation
@@ -249,7 +336,7 @@ public:
     std::vector<int> getAllPlaneIds() const;
     int planeCount() const;
 
-    // Reference images — raster underlays hosted on construction planes
+    // Reference images - raster underlays hosted on construction planes
     // (see RefImageEntry). Keyed by the host plane's id; changes ride the
     // Plane*Event stream (the image renderer re-syncs off the same events the
     // plane renderer does). removePlane() drops the hosted image with it.
@@ -260,7 +347,7 @@ public:
     void setRefImageOpacity(int planeId, float opacity);
     std::vector<int> getAllRefImagePlaneIds() const;
 
-    // Construction axes — same shape as construction planes. Used by
+    // Construction axes - same shape as construction planes. Used by
     // Revolve and any other op that needs to rotate around a line.
     // Axis* events let the renderer + Items panel react without polling.
     // `reuseId` semantics match addPlane.
@@ -295,12 +382,19 @@ private:
     std::vector<RefImageEntry> m_refImages;
     std::vector<AxisEntry> m_axes;
     std::vector<SketchEntry> m_sketches;
-    // See setCascadeSketchOverride — pinned final sketch states during a
+    std::vector<materializr::Mate> m_mates;
+    std::map<int, TopoDS_Shape> m_mateBases;
+    std::map<int, gp_Pln> m_mateSketchPlanes;
+    int m_nextMateId = 1;
+    int m_groundedBody = -1;
+    bool m_replaying = false;
+    std::string m_mateSolveError;
+    // See setCascadeSketchOverride - pinned final sketch states during a
     // cascade history replay. Empty outside cascadeFromSketchEdit.
     std::map<int, std::shared_ptr<materializr::Sketch>> m_cascadeSketchOverrides;
-    // See setBodyLedger — non-owning, cleared on updateBody.
+    // See setBodyLedger - non-owning, cleared on updateBody.
     std::map<int, materializr::topo::GenerationLedger> m_bodyLedgers;
-    // See setBodyFaceIds — owned here (unlike the non-owning ledgers).
+    // See setBodyFaceIds - owned here (unlike the non-owning ledgers).
     std::map<int, materializr::topo::FaceIdMap> m_bodyFaceIds;
     int m_nextFaceId = 1;
     std::vector<FolderEntry> m_folders;

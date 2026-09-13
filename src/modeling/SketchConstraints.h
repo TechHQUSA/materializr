@@ -39,17 +39,17 @@ struct Constraint {
     // a degree of freedom. Reference/driven = the solver ignores it entirely;
     // it only annotates, re-measuring itself as the geometry moves.
     //
-    // Defaults to TRUE so every pre-existing constraint — in memory, in old
+    // Defaults to TRUE so every pre-existing constraint - in memory, in old
     // project files, and every geometric type (Horizontal, Coincident,
-    // Tangent, …) for which "reference" is meaningless — keeps driving
+    // Tangent, …) for which "reference" is meaningless - keeps driving
     // exactly as before. Only the Dimension tool clears it, so a placed
     // dimension measures without moving anything until the user promotes it
     // in the label's edit popup. See Application::applyPendingDimension.
     bool isDriving = true;
 
     // Which way round the constraint was placed. Both error terms below are
-    // unsigned — a perpendicular distance and a point-to-point length are the
-    // same number on either side — so a dimension driven through zero came out
+    // unsigned - a perpendicular distance and a point-to-point length are the
+    // same number on either side - so a dimension driven through zero came out
     // the far side and the sketch settled mirrored. These record the
     // arrangement the user placed, so a correction can restore it instead of
     // re-deriving it from geometry that has already crossed over.
@@ -61,7 +61,7 @@ struct Constraint {
     //     break the tie when the two points are coincident and the geometry
     //     itself offers no direction.
     //
-    // (0, 0) means "not recorded" — projects written before this existed, and
+    // (0, 0) means "not recorded" - projects written before this existed, and
     // constraints whose geometry was degenerate when they were seeded. Those
     // keep the previous behaviour. Seeded on first solve, not at creation, so
     // the dimension-placement paths did not have to change.
@@ -69,7 +69,7 @@ struct Constraint {
     double orientY = 0.0;
 };
 
-// Reference/driven mode is only meaningful for the dimension-bearing types —
+// Reference/driven mode is only meaningful for the dimension-bearing types -
 // the ones carrying a numeric value the user reads off the drawing. A
 // geometric relationship (Horizontal, Parallel, Coincident, …) has no
 // measurement to annotate, so it is always driving and the edit popup offers
@@ -78,6 +78,38 @@ inline bool constraintSupportsReference(ConstraintType t) {
     return t == ConstraintType::Distance || t == ConstraintType::Radius ||
            t == ConstraintType::Angle || t == ConstraintType::DistancePointLine ||
            t == ConstraintType::CircleGap;
+}
+
+// How far a press must travel, in pixels, before it counts as dragging a
+// dimension label rather than clicking it. Pixels rather than sketch mm because
+// this is a property of the hand, not of the model's scale.
+inline constexpr float kDimDragThresholdPx = 3.0f;
+
+// Whether a press that has moved (dx, dy) pixels is a drag yet.
+//
+// Load-bearing for more than feel: the caller must store NOTHING until this
+// turns true. A label's stored offset doubles as the "user placed this" flag,
+// so writing one on a plain click converts an automatically positioned label
+// into a fixed one - it gains a leader line and stops tracking automatic
+// placement, without the user having asked for either.
+inline bool dimDragExceedsThreshold(float dx, float dy) {
+    return dx * dx + dy * dy > kDimDragThresholdPx * kDimDragThresholdPx;
+}
+
+// Label offset for a dimension tag dropped at `want`, measured from its
+// geometric anchor.
+//
+// (0,0) is overloaded: it is also the sentinel for "never placed", which the
+// renderer reads as "use the automatic position". A tag dropped exactly on its
+// anchor would therefore snap back to auto placement and look like the drag was
+// ignored. Nudging by a tenth of a micron is invisible at any usable zoom and
+// keeps the placement.
+inline void dimLabelOffset(double wantX, double wantY,
+                           double anchorX, double anchorY,
+                           double& outX, double& outY) {
+    outX = wantX - anchorX;
+    outY = wantY - anchorY;
+    if (outX == 0.0 && outY == 0.0) outX = 1e-4;
 }
 
 } // namespace materializr

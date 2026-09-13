@@ -32,8 +32,8 @@
 namespace materializr {
 
 // Project format history:
-//   v1 — bodies only (name, visible, BREP).
-//   v2 — adds per-body colour, a SKETCH section, and an optional HISTORY
+//   v1 - bodies only (name, visible, BREP).
+//   v2 - adds per-body colour, a SKETCH section, and an optional HISTORY
 //        section (operation list + per-step body diffs for undo/redo).
 // The loader still reads v1 files; the saver always writes v2.
 
@@ -74,7 +74,7 @@ bool readBodyBlockV2(std::istream& ifs, const std::string& sbLine,
 // binary payload.
 void writeBodyBlockV3(std::ostream& ofs, int id, const TopoDS_Shape& shape) {
     std::ostringstream bin;
-    // No display triangulation / normals — those are megabytes per body
+    // No display triangulation / normals - those are megabytes per body
     // and are regenerated on load. (Default 2-arg Write has them ON.)
     BinTools::Write(shape, bin, Standard_False, Standard_False,
                     BinTools_FormatVersion_CURRENT);
@@ -118,7 +118,7 @@ bool readBodyBlockV3(std::istream& ifs, const std::string& sbLine,
     return !shapeOut.IsNull();
 }
 
-// Switch helpers — saver always writes v3; loader picks based on header.
+// Switch helpers - saver always writes v3; loader picks based on header.
 void writeBodyBlock(std::ostream& ofs, int id, const TopoDS_Shape& shape) {
     writeBodyBlockV3(ofs, id, shape);
 }
@@ -131,7 +131,7 @@ bool readBodyBlock(std::istream& ifs, const std::string& sbLine,
 // ─── zlib gzip helpers ──────────────────────────────────────────────────────
 // We build the entire save in an in-memory buffer, then gzip-compress the
 // result to file in one shot. Project files are small enough that the peak
-// memory cost is irrelevant — and keeping the parser working on a
+// memory cost is irrelevant - and keeping the parser working on a
 // std::stringstream lets the rest of save/load stay byte-identical.
 bool looksLikeGzip(const std::string& bytes) {
     return bytes.size() >= 2 &&
@@ -189,7 +189,7 @@ std::string gunzipInflate(const std::string& src) {
         ret = inflate(&zs, Z_NO_FLUSH);
         out.append(buf, sizeof(buf) - zs.avail_out);
         if (out.size() > maxOutput) {
-            std::fprintf(stderr, "[ProjectIO] inflated size exceeded %zu bytes — refusing\n", maxOutput);
+            std::fprintf(stderr, "[ProjectIO] inflated size exceeded %zu bytes - refusing\n", maxOutput);
             inflateEnd(&zs);
             return {};
         }
@@ -200,7 +200,7 @@ std::string gunzipInflate(const std::string& src) {
 
 // ─── base64 (for the THUMB_PNG section) ─────────────────────────────────────
 // The thumbnail rides in the line-oriented tail region, where older loaders
-// skip unknown sections one getline at a time — so the PNG must be a single
+// skip unknown sections one getline at a time - so the PNG must be a single
 // newline-free line, hence base64 rather than a raw length-prefixed blob.
 const char kB64Alphabet[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -257,7 +257,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
     // Standard_Failure on a degenerate in-memory shape; the inner per-body catch
     // only handles std::exception and the history writes are unguarded. Wrap the
     // whole save so Ctrl+S / autosave reports a graceful error instead of
-    // aborting the process and losing the document — mirrors load().
+    // aborting the process and losing the document - mirrors load().
     try {
     // Build the entire file content in memory first (binary-safe stringstream
     // so writeBodyBlockV3's raw bytes pass through unmodified), then gzip-
@@ -305,7 +305,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
 
     // --- Thumbnail (optional, 1.6+) ---
     // Placed FIRST in the tail region so peekThumbnail can stop parsing the
-    // moment the body blocks end. One base64 line — see the encoder note.
+    // moment the body blocks end. One base64 line - see the encoder note.
     if (thumbnailPng && !thumbnailPng->empty()) {
         ofs << "THUMB_PNG "
             << base64Encode(thumbnailPng->data(), thumbnailPng->size()) << "\n";
@@ -320,7 +320,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         std::string sname = doc.getSketchName(sid);
         bool svis = doc.isSketchVisible(sid);
 
-        // Trailing detached flag (0|1) is optional — older loaders stop after
+        // Trailing detached flag (0|1) is optional - older loaders stop after
         // sourceBody, newer ones read it to restore the broken-link state.
         ofs << "SKETCH_START " << sid << " \"" << sname << "\" " << (svis ? 1 : 0)
             << " " << sk->getSourceBody() << " " << (sk->isDetachedFromBody() ? 1 : 0)
@@ -332,7 +332,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         gp_Dir x = pln.XAxis().Direction();
         gp_Dir y = pln.YAxis().Direction();
         // The first 9 values are unchanged for backward compatibility. The
-        // optional 3 trailing values are the Y direction — needed because
+        // optional 3 trailing values are the Y direction - needed because
         // gp_Ax3 default-reconstructs a right-handed system, but some
         // sketches (faces from STEP imports, or post-ZReverse) are left-
         // handed. Without the explicit Y, those sketches reload mirrored
@@ -392,7 +392,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
 
         // Constraints: opt-in user-applied sketch constraints. One line each,
         // type stored as the enum's int value (stable as long as we only append
-        // to ConstraintType in SketchConstraints.h — which is the policy).
+        // to ConstraintType in SketchConstraints.h - which is the policy).
         // K line format:
         //   K id type eA eB value valueY labelOffX labelOffY isDriving
         //     orientX orientY
@@ -400,7 +400,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
         // reference (annotation-only) dimensions; the orientation pair for
         // which side an unsigned dimension was placed on. Readers of older
         // builds ignore trailing tokens, so a file written here still loads
-        // there — losing the offsets and treating every dimension as driving,
+        // there - losing the offsets and treating every dimension as driving,
         // which is that build's only behaviour anyway. An older FILE loaded
         // here simply arrives with no orientation and gets one on first solve.
         const auto& cns = sk->getConstraints();
@@ -475,12 +475,41 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             << " " << s.kerfMm << "\n";
     }
 
+    // --- Mates ---
+    // Written after the bodies so their ids are already known on load. Field
+    // order is append-only: a reader wanting a field a writer did not emit
+    // leaves its default standing, and older readers ignore trailing tokens.
+    // Same contract as the sketch constraint "K" line.
+    //   M id type bodyA bodyB offset angle flipped suppressed
+    ofs << "GROUNDED_BODY " << doc.getGroundedBody() << "\n";
+    {
+        const auto& mates = doc.getMates();
+        ofs << "MATE_COUNT " << static_cast<int>(mates.size()) << "\n";
+        for (const auto& m : mates) {
+            // Anchor blobs last, and space-free by construction (FaceAnchor
+            // serializes with ~ and , separators), so they can ride on the
+            // same whitespace-split line. "-" stands for "no anchors" because
+            // an empty token would be invisible to the reader.
+            std::string aa = FaceAnchor::serialize(m.anchorsA);
+            std::string ab = FaceAnchor::serialize(m.anchorsB);
+            if (aa.empty()) aa = "-";
+            if (ab.empty()) ab = "-";
+            ofs << "M " << m.id << " " << static_cast<int>(m.type) << " "
+                << m.bodyA << " " << m.bodyB << " "
+                << m.offset << " " << m.angle << " "
+                << (m.flipped ? 1 : 0) << " " << (m.suppressed ? 1 : 0) << " "
+                << aa << " " << ab << " "
+                << (m.hasRelPose ? 1 : 0) << " "
+                << m.relX << " " << m.relY << " " << m.relZ << "\n";
+        }
+    }
+
     // --- Construction primitives (planes + axes) ---
     // Saved as document records (not history-derived) so they survive
     // reload even when their creating op isn't re-executed. Format is the
     // minimal "free-floating thing in the doc" line shape; ids are NOT
     // preserved on reload (new monotonic ids are allocated) since no
-    // cross-references exist yet — Revolve persistence will need a fixup
+    // cross-references exist yet - Revolve persistence will need a fixup
     // pass when it gets here (TODO once axis-id references land).
     {
         std::vector<int> planeIds = doc.getAllPlaneIds();
@@ -514,7 +543,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
     // Reference images (photo underlays hosted on construction planes). The
     // ORIGINAL compressed file bytes go in verbatim, length-prefixed like
     // PARAMS_LEN, so a .materializr stays self-contained and no recompression
-    // ever degrades the photo. Keyed by the SAVED plane id — the loader remaps
+    // ever degrades the photo. Keyed by the SAVED plane id - the loader remaps
     // through the CPLANE savedId→newId map (plane ids aren't preserved).
     // Block only appears when images exist, so ordinary projects are
     // byte-identical to before.
@@ -551,7 +580,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
             // Per-op parameter blob. v3 uses a length-prefixed binary-safe
             // form (PARAMS_LEN + raw bytes) so the blob can carry multi-line
             // content like the SketchEditOp before/after sketch snapshots.
-            // v2 readers see no PARAMS line at all from a v3 save — that's
+            // v2 readers see no PARAMS line at all from a v3 save - that's
             // fine because v3 files round-trip through v3 readers.
             if (!st.params.empty()) {
                 ofs << "PARAMS_LEN " << st.params.size() << "\n";
@@ -576,7 +605,7 @@ ProjectSaveResult ProjectIO::save(const std::string& filePath, const Document& d
 
     // --- Face lineage (additive; older readers skip these unknown tokens) ---
     // Per body: each face's ancestry ids, keyed by the face's ordinal in the
-    // SAVED shape (bit-identical on load, so ordinal is exact there — the
+    // SAVED shape (bit-identical on load, so ordinal is exact there - the
     // drift hazard only exists across REBUILDS, which is what the ids solve).
     {
         bool wroteNext = false;
@@ -653,7 +682,7 @@ namespace {
 
 // Parse the element / constraint bodies of one sketch from the stream into
 // `sk`, stopping when we hit `endTok` (typically "SKETCH_END"). This is the
-// loop that used to be inlined inside readSketch — extracted so SketchEditOp
+// loop that used to be inlined inside readSketch - extracted so SketchEditOp
 // can re-use it to embed full before/after sketch snapshots in the params
 // blob of each sketch-edit step.
 void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
@@ -759,8 +788,8 @@ void parseSketchBodyImpl(std::istream& ifs, materializr::Sketch& sk,
                     c.labelOffY = 0.0;
                 }
                 // isDriving is the 9th field (reference dimensions). Absent
-                // in every file written before it existed — and in every
-                // geometric constraint ever written — so the default is
+                // in every file written before it existed - and in every
+                // geometric constraint ever written - so the default is
                 // DRIVING, preserving old behaviour exactly. Note the stream
                 // is already in fail state here for a legacy 6-field line, so
                 // this extraction fails too and the default stands.
@@ -847,7 +876,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
     std::streampos rawSize = raw.tellg();
     raw.seekg(0, std::ios::beg);
     if (rawSize > static_cast<std::streampos>(512LL * 1024 * 1024)) {
-        result.errorMessage = "Project file too large (> 512 MB) — refusing to load";
+        result.errorMessage = "Project file too large (> 512 MB) - refusing to load";
         return result;
     }
     std::ostringstream slurp;
@@ -891,7 +920,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
         if (std::getline(ifs, peek) && peek.rfind("SAVED_BY ", 0) == 0) {
             result.savedByVersion = peek.substr(9); // after "SAVED_BY "
         } else {
-            ifs.seekg(pos); // put it back — it's the BODY_COUNT line
+            ifs.seekg(pos); // put it back - it's the BODY_COUNT line
         }
     }
     std::fprintf(stderr, "[ProjectIO] file saved by: %s\n",
@@ -932,7 +961,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
         std::string bodyName;
         bool hasColor = false;
         float r = 0.8f, g = 0.8f, b = 0.82f;
-        std::size_t bodyByteCount = 0; // v3 only — 0 means "scan to BODY_END"
+        std::size_t bodyByteCount = 0; // v3 only - 0 means "scan to BODY_END"
         bool haveByteCount = false;
         {
             std::istringstream iss(startLine);
@@ -1020,7 +1049,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
     }
 
     // After the bodies, v2 files carry a SKETCH section. Scan remaining lines and
-    // dispatch; stop at END. (v1 files just have END here — nothing to do.)
+    // dispatch; stop at END. (v1 files just have END here - nothing to do.)
     // CPLANE loading allocates NEW plane ids; REFIMG entries reference the
     // saved ones, so the CPLANE arm records the remap here for REFIMG to use
     // (save order guarantees CPLANE precedes REFIMG).
@@ -1048,7 +1077,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
             // returns a NEW id rather than respecting the saved one; for now
             // that's fine because BODY_FOLDER lines below remap by saved id
             // via a local map. (Folder ids don't need to be globally stable
-            // the way body ids do — no operations reference them.)
+            // the way body ids do - no operations reference them.)
             int n = 0; iss >> n;
             std::map<int,int> savedToNewFolder;
             for (int i = 0; i < n; ++i) {
@@ -1075,7 +1104,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                 savedToNewFolder[savedId] = newId;
             }
             // BODY_FOLDER_COUNT may be on the next line OR somewhere later in
-            // the same stream — peek and only consume if it's adjacent. (Save
+            // the same stream - peek and only consume if it's adjacent. (Save
             // writes them adjacent.)
             std::streampos restore = ifs.tellg();
             std::string maybe;
@@ -1114,6 +1143,73 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                 int bid = -1; ms >> bid;
                 if (bid >= 0) doc.setBodyMesh(bid, true);
             }
+        } else if (tok == "GROUNDED_BODY") {
+            int g = -1; iss >> g;
+            doc.setGroundedBody(g);
+        } else if (tok == "MATE_COUNT") {
+            int n = 0; iss >> n;
+            // A corrupted count that runs past EOF already falls through the
+            // getline-fails break just below; a corrupted count that is
+            // merely too LARGE relative to the actual mate lines (a
+            // hand-edited or fuzzed file) is the one this guards - without
+            // it there is no bound on how many lines this loop tries to
+            // consume before giving up.
+            if (n < 0 || n > 1000000) n = 0;
+            for (int i = 0; i < n; ++i) {
+                std::streampos beforeLine = ifs.tellg();
+                std::string mline;
+                if (!std::getline(ifs, mline)) break;
+                std::istringstream ms(mline);
+                std::string mt; ms >> mt;
+                // A non-"M" line here means MATE_COUNT no longer agrees with
+                // the file's actual content - stop consuming lines rather
+                // than `continue` (which would keep losing every line after
+                // it too, up to n total, silently swallowing the rest of the
+                // file's sections whenever a corrupted count overshoots the
+                // true mate-line count). Seek back so the outer section loop
+                // still sees this line - it may be a valid header (e.g.
+                // CPLANE_COUNT) that a mismatched count would otherwise drop.
+                if (mt != "M") { ifs.seekg(beforeLine); break; }
+                materializr::Mate m{};
+                int typeRaw = 0, flip = 0, supp = 0;
+                if (!(ms >> m.id >> typeRaw >> m.bodyA >> m.bodyB
+                         >> m.offset >> m.angle)) continue;
+                // Out-of-range type: drop the mate rather than index the enum
+                // out of bounds, as an unknown constraint type is dropped.
+                if (typeRaw < 0 ||
+                    typeRaw > static_cast<int>(materializr::MateType::Planar))
+                    continue;
+                m.type = static_cast<materializr::MateType>(typeRaw);
+                if (ms >> flip) m.flipped = (flip != 0);
+                if (ms >> supp) m.suppressed = (supp != 0);
+                std::string aa, ab;
+                // A truncated or hand-edited blob must be REJECTED, not
+                // half-parsed: FaceAnchor::parse leaves default field values
+                // behind on a short token, and a default anchor resolves to
+                // some arbitrary face rather than failing. Silently mating to
+                // the wrong face is worse than losing the reference, so on a
+                // parse failure the anchors are dropped and the mate is marked
+                // broken - which the panel already explains to the user.
+                if (ms >> aa && aa != "-" && !FaceAnchor::parse(aa, m.anchorsA)) {
+                    m.anchorsA.clear();
+                    m.broken = true;
+                }
+                if (ms >> ab && ab != "-" && !FaceAnchor::parse(ab, m.anchorsB)) {
+                    m.anchorsB.clear();
+                    m.broken = true;
+                }
+                int hasRel = 0;
+                if (ms >> hasRel && hasRel) {
+                    // All three or none: a half-read pose is worse than no
+                    // pose, because it silently displaces the body.
+                    double rx = 0.0, ry = 0.0, rz = 0.0;
+                    if (ms >> rx >> ry >> rz) {
+                        m.hasRelPose = true;
+                        m.relX = rx; m.relY = ry; m.relZ = rz;
+                    }
+                }
+                doc.addRawMate(m);
+            }
         } else if (tok == "BODY_SHEET_COUNT") {
             int n = 0; iss >> n;
             for (int i = 0; i < n; ++i) {
@@ -1136,7 +1232,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
         } else if (tok == "CPLANE_COUNT") {
             // Construction plane block. We re-issue addPlane so the
             // Document's next-id counter ticks; saved ids are NOT preserved
-            // (no cross-references yet — see save-side note).
+            // (no cross-references yet - see save-side note).
             int n = 0; iss >> n;
             for (int i = 0; i < n; ++i) {
                 std::string pline;
@@ -1307,12 +1403,12 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                         else if (t == "DESC")   st.description = v;
                         else                    st.params = v; // legacy v2 PARAMS
                     } else if (t == "PARAMS_LEN") {
-                        // v3 length-prefixed params blob — can carry newlines
+                        // v3 length-prefixed params blob - can carry newlines
                         // / arbitrary content, used for SketchEditOp's full
                         // before+after sketch snapshots.
                         std::size_t n = 0; ls >> n;
                         // Bound the (untrusted) length-prefix against the bytes
-                        // left before allocating — same class as the body
+                        // left before allocating - same class as the body
                         // byteCount guard, and reached on every project open.
                         std::streampos here = ifs.tellg();
                         std::size_t remaining = (here >= 0 && static_cast<std::size_t>(here) <= contents.size())
@@ -1354,7 +1450,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
 
     // A sketch can outlive the body it was drawn on: delete that body (or have
     // an op consume it) and the sketch keeps the now-dead id. Nothing validated
-    // it, and two behaviours keyed off it silently went wrong — the toolbar
+    // it, and two behaviours keyed off it silently went wrong - the toolbar
     // offered Push/Pull and hid Extrude (attachment is an either/or), while
     // PushPullOp took the fuse-into-existing path, failed doc.getBody() and
     // SKIPPED the target, so push/pull appeared to do nothing at all.
@@ -1375,7 +1471,7 @@ ProjectLoadResult loadImpl(const std::string& filePath, Document& doc,
                 continue;
             std::fprintf(stderr,
                          "[ProjectIO] sketch %d was anchored to body %d, which "
-                         "no longer exists — treating it as free-floating.\n",
+                         "no longer exists - treating it as free-floating.\n",
                          sid, host);
             sk->setSourceBody(-1);
         }
@@ -1405,7 +1501,7 @@ ProjectLoadResult ProjectIO::load(const std::string& filePath, Document& doc,
     // Transactional guarantee: loadImpl clears the document and then mutates
     // it incrementally, so a mid-parse failure (corrupt/hostile file) would
     // otherwise hand the caller a silently truncated document. Reset to a
-    // clean empty state so failure is unambiguous — never half a project.
+    // clean empty state so failure is unambiguous - never half a project.
     if (!result.success) doc.clear();
     return result;
 }
@@ -1445,7 +1541,7 @@ bool ProjectIO::peekThumbnail(const std::string& filePath,
             }
         }
         // v2 saves predate thumbnails entirely, and every thumbnail-bearing
-        // save is v3 with length-prefixed bodies — required for the hop below.
+        // save is v3 with length-prefixed bodies - required for the hop below.
         if (fileVersion < 3) return false;
 
         {
@@ -1470,7 +1566,7 @@ bool ProjectIO::peekThumbnail(const std::string& filePath,
             std::string label;
             iss >> label;
             if (label != "BODY_START") return false;
-            // BODY_START id "name" visible r g b byteCount — the byte count is
+            // BODY_START id "name" visible r g b byteCount - the byte count is
             // the last token after the closing quote (same parse as the loader).
             auto lq = line.rfind('"');
             if (lq == std::string::npos) return false;
@@ -1542,7 +1638,7 @@ void ProjectIO::parseSketchBody(std::istream& is, Sketch& sk, const char* endTok
 
 void ProjectIO::writeSketchBody(std::ostream& os, const Sketch& sk) {
     // Mirrors the per-sketch block of ProjectIO::save (the schema
-    // parseSketchBody reads), minus SKETCH_START — callers supply their own
+    // parseSketchBody reads), minus SKETCH_START - callers supply their own
     // header. Emits a trailing SKETCH_END as the parser's terminator.
     const gp_Pln& pln = sk.getPlane();
     gp_Pnt o = pln.Location();

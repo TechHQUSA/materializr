@@ -1,3 +1,5 @@
+#include "core/Units.h"
+#include <cmath>
 #include "Settings.h"
 
 #include <cctype>
@@ -28,7 +30,7 @@ void readInt(const std::map<std::string, std::string>& kv, const char* key, int&
     try { out = std::stoi(it->second); } catch (...) { /* keep default */ }
 }
 
-// Range-clamped variant for ints that index arrays or select fixed enums —
+// Range-clamped variant for ints that index arrays or select fixed enums -
 // a hand-edited (or injected) out-of-range value must not survive load.
 // orbitButton=99 would otherwise index past ImGui's MouseDown[5] on every
 // drag frame (IM_ASSERT is a no-op under NDEBUG).
@@ -62,7 +64,7 @@ void readBool(const std::map<std::string, std::string>& kv, const char* key, boo
     // anything else: keep default
 }
 
-// Serialized names for the UiLayout enum — what `uiLayout = ...` holds in
+// Serialized names for the UiLayout enum - what `uiLayout = ...` holds in
 // the settings file (readable, order-independent, extensible).
 const char* uiLayoutName(UiLayout l) {
     switch (l) {
@@ -70,6 +72,10 @@ const char* uiLayoutName(UiLayout l) {
         case UiLayout::ImTouch: return "imtouch";
         case UiLayout::Classic: default: return "classic";
     }
+}
+
+const char* aiProviderName(AiProvider p) {
+    return p == AiProvider::OpenAiCompatible ? "openai_compatible" : "anthropic";
 }
 
 // Map a bag of string key/values onto the struct. Shared by the `.cfg` text
@@ -112,6 +118,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readIntClamped(kv, "autosaveIntervalSec", s.autosaveIntervalSec, 5, 86400);
     readBool(kv, "invertCubeDrag",       s.invertCubeDrag);
     readFloat(kv, "doubleClickTimeSec",  s.doubleClickTimeSec);
+    readFloat(kv, "filletProbeSeconds",  s.filletProbeSeconds);
     readFloat(kv, "lightAmbient",        s.lightAmbient);
     readBool(kv, "lightHeadlight",       s.lightHeadlight);
     readBool(kv, "lightFill",            s.lightFill);
@@ -141,7 +148,64 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
     readBool(kv, "includePrereleases",   s.includePrereleases);
     readBool(kv, "supporter",            s.supporter);
     readBool(kv, "snapToGrid",           s.snapToGrid);
-    readFloat(kv, "sketchGridStep",      s.sketchGridStep); // was written but never read back
+    {
+        std::string v;
+        readString(kv, "aiProvider", v);
+        if (v == "openai_compatible") s.ai.provider = AiProvider::OpenAiCompatible;
+        else if (v == "anthropic")    s.ai.provider = AiProvider::Anthropic;
+        // unknown/missing value: keep the default (Anthropic)
+    }
+    readString(kv, "aiAnthropicApiKey", s.ai.anthropicApiKey);
+    readString(kv, "aiAnthropicModel",  s.ai.anthropicModel);
+    readString(kv, "aiOpenAiApiKey",    s.ai.openAiApiKey);
+    readString(kv, "aiOpenAiBaseUrl",   s.ai.openAiBaseUrl);
+    readString(kv, "aiOpenAiModel",     s.ai.openAiModel);
+    // Normalised HERE, before anything reads it. An out-of-range value means
+    // millimetres, never a clamp to the nearest legal index - clamping made 99
+    // mean Feet during the grid-step migration below while the same 99 meant
+    // millimetres for the setting itself, so one file was read two ways.
+    { int v = s.displayUnit; readInt(kv, "displayUnit", v);
+      s.displayUnit = (v >= 0 && v < materializr::kLengthUnitCount) ? v : 0; }
+
+    // The grid step changed MEANING, so it changed KEY. "sketchGridStep" was
+    // always millimetres; "sketchGridStepUnits" is a display number, because
+    // the presets are labelled 0.1 / 0.5 / 1 / 10 and "1" means one of
+    // whatever unit is showing. Two keys rather than a version counter: a file
+    // says which it carries, and no counter has to be kept in step.
+    //
+    // Anything that reaches m_sketchGridStep divides the snap lattice and
+    // sizes the grid renderer, so a non-finite or non-positive value is not a
+    // small cosmetic problem: NaN passes every `<= 0` guard and then reaches
+    // an int conversion in SketchRenderer. Validated before it is accepted.
+    {
+        auto usable = [](float v) {
+            return std::isfinite(v) && v > 0.0f && v <= AppSettings::kMaxGridStepUnits;
+        };
+        if (kv.count("sketchGridStepUnits")) {
+            float v = s.sketchGridStep;
+            readFloat(kv, "sketchGridStepUnits", v);
+            if (usable(v)) s.sketchGridStep = v;      // else keep the default
+        } else if (kv.count("sketchGridStep")) {
+            float legacyMm = 1.0f;
+            readFloat(kv, "sketchGridStep", legacyMm);
+            const double toMm = materializr::unitInfo(
+                static_cast<materializr::LengthUnit>(s.displayUnit)).toMm;
+            const float shown = static_cast<float>(legacyMm / toMm);
+            if (usable(shown)) {
+                s.sketchGridStep = shown;
+                // A millimetre grid carried into FEET migrates to 0.0033 of a
+                // foot: finer than the smallest preset and a lattice the
+                // renderer fades to nothing. The presets are labelled with bare
+                // numbers, so someone who picked "1" meant one of something.
+                // Only where a CONVERSION made it impractical - never under
+                // millimetres, where a deliberate 0.05 mm grid is a real choice
+                // and not something to overwrite.
+                if (s.displayUnit != 0 && s.sketchGridStep < 0.1f)
+                    s.sketchGridStep = 1.0f;
+            }
+        }
+    }
+
     readIntClamped(kv, "inferenceLevel", s.inferenceLevel, 0, 3);
     // -1 is meaningful here ("never chosen"), so the floor is -1, not 0.
     readIntClamped(kv, "language", s.language, -1, 5);
@@ -181,7 +245,7 @@ void applyKv(const std::map<std::string, std::string>& kv, AppSettings& s) {
 // Strip control characters from a string value before it's written to the
 // `.cfg`. The file format is line-oriented `key = value`; a value carrying an
 // embedded newline (legal in a POSIX filename) would otherwise be re-parsed as
-// extra `key = value` lines on the next load — an injection channel into every
+// extra `key = value` lines on the next load - an injection channel into every
 // other setting. Control chars have no business in a path/name; drop them.
 std::string sanitizeValue(const std::string& v) {
     std::string out;
@@ -203,7 +267,7 @@ void ensureParentDir(const std::string& path) {
 // Minimal reader for a flat JSON object of scalar values. Returns each
 // "key": value pair as raw text (numbers/booleans verbatim; strings unquoted
 // and unescaped) so applyKv can interpret them exactly like the `.cfg` map.
-// Not a general JSON parser — nested objects/arrays are not expected here.
+// Not a general JSON parser - nested objects/arrays are not expected here.
 std::map<std::string, std::string> parseFlatJson(const std::string& text) {
     std::map<std::string, std::string> kv;
     size_t i = 0, n = text.size();
@@ -333,13 +397,19 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
         }
         // Legacy layout keys this build superseded (read via applyKv's
         // migration, re-written as uiLayout/imTouchTree/imTouchTimeline).
-        // Don't round-trip them as "another version's" keys — a stale
+        // Don't round-trip them as "another version's" keys - a stale
         // imTouchUi=true would override a later uiLayout=classic in any
         // pre-rename build still lying around.
         oldKv.erase("imTouchUi");
         oldKv.erase("imTouchLite");
         oldKv.erase("imTouchLiteTree");
         oldKv.erase("imTouchLiteTimeline");
+        // Same reason, different migration: superseded by sketchGridStepUnits.
+        // Left in place the legacy key round-trips forever, so a downgrade
+        // would edit it while the stale new key silently won on the next
+        // upgrade. The first save by this build completes the migration.
+        oldKv.erase("sketchGridStep");
+
     }
 
     ensureParentDir(path);
@@ -364,6 +434,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "autosaveIntervalSec = " << s.autosaveIntervalSec << "\n";
     ofs << "invertCubeDrag = "      << (s.invertCubeDrag ? "true" : "false") << "\n";
     ofs << "doubleClickTimeSec = "  << s.doubleClickTimeSec  << "\n";
+    ofs << "filletProbeSeconds = "  << s.filletProbeSeconds  << "\n";
     ofs << "lightAmbient = "        << s.lightAmbient        << "\n";
     ofs << "lightHeadlight = "      << (s.lightHeadlight ? "true" : "false") << "\n";
     ofs << "lightFill = "           << (s.lightFill ? "true" : "false") << "\n";
@@ -400,9 +471,16 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
     ofs << "includePrereleases = "      << (s.includePrereleases ? "true" : "false") << "\n";
     ofs << "supporter = "               << (s.supporter ? "true" : "false") << "\n";
     ofs << "snapToGrid = "              << (s.snapToGrid ? "true" : "false") << "\n";
-    ofs << "sketchGridStep = "          << s.sketchGridStep      << "\n";
+    ofs << "aiProvider = "         << aiProviderName(s.ai.provider)      << "\n";
+    ofs << "aiAnthropicApiKey = "  << sanitizeValue(s.ai.anthropicApiKey) << "\n";
+    ofs << "aiAnthropicModel = "   << sanitizeValue(s.ai.anthropicModel)  << "\n";
+    ofs << "aiOpenAiApiKey = "     << sanitizeValue(s.ai.openAiApiKey)    << "\n";
+    ofs << "aiOpenAiBaseUrl = "    << sanitizeValue(s.ai.openAiBaseUrl)   << "\n";
+    ofs << "aiOpenAiModel = "      << sanitizeValue(s.ai.openAiModel)     << "\n";
+    ofs << "sketchGridStepUnits = "     << s.sketchGridStep      << "\n";
     ofs << "inferenceLevel = "          << s.inferenceLevel      << "\n";
     ofs << "language = "                << s.language            << "\n";
+    ofs << "displayUnit = "             << s.displayUnit         << "\n";
     ofs << "showInferenceToolbarToggle = "
         << (s.showInferenceToolbarToggle ? "true" : "false") << "\n";
     ofs << "angleSnapDeg = "             << s.angleSnapDeg        << "\n";
@@ -421,7 +499,7 @@ bool SettingsIO::save(const std::string& path, const AppSettings& s) {
         }
         // Indexed LIST keys (recentN_*, sessionN_path) are rewritten whole on
         // every save, so a key this build didn't emit means the list SHRANK.
-        // Preserving it resurrects the removed entry — a phantom tab on the
+        // Preserving it resurrects the removed entry - a phantom tab on the
         // next launch after closing one (found on the rig, 2026-07-28).
         auto isIndexedListKey = [](const std::string& k) {
             for (const char* p : {"recent", "session"}) {
@@ -474,6 +552,7 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"autosaveIntervalSec\": "     << s.autosaveIntervalSec   << ",\n";
     ofs << "  \"invertCubeDrag\": "          << b(s.invertCubeDrag)     << ",\n";
     ofs << "  \"doubleClickTimeSec\": "      << s.doubleClickTimeSec    << ",\n";
+    ofs << "  \"filletProbeSeconds\": "      << s.filletProbeSeconds    << ",\n";
     ofs << "  \"lightAmbient\": "            << s.lightAmbient          << ",\n";
     ofs << "  \"lightHeadlight\": "          << b(s.lightHeadlight)     << ",\n";
     ofs << "  \"lightFill\": "               << b(s.lightFill)          << ",\n";
@@ -501,9 +580,10 @@ bool SettingsIO::exportJson(const std::string& path, const AppSettings& s) {
     ofs << "  \"includePrereleases\": " << b(s.includePrereleases) << ",\n";
     ofs << "  \"supporter\": "               << b(s.supporter)          << ",\n";
     ofs << "  \"snapToGrid\": "              << b(s.snapToGrid)         << ",\n";
-    ofs << "  \"sketchGridStep\": "          << s.sketchGridStep        << ",\n";
+    ofs << "  \"sketchGridStepUnits\": "     << s.sketchGridStep        << ",\n";
     ofs << "  \"inferenceLevel\": "          << s.inferenceLevel        << ",\n";
     ofs << "  \"language\": "                << s.language              << ",\n";
+    ofs << "  \"displayUnit\": "             << s.displayUnit           << ",\n";
     ofs << "  \"showInferenceToolbarToggle\": "
         << b(s.showInferenceToolbarToggle) << ",\n";
     ofs << "  \"angleSnapDeg\": "             << s.angleSnapDeg          << ",\n";
@@ -530,6 +610,12 @@ AppSettings SettingsIO::importJson(const std::string& path, bool* ok) {
     // file can't inject this machine's session state (a lastProjectPath that
     // becomes a silent save target, a lastFileDir, or fabricated recents).
     kv.erase("lastProjectPath");
+    kv.erase("aiProvider");
+    kv.erase("aiAnthropicApiKey");
+    kv.erase("aiAnthropicModel");
+    kv.erase("aiOpenAiApiKey");
+    kv.erase("aiOpenAiBaseUrl");
+    kv.erase("aiOpenAiModel");
     kv.erase("lastFileDir");
     kv.erase("sessionActive");
     for (auto it = kv.begin(); it != kv.end(); ) {

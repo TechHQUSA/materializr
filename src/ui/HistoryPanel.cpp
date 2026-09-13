@@ -1,13 +1,13 @@
 #include "UiTheme.h"
 #include "HistoryPanel.h"
+#include "../core/HistoryPanelActions.h"
 #include <cctype>
 #include "../core/History.h"
 #include "../core/Document.h"
 #include "../core/Operation.h"
 #include "../core/EventBus.h"
 #include "../core/Events.h"
-#include "../modeling/SketchEditOp.h"
-#include "../modeling/SketchTransformOp.h"
+#include "../core/SketchCascadeTarget.h"
 #include <imgui.h>
 #include <algorithm>
 #include <chrono>
@@ -32,22 +32,20 @@ void HistoryPanel::setDocument(Document* doc) {
     m_document = doc;
 }
 
-bool HistoryPanel::render() {
+void HistoryPanel::render() {
     m_showUndoRedo = true;   // the desktop window always shows its own row
     ImGui::Begin("History", nullptr, ImGuiWindowFlags_NoCollapse);
-    const bool modified = renderContent();
+    renderContent();
     ImGui::End();
-    return modified;
 }
 
-// Panel body without the window wrapper — see ItemsPanel::renderContent().
-bool HistoryPanel::renderContent() {
-    bool modified = false;
+// Panel body without the window wrapper - see ItemsPanel::renderContent().
+void HistoryPanel::renderContent() {
     m_hoveredStep = -1; // recomputed below from whichever row the cursor is over
 
     if (!m_history || !m_document) {
         ImGui::TextColored(materializr::dimText(), "%s", materializr::tr("No history available."));
-        return false;
+        return;
     }
 
     int stepCount = m_history->stepCount();
@@ -56,7 +54,7 @@ bool HistoryPanel::renderContent() {
 
     ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Operation History"));
     if (!m_showUndoRedo) {
-        // No bottom button row (the host provides undo/redo) — the step
+        // No bottom button row (the host provides undo/redo) - the step
         // counter rides beside the label instead.
         ImGui::SameLine();
         ImGui::TextColored(materializr::dimText(), "%d/%d",
@@ -74,27 +72,27 @@ bool HistoryPanel::renderContent() {
     if (anyReloaded) {
         // Keep the banner to a single sentence so the panel stays tidy; the
         // how-to-fix detail lives in a hover tooltip. (Honest wording: frozen
-        // just means the step reloaded without editable parameters — old files
+        // just means the step reloaded without editable parameters - old files
         // are ONE cause, but a step type the reload path can't yet rebuild
-        // produces the same state on a brand-new save — a bug to report, not an
+        // produces the same state on a brand-new save - a bug to report, not an
         // old file.)
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1.0f), "%s", materializr::tr("Amber (frozen) steps reloaded without editable parameters. (hover for more)"));
         ImGui::PopTextWrapPos();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", materializr::tr("Undo/redo still work; to change one, select its feature and\nuse Repair Geometry, then redo it.\n(Usual cause: a save from an older version.)"));
+            ImGui::SetTooltip("%s", materializr::tr("Undo/redo still work; to change one, select its feature and\nuse Remove Feature, then redo it.\n(Usual cause: a save from an older version.)"));
         ImGui::Separator();
     }
 
     // A step that failed to recompute after an upstream edit sits above the
-    // current index with its geometry missing from the viewport — say so,
+    // current index with its geometry missing from the viewport - say so,
     // and say how to get it back, instead of leaving it silently absent.
     int failedAt = m_history->lastReplayFailure();
     if (failedAt >= 0) {
         const Operation* fop = m_history->getStep(failedAt);
         ImGui::PushTextWrapPos(0.0f);
         ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f),
-            materializr::tr("Step %d (%s) couldn't recompute — the geometry it referenced no longer exists after an upstream step was edited or disabled. Re-enable the disabled step, edit an upstream step (it retries automatically), edit this step's parameters, or delete it."),
+            materializr::tr("Step %d (%s) couldn't recompute - the geometry it referenced no longer exists after an upstream step was edited or disabled. Re-enable the disabled step, edit an upstream step (it retries automatically), edit this step's parameters, or delete it."),
             failedAt + 1, fop ? fop->name().c_str() : "?");
         ImGui::PopTextWrapPos();
         ImGui::Separator();
@@ -103,13 +101,13 @@ bool HistoryPanel::renderContent() {
     // Step list. When a step's properties editor is open below, shrink the
     // list so the editor + its pinned Apply button stay on-screen instead of
     // overflowing past the panel bottom (previously: type, scroll, THEN
-    // apply — every single edit).
+    // apply - every single edit).
     const bool propsOpen =
         m_showProperties && m_editingStep >= 0 && m_editingStep < stepCount &&
         m_history->getStep(m_editingStep) != nullptr;
     // The properties block SIZES TO THE OP'S FIELDS (measured last frame) plus
     // the fixed chrome (separator + header + Apply button). A fixed box made a
-    // two-distance chamfer — one field taller than a plain op — scroll. Capped
+    // two-distance chamfer - one field taller than a plain op - scroll. Capped
     // so the step list keeps a usable floor; past the cap the props child
     // scrolls internally (Apply stays pinned) rather than growing further.
     const float kPropsChrome = 66.0f;
@@ -165,7 +163,7 @@ bool HistoryPanel::renderContent() {
         } else {
             pushedText = false;
         }
-        // Step label uses the op's description() when available — gives
+        // Step label uses the op's description() when available - gives
         // dimension steps a useful caption ("Add Distance 25 mm") instead
         // of the generic name().
         std::string detail = op->description();
@@ -198,7 +196,7 @@ bool HistoryPanel::renderContent() {
         bool selected = (i == m_editingStep) || isHighlighted;
         if (ImGui::Selectable(label, selected)) {
             // Re-clicking the active step toggles it off, clearing the orange
-            // viewport highlight (which tracks the editing step) — otherwise
+            // viewport highlight (which tracks the editing step) - otherwise
             // there's no way to dismiss it.
             if (i == m_editingStep) {
                 m_editingStep = -1;
@@ -229,24 +227,21 @@ bool HistoryPanel::renderContent() {
                 m_showProperties = true;
             }
             if (ImGui::MenuItem(op->isEnabled() ? "Disable" : "Enable")) {
-                // In-place toggle — preserves base bodies the op modifies
+                // In-place toggle - preserves base bodies the op modifies
                 // (replayAll's doc.clear() would delete them).
                 const bool enabling = !op->isEnabled();
                 const bool okTog =
-                    m_history->setStepEnabled(i, enabling, *m_document);
+                    toggleStepEnabled(*m_history, *m_document, i, enabling, m_markBodyDirty);
                 // Re-enabling a step whose references are gone re-executes,
-                // fails, and gets SKIPPED — which read as "does nothing"
+                // fails, and gets SKIPPED - which read as "does nothing"
                 // (#54). Say so, inline under the step.
                 m_enableFailStep = (enabling && !okTog) ? i : -1;
-                modified = true;
             }
             if (ImGui::MenuItem(materializr::tr("Set Breakpoint Here"))) {
                 m_history->setBreakpoint(i);
-                modified = true;
             }
             if (breakpoint == i && ImGui::MenuItem(materializr::tr("Clear Breakpoint"))) {
                 m_history->setBreakpoint(-1);
-                modified = true;
             }
             ImGui::Separator();
             if (ImGui::MenuItem(materializr::tr("Delete"))) {
@@ -257,7 +252,7 @@ bool HistoryPanel::renderContent() {
         ImGui::PopID();
     };
 
-    // Group steps by calendar date — "Today", "Yesterday", or a date string
+    // Group steps by calendar date - "Today", "Yesterday", or a date string
     // for older sessions. Each date is a collapsible header so a 100+ step
     // project doesn't dominate the panel. Default state: today's bucket is
     // expanded, all older buckets are collapsed (so the panel boots
@@ -276,7 +271,7 @@ bool HistoryPanel::renderContent() {
         return {local.tm_year + 1900, local.tm_mon, local.tm_mday};
     };
     // Step timestamps never change, so their calendar dates are cached and
-    // rebuilt only when history mutates — the grouping loop below reads the
+    // rebuilt only when history mutates - the grouping loop below reads the
     // date of EVERY step EVERY frame, which was 150+ localtime_r calls per
     // frame on a long history. ("Today"/"Yesterday" labels still use a fresh
     // `today` below, so the midnight rollover renames buckets correctly.)
@@ -352,7 +347,7 @@ bool HistoryPanel::renderContent() {
                            dateLabel(bucket, today, yest).c_str(),
                            runLen, runLen == 1 ? "" : "s");
         if (!isCollapsed) {
-            // A modest indent (not the full default ~21px) — enough to nest the
+            // A modest indent (not the full default ~21px) - enough to nest the
             // steps under their date header without stranding the numbers in a
             // wide empty left margin.
             const float stepIndent = ImGui::GetFontSize() * 0.6f;
@@ -367,14 +362,13 @@ bool HistoryPanel::renderContent() {
     // list. removeStep rebuilds in place and refuses (returns false) if a later
     // operation depends on the one being removed.
     if (deleteIndex >= 0) {
-        if (m_history->removeStep(deleteIndex, *m_document)) {
+        if (deleteStep(*m_history, *m_document, deleteIndex, m_markBodyDirty)) {
             if (m_editingStep == deleteIndex) { m_editingStep = -1; m_showProperties = false; }
             else if (m_editingStep > deleteIndex) m_editingStep--;
             m_deleteConflict = false;
         } else {
             m_deleteConflict = true; // a dependent step blocked the removal
         }
-        modified = true;
     }
 
     if (m_deleteConflict) {
@@ -390,7 +384,7 @@ bool HistoryPanel::renderContent() {
 
     ImGui::EndChild();
 
-    // Properties sub-section — the parameter widgets live in a bounded,
+    // Properties sub-section - the parameter widgets live in a bounded,
     // scrollable child; the Apply button is pinned BELOW it so it's always
     // visible no matter how many fields the op renders. Enter anywhere in
     // the editor commits too.
@@ -407,7 +401,7 @@ bool HistoryPanel::renderContent() {
             // default item width eats most of the row, so the field is
             // absurdly wide for a 2-3 digit id and the label runs off the
             // panel edge. Size the input for ~7 digits PLUS the -/+ step
-            // buttons (which InputDouble carves out of the item width — a flat
+            // buttons (which InputDouble carves out of the item width - a flat
             // char count left "12.500"-style values clipped). Ops wanting a
             // full-width control still PushItemWidth themselves inside.
             ImGui::PushItemWidth(
@@ -437,16 +431,15 @@ bool HistoryPanel::renderContent() {
 
             if (ImGui::Button(materializr::tr("Apply Changes"), ImVec2(-1, 0)) || enterInProps) {
                 // Carry any inline circle-diameter edit forward into the later
-                // full-snapshot sketchedit steps FIRST — otherwise the next
+                // full-snapshot sketchedit steps FIRST - otherwise the next
                 // snapshot overwrites it before the extrude/pushpull reads it.
                 m_history->propagateSketchValueEdits(m_editingStep, *m_document);
                 // Transactional: a failed replay restores the model wholesale
                 // rather than leaving it half-built.
-                bool applied = m_history->editStep(m_editingStep, *m_document,
-                                                   /*transactional=*/true);
-                modified = true;
+                bool applied = applyStepEdit(*m_history, *m_document, m_editingStep,
+                                             m_markBodyDirty);
                 if (!applied && !m_paramsSnap.empty()) {
-                    // The replay was rolled back — snap the fields back to the
+                    // The replay was rolled back - snap the fields back to the
                     // pre-edit values too. The inputs bind live to op members,
                     // so without this the REJECTED value silently sticks in
                     // the panel while the geometry shows the old state.
@@ -458,9 +451,9 @@ bool HistoryPanel::renderContent() {
                 // event so any downstream Extrude / Push-Pull that consumed
                 // this sketch re-runs with the new constraint values. We
                 // publish from here (not from inside editStep) so generic
-                // history shuffles — undo/redo, push/pull drag previews —
+                // history shuffles - undo/redo, push/pull drag previews -
                 // don't trigger spurious cascades. Skip if the edit didn't
-                // apply (model was reverted) — cascading a reverted edit is wrong.
+                // apply (model was reverted) - cascading a reverted edit is wrong.
                 if (applied && m_eventBus) {
                     auto* sketchOp = dynamic_cast<const materializr::SketchEditOp*>(op);
                     if (sketchOp) {
@@ -480,33 +473,13 @@ bool HistoryPanel::renderContent() {
     // Bottom section: Undo/Redo + step counter
     ImGui::Separator();
 
-    // After an undo/redo of a SketchEditOp, the body built from that sketch is
-    // updated through the cascade (editStep), which the op's own undo/redo
-    // doesn't drive — publish a SketchEditedEvent so the body follows. Mirrors
-    // the Ctrl+Z/Ctrl+Y handlers in Application.
-    auto publishIfSketchEdit = [&](const Operation* op) {
-        if (!op || !m_eventBus || !m_document) return;
-        if (auto* se = dynamic_cast<const materializr::SketchEditOp*>(op)) {
-            if (auto target = se->getTarget()) {
-                int sid = m_document->findSketchId(target.get());
-                if (sid >= 0) m_eventBus->publish(SketchEditedEvent{sid});
-            }
-        } else if (auto* st = dynamic_cast<const materializr::SketchTransformOp*>(op)) {
-            // A linked 3D sketch move updated its body via the cascade — re-run it
-            // so the body follows the reverted/re-applied plane.
-            if (st->getSketchId() >= 0)
-                m_eventBus->publish(SketchEditedEvent{st->getSketchId()});
-        }
-    };
-
     if (m_showUndoRedo) {
         ImGui::BeginDisabled(m_historyLocked || !m_history->canUndo());
         if (ImGui::Button(materializr::tr("Undo"))) {
-            const Operation* undone =
-                m_history->getStep(m_history->currentStep());
-            m_history->undo(*m_document);
-            publishIfSketchEdit(undone);
-            modified = true;
+            undoStep(*m_history, *m_document, m_markBodyDirty);
+            const int idx = m_history->lastUndoneStep();
+            materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document, -1,
+                [&](int sid) { if (m_eventBus) m_eventBus->publish(SketchEditedEvent{sid}); });
         }
         ImGui::EndDisabled();
 
@@ -514,9 +487,10 @@ bool HistoryPanel::renderContent() {
 
         ImGui::BeginDisabled(m_historyLocked || !m_history->canRedo());
         if (ImGui::Button(materializr::tr("Redo"))) {
-            m_history->redo(*m_document);
-            publishIfSketchEdit(m_history->getStep(m_history->currentStep()));
-            modified = true;
+            redoStep(*m_history, *m_document, m_markBodyDirty);
+            const int idx = m_history->lastRedoneStep();
+            materializr::dispatchUndoRedoCascade(idx, m_history->getStep(idx), *m_document, -1,
+                [&](int sid) { if (m_eventBus) m_eventBus->publish(SketchEditedEvent{sid}); });
         }
         ImGui::EndDisabled();
 
@@ -528,7 +502,6 @@ bool HistoryPanel::renderContent() {
         ImGui::Text("%s", stepText);
     }
 
-    return modified;
 }
 
 } // namespace materializr

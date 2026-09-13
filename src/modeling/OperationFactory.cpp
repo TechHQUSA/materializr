@@ -4,6 +4,9 @@
 #include "LoftOp.h"
 #include "GuidedLoftOp.h"
 #include "BoundaryFillOp.h"
+#include "PatchOp.h"
+#include "FaceTweakOp.h"
+#include "SewOp.h"
 #include "SketchTransformOp.h"
 #include "SplitBodyOp.h"
 #include "SeparateBodyOp.h"
@@ -51,7 +54,7 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     //                 declines when any target is a bare body face.
     //   - "revolve":  profile re-derived from its sketch; axis is geometric
     //                 (origin+direction) and serialises directly.
-    //   - datum creation ops: self-contained — params carry the computed
+    //   - datum creation ops: self-contained - params carry the computed
     //     plane/axis + its document id, so reloaded steps undo/redo cleanly.
     if (typeId == "pattern")  return std::make_unique<PatternOp>();
     if (typeId == "extrude")  return std::make_unique<ExtrudeOp>();
@@ -79,6 +82,9 @@ std::unique_ptr<Operation> create(const std::string& typeId) {
     if (typeId == "loft")            return std::make_unique<LoftOp>();
     if (typeId == "guided_loft")     return std::make_unique<GuidedLoftOp>();
     if (typeId == "boundary_fill")   return std::make_unique<BoundaryFillOp>();
+    if (typeId == "patch")           return std::make_unique<PatchOp>();
+    if (typeId == "face_tweak")      return std::make_unique<FaceTweakOp>();
+    if (typeId == "sew")             return std::make_unique<SewOp>();
     if (typeId == "sweep")           return std::make_unique<SweepOp>();
     //   - Tier 2b (persistent sub-shape identity, see SubShapeIndex.h):
     //     edges/faces persist as ordinal indices into the step's input shape.

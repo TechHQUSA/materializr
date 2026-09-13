@@ -1,3 +1,5 @@
+#include "ui/LengthField.h"
+#include "core/Units.h"
 #include "ScaleFaceOp.h"
 #include "SubShapeIndex.h"
 #include <cstdio>
@@ -36,6 +38,7 @@
 #include "../ui/NumField.h"
 #include "../i18n.h"
 #include "../i18n.h"
+#include "BoolArgs.h"
 
 ScaleFaceOp::ScaleFaceOp() = default;
 
@@ -50,6 +53,13 @@ void ScaleFaceOp::setLength(double l) { m_length = l; }
 void ScaleFaceOp::setMode(Mode m) { m_mode = m; }
 
 bool ScaleFaceOp::execute(Document& doc) {
+    // FIRST statement, before the parameter guards below: any early return
+    // must still consume the candidate, or an operation that was armed, then
+    // executed once at an invalid value, would keep the candidate armed for a
+    // later execute at the original value. Whether it is USED is decided
+    // further down, after the face references have been re-bound.
+    auto adopted = takePrecomputed();
+
     if (m_bodyId < 0 || m_face.IsNull() || m_length <= 1e-6 ||
         m_scaleU < 1.0 || m_scaleU > 500.0 ||
         m_scaleV < 1.0 || m_scaleV > 500.0 ||
@@ -60,6 +70,16 @@ bool ScaleFaceOp::execute(Document& doc) {
     try {
         m_previousShape = doc.getBody(m_bodyId);
 
+        // The worker already reshaped this exact body from this exact face.
+        // ScaleFace keeps its face handle as stored rather than re-binding, so
+        // there is no re-bind to sequence after; the key check below still
+        // proves the selection is the one the worker used.
+        if (adopted && canAdopt(*adopted, m_previousShape,
+                                previewKey(m_previousShape))) {
+            doc.updateBody(m_bodyId, adopted->result);
+            return true;
+        }
+
         // Planar end faces only (a wing tip cap, a box end…).
         Handle(Geom_Plane) pl =
             Handle(Geom_Plane)::DownCast(BRep_Tool::Surface(m_face));
@@ -68,7 +88,7 @@ bool ScaleFaceOp::execute(Document& doc) {
             return false;
         }
 
-        // Outward normal (orientation-aware) and the face centroid — the
+        // Outward normal (orientation-aware) and the face centroid - the
         // scale pivot.
         BRepGProp_Face gpf(m_face);
         double u1, u2, v1, v2;
@@ -92,7 +112,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         // X / Y directions (deterministic per face, so reload-safe):
         // M = su*(u (x) u) + sv*(v (x) v) + (n (x) n), translation keeps
         // the centroid fixed. gp_Trsf can't do this; gp_GTrsf can.
-        // COPY the plane — Pln() returns a temporary, and a reference
+        // COPY the plane - Pln() returns a temporary, and a reference
         // into it dangles after this statement (the axes came out as
         // uninitialized garbage: zero scale matrix, NaN directions).
         const gp_Pln fpln = pl->Pln();
@@ -125,7 +145,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         };
         // UNIFORM scale must stay exact. GTransform converts every analytic
         // curve to a bspline (a general affine map can turn a circle into an
-        // ellipse, so OCCT downgrades unconditionally) — a uniformly scaled
+        // ellipse, so OCCT downgrades unconditionally) - a uniformly scaled
         // circle came back as a wobbly approximation: the loft wall rendered
         // lumpy and the scaled cap centroid drifted off-axis (Steve's
         // "strange geometry on the side wall", 2026-08-04). gp_Trsf's true
@@ -159,7 +179,8 @@ bool ScaleFaceOp::execute(Document& doc) {
                 std::fprintf(stderr, "[ScaleFace] tip loft failed\n");
                 return false;
             }
-            BRepAlgoAPI_Fuse fuse(m_previousShape, loft.Shape());
+            BRepAlgoAPI_Fuse fuse;
+            materializr::setBooleanShapes(fuse, m_previousShape, loft.Shape());
             fuse.SetFuzzyValue(1.0e-4);
             fuse.Build();
             if (!fuse.IsDone()) {
@@ -170,11 +191,28 @@ bool ScaleFaceOp::execute(Document& doc) {
         } else {
             // Pinch: reshape the last L of the body toward the scaled
             // outline. When L spans the WHOLE body ("scale the top face
-            // and the sides follow from the base" — the default), the cut
+            // and the sides follow from the base" - the default), the cut
             // degenerates and a single Common against the frustum does
             // everything.
             Bnd_Box bb;
-            BRepBndLib::Add(m_previousShape, bb);
+            // Triangulation OFF, deliberately. These bounds drive `depth` and
+            // therefore the fullDepth branch below, and BRepBndLib::Add
+            // defaults to using a triangulation when the shape carries one.
+            // The live body is meshed; the preview worker computes on a copy
+            // that deliberately is not (see SnapshotPreview.cpp), so the same
+            // body measures 20.000 by geometry and 20.125 through its mesh on
+            // a plain cone - and the branch turns on 1e-4. The branch really
+            // does flip between the two paths.
+            //
+            // No input has been found where that flip changes the RESULT: a
+            // sweep of 123 lengths across the threshold, at three scales, on
+            // a cone and a cylinder, produced identical geometry either way,
+            // because the two branches agree wherever they can both apply. So
+            // this is a latent dependency removed, not a demonstrated defect
+            // repaired. It matters because the commit may now ADOPT what the
+            // preview computed, and a decision that depends on whether a body
+            // happens to be meshed is one the two paths must not disagree on.
+            BRepBndLib::Add(m_previousShape, bb, Standard_False);
             double bx0, by0, bz0, bx1, by1, bz1;
             bb.Get(bx0, by0, bz0, bx1, by1, bz1);
             double diag = gp_Pnt(bx0, by0, bz0).Distance(
@@ -219,22 +257,24 @@ bool ScaleFaceOp::execute(Document& doc) {
             // material, so a frustum wider than the body just clipped back to
             // the body and the op reported success having changed nothing
             // (Steve: "scale only makes a face smaller"). The frustum already
-            // describes the wanted shape in both directions — full-size
-            // outline at the base, scaled outline at the face — so growing is
+            // describes the wanted shape in both directions - full-size
+            // outline at the base, scaled outline at the face - so growing is
             // the same solid UNIONED on instead of intersected, which flares
             // the side walls outward from the base and keeps the body's other
             // features. Union works for the partial-length case too: the
             // frustum only spans the last L, so only that band flares.
             const bool grow = (su > 1.0 || sv > 1.0);
             if (grow) {
-                BRepAlgoAPI_Fuse fuse(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Fuse fuse;
+                materializr::setBooleanShapes(fuse, m_previousShape, loft.Shape());
                 fuse.SetFuzzyValue(1.0e-4);
                 fuse.Build();
                 if (!fuse.IsDone()) return false;
                 result = fuse.Shape();
             } else if (fullDepth) {
                 // The frustum spans the entire body: one Common does it.
-                BRepAlgoAPI_Common common(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Common common;
+                materializr::setBooleanShapes(common, m_previousShape, loft.Shape());
                 common.SetFuzzyValue(1.0e-4);
                 common.Build();
                 if (!common.IsDone()) return false;
@@ -247,24 +287,28 @@ bool ScaleFaceOp::execute(Document& doc) {
                     BRepPrimAPI_MakePrism(bigFace, gp_Vec(n) * (2.0 * diag))
                         .Shape();
 
-                BRepAlgoAPI_Cut mainCut(m_previousShape, tipBox);
+                BRepAlgoAPI_Cut mainCut;
+                materializr::setBooleanShapes(mainCut, m_previousShape, tipBox);
                 mainCut.SetFuzzyValue(1.0e-4);
                 mainCut.Build();
                 if (!mainCut.IsDone()) return false;
                 TopoDS_Shape mainPiece = mainCut.Shape();
 
-                BRepAlgoAPI_Common tipCommon(m_previousShape, loft.Shape());
+                BRepAlgoAPI_Common tipCommon;
+                materializr::setBooleanShapes(tipCommon, m_previousShape, loft.Shape());
                 tipCommon.SetFuzzyValue(1.0e-4);
                 tipCommon.Build();
                 if (!tipCommon.IsDone()) return false;
-                // Keep only the part beyond the cut plane — the frustum
+                // Keep only the part beyond the cut plane - the frustum
                 // also overlaps inboard material.
-                BRepAlgoAPI_Common tipPiece(tipCommon.Shape(), tipBox);
+                BRepAlgoAPI_Common tipPiece;
+                materializr::setBooleanShapes(tipPiece, tipCommon.Shape(), tipBox);
                 tipPiece.SetFuzzyValue(1.0e-4);
                 tipPiece.Build();
                 if (!tipPiece.IsDone()) return false;
 
-                BRepAlgoAPI_Fuse fuse(mainPiece, tipPiece.Shape());
+                BRepAlgoAPI_Fuse fuse;
+                materializr::setBooleanShapes(fuse, mainPiece, tipPiece.Shape());
                 fuse.SetFuzzyValue(1.0e-4);
                 fuse.Build();
                 if (!fuse.IsDone()) return false;
@@ -275,7 +319,7 @@ bool ScaleFaceOp::execute(Document& doc) {
         if (result.IsNull()) return false;
 
         // The booleans (the grow-Fuse especially) leave same-surface faces
-        // split — the grown cap arrived as the ORIGINAL top disc plus a
+        // split - the grown cap arrived as the ORIGINAL top disc plus a
         // coplanar annulus stacked at the same height. Merge them, the same
         // way Push/Pull does after its cut/fuse.
         result = materializr::unifySameDomain(result, "ScaleFace");
@@ -312,21 +356,31 @@ bool ScaleFaceOp::undo(Document& doc) {
 
 std::string ScaleFaceOp::description() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf),
-                  "Scale face to %.0f%%/%.0f%% over %.1f mm (%s)",
-                  m_scaleU, m_scaleV, m_length,
-                  m_mode == Mode::Extend ? "extend" : "pinch");
+    std::snprintf(buf, sizeof(buf), "Scale face to %.0f%%/%.0f%% over %s (%s)", m_scaleU, m_scaleV, materializr::fmtLength(m_length).c_str(), m_mode == Mode::Extend ? "extend" : "pinch");
     return buf;
 }
 
 void ScaleFaceOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Scale Face"));
     ImGui::Separator();
+    // PERCENTAGES, not lengths - the header says "percent along the face
+    // plane's XDirection" and the labels say (%). Routed through lengthField
+    // they were converted display->mm on commit, so typing 100 under inches
+    // stored 2540%.
     materializr::inputNumber(materializr::tr("Scale U (%)"), &m_scaleU, 1.0, 10.0, "%.1f");
     materializr::inputNumber(materializr::tr("Scale V (%)"), &m_scaleV, 1.0, 10.0, "%.1f");
-    materializr::inputNumber(materializr::tr("Length (mm)"), &m_length, 0.5, 5.0, "%.2f");
+    materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &m_length);
     ImGui::Text(materializr::tr("Mode: %s"), m_mode == Mode::Extend ? "Extend" : "Pinch");
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
+}
+
+std::string ScaleFaceOp::previewKey(const TopoDS_Shape& base) const {
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "scaleface;u=%a;v=%a;L=%a;mode=%d;face=",
+                  m_scaleU, m_scaleV, m_length, static_cast<int>(m_mode));
+    std::string sel;
+    if (!SubShapeIndex::orientedKey(base, {m_face}, TopAbs_FACE, sel)) return {};
+    return std::string(buf) + sel;
 }
 
 std::string ScaleFaceOp::serializeParams() const {

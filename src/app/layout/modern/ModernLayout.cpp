@@ -1,4 +1,4 @@
-// Modern layout (UiLayout::Modern) — the tablet shell (docs/im-touch-ui-plan.md
+// Modern layout (UiLayout::Modern) - the tablet shell (docs/im-touch-ui-plan.md
 // Phase 0 skeleton with the Phase 1 theme/widgets/icons applied).
 //
 // Replaces the desktop menu bar / dockspace / status bar with fixed chrome:
@@ -9,7 +9,7 @@
 // renderViewport() via m_touchVp* (set here, read there, every frame).
 //
 // Everything fundamental (menus, tool catalogue, panel content) is shared
-// code — see layout/LayoutCommon.h for the keep-in-lockstep contract.
+// code - see layout/LayoutCommon.h for the keep-in-lockstep contract.
 
 #include <cstring>
 #include <algorithm>
@@ -50,7 +50,7 @@ void Application::renderModernLayout() {
     const ImVec2 wp = vp->WorkPos;
     const ImVec2 ws = vp->WorkSize;
 
-    // Hover tooltip on the previous item — honours the same "toolbar
+    // Hover tooltip on the previous item - honours the same "toolbar
     // tooltips" setting the classic toolbar uses. (Hover exists on desktop
     // modern and on a tablet with a mouse; bare-finger use never sees it.)
     auto tip = [&](const char* text) {
@@ -68,7 +68,7 @@ void Application::renderModernLayout() {
     const float rightW = m_rightPanelHidden ? 0.0f : m_touchRightW * s; // user-resizable
 
     // ── Top app bar ─────────────────────────────────────────────────────────
-    // The fixed bars are edge-flush strips — opt out of the theme's global
+    // The fixed bars are edge-flush strips - opt out of the theme's global
     // WindowRounding (their corners would notch against the viewport). The
     // pop right after Begin keeps rounding intact for anything opened inside
     // (modals, popups pick up style at their own Begin).
@@ -91,12 +91,12 @@ void Application::renderModernLayout() {
         // strip has to know where this cluster starts: with enough tabs open
         // the pills used to run straight under Finish Sketch / Exit Sketch
         // (Steve, 2026-08-07). `total` below is that boundary.
-        // Focus, ⋯. Finish/Discard appear in sketch mode — the two actions
+        // Focus, ⋯. Finish/Discard appear in sketch mode - the two actions
         // that must never be hunted for.
         const float sp = 8.0f * s;
         // Square icon buttons in the right cluster: undo, redo.
         // (The ⋯ overflow moved to the top-left; the soft-keyboard toggle is
-        // gone — numeric fields raise the native keyboard on focus now.)
+        // gone - numeric fields raise the native keyboard on focus now.)
         const int nSquare = 2;
         // Multi-Select toggle (the touch Ctrl stand-in): shown for 3D selection
         // and in sketch Select/move mode, hidden in the sketch draw tools where
@@ -107,8 +107,8 @@ void Application::renderModernLayout() {
         // Context-clear labels so nobody discards a whole sketch by reflex: while
         // a draw tool is running the buttons act on its SHAPE (Finish / Cancel);
         // with no tool running (e.g. Select/move) they act on the SKETCH, and say
-        // so — "Finish Sketch" / "Exit Sketch". (Exit still asks to confirm
-        // before discarding — the warning popup does the "throw away" wording.)
+        // so - "Finish Sketch" / "Exit Sketch". (Exit still asks to confirm
+        // before discarding - the warning popup does the "throw away" wording.)
         const bool toolRunning = m_inSketchMode && m_sketchTool &&
                                  m_sketchTool->isPlacing();
         const char* finishLbl = toolRunning ? materializr::tr("Finish")
@@ -128,7 +128,7 @@ void Application::renderModernLayout() {
             }
         }
         // Right-align the cluster with EXACT widths (touchui::pillButtonWidth
-        // shares pillButton's sizing) — the previous estimate overshot per
+        // shares pillButton's sizing) - the previous estimate overshot per
         // pill, leaving an awkward gap against the right edge.
         // Focus is a 3-position cycle: full UI -> side panel hidden ->
         // viewport only (which retired the old bottom-left FULL pill). The
@@ -244,7 +244,7 @@ void Application::renderModernLayout() {
                 ImGui::SameLine(0.0f, 6.0f * s);
                 ImGui::PopID();
             }
-            // Keep the ACTIVE tab in view when the strip is scrolled — after a
+            // Keep the ACTIVE tab in view when the strip is scrolled - after a
             // switch from the tab menu it may be off to one side.
             ImGui::EndChild();
             ImGui::PopStyleVar(2);
@@ -289,7 +289,7 @@ void Application::renderModernLayout() {
         }
 
         if (m_inSketchMode) {
-            // Inference level — just left of Finish; click cycles the level.
+            // Inference level - just left of Finish; click cycles the level.
             if (touchui::twoRowButton("inflvl", materializr::tr("Inference level"), materializr::tr(infLbl))) {
                 handleToolAction(static_cast<int>(ToolAction::SketchCycleInference));
             }
@@ -311,7 +311,7 @@ void Application::renderModernLayout() {
                 if (toolRunning)
                     m_sketchTool->onCancel();       // discard the in-progress shape
                 else
-                    // Whole-sketch discard is destructive — confirm first so a
+                    // Whole-sketch discard is destructive - confirm first so a
                     // misclick can't throw the sketch away.
                     ImGui::OpenPopup("Discard sketch?");
             }
@@ -367,7 +367,7 @@ void Application::renderModernLayout() {
     }
     ImGui::End();
 
-    // ── Left tool rail — the selection-context tool catalogue. ──────────────
+    // ── Left tool rail - the selection-context tool catalogue. ──────────────
     if (railW > 0.0f) {
         ImGui::SetNextWindowPos(ImVec2(wp.x, wp.y + topH));
         ImGui::SetNextWindowSize(ImVec2(railW, ws.y - topH));
@@ -404,7 +404,7 @@ void Application::renderModernLayout() {
                 return 0.0f;                            // 0 = full content width
             };
 
-            // Grouped popups for the create tools the contextual rail omits —
+            // Grouped popups for the create tools the contextual rail omits -
             // one tap away (not buried in the ⋯ menu). On a touch screen they
             // get roomier rows (bigger padding + row gap) for finger targets.
             const bool nothingSel = !m_inSketchMode &&
@@ -485,15 +485,21 @@ void Application::renderModernLayout() {
                 // the View menu) and the inference level (now the top bar).
                 //
                 // "Transform" used to label the Copy/Mirror/Duplicate group,
-                // which is why Move/Rotate/Scale — the actual transforms — had
+                // which is why Move/Rotate/Scale - the actual transforms - had
                 // to sit loose. The name belongs here (classic's palette has
                 // always headed that trio "Transform"); everything that changes
                 // how MANY bodies you end up with is Multiply.
+                //   Repair    = Patch + Sew + Merge Faces + Remove Feature
+                // The repair group is the one whose members come from four
+                // different selection contexts, so it collapses to whichever
+                // are usable right now - and to nothing at all when none are.
                 auto groupOf = [](const Toolbar::RailTool& t) -> int {
                     if (t.pluginIndex >= 0) {
                         if (t.label && std::strcmp(t.label, "Linear") == 0)    return 1;
                         if (t.label && std::strcmp(t.label, "Circular") == 0)  return 1;
                         if (t.label && std::strcmp(t.label, "Duplicate") == 0) return 1;
+                        if (t.label && std::strcmp(t.label, "Patch") == 0)     return 4;
+                        if (t.label && std::strcmp(t.label, "Sew") == 0)       return 4;
                         return 0;
                     }
                     switch (t.action) {
@@ -511,6 +517,8 @@ void Application::renderModernLayout() {
                         // the rail short and makes the pair discoverable.
                         case ToolAction::SketchSvg:
                         case ToolAction::SketchAirfoil:        return 3;
+                        case ToolAction::MergeFaces:
+                        case ToolAction::RemoveFace:           return 4;
                         default: return 0;
                     }
                 };
@@ -529,7 +537,7 @@ void Application::renderModernLayout() {
                     else handleToolAction(static_cast<int>(t.action));
                 };
 
-                bool done[4] = { false, false, false, false };
+                bool done[5] = { false, false, false, false, false };
                 int railIdx = 0;
                 for (const auto& tool : rail) {
                     if (skip(tool)) continue;
@@ -540,11 +548,14 @@ void Application::renderModernLayout() {
                         if (done[g]) continue;
                         done[g] = true;
                         const char* gIcon  = g == 1 ? MZ_ICON_COPY
-                                           : g == 2 ? MZ_ICON_MOVE : MZ_ICON_SVG;
+                                           : g == 2 ? MZ_ICON_MOVE
+                                           : g == 4 ? MZ_ICON_REPAIR : MZ_ICON_SVG;
                         const char* gLabel = g == 1 ? "Multiply"
-                                           : g == 2 ? "Transform" : "Import";
+                                           : g == 2 ? "Transform"
+                                           : g == 4 ? "Repair" : "Import";
                         const char* gPopup = g == 1 ? "##railMultiply"
                                            : g == 2 ? "##railTransform"
+                                           : g == 4 ? "##railRepair"
                                                     : "##railImport";
                         ImGui::PushID(2000 + g);
                         if (touchui::railButton(gLabel, gIcon, tr(gLabel), false, cell()))
@@ -552,6 +563,9 @@ void Application::renderModernLayout() {
                         tip(materializr::tr(
                             g == 3 ? "Bring outside artwork into the sketch: an "
                                      "SVG outline or an aerofoil section"
+                          : g == 4 ? "Fix up geometry: fill an opening, stitch "
+                                     "surfaces into a solid, merge split faces, "
+                                     "or take a feature back off"
                           : g == 1 ? "Copy, mirror, pattern or split the selection"
                                    : "Move, rotate or scale the selection"));
                         pushPopupPad();
@@ -589,7 +603,7 @@ void Application::renderModernLayout() {
             }
 
             // Construction stays reachable with a selection too (its options
-            // derive from the selection) — after the contextual tools.
+            // derive from the selection) - after the contextual tools.
             if (!m_inSketchMode && !nothingSel)
                 constructGroup();
         }
@@ -631,7 +645,7 @@ void Application::renderModernLayout() {
             }
 
             // Properties lives inside the History tab (below the steps) but
-            // the tab just says "History" — that's where people expect it,
+            // the tab just says "History" - that's where people expect it,
             // and the short label keeps the switcher clean.
             // Rebuilt per frame (NOT static) so a live language switch
             // retranslates it; tr() pointers are stable per language.
@@ -645,20 +659,19 @@ void Application::renderModernLayout() {
                 saveAppSettings();
             }
             // Scrolling body below the pinned switcher. The panels' content
-            // renderers are the same code the desktop docks host — identical
+            // renderers are the same code the desktop docks host - identical
             // behavior, different container.
             if (ImGui::BeginChild("##touchRightBody", ImVec2(0, 0), false)) {
                 if (m_touchRightTab == 0) {
                     if (m_itemsPanel && m_itemsPanel->renderContent()) {
                         m_hoveredBodyId = -1;
-                        m_meshesDirty = true;
                     }
                 } else {
-                    // History on top, Properties beneath — one tab hosts
+                    // History on top, Properties beneath - one tab hosts
                     // both. When a history STEP is selected the History panel
                     // shows the step's editor INLINE, so the bottom Properties
                     // section would just duplicate an empty panel beneath it
-                    // ("two properties windows, the bottom one blank") — give
+                    // ("two properties windows, the bottom one blank") - give
                     // History the full height instead and skip the section.
                     const bool stepEditing =
                         m_historyPanel && m_historyPanel->getEditingStep() >= 0;
@@ -668,21 +681,21 @@ void Application::renderModernLayout() {
                     // measured each frame; History reserves last frame's value
                     // (`-footerH` = fill all but that), so a selection change
                     // settles in one frame. Capped at half the panel so a
-                    // many-field selection can't swallow the step list — past
+                    // many-field selection can't swallow the step list - past
                     // the cap the footer becomes a fixed scrolling box.
                     const float availH = ImGui::GetContentRegionAvail().y;
                     // Properties owns its height: it sizes to its content and
                     // NEVER scrolls, growing upward from the bottom as a
                     // selection needs more room. History takes whatever's left
-                    // and scrolls (it always would — the step list is long).
+                    // and scrolls (it always would - the step list is long).
                     // History keeps a small floor so it can't vanish entirely
                     // when a selection is field-heavy.
                     const float minHistH = ImGui::GetFrameHeightWithSpacing() * 2.5f;
                     // Bootstrap / re-show seed: History must reserve SOME footer
                     // room on the first frame (and the frame we leave step
                     // editing), or it fills the panel, pushes the footer past
-                    // the bottom edge, and AutoResizeY — which only measures
-                    // while visible — can never size it (stuck at 0). A rough
+                    // the bottom edge, and AutoResizeY - which only measures
+                    // while visible - can never size it (stuck at 0). A rough
                     // seed makes the footer visible; it snaps to exact next
                     // frame.
                     if (!stepEditing && m_propsFooterH <= 0.0f)
@@ -695,8 +708,7 @@ void Application::renderModernLayout() {
                             // Undo/redo live in the shell's top bar; the panel
                             // shows its step counter beside the label instead.
                             m_historyPanel->setShowUndoRedo(false);
-                            if (m_historyPanel->renderContent())
-                                m_meshesDirty = true;
+                            m_historyPanel->renderContent();
                         }
                     }
                     ImGui::EndChild();
@@ -712,8 +724,8 @@ void Application::renderModernLayout() {
                         if (ImGui::BeginChild("##propsHalf", ImVec2(0, 0),
                                               ImGuiChildFlags_AutoResizeY,
                                               ImGuiWindowFlags_NoScrollbar)) {
-                            if (m_propertiesPanel && m_propertiesPanel->renderContent())
-                                m_meshesDirty = true;
+                            if (m_propertiesPanel)
+                                m_propertiesPanel->renderContent();
                         }
                         ImGui::EndChild();
                         // Measure the whole footer (separator + header + box) so
@@ -735,9 +747,36 @@ void Application::renderModernLayout() {
     // The panel/viewport edge tabs (pop-in/out chevrons) render in
     // renderModernEdgeTabs(), called AFTER renderViewport so their windows are
     // submitted after the (NoBringToFrontOnFocus) Viewport window and sit ON
-    // TOP of it. Submitting them here — before the viewport — let the viewport
+    // TOP of it. Submitting them here - before the viewport - let the viewport
     // cover them until a focus reorder (e.g. toggling Settings) surfaced them,
     // which read as "no chevrons on first launch" on the tablet.
+
+    // ── fps readout - a small solid chip at the top-centre. Hidden entirely
+    //    via Settings → Appearance → "Show FPS counter". Mirrors
+    //    ImTouchLayout's readout (kept separate since Modern's shell doesn't
+    //    share that file's local kFloat/margin locals) - this is the ONLY
+    //    place Modern (the live desktop layout) draws it, so without this
+    //    block the setting has no visible effect at all on desktop.
+    if (m_showFps) {
+        const ImGuiWindowFlags fpsFlags =
+            (layoutui::kShellWindowFlags & ~ImGuiWindowFlags_NoBringToFrontOnFocus) |
+            ImGuiWindowFlags_AlwaysAutoResize;
+        ImGui::SetNextWindowPos(ImVec2(wp.x + ws.x * 0.5f, wp.y + topH + 8.0f * s),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.92f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, touchui::radius(14.0f * s));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, touchui::panelBg());
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(9.0f * s, 4.0f * s));
+        if (ImGui::Begin("##ModernFps", nullptr, fpsFlags)) {
+            ImGui::SetWindowFontScale(0.82f);
+            ImGui::TextColored(touchui::textDim(), materializr::tr("%.0f fps"),
+                               ImGui::GetIO().Framerate);
+            ImGui::SetWindowFontScale(1.0f);
+        }
+        ImGui::End();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
+    }
 
     // Center rect for renderViewport()'s pin.
     m_touchVpX = wp.x + railW;
@@ -748,11 +787,11 @@ void Application::renderModernLayout() {
 
 // The panel/viewport pop-in/out edge tabs. Called AFTER renderViewport (see
 // the dispatch in run()) so these windows are submitted last and sit above the
-// Viewport window — otherwise the viewport covered them until a focus reorder.
+// Viewport window - otherwise the viewport covered them until a focus reorder.
 // Geometry comes from m_touchVp* (the panel/viewport boundaries), set by
 // renderModernLayout earlier this frame.
 void Application::renderModernEdgeTabs() {
-    // The tabs belong to the panel edges — when the landing page covers the
+    // The tabs belong to the panel edges - when the landing page covers the
     // shell there are no edges to pop, and while a modal is up the dim layer
     // owns the screen. Both input and visual skip entirely (long-standing
     // bug: the old foreground-drawn chevrons floated over everything).
@@ -768,7 +807,7 @@ void Application::renderModernEdgeTabs() {
         // Anchor by the window's LEFT edge (pivot 0) so the flat side lands
         // exactly on the panel boundary. Push WindowMinSize 0 (tabW is below
         // the default 32) and derive geometry from our own winLeft, never
-        // GetWindowPos — so cx = winLeft(+tabW) is exactly edgeX.
+        // GetWindowPos - so cx = winLeft(+tabW) is exactly edgeX.
         const float winLeft = (side < 0) ? edgeX : edgeX - tabW;
         ImGui::SetNextWindowPos(ImVec2(winLeft, midY), ImGuiCond_Always,
                                 ImVec2(0.0f, 0.5f));
@@ -780,7 +819,7 @@ void Application::renderModernEdgeTabs() {
         // NOT kShellWindowFlags: those carry NoBringToFrontOnFocus, which (with
         // the Viewport window, also NoBringToFrontOnFocus, sharing this rect)
         // left the tab BURIED under the viewport in ImGui's persistent z-order
-        // until an unrelated focus event surfaced it — "no chevrons on cold
+        // until an unrelated focus event surfaced it - "no chevrons on cold
         // start". Without the flag the tiny input window rises to the front on
         // creation and stays there (the viewport can't climb above it). The
         // VISUAL is drawn into the foreground draw list below, so it's on top
@@ -818,13 +857,13 @@ void Application::renderModernEdgeTabs() {
                 *dragged = false;
             }
 
-            // The tab window's OWN draw list — it already rises above the
+            // The tab window's OWN draw list - it already rises above the
             // viewport on creation (see the flags note above), and unlike the
             // foreground list it lets dialogs/panels opened later stack above
             // the chevron naturally. (The foreground list made the wedges
-            // float over every dialog — the bug this replaces. If "no
+            // float over every dialog - the bug this replaces. If "no
             // chevrons on cold start" ever returns on the tablet, the window
-            // z-order fix regressed — fix THAT, don't move this back.)
+            // z-order fix regressed - fix THAT, don't move this back.)
             ImDrawList* dl = ImGui::GetWindowDrawList();
             const float cx = side < 0 ? p.x : p.x + tabW;
             const ImVec2 c(cx, p.y + tabH * 0.5f);

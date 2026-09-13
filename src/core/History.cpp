@@ -10,13 +10,33 @@
 
 History::History() = default;
 
+namespace {
+struct ReplayGuard {
+    Document& d;
+    bool prev;
+    explicit ReplayGuard(Document& doc) : d(doc), prev(doc.isReplaying()) {
+        d.setReplaying(true);
+    }
+    ~ReplayGuard() { d.setReplaying(prev); }
+};
+} // namespace
+
+void History::resolveMates(Document& doc, bool regenerated) {
+    if (regenerated) {
+        doc.clearMateBases();
+        m_mateSolver.reset();
+    }
+    const auto res = m_mateSolver.solve(doc);
+    doc.setMateSolveError(res.ok ? std::string() : res.error);
+}
+
 bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     ++m_revision;
     if (!op) {
         return false;
     }
 
-    // THREADS ARE A FINISHING PASS — enforced by REFLOW: an op targeting a
+    // THREADS ARE A FINISHING PASS - enforced by REFLOW: an op targeting a
     // thread-modified body is reordered beneath the thread(s) via
     // insertStepAndReplay (non-thread steps replay first, then the op
     // against clean geometry, then the threads re-cut parametrically on the
@@ -26,7 +46,7 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     // cost: ThreadOp's async recut hook (the re-cut lands from a worker;
     // the body shows unthreaded for a moment) and the swept-profile fast
     // path (~200ms for Standard/Rounded). If the reflow can't land (baked
-    // reload snapshot on the body / a step failed to replay — state is
+    // reload snapshot on the body / a step failed to replay - state is
     // restored inside insertStepAndReplay), fall back to the old refusal
     // with guidance rather than running the op directly against the
     // thread's helicoid faces (kernel garbage).
@@ -47,11 +67,11 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
         }
     }
 
-    // SHELLS auto-reflow (unlike threads no refusal — a shell re-execute is
+    // SHELLS auto-reflow (unlike threads no refusal - a shell re-execute is
     // sub-second): a face transform on a shelled body applies to the
     // PRE-SHELL solid and the shell re-runs on the moved body, giving the
     // result the user means ("the order flipped"). If the reflow can't land
-    // (rolled back + restored inside insertStepAndReplay), fail cleanly —
+    // (rolled back + restored inside insertStepAndReplay), fail cleanly -
     // the direct path would only hit the hollow-body corruption guards.
     {
         int at = shellReflowIndex(*op);
@@ -79,7 +99,13 @@ bool History::pushOperation(std::unique_ptr<Operation> op, Document& doc) {
     m_currentIndex = static_cast<int>(m_operations.size()) - 1;
 
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/false);
     return true;
+}
+
+void History::pushExecuted(std::unique_ptr<Operation> op, Document& doc) {
+    pushExecuted(std::move(op));
+    resolveMates(doc, /*regenerated=*/false);
 }
 
 void History::pushExecuted(std::unique_ptr<Operation> op) {
@@ -110,6 +136,7 @@ bool History::undo(Document& doc) {
     if (!canUndo()) {
         std::fprintf(stderr, "[History] undo: nothing to undo (currentIndex=%d)\n",
                      m_currentIndex);
+        m_lastUndoneStep = -1;
         return false;
     }
 
@@ -119,9 +146,10 @@ bool History::undo(Document& doc) {
     int idx = m_currentIndex;
     while (idx > m_undoFloor && !m_operations[idx]->isEnabled()) idx--;
     if (idx <= m_undoFloor) {
-        // Only disabled (never-applied) steps sit above the floor — nothing to undo.
+        // Only disabled (never-applied) steps sit above the floor - nothing to undo.
         std::fprintf(stderr, "[History] undo: only disabled steps above floor (currentIndex=%d)\n",
                      m_currentIndex);
+        m_lastUndoneStep = -1;
         return false;
     }
 
@@ -132,24 +160,37 @@ bool History::undo(Document& doc) {
                      idx, op->name().c_str(), op->typeId().c_str(),
                      op->isReloaded() ? 1 : 0, op->isEnabled() ? 1 : 0);
     if (!op->undo(doc)) {
-        std::fprintf(stderr, "[History] undo FAILED at step %d '%s' — op->undo() "
+        std::fprintf(stderr, "[History] undo FAILED at step %d '%s' - op->undo() "
                              "returned false; staying at this step\n",
                      idx, op->name().c_str());
+        m_lastUndoneStep = -1;
         return false;
     }
 
+    m_lastUndoneStep = idx;
     m_currentIndex = idx - 1;
-    // Manual undo means the user is steering the applied range themselves —
+    // Manual undo means the user is steering the applied range themselves -
     // drop any pending auto-recovery so a later edit doesn't surprise-redo
     // steps they deliberately walked back past.
     m_failedReplayAt = -1;
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::redo(Document& doc) {
+    // Without this, TransformOp::execute (and anything else that checks
+    // doc.isReplaying() to refuse touching a mate-placed body outside a
+    // replay) sees a plain interactive call here, not a replay - so redoing
+    // a step on a body that got mated after it was first executed refuses,
+    // sets m_failedReplayAt, and gets stuck there: Ctrl+Y can never advance
+    // past that step again. Same fix as editStep/removeStep/setStepEnabled/
+    // replayAll/insertStepAndReplay - redo() was simply missing it.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     if (!canRedo()) {
+        m_lastRedoneStep = -1;
         return false;
     }
 
@@ -159,25 +200,35 @@ bool History::redo(Document& doc) {
     int idx = m_currentIndex + 1;
     while (idx < n && !m_operations[idx]->isEnabled()) idx++;
     if (idx >= n) {
-        // Only disabled steps remain in the redo range — consume them (advance the
+        // Only disabled steps remain in the redo range - consume them (advance the
         // tip past them, no execution) so Ctrl+Y doesn't keep firing with no effect.
+        m_lastRedoneStep = -1;
         m_currentIndex = n - 1;
         if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+        // false, not true: nothing was rebuilt here (no op->execute() ran),
+        // so there is no reason to drop every cached mate/sketch-plane base
+        // in the whole document and re-solve everything from scratch - that
+        // is what true means elsewhere (undo/editStep/replayAll, where the
+        // document genuinely changed underneath the mates).
+        resolveMates(doc, /*regenerated=*/false);
         return true;
     }
 
     Operation* op = m_operations[idx].get();
     if (!op->execute(doc)) {
         m_failedReplayAt = idx;
+        m_lastRedoneStep = -1;
         return false; // leave the tip below the failed step
     }
 
+    m_lastRedoneStep = idx;
     m_currentIndex = idx;
     op->rememberGoodParams();
     if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
         m_failedReplayAt = -1; // the previously-failed step recomputed fine
     }
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
@@ -222,6 +273,12 @@ void History::propagateSketchValueEdits(int editedStep, Document& doc) {
 }
 
 bool History::editStep(int index, Document& doc, bool transactional) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     m_lastEditFailStep = -1;
     ++m_revision;
     if (index < 0 || index >= static_cast<int>(m_operations.size())) {
@@ -232,12 +289,12 @@ bool History::editStep(int index, Document& doc, bool transactional) {
     // and prune orphan bodies created when a downstream op has lost its
     // reuseBodyIds (e.g., a push/pull op whose created-body tracking was
     // corrupted in the saved file). Only applied in non-transactional (preview)
-    // mode — transactional failures are already handled by restoreSnapshot.
+    // mode - transactional failures are already handled by restoreSnapshot.
     const std::vector<int> preEditBodyIds = doc.getAllBodyIds();
 
     // Transactional safety: snapshot the whole model up front so a replay that
     // fails partway (a downstream fillet whose edges can't re-bind after the
-    // edited geometry moved, etc.) can be fully reverted — an edit must never
+    // edited geometry moved, etc.) can be fully reverted - an edit must never
     // strand a half-built model. TopoDS_Shape is a cheap handle; sketches copy
     // by value. Only done when asked (one-shot Apply paths), not per preview frame.
     const int savedIndex = m_currentIndex;
@@ -250,7 +307,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         // Op-internal edit state too: ops that SUCCEED during a replay that
         // later fails have re-resolved their stored edges/refs against bodies
         // the rollback below is about to discard. Restoring bodies but not
-        // that state wedges the step — the next attempt resolves against
+        // that state wedges the step - the next attempt resolves against
         // geometry that no longer exists (fails where a fresh session works).
         for (auto& op : m_operations) op->snapshotEditState();
     }
@@ -270,7 +327,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
     }
 
     if (index > limit) {
-        // The step isn't currently applied — e.g. it was suspended by an
+        // The step isn't currently applied - e.g. it was suspended by an
         // earlier failed recompute (fillet grew, chamfer edge vanished) and
         // the user is editing ITS parameters to fix it. Roll FORWARD to it,
         // executing the intervening steps, instead of refusing.
@@ -289,6 +346,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
         if (m_failedReplayAt >= 0 && m_currentIndex >= m_failedReplayAt) {
             m_failedReplayAt = -1;
         }
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -308,14 +366,14 @@ bool History::editStep(int index, Document& doc, bool transactional) {
             if (!op->execute(doc)) {
                 // If the EDITED step itself rejects its new values (e.g. a
                 // fillet radius its host geometry can't carry), restore the
-                // parameters from its last successful execute and reapply —
+                // parameters from its last successful execute and reapply -
                 // the model stays as it was instead of stranding this step
                 // and everything above it (where the next Ctrl+Z would hit
                 // the step below: "undo deleted the whole body"). The UI
                 // re-reads the op, so the value visibly snaps back.
                 //
                 // PREVIEW MODE ONLY: a transactional caller holds a full
-                // pre-edit snapshot, which restores the EXACT prior model —
+                // pre-edit snapshot, which restores the EXACT prior model -
                 // a lastGoodParams REBUILD merely approximates it (fallback-
                 // built blends are path-dependent: rebuilding "the same"
                 // chamfer can produce different downstream geometry, silently
@@ -344,7 +402,7 @@ bool History::editStep(int index, Document& doc, bool transactional) {
     if (editRejected) return false; // model intact, but the edit didn't apply
 
     // If a PREVIOUS edit knocked steps out (failed recompute left a suspended
-    // tail), retry them now that the upstream geometry changed again — this is
+    // tail), retry them now that the upstream geometry changed again - this is
     // what makes "grow the fillet too far, chamfer dies, shrink the fillet
     // back" bring the chamfer back automatically. Stops at the first step
     // that still fails (keeping the flag) without failing THIS edit.
@@ -375,24 +433,24 @@ bool History::editStep(int index, Document& doc, bool transactional) {
     // on reload the op has empty m_reuseBodyIds. Its undo() is a no-op (leaves
     // the phantom initialState body in the doc) and its execute() creates a
     // FRESH body with a new ID rather than reusing the original. The phantom
-    // stays AND a duplicate appears — causing missing or misplaced geometry.
+    // stays AND a duplicate appears - causing missing or misplaced geometry.
     //
     // Fix: any body ID that wasn't in the document before this editStep but IS
     // there now is an orphan created by a stateless op. Remove it so only the
     // correctly-managed bodies remain. The op retains its m_createdBodyIds =
     // {new_id} and m_reuseBodyIds will be set to {new_id} on the next undo(),
     // so subsequent preview frames recreate and re-clean the same orphan via the
-    // tombstone mechanism — cosmetically invisible to the user.
+    // tombstone mechanism - cosmetically invisible to the user.
     //
     // Transactional (commit) mode: restoreSnapshot() handles cleanup on failure;
-    // on success the history should be clean — skip this guard.
+    // on success the history should be clean - skip this guard.
     if (!transactional) {
         std::set<int> preSet(preEditBodyIds.begin(), preEditBodyIds.end());
         for (int id : doc.getAllBodyIds()) {
             if (!preSet.count(id)) {
                 std::fprintf(stderr,
                     "[editStep] orphan body %d removed (appeared during replay, "
-                    "not in pre-edit set of %zu) — likely a push/pull op with "
+                    "not in pre-edit set of %zu) - likely a push/pull op with "
                     "lost body-ID state from a mid-undo save.\n",
                     id, preSet.size());
                 doc.removeBody(id);
@@ -402,23 +460,31 @@ bool History::editStep(int index, Document& doc, bool transactional) {
 
     // Note: we deliberately don't publish HistoryStepEvent here. editStep
     // is initiated from explicit user UI (HistoryPanel's Apply Changes),
-    // which publishes its own SketchEditedEvent when appropriate — better
+    // which publishes its own SketchEditedEvent when appropriate - better
     // signal-to-noise than a generic step event that also fires for
     // unrelated history shuffles (push/pull preview undos, etc).
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::removeStep(int index, Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int count = static_cast<int>(m_operations.size());
     if (index < 0 || index >= count) return false;
 
     // If the step is beyond the current state (in the redo region) it has no
-    // effect on the document right now — just drop it.
+    // effect on the document right now - just drop it.
     if (index > m_currentIndex) {
         m_operations.erase(m_operations.begin() + index);
         if (m_breakpoint > index) m_breakpoint--;
         else if (m_breakpoint == index) m_breakpoint = -1;
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -463,10 +529,17 @@ bool History::removeStep(int index, Document& doc) {
     }
 
     if (m_eventBus) m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
 bool History::setStepEnabled(int index, bool enabled, Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int count = static_cast<int>(m_operations.size());
     if (index < 0 || index >= count) return false;
@@ -474,10 +547,11 @@ bool History::setStepEnabled(int index, bool enabled, Document& doc) {
     if (target->isEnabled() == enabled) return true; // no change
 
     // Above the applied tip (redo region / breakpoint-suppressed): the step
-    // isn't in the document right now, so just flip the flag — the next
+    // isn't in the document right now, so just flip the flag - the next
     // redo/replay will honor it.
     if (index > m_currentIndex) {
         target->setEnabled(enabled);
+        resolveMates(doc, /*regenerated=*/true);
         return true;
     }
 
@@ -513,6 +587,7 @@ bool History::setStepEnabled(int index, bool enabled, Document& doc) {
 
     if (m_eventBus)
         m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, true});
+    resolveMates(doc, /*regenerated=*/true);
     return firstFail < 0;
 }
 
@@ -525,8 +600,23 @@ int History::getBreakpoint() const {
 }
 
 bool History::replayAll(Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
+
+    // Mates are document state, not history steps, so a full replay must not
+    // destroy them - doc.clear() wipes the mate list, the grounded body and the
+    // id counter along with the geometry. Mate edits are not undoable, so
+    // losing them here would be unrecoverable. Carry them across the clear.
+    std::vector<materializr::Mate> keptMates = doc.getMates();
+    int keptGrounded = doc.getGroundedBody();
+
     doc.clear();
+    m_mateSolver.reset();
 
     int limit = static_cast<int>(m_operations.size()) - 1;
     if (m_breakpoint >= 0 && m_breakpoint < limit) {
@@ -536,7 +626,7 @@ bool History::replayAll(Document& doc) {
     // Called only by the history Disable/Enable toggle. Suppressing a feature
     // strips the geometry downstream ops were built on, so some of them can no
     // longer recompute. Rather than ABORT the whole replay at the first such
-    // failure — which blanks the viewport and reads as "the model is gone" —
+    // failure - which blanks the viewport and reads as "the model is gone" -
     // SKIP the failed op and keep going. A dependent op that needs the
     // suppressed geometry simply fails and is skipped too (cascade suppression),
     // while geometry that's independent of the disabled step still builds. Re-
@@ -559,8 +649,14 @@ bool History::replayAll(Document& doc) {
     m_currentIndex = limit;
     if (firstFailure >= 0) {
         m_failedReplayAt = firstFailure;
+        for (const auto& km : keptMates) doc.addRawMate(km);
+        doc.setGroundedBody(keptGrounded);
+        resolveMates(doc, /*regenerated=*/true);
         return false;
     }
+    for (const auto& km : keptMates) doc.addRawMate(km);
+    doc.setGroundedBody(keptGrounded);
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }
 
@@ -594,7 +690,7 @@ bool History::isBodyThreaded(int bodyId) const {
         // preview in Push/Pull, no live preview in Resize Cylindrical), and
         // there is nothing to avoid. Missing the isEnabled() check left every
         // later op degrading its preview for a thread the user had switched
-        // off — while reflowInsertionIndex(), which DOES check, saw no thread
+        // off - while reflowInsertionIndex(), which DOES check, saw no thread
         // to reorder beneath. isBodyShelled() below always had it right.
         if (!s || !s->isEnabled() || s->kind() != Operation::Kind::Thread) continue;
         // ThreadOp doesn't override plannedBodyIds() (returns {}); the body it
@@ -649,9 +745,9 @@ int History::reflowInsertionIndex(const Operation& op) const {
     // thread). Reorder beneath the deepest thread that touched a planned
     // body. NON-thread touching steps above that thread no longer block:
     // insertStepAndReplay replays them BEFORE the new op (thread-last
-    // partition), so an op that depends on their results — e.g. a Boolean
+    // partition), so an op that depends on their results - e.g. a Boolean
     // subtract whose tool body was push/pulled into existence AFTER the
-    // thread — still sees them applied. (The old stop-cold rule made that
+    // thread - still sees them applied. (The old stop-cold rule made that
     // Boolean run directly against the threaded rod: kernel garbage.)
     int insertAt = -1;
     for (int i = limit; i >= 0; --i) {
@@ -695,13 +791,19 @@ int History::shellReflowIndex(const Operation& op) const {
 
 bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
                                   Document& doc) {
+    // Save-and-restore, not set-and-clear: the moment one guarded path reaches
+    // another, an inner destructor clearing the flag outright would drop the
+    // remaining replayed ops onto the interactive refusal and silently lose
+    // their geometry - the exact failure the flag exists to prevent.
+    ReplayGuard _rg{doc};
+
     ++m_revision;
     int limit = m_currentIndex;
     if (m_breakpoint >= 0 && m_breakpoint < limit) limit = m_breakpoint;
     if (index < 0 || index > limit) return false;
 
     // Only steps that TOUCH the op's bodies are rolled back and replayed.
-    // Unrelated steps stay applied — critically, a reloaded project's baked
+    // Unrelated steps stay applied - critically, a reloaded project's baked
     // full-document snapshot steps must NOT re-execute, or their snapshots
     // resurrect the pre-op world and silently erase the inserted op's result
     // (Steve: "it didn't work, but it didn't crash").
@@ -721,7 +823,7 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
         Operation* s = m_operations[i].get();
         if (!s->isEnabled() || !touches(s)) continue;
         if (s->isReloaded()) {
-            // A baked reload snapshot on this body can't recompute — replaying
+            // A baked reload snapshot on this body can't recompute - replaying
             // it would clobber the op's result. Decline the whole reflow; the
             // caller falls back to the direct path (fast failure, no hang).
             std::fprintf(stderr, "[History] reflow declined: step %d '%s' is "
@@ -740,7 +842,7 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
     // EXTRACT the touched ops (highest index first so the indices stay
     // valid), preserving their original relative order. They go back in
     // THREAD-LAST order: non-thread steps first (rebuilding e.g. the tool
-    // body a Boolean depends on), then the new op, then the threads — so
+    // body a Boolean depends on), then the new op, then the threads - so
     // every boolean in the chain runs against clean geometry and the
     // threads re-cut parametrically at the end.
     std::vector<std::unique_ptr<Operation>> extracted;
@@ -750,7 +852,7 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
         m_operations.erase(m_operations.begin() + touched[k]);
     }
     // Finishing passes replay AFTER the new op. Threads always; shells only
-    // when the new op is a face transform (the shell-reflow case) — for any
+    // when the new op is a face transform (the shell-reflow case) - for any
     // other insertion a shell in the window keeps its original position, so
     // e.g. a boolean that ran on the hollow body still does.
     const bool shellIsFinishing = (op->kind() == Operation::Kind::MoveFace);
@@ -827,12 +929,12 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
         s->rememberGoodParams();
     }
 
-    // Finishing passes propagate to bodies the inserted op CREATED — a split
+    // Finishing passes propagate to bodies the inserted op CREATED - a split
     // lengthwise through a bolt must leave threads on BOTH halves, not just
     // the half that kept the original body id ("half of it is smooth").
     // Clone each displaced thread for each created body and append the
     // clones as real (undoable, saveable) steps. Gate on THIS replay's
-    // outcome — a stale m_failedReplayAt from an earlier suspension must
+    // outcome - a stale m_failedReplayAt from an earlier suspension must
     // not silently skip propagation.
     if (!replayFailed) {
         OperationDiff nd = m_operations[opPos]->captureDiff();
@@ -856,5 +958,6 @@ bool History::insertStepAndReplay(int index, std::unique_ptr<Operation> op,
     }
     if (m_eventBus)
         m_eventBus->publish(materializr::HistoryStepEvent{m_currentIndex, false});
+    resolveMates(doc, /*regenerated=*/true);
     return true;
 }

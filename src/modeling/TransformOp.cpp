@@ -1,4 +1,7 @@
+#include "ui/LengthField.h"
+#include "core/Units.h"
 #include "TransformOp.h"
+#include "Mate.h"
 #include "Sketch.h"
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
@@ -72,6 +75,16 @@ void TransformOp::setCenter(double cx, double cy, double cz) {
 }
 
 bool TransformOp::execute(Document& doc) {
+    // A body placed by a mate has its position owned by the mate solve. A
+    // direct transform here would be silently undone the next time the solver
+    // runs, which reads as the app ignoring the user, so refuse it and let the
+    // caller offer the mate's offset instead. Operation carries no error
+    // string; ops signal refusal by returning false.
+    // Not during replay: this same op may have been recorded before the mate
+    // existed, and refusing it there marks the step failed and loses the
+    // geometry it applied.
+    if (!doc.isReplaying() && materializr::bodyIsMatePlaced(doc, m_bodyId)) return false;
+
     if (m_bodyId < 0) {
         return false;
     }
@@ -80,10 +93,10 @@ bool TransformOp::execute(Document& doc) {
         // Store previous shape for undo
         m_previousShape = doc.getBody(m_bodyId);
         // And the input face lineage: updateBody wipes it, and a partial
-        // replay never re-runs the op that minted it — undo restores this.
+        // replay never re-runs the op that minted it - undo restores this.
         m_prevFaceIds.clear();
         if (const auto* im = doc.bodyFaceIds(m_bodyId)) m_prevFaceIds = *im;
-        // Same for sketch planes anchored to this body — they follow the
+        // Same for sketch planes anchored to this body - they follow the
         // host face/body through Translate / Rotate so sketches drawn on it
         // stay registered to "where they were drawn" even after a move.
         // Scale is deliberately skipped: it changes physical dimensions, which
@@ -92,7 +105,7 @@ bool TransformOp::execute(Document& doc) {
         // Link model (2026-06): a body move no longer AUTO-drags its source
         // sketch (that auto-propagation caused the edit-after-move double-
         // transform). Instead the gizmo commit explicitly lists the sketches that
-        // should ride along — a unison move (body + its driving sketch moved
+        // should ride along - a unison move (body + its driving sketch moved
         // together). Capture their current planes so the apply loop below
         // transforms them by the same rigid trsf, and undo restores them. This
         // keeps the unison move a single atomic op: the sketch always follows.
@@ -118,7 +131,7 @@ bool TransformOp::execute(Document& doc) {
         // to the LIVE body so any upstream edit (a fillet on this body) survives.
         // Rigid/affine move: carry face lineage 1:1 through the transform
         // (the builder maps each input face to its moved twin). Used by every
-        // build path below — without it a transform severs the ancestry chain
+        // build path below - without it a transform severs the ancestry chain
         // a downstream fillet/chamfer resolves its edges through.
         auto carryFaceIds = [&](BRepBuilderAPI_ModifyShape& tf) {
             if (m_prevFaceIds.empty()) return;
@@ -215,7 +228,7 @@ bool TransformOp::undo(Document& doc) {
 
     try {
         doc.updateBody(m_bodyId, m_previousShape);
-        // Restore the input face lineage captured at execute — updateBody
+        // Restore the input face lineage captured at execute - updateBody
         // just wiped it, and if this undo is part of a PARTIAL replay
         // (editStep starting after the map's producer), nothing upstream
         // will re-mint it.
@@ -223,7 +236,7 @@ bool TransformOp::undo(Document& doc) {
             doc.setBodyFaceIds(m_bodyId, m_prevFaceIds);
         // Restore the sketch planes we snapshotted in execute(). Even if
         // some sketches have been removed since, we just skip the missing
-        // ones — restoration is best-effort.
+        // ones - restoration is best-effort.
         for (const auto& [sid, prevPln] : m_previousSketchPlanes) {
             auto sk = doc.getSketch(sid);
             if (sk) sk->setPlane(prevPln);
@@ -240,8 +253,7 @@ bool TransformOp::undo(Document& doc) {
 std::string TransformOp::description() const {
     switch (m_type) {
         case TransformType::Translate:
-            return "Translate (" + std::to_string(m_dx) + ", " +
-                   std::to_string(m_dy) + ", " + std::to_string(m_dz) + ")";
+            return "Translate " + materializr::fmtVec3(m_dx, m_dy, m_dz);
         case TransformType::Rotate:
             return "Rotate " + std::to_string(m_angle) + " deg around (" +
                    std::to_string(m_ax) + ", " + std::to_string(m_ay) + ", " +
@@ -266,9 +278,9 @@ void TransformOp::renderProperties() {
 
     switch (m_type) {
         case TransformType::Translate:
-            materializr::inputNumber("X", &m_dx, 0.1, 1.0, "%g");
-            materializr::inputNumber("Y", &m_dy, 0.1, 1.0, "%g");
-            materializr::inputNumber("Z", &m_dz, 0.1, 1.0, "%g");
+            materializr::lengthField("X", &m_dx);
+            materializr::lengthField("Y", &m_dy);
+            materializr::lengthField("Z", &m_dz);
             break;
         case TransformType::Rotate:
             materializr::inputNumber(materializr::tr("Axis X"), &m_ax, 0.1, 1.0, "%g");

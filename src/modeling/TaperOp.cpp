@@ -16,6 +16,7 @@
 #include "../ui/NumField.h"
 #include "../i18n.h"
 #include "../i18n.h"
+#include "ParamParse.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -38,6 +39,13 @@ void TaperOp::setNeutralPoint(double x, double y, double z) {
 void TaperOp::setAngleDeg(double a) { m_angleDeg = a; }
 
 bool TaperOp::execute(Document& doc) {
+    // FIRST statement, before the parameter guards below: any early return
+    // must still consume the candidate, or an operation that was armed, then
+    // executed once at an invalid value, would keep the candidate armed for a
+    // later execute at the original value. Whether it is USED is decided
+    // further down, after the face references have been re-bound.
+    auto adopted = takePrecomputed();
+
     if (m_bodyId < 0 || m_faces.IsEmpty() || std::abs(m_angleDeg) < 1e-3 ||
         std::abs(m_angleDeg) > 80.0) {
         return false;
@@ -49,7 +57,7 @@ bool TaperOp::execute(Document& doc) {
         // Mint topo names on the first run, while the stored handles are
         // valid; on later runs, if any handle is no longer a sub-shape of the
         // current body (an upstream edit rebuilt it), resolve the names
-        // instead — otherwise DraftAngle::Add just fails on the stale face.
+        // instead - otherwise DraftAngle::Add just fails on the stale face.
         {
             auto isLive = [&](const TopoDS_Shape& f) {
                 for (TopExp_Explorer ex(m_previousShape, TopAbs_FACE);
@@ -85,6 +93,15 @@ bool TaperOp::execute(Document& doc) {
                 m_faces.Clear();
                 for (const auto& f : out) m_faces.Append(TopoDS::Face(f));
             }
+        }
+
+        // The worker already drafted this exact body with this exact
+        // selection. Checked after the re-bind, which can legitimately land on
+        // a different face than the worker used.
+        if (adopted && canAdopt(*adopted, m_previousShape,
+                                previewKey(m_previousShape))) {
+            doc.updateBody(m_bodyId, adopted->result);
+            return true;
         }
 
         gp_Dir dir(m_dirX, m_dirY, m_dirZ);
@@ -144,6 +161,27 @@ void TaperOp::renderProperties() {
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
 }
 
+std::string TaperOp::previewKey(const TopoDS_Shape& base) const {
+    // Built as a string, not into a fixed buffer: seven %a doubles can reach
+    // 193 characters, and snprintf would truncate the tail silently - dropping
+    // the neutral point and letting two different ones key identically, in the
+    // one place a collision must never happen.
+    auto hex = [](double v) {
+        char b[32];
+        std::snprintf(b, sizeof(b), "%a", v);
+        return std::string(b);
+    };
+    const std::string head =
+        "taper;a=" + hex(m_angleDeg) +
+        ";d=" + hex(m_dirX) + "," + hex(m_dirY) + "," + hex(m_dirZ) +
+        ";n=" + hex(m_nX) + "," + hex(m_nY) + "," + hex(m_nZ) + ";faces=";
+    std::vector<TopoDS_Shape> faces;
+    for (const TopoDS_Shape& f : m_faces) faces.push_back(f);
+    std::string sel;
+    if (!SubShapeIndex::orientedKey(base, faces, TopAbs_FACE, sel)) return {};
+    return head + sel;
+}
+
 std::string TaperOp::serializeParams() const {
     std::string blob;
     char buf[192];
@@ -185,21 +223,12 @@ bool TaperOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
-        // facerefs is a length-prefixed list written last — read to the end.
+        // facerefs is a length-prefixed list written last - read to the end.
         if (key == "facerefs") {
             std::string rest = blob.substr(eq + 1);
             m_faceRefs.clear();
-            size_t p = 0;
-            while (p < rest.size()) {
-                size_t c = rest.find(':', p);
-                if (c == std::string::npos) break;
-                size_t n = static_cast<size_t>(
-                    std::atoll(rest.substr(p, c - p).c_str()));
-                if (c + 1 + n > rest.size()) break;
-                m_faceRefs.push_back(
-                    materializr::topo::Ref::parse(rest.substr(c + 1, n)));
-                p = c + 1 + n;
-            }
+            if (!materializr::topo::parseRefList(rest, m_faceRefs))
+                return false;
             any = true;
             break;
         }

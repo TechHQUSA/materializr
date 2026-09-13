@@ -3,6 +3,8 @@
 #include "ui_scale.h"
 #include "touch_mode.h"
 #include "gl_common.h"
+#include "viewport/GridScale.h"
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 
@@ -70,6 +72,8 @@
 #include "modeling/AxisTransformOp.h"
 #include "modeling/MirrorOp.h"
 #include "modeling/FilletOp.h"
+#include "ui/LengthField.h"
+#include <cstring>
 #include "modeling/ChamferOp.h"
 #include "modeling/DeleteOp.h"
 #include "modeling/SeparateBodyOp.h"
@@ -93,7 +97,6 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #include <imgui_impl_sdl2.h>
 #include <imgui_impl_opengl3.h>
 #include <BRepPrimAPI_MakeBox.hxx>
-#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <gp_Ax3.hxx>
 #include <BRep_Tool.hxx>
@@ -115,19 +118,24 @@ namespace materializr { namespace force_link { void linkAll(); } }
 #define M_PI 3.14159265358979323846
 #endif
 
-// Implementations split out of Application.cpp — the giant 3D viewport
+// Implementations split out of Application.cpp - the giant 3D viewport
 // renderer plus its drag-projection helper.
 namespace materializr {
 
-// opDialogDragGrip moved to ui/OpDialogGrip.h — Move Face's panel (in
+// Smallest on-screen cell, in pixels, the sketch grid will draw. Below this
+// the shader's density fade greys the lines out anyway, so a finer lattice
+// costs fill rate and shows nothing.
+constexpr float kGridMinPx = 8.0f;
+
+// opDialogDragGrip moved to ui/OpDialogGrip.h - Move Face's panel (in
 // FaceOpControllers.cpp) uses it too.
 
 // Map a screen drag onto a world direction: project the mouse delta onto the
 // screen-space image of `normal` at `origin`. Falls back to vertical drag when
-// that direction is nearly perpendicular to the screen (face head-on) — otherwise
+// that direction is nearly perpendicular to the screen (face head-on) - otherwise
 // normalizing a near-zero vector yields NaN, which propagates into a NaN prism
 // and crashes the boolean kernel.
-// Convert a mouse drag (pixels) into a world distance along `normal` — EXACT:
+// Convert a mouse drag (pixels) into a world distance along `normal` - EXACT:
 // +1 world unit along the axis spans a measurable pixel vector on screen, and
 // the returned distance is the drag's projection onto that vector divided by
 // its pixel length. The face/arrow therefore tracks the cursor 1:1 at every
@@ -166,7 +174,7 @@ static float projectDragOntoNormal(const glm::vec3& origin, const glm::vec3& nor
 
 void Application::gizmoPreviewApply(const glm::mat4& m) {
     // Push the drag's accumulated transform onto every dragged body's mesh
-    // slots (shape + edges). GPU-only — the document is untouched, so a drag
+    // slots (shape + edges). GPU-only - the document is untouched, so a drag
     // frame costs two uniform updates per body instead of re-tessellating
     // the body (see the Revolve live preview, which pioneered the pattern).
     //
@@ -194,16 +202,8 @@ void Application::gizmoPreviewApply(const glm::mat4& m) {
 // Drafting convention splits the two: an arc is called out by RADIUS ("R 10"),
 // a full circle by DIAMETER ("Ø 20"). Constraint::value stores a radius for
 // both, so the label, the edit-popup prefill, and the popup's commit all have
-// to agree on which convention applies — hence one helper rather than three
+// to agree on which convention applies - hence one helper rather than three
 // copies of the scan. Non-Radius types are never arc radii.
-static bool constraintIsArcRadiusIn(const Sketch& sk, const Constraint& c) {
-    if (c.type != ConstraintType::Radius) return false;
-    for (const auto& circ : sk.getCircles())
-        if (circ.id == c.entityA) return false; // a circle wins
-    for (const auto& arc : sk.getArcs())
-        if (arc.id == c.entityA) return true;
-    return false;
-}
 
 // Recover the two comparable entities behind a dimension, so the edit popup
 // can offer "Make equal" (equal length for two lines, equal radius for two
@@ -227,7 +227,7 @@ static bool dimensionEqualPair(const Sketch& sk, const Constraint& c,
             return outA >= 0 && outB >= 0 && outA != outB;
         case ConstraintType::DistancePointLine: {
             // entityA is a POINT on the second line, entityB the first line.
-            // Recover the second line as the one owning that point — that is
+            // Recover the second line as the one owning that point - that is
             // exactly how resolveDimension's parallel branch built the pair.
             for (const auto& l : sk.getLines()) {
                 if (l.id == c.entityB) continue;
@@ -371,7 +371,7 @@ void Application::renderViewport() {
         // dockspace's central node (its tab bar is off, so the user can't
         // re-dock it by hand). The touch shell actively UNDOCKS it every
         // frame (SetNextWindowDockID(0) above) and that undocked state can
-        // even reach imgui.ini — so coming back from im-touch (or launching
+        // even reach imgui.ini - so coming back from im-touch (or launching
         // classic with such an ini) found the viewport floating over the
         // Tools panel. If it's floating here, put it back.
         if (ImGuiWindow* w = ImGui::FindWindowByName("Viewport")) {
@@ -394,7 +394,7 @@ void Application::renderViewport() {
     }
 
     // Classic: the project tab strip lives at the top of the viewport (and
-    // ONLY the viewport — it's a plain tab bar, not a dock node, so tabs
+    // ONLY the viewport - it's a plain tab bar, not a dock node, so tabs
     // can't be dragged into the panel docks). Drawn before contentSize is
     // measured so the 3D image and all item-relative picking shift down
     // together; suppressed while the landing page owns the screen.
@@ -407,7 +407,7 @@ void Application::renderViewport() {
     if (w > 0 && h > 0) {
         // Render the offscreen 3D viewport at the display's PIXEL resolution, not
         // logical points, so it stays crisp on HiDPI/Retina screens. Otherwise the
-        // FBO is point-sized and ImGui::Image upscales it — soft/blurry at 2x. Only
+        // FBO is point-sized and ImGui::Image upscales it - soft/blurry at 2x. Only
         // the render target scales: the image is still laid out at contentSize
         // (points) and picking works in point-space (mouse + viewport both points
         // → NDC), so neither needs to change. DisplayFramebufferScale is (1,1) on
@@ -425,6 +425,7 @@ void Application::renderViewport() {
         const int fbh = static_cast<int>(contentSize.y * fbScaleY);
         m_viewport->resize(fbw, fbh);
 
+        landMeshes(); // a finished worker mesh marks its body dirty
         bool geomChanged = m_meshesDirty || !m_dirtyBodyIds.empty();
         if (geomChanged) {
             rebuildMeshes();
@@ -465,6 +466,19 @@ void Application::renderViewport() {
         // Deferred into a lambda and invoked AFTER the solid geometry below, so
         // the grid (which no longer writes depth) blends over bodies instead of
         // punching through coplanar faces.
+        // The step the user picked is a BASE; what the sketch actually uses is
+        // that base scaled by whole decades to suit this zoom (GridScale.h).
+        // Computed HERE as a plain statement rather than inside drawGrid,
+        // because six later sites read it and a value assigned as a side
+        // effect of "draw the grid" makes that dependency invisible.
+        m_effectiveGridStepMm = std::max(m_sketchGridStep, 0.01f);
+        if (m_inSketchMode && m_activeSketch) {
+            const glm::vec2 g0 = screenToSketch(0.0f, 0.0f, contentSize.x, contentSize.y);
+            const glm::vec2 g1 = screenToSketch(1.0f, 0.0f, contentSize.x, contentSize.y);
+            m_effectiveGridStepMm = gridStepForZoom(
+                m_effectiveGridStepMm, glm::length(g1 - g0), kGridMinPx);
+        }
+
         auto drawGrid = [&]() {
             Grid::Plane gp; // defaults to the XZ ground
             bool sketching = m_inSketchMode && m_activeSketch;
@@ -475,7 +489,28 @@ void Application::renderViewport() {
                 // the grid origin so grid lines pass through whole world-grid
                 // intersections on the sketch plane instead of being shifted
                 // by the face's off-grid centre.
-                gp.origin = m_sketchSnappedAnchor;
+                //
+                // Re-snapped to the EFFECTIVE step every frame. The anchor was
+                // laid on the BASE lattice at sketch entry, while the shader
+                // draws lines every effective step FROM it and SketchTool::snap
+                // rounds to multiples of the effective step from the PLANE
+                // origin. Those two agree only when the anchor is itself a
+                // multiple of the effective step - so as soon as zoom coarsened
+                // the step (base 1 mm -> 10 mm) the drawn grid sat up to a full
+                // cell off the lattice the cursor actually lands on. That is
+                // "I can't draw a line on the snap grid" again, and it is the
+                // precise thing this commit's invariant claims cannot happen.
+                gp.origin = glm::vec3(0.0f);
+                {
+                    const gp_Pnt a = Sketch::latticeAnchor(
+                        m_activeSketch->getPlane(),
+                        gp_Pnt(m_sketchSnappedAnchor.x, m_sketchSnappedAnchor.y,
+                               m_sketchSnappedAnchor.z),
+                        static_cast<double>(m_effectiveGridStepMm));
+                    gp.origin = glm::vec3(static_cast<float>(a.X()),
+                                          static_cast<float>(a.Y()),
+                                          static_cast<float>(a.Z()));
+                }
                 gp.u = v3(ax.XDirection());
                 gp.v = v3(ax.YDirection());
                 gp.normal = v3(ax.Direction());
@@ -500,7 +535,7 @@ void Application::renderViewport() {
                     float denom = glm::dot(rd, gp.normal);
                     if (std::abs(denom) > 1e-6f) {
                         float t = glm::dot(gp.origin - ro, gp.normal) / denom;
-                        // Only adopt the look-point when it's a sane, near hit —
+                        // Only adopt the look-point when it's a sane, near hit -
                         // not the horizon-bound intersection at grazing angles.
                         float cap = std::max(std::abs(eyeH), 10.0f) * 32.0f;
                         if (t > 0.0f && t < cap) fadeCenter = ro + rd * t;
@@ -512,7 +547,7 @@ void Application::renderViewport() {
             // but on large projects the orbit target drifts away from the content
             // on screen (cursor-zoom onto a small part can leave it millimetres
             // from the camera) and the grid faded out within arm's reach of the
-            // eye — "the grid disappears when I'm not even zoomed in". Key it off
+            // eye - "the grid disappears when I'm not even zoomed in". Key it off
             // the camera→fadeCenter distance instead: the point on the plane the
             // fade is centred on is, by construction, where the view is actually
             // looking. The eye height above the plane is the floor so a low
@@ -521,7 +556,7 @@ void Application::renderViewport() {
                 ? cam.getOrthoSize() * 8.0f
                 : std::max(glm::length(fadeCenter - ro), std::abs(eyeH)) * 8.0f;
             // Suppress the minor (1×) grid tier when the project is big and
-            // the user isn't actively sketching / moving — at that zoom the
+            // the user isn't actively sketching / moving - at that zoom the
             // 1-mm lines are clutter that drowns the major (10-mm) lines.
             // The minor tier comes back during sketch / gizmo drag because
             // that's when fine snapping actually matters.
@@ -535,7 +570,7 @@ void Application::renderViewport() {
                 // the 1× minor grid. On a 65-body airplane that's ~65 OCCT
                 // bbox calls per frame; even cheap each, the cumulative
                 // baseline cost is real. We only need this threshold check
-                // to feel responsive — not to update every frame — so cache
+                // to feel responsive - not to update every frame - so cache
                 // the verdict and refresh every ~0.25s. A topology change
                 // can wait that long to flip the grid tier.
                 static double s_nextCheckTime = 0.0;
@@ -582,7 +617,7 @@ void Application::renderViewport() {
                 // vanishes. Grow the fade radius hard as the view grazes the plane
                 // so the grid reaches the horizon and stays drawn (the pristine-grid
                 // coverage greys distant cells, so no moiré). NOTE: no alpha fade
-                // here — basing it on the view-to-target angle wrongly blanked the
+                // here - basing it on the view-to-target angle wrongly blanked the
                 // grid whenever you looked horizontally at something ABOVE it.
                 glm::vec3 vd = cam.getTarget() - cam.getPosition();
                 float vl = glm::length(vd);
@@ -595,15 +630,15 @@ void Application::renderViewport() {
             // coplanar body face (e.g. a body sitting on the XZ ground) occlude
             // the ground grid instead of it bleeding through.
             m_grid->render(view, proj, fadeCenter, gridFade,
-                           gp, std::max(m_sketchGridStep, 0.01f),
+                           gp, m_effectiveGridStepMm,
                            minorAlpha, worldGridAlpha /*globalAlpha*/,
                            sketching ? 1.0f : 0.0f /*sketchGrid: uniform single tier*/,
                            sketching ? 0.0005f : -0.0005f /*depthBias*/,
                            lightBg ? 1.0f : 0.0f /*lightBg palette*/,
                            m_sketchGridThickness /*sketch grid line width*/);
         };
-        // OUTSIDE sketch mode the world grid draws EARLY — before the plugin
-        // passes — so translucent pass content (reference-image photos,
+        // OUTSIDE sketch mode the world grid draws EARLY - before the plugin
+        // passes - so translucent pass content (reference-image photos,
         // construction-plane quads) blends OVER it: a photo's opacity then
         // genuinely reveals the grid/ground beneath instead of fading to the
         // bare background. Bodies still paint over the early grid opaquely, so
@@ -618,7 +653,7 @@ void Application::renderViewport() {
         // Passes that draw BEHIND geometry. Nothing registers here today: the
         // reference photo used to (priority 490, "it is meant to be traced
         // over"), but drawing early does NOT put a translucent overlay behind
-        // the model — with glDepthMask(GL_FALSE) it leaves no depth, so it
+        // the model - with glDepthMask(GL_FALSE) it leaves no depth, so it
         // loses to every body regardless of where it actually sits in 3D. A
         // photo the camera is nearer to than the part vanished anyway. Depth
         // TEST does the "behind" part correctly on its own, so the photo moved
@@ -643,35 +678,23 @@ void Application::renderViewport() {
                                              glm::vec3(n.X(), n.Y(), n.Z()));
             m_edgeRenderer->setSectionPlane(true, p,
                                             glm::vec3(n.X(), n.Y(), n.Z()));
-            // DEBOUNCED overlay recompute. The GPU clip planes above track
-            // the slider instantly; SectionView::update() runs a full OCCT
-            // plane-section + cap triangulation on the MAIN thread — on a
-            // swept-thread body (helicoid BSplines) that's seconds PER
-            // recompute, and firing it on every drag tick froze the app
-            // solid. Recompute only once the plane has RESTED for 250 ms
-            // (the overlay/cap pops in when the drag pauses).
-            // ASYNC overlay recompute. One recompute on a swept-thread body
-            // measured 100.78s — on the main thread that froze the whole
-            // app (Steve's section-view hang). The GPU clip planes above
-            // track the slider instantly; the overlay (curves + caps)
-            // computes on a WORKER from deep-copied shapes, debounced until
-            // the plane rests, newest-plane-wins (a superseded compute is
-            // user-break-cancelled mid-boolean).
-            const uint32_t nowMs = static_cast<uint32_t>(
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count());
+            // ASYNC overlay recompute. The GPU clip planes above track the
+            // slider instantly; the outline and cap are sliced from the
+            // bodies' triangulations on a WORKER (SectionCap.h), a few
+            // milliseconds per body, newest-plane-wins: a plane change while
+            // a compute is in flight cancels it and the next frame dispatches
+            // again, so the overlay follows the slider. The worker reads
+            // Handles to the faces' triangulations, not copies; see FaceMesh
+            // for why a re-mesh under it is safe.
             if (m_sectionDirty || geomChanged) {
-                m_sectionRestMs = nowMs;
                 m_sectionPending = true;
                 m_sectionDirty = false;
-                // Supersede an in-flight compute — its plane is stale.
+                // Supersede an in-flight compute - its plane is stale.
                 if (m_sectionFut.valid() && m_sectionCancel)
                     m_sectionCancel->store(true);
             }
             m_sectionView->setEnabled(true);
-            if (m_sectionPending && !m_sectionFut.valid() &&
-                nowMs - m_sectionRestMs >= 250) {
+            if (m_sectionPending && !m_sectionFut.valid()) {
                 gp_Pln cutting = pl;
                 {
                     gp_Pnt o2 = cutting.Location();
@@ -679,14 +702,14 @@ void Application::renderViewport() {
                                  static_cast<double>(m_sectionOffset));
                     cutting.SetLocation(o2);
                 }
-                std::vector<std::pair<TopoDS_Shape, glm::vec3>> bodies;
+                std::vector<materializr::SectionView::BodyMesh> bodies;
                 for (int id : m_document->getAllBodyIds()) {
                     if (!m_document->isBodyVisible(id)) continue;
                     try {
                         const TopoDS_Shape& s = m_document->getBody(id);
                         if (s.IsNull()) continue;
-                        bodies.emplace_back(BRepBuilderAPI_Copy(s).Shape(),
-                                            m_document->getBodyColor(id));
+                        bodies.push_back({materializr::faceMeshes(s),
+                                          m_document->getBodyColor(id)});
                     } catch (...) { continue; }
                 }
                 m_sectionCancel = std::make_shared<std::atomic<bool>>(false);
@@ -713,7 +736,7 @@ void Application::renderViewport() {
             m_edgeRenderer->setSectionPlane(false, glm::vec3(0.0f),
                                             glm::vec3(0.0f, 1.0f, 0.0f));
             if (m_sectionView) m_sectionView->setEnabled(false);
-            // Kill an in-flight compute — its result is unwanted.
+            // Kill an in-flight compute - its result is unwanted.
             if (m_sectionFut.valid() && m_sectionCancel)
                 m_sectionCancel->store(true);
         }
@@ -728,7 +751,7 @@ void Application::renderViewport() {
         }
         m_shapeRenderer->render(view, proj, cam.getPosition());
         m_edgeRenderer->render(view, proj);
-        // Passes that draw IN FRONT — the reference photo (500), construction
+        // Passes that draw IN FRONT - the reference photo (500), construction
         // planes (501) and axes (502),
         // which is what both already claim ("above body") but never got: the
         // whole block ran before the bodies, and PlaneRenderer draws with
@@ -754,7 +777,7 @@ void Application::renderViewport() {
         // view matrix moves the outline with the body exactly, with no change
         // to SelectionHighlight and no re-tessellation. m_gizmoPreviewXf is
         // identity when no drag is running, so this is a no-op the rest of
-        // the time. (Revolve still hides it — that preview deforms the
+        // the time. (Revolve still hides it - that preview deforms the
         // geometry rather than rigidly transforming it, so no single matrix
         // can carry the outline along.)
         if (!m_revolveLiveActive) {
@@ -762,7 +785,7 @@ void Application::renderViewport() {
                                          view * m_gizmoPreviewXf, proj);
         }
 
-        // Sketch-mode grid drawn here — after bodies/edges/section/highlight —
+        // Sketch-mode grid drawn here - after bodies/edges/section/highlight -
         // so it blends over solid geometry (and the reference photo being
         // traced) and fades cleanly under the opacity slider, rather than
         // punching grid lines through coplanar faces (the old "grey grid baked
@@ -776,7 +799,7 @@ void Application::renderViewport() {
         // gets the gizmo back by either explicitly clicking Move/Rotate/Scale
         // (which clears the flag) or by picking again in the viewport.
         //
-        // Also hidden whenever ANY interactive op is active — Push/Pull,
+        // Also hidden whenever ANY interactive op is active - Push/Pull,
         // Loft, Construction Plane, Pattern, Shell, Resize, etc. Without
         // this guard the rotate/move gizmo "sticks around" on top of those
         // popups' previews, looking like an extra widget the user can grab.
@@ -794,7 +817,7 @@ void Application::renderViewport() {
                 const TopoDS_Shape& shape = m_document->getBody(bodyId);
                 // Cache the body's bbox-centre keyed on its TShape pointer.
                 // BRepBndLib::Add walks every face's surface and on a complex
-                // body (trimmed NURBS heavy) is 50-150ms — running it every
+                // body (trimmed NURBS heavy) is 50-150ms - running it every
                 // frame while a body is selected pinned idle FPS to ~6 with
                 // the cooling fan ramping. The TShape pointer is invalidated
                 // exactly when topology rebuilds (push/pull, fillet, rotate
@@ -824,7 +847,7 @@ void Application::renderViewport() {
                 // and the gizmo correctly stays put, while a multi-body drag
                 // about a shared pivot moves this body's centre by exactly the
                 // amount the body moved. It also picks up the grid-SNAPPED
-                // translation for free — the snap is applied before the matrix
+                // translation for free - the snap is applied before the matrix
                 // is built, so the gizmo can't drift off-grid from the body.
                 if (m_gizmoDragging)
                     center = glm::vec3(m_gizmoPreviewXf * glm::vec4(center, 1.0f));
@@ -836,7 +859,7 @@ void Application::renderViewport() {
         // Sketch-as-construction-plane: when a Sketch OR a SketchRegion is
         // selected (no body in selection), not in sketch-edit, in perspective
         // view, show the gizmo at the parent sketch's plane origin so the
-        // user can move/rotate it in 3D — effectively repositioning it like
+        // user can move/rotate it in 3D - effectively repositioning it like
         // a construction plane. Ortho view is excluded because the user is
         // then implicitly "looking at" the sketch and dragging in 3D there
         // is disorienting. SketchRegion picks count: the user clicked
@@ -919,7 +942,7 @@ void Application::renderViewport() {
             m_inSketchMode || m_extrudeCtl.active() || m_edgeCtl.active() ||
             m_ppCtl.active() || anyIopActive() ||
             m_patternActive || m_loftActive || m_sketchPatternActive;
-        // Construction-axis gizmo — Move only. Same arming pattern as
+        // Construction-axis gizmo - Move only. Same arming pattern as
         // planes: implicit during the Construction Axis popup
         // (m_axisOpActive), opt-in via W/E after commit.
         int firstAxisInSel = -1;
@@ -941,7 +964,7 @@ void Application::renderViewport() {
             if (aid >= 0) {
                 const auto* entry = m_document->getAxis(aid);
                 if (entry) {
-                    // Axes are 1D — Rotate / Scale aren't meaningful, so
+                    // Axes are 1D - Rotate / Scale aren't meaningful, so
                     // snap to Translate if the user's in either of those.
                     if (m_gizmo->getMode() != GizmoMode::Translate) {
                         m_gizmo->setMode(GizmoMode::Translate);
@@ -974,7 +997,7 @@ void Application::renderViewport() {
         // During the original Construction Plane placement popup we treat
         // the gizmo as implicitly armed so the user can manipulate the
         // preview from the start. Outside the popup we require an explicit
-        // arm (Move/Rotate button or W/E key) — same UX sketches use.
+        // arm (Move/Rotate button or W/E key) - same UX sketches use.
         const bool planeImplicitArm = m_planeOpActive;
         if (!gizmoShown && !m_selection->hasSelectedBodies() &&
             !m_selection->navigationOnly() &&
@@ -1008,12 +1031,12 @@ void Application::renderViewport() {
         // Controller 3D gizmo meshes (the Move Face arrows/rings/cubes). This
         // MUST stay inside the FBO-bound 3D pass: the controller-overlay loop
         // further down runs after unbind(), where a raw GL draw lands in the
-        // window framebuffer and the UI paints straight over it — see
+        // window framebuffer and the UI paints straight over it - see
         // IopGizmo3D in IopViewport.h.
         {
             IopGizmo3D g3d;
             // Colours arrive packed; Gizmo takes a float vec3, so unpack here
-            // — the controller side never sees either type.
+            // - the controller side never sees either type.
             auto unpack = [](unsigned c) {
                 return glm::vec3(((c      ) & 0xFF) / 255.0f,
                                  ((c >>  8) & 0xFF) / 255.0f,
@@ -1045,8 +1068,30 @@ void Application::renderViewport() {
             // Keep the tool's snap step in sync with the user-chosen grid. The
             // grid itself is the infinite world grid above (now aligned to the
             // sketch plane), so face sketches no longer need a separate per-face
-            // grid — drawing across to neighbouring faces just works.
-            m_sketchTool->setGridStep(m_sketchGridStep);
+            // grid - drawing across to neighbouring faces just works.
+            // Snapping takes the EFFECTIVE step - the cursor must land on the
+            // lines actually drawn. Pointing tolerances keep taking the BASE:
+            // they are a precision preference, not a lattice, and letting zoom
+            // coarsen them pinned the trim/pick radius at its 10 mm cap the
+            // moment the grid stepped up.
+            m_sketchTool->setGridStep(m_effectiveGridStepMm);
+            m_sketchTool->setToleranceStep(m_sketchGridStep);
+            // The TOGGLE belongs here for the same reason the step does: its
+            // only other writer was the classic-toolbar branch, which modern
+            // and im-touch never run. So in those layouts the badge said
+            // "Snap off" while SketchTool sat on its own default of true and
+            // kept snapping - the setting was honoured on screen and ignored
+            // in the geometry, from launch, with no way to correct it.
+            m_sketchTool->setSnapToGridEnabled(m_snapToGrid);
+            // Sketch millimetres per screen pixel, measured by unprojecting two
+            // points one pixel apart - exact for any camera and any plane
+            // orientation. Pointing tolerances are a screen distance, so they
+            // need the zoom, not just the grid.
+            {
+                const glm::vec2 p0 = screenToSketch(0.0f, 0.0f, contentSize.x, contentSize.y);
+                const glm::vec2 p1 = screenToSketch(1.0f, 0.0f, contentSize.x, contentSize.y);
+                m_sketchTool->setPixelScale(glm::length(p1 - p0));
+            }
             m_sketchRenderer->render(m_activeSketch.get(), m_sketchTool.get(), view, proj,
                                      m_sketchSolver.get());
         }
@@ -1072,7 +1117,7 @@ void Application::renderViewport() {
                 highlightRegion(e.sketchId, e.subShapeIndex,
                                 glm::vec3(1.0f, 0.85f, 0.1f), 4.0f, 0.28f);
             } else if (e.type == SelectionType::Sketch && e.sketchId >= 0) {
-                // Whole-sketch highlight — covers every primitive (so open
+                // Whole-sketch highlight - covers every primitive (so open
                 // profiles light up too, not just closed regions).
                 std::shared_ptr<Sketch> sk;
                 if (e.sketchId == m_activeSketchId && m_activeSketch) sk = m_activeSketch;
@@ -1083,7 +1128,7 @@ void Application::renderViewport() {
                 }
             }
         }
-        // Highlight the geometry a history step touches — hovering a step
+        // Highlight the geometry a history step touches - hovering a step
         // previews it, selecting (pinning) a step keeps it. Lets the user see
         // WHAT each step made before editing it. Hover wins over the pinned
         // step so moving the cursor down the list previews each in turn.
@@ -1098,7 +1143,7 @@ void Application::renderViewport() {
                 if (auto* se = dynamic_cast<const SketchEditOp*>(op)) {
                     // Sketch step: the WHOLE sketch outline normally; the
                     // specific edited element(s) only while we're actually IN
-                    // that sketch (Steve — the relevant sketch is enough for a
+                    // that sketch (Steve - the relevant sketch is enough for a
                     // history item; element precision is for sketch editing).
                     auto tgt = se->getTarget();
                     int sid = (tgt && m_document) ? m_document->findSketchId(tgt.get()) : -1;
@@ -1182,7 +1227,7 @@ void Application::renderViewport() {
             };
             // Style enum lets callers pick between the subtle sketch / move
             // gizmo readout (Normal) and the bolder fluorescent-yellow arrow
-            // used during active body operations (Bold) — push/pull, fillet,
+            // used during active body operations (Bold) - push/pull, fillet,
             // chamfer. Sketch inferences keep Normal because 4-5 of them can
             // run at once and the heavier visuals would clutter the canvas.
             enum class DimStyle { Normal, Bold };
@@ -1234,7 +1279,7 @@ void Application::renderViewport() {
                 arrow(da, ImVec2(-dir.x, -dir.y));
                 arrow(db, dir);
                 // Skip the centred label when the caller passes a null/empty
-                // label — for the fillet/chamfer drag handle we instead pin
+                // label - for the fillet/chamfer drag handle we instead pin
                 // the readout to the mouse cursor (drawn by the caller),
                 // matching the arc-angle preview's "follow the mouse" pill.
                 if (label && label[0]) {
@@ -1252,7 +1297,7 @@ void Application::renderViewport() {
                 }
             };
 
-            // Revolve indicator — yellow arced arrow showing the rotation
+            // Revolve indicator - yellow arced arrow showing the rotation
             // axis + current angle while the Revolve popup is up. Now
             // CLICKABLE: press on the arc to grab it, drag tangentially to
             // spin the body around the axis live. The cursor's projected
@@ -1299,7 +1344,7 @@ void Application::renderViewport() {
                 // a 360° revolve doesn't render as a closed circle that
                 // hides its own arrowhead. Below 5° we draw a default
                 // 45°-ish stub so the gizmo stays grabbable when the
-                // user just opened the popup (angle reset to 0) — the
+                // user just opened the popup (angle reset to 0) - the
                 // stub fades into a real sweep the moment they drag.
                 float ang = m_revolveAngle * (float)M_PI / 180.0f;
                 float sign = (ang >= 0.0f) ? 1.0f : -1.0f;
@@ -1321,7 +1366,7 @@ void Application::renderViewport() {
                 }
                 if (nPts > 1) {
                     // Cursor → arc hit-test (closest point on any segment;
-                    // 10 px pickability band — generous because the arc is
+                    // 10 px pickability band - generous because the arc is
                     // thin and the user is moving deliberately when they
                     // grab it).
                     ImVec2 mp = ImGui::GetMousePos();
@@ -1410,7 +1455,7 @@ void Application::renderViewport() {
                             float deg = m_revolveArcDragStartBodyAng +
                                         m_revolveArcDragAngleAccum *
                                         180.0f / (float)M_PI;
-                            // Snap to 5° increments — the arc drag is the
+                            // Snap to 5° increments - the arc drag is the
                             // coarse positioning tool; fine adjustments
                             // happen through the popup's typed-angle
                             // InputText, which doesn't snap.
@@ -1483,7 +1528,7 @@ void Application::renderViewport() {
             // tracking the live percentage. Drag a tip to scale that
             // direction (handled in the input section below). Arrows are
             // labelled by COLOUR (red / blue) matching the panel's per-
-            // axis sliders — the old "U" / "V" letters meant nothing to
+            // axis sliders - the old "U" / "V" letters meant nothing to
             // the user.
             // Controller handle overlays. Was a ScaleFace-specific block that
             // read its gizmo frame through public accessors; now any
@@ -1538,7 +1583,7 @@ void Application::renderViewport() {
                 }
                 // Every ACTIVE controller gets the overlay, whether or not it
                 // takes pointer input. These used to be one gate, which was
-                // only ever true by coincidence — the four controllers that
+                // only ever true by coincidence - the four controllers that
                 // drew handles also dragged them. Split draws a ghost plane and
                 // has nothing to drag, and under the old gate it silently drew
                 // nothing. drawOverlay's default is a no-op, so a controller
@@ -1551,7 +1596,7 @@ void Application::renderViewport() {
             char dbuf[40];
             // im-touch: the distance input well (rendered later, different
             // scope) anchors near the geometry being modified. The anchor is
-            // LATCHED in world space when the action starts — the well must
+            // LATCHED in world space when the action starts - the well must
             // not chase the growing arrow while values change (same rule as
             // the sketch bubbles' frozen endpoints), but projecting the
             // latched point each frame keeps it tracking camera pan/zoom.
@@ -1582,20 +1627,20 @@ void Application::renderViewport() {
                 }
             }
             if (m_extrudeCtl.active()) {
-                std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", std::abs(m_extrudeCtl.distance()));
+                std::snprintf(dbuf, sizeof(dbuf), "%s", materializr::fmtLength(std::abs(m_extrudeCtl.distance())).c_str());
                 drawDim(m_extrudeCtl.origin(),
                         m_extrudeCtl.origin() + m_extrudeCtl.normal() * m_extrudeCtl.distance(), dbuf,
                         DimStyle::Bold);
             } else if (m_ppCtl.active() && m_ppCtl.hasArrow()) {
                 // Arrow out of the face + signed-distance measurement.
                 // Push/pull STARTS at 0 mm (no change), and drawDim draws
-                // nothing for a near-zero span — which left the face with no
+                // nothing for a near-zero span - which left the face with no
                 // visible handle at all (extrude starts non-zero, so it
                 // always shows one). Until the distance moves, draw a
                 // STARTER handle instead: a double-headed arrow through the
                 // face centre along ±normal, in the Bold palette.
                 if (std::abs(m_ppCtl.distance()) > 0.05f) {
-                    std::snprintf(dbuf, sizeof(dbuf), "%.1f mm", m_ppCtl.distance());
+                    std::snprintf(dbuf, sizeof(dbuf), "%s", materializr::fmtLength(m_ppCtl.distance()).c_str());
                     drawDim(m_ppCtl.origin(),
                             m_ppCtl.origin() + m_ppCtl.normal() * m_ppCtl.distance(), dbuf,
                             DimStyle::Bold);
@@ -1629,7 +1674,7 @@ void Application::renderViewport() {
                         };
                         head(b,  1.0f);
                         head(a, -1.0f);
-                        const char* hint = "0 mm — drag";
+                        const std::string hintS = materializr::fmtLength(0.0) + " - drag"; const char* hint = hintS.c_str();
                         ImVec2 ts = ImGui::CalcTextSize(hint);
                         ImVec2 tp(so.x + perp.x * 18.0f * s3 - ts.x * 0.5f,
                                   so.y + perp.y * 18.0f * s3 - ts.y * 0.5f);
@@ -1642,7 +1687,7 @@ void Application::renderViewport() {
             } else if (m_gizmoDragging && !m_planeGizmoDrag.empty()) {
                 // Construction-plane drag readout. The world-axis dim line
                 // from origin (used for body/sketch translate below) isn't
-                // useful here — for an askew plane the user cares about
+                // useful here - for an askew plane the user cares about
                 // distance along the plane's own normal and the rotation
                 // angle, not the world-coord delta. Pin a compact pill near
                 // the cursor with the values that matter for plane work.
@@ -1668,8 +1713,9 @@ void Application::renderViewport() {
                         absAfter = std::round(absAfter / step) * step;
                     }
                     std::snprintf(dbuf, sizeof(dbuf),
-                                  "\xCE\x94 %.2f mm   |   Origin %.2f mm",
-                                  delta, absAfter);
+                                  "\xCE\x94 %s   |   Origin %s",
+                                  materializr::fmtLength(delta).c_str(),
+                                  materializr::fmtLength(absAfter).c_str());
                 } else if (m_gizmo->getMode() == GizmoMode::Rotate) {
                     char axL = '?';
                     if (std::abs(m_gizmoRotAxis.x) > 0.5f)      axL = 'X';
@@ -1705,7 +1751,7 @@ void Application::renderViewport() {
                 }
             }
 
-            // Rotate (°) / Scale (%) readout near the body during a gizmo drag —
+            // Rotate (°) / Scale (%) readout near the body during a gizmo drag -
             // the analogue of the mm readout for moves. Uses the cached pivot
             // so sketch-only drags get a readout even with no body shape.
             // Suppressed for plane-only drags so we don't show two readouts
@@ -1725,7 +1771,7 @@ void Application::renderViewport() {
                                 // snap policy: hard 15° when snap-on, soft
                                 // 45° when off) plus the rotation axis name
                                 // so the user sees which axis the value is
-                                // about — m_gizmoRotAxis is the world-axis
+                                // about - m_gizmoRotAxis is the world-axis
                                 // unit vector set when the drag started.
                                 float shown;
                                 if (m_snapToGrid) {
@@ -1761,7 +1807,7 @@ void Application::renderViewport() {
             }
 
             // Sketch preview dimensions: line length, circle diameter (across the
-            // full width — makers dimension by diameter), rectangle both sides.
+            // full width - makers dimension by diameter), rectangle both sides.
             if (m_inSketchMode && m_activeSketch && m_sketchTool && m_sketchTool->hasPreview()) {
                 const gp_Ax3& ax = m_activeSketch->getPlane().Position();
                 glm::vec3 O(ax.Location().X(), ax.Location().Y(), ax.Location().Z());
@@ -1772,11 +1818,13 @@ void Application::renderViewport() {
                 // Length readout: two decimals with trailing zeros trimmed, so
                 // short segments read at hundredth precision (0.27) while round
                 // values stay clean (0.90 -> 0.9, 1.00 -> 1). The old tenths
-                // format hid everything under 0.1 mm. (No <cstring> needed —
+                // format hid everything under 0.1 mm. (No <cstring> needed -
                 // trim over the fixed buffer by index.)
-                auto fmtLen = [](char* out, size_t n, float v, const char* suffix) {
+                auto fmtLen = [](char* out, size_t n, float v) {   // v is mm; prints display unit
                     char num[32];
-                    int m = std::snprintf(num, sizeof(num), "%.2f", v);
+                    int m = std::snprintf(num, sizeof(num), "%.*f",
+                                          materializr::unitInfo(materializr::currentUnit()).decimals,
+                                          materializr::toDisplay(v));
                     if (m > 0) {
                         bool hasDot = false;
                         for (int k = 0; k < m; ++k) if (num[k] == '.') { hasDot = true; break; }
@@ -1786,7 +1834,7 @@ void Application::renderViewport() {
                             if (e >= 0 && num[e] == '.') num[e] = '\0';
                         }
                     }
-                    std::snprintf(out, n, "%s %s", num, suffix);
+                    std::snprintf(out, n, "%s %s", num, materializr::unitSuffix());
                 };
 
                 SketchToolMode pm = m_sketchTool->getPreviewType();
@@ -1796,7 +1844,7 @@ void Application::renderViewport() {
                 if (pm == SketchToolMode::Line) {
                     float length = glm::length(pe - ps);
                     if (length > 1e-3f) {
-                        fmtLen(dbuf, sizeof(dbuf), length, "mm");
+                        fmtLen(dbuf, sizeof(dbuf), length);
                         drawDim(sketch2world(ps), sketch2world(pe), dbuf);
                     }
                 } else if (pm == SketchToolMode::Circle) {
@@ -1804,7 +1852,8 @@ void Application::renderViewport() {
                     glm::vec2 rvec = pe - ps;
                     float dia = 2.0f * glm::length(rvec);
                     if (dia > 1e-3f) {
-                        fmtLen(dbuf, sizeof(dbuf), dia, "mm dia");
+                        fmtLen(dbuf, sizeof(dbuf), dia);
+                        { const size_t l = std::strlen(dbuf); std::snprintf(dbuf + l, sizeof(dbuf) - l, " dia"); }
                         drawDim(sketch2world(ps - rvec), sketch2world(pe), dbuf);
                     }
                 } else if (pm == SketchToolMode::Rectangle) {
@@ -1812,16 +1861,16 @@ void Application::renderViewport() {
                     glm::vec2 bl(ps.x, ps.y), br(pe.x, ps.y), tr(pe.x, pe.y);
                     float w = std::abs(pe.x - ps.x), h = std::abs(pe.y - ps.y);
                     if (w > 1e-3f) {
-                        fmtLen(dbuf, sizeof(dbuf), w, "mm");
+                        fmtLen(dbuf, sizeof(dbuf), w);
                         drawDim(sketch2world(bl), sketch2world(br), dbuf);
                     }
                     if (h > 1e-3f) {
-                        fmtLen(dbuf, sizeof(dbuf), h, "mm");
+                        fmtLen(dbuf, sizeof(dbuf), h);
                         drawDim(sketch2world(br), sketch2world(tr), dbuf);
                     }
                 } else if (pm == SketchToolMode::Arc) {
                     // Arc is a 3-click tool. While placing the second click
-                    // (clicks==1) we just have a chord — show its length.
+                    // (clicks==1) we just have a chord - show its length.
                     // Once the second click lands (clicks==2) we have three
                     // points on a circle, so we can compute the sweep and
                     // show the user "this is a 90° quarter, this is a 180°
@@ -1831,7 +1880,7 @@ void Application::renderViewport() {
                     if (clicks == 1) {
                         float length = glm::length(pe - ps);
                         if (length > 1e-3f) {
-                            fmtLen(dbuf, sizeof(dbuf), length, "mm");
+                            fmtLen(dbuf, sizeof(dbuf), length);
                             drawDim(sketch2world(ps), sketch2world(pe), dbuf);
                         }
                     } else if (clicks == 2) {
@@ -1861,7 +1910,7 @@ void Application::renderViewport() {
                                 // only decides direction. (Previously I'd
                                 // labelled mA/eA inverted, which flipped the
                                 // (dm<ds) branch and reported the long-way
-                                // arc — e.g. a 25° sliver as 335°.)
+                                // arc - e.g. a 25° sliver as 335°.)
                                 float sA = std::atan2(ps.y - ctr.y, ps.x - ctr.x);
                                 float eA = std::atan2(second.y - ctr.y,
                                                        second.x - ctr.x);
@@ -1876,7 +1925,7 @@ void Application::renderViewport() {
                                 float dm = norm(mA - sA);
                                 float sweep = (dm < ds) ? ds : (ds - 2.0f * (float)M_PI);
                                 float deg = std::abs(sweep * 180.0f / (float)M_PI);
-                                // Pin label 14 px to the right of the cursor —
+                                // Pin label 14 px to the right of the cursor -
                                 // a consistent place to look that doesn't
                                 // dance around when the inferred circle's
                                 // centre/radius shift mid-drag. Tags common
@@ -1905,13 +1954,13 @@ void Application::renderViewport() {
                 } else if (pm == SketchToolMode::Polygon) {
                     // ps = centre, pe = a vertex (vertex 0 lands under the
                     // cursor). Show the circumradius (centre→vertex) as a
-                    // radius dimension — the polygon analogue of the circle's
-                    // diameter readout — tagged with the side count.
+                    // radius dimension - the polygon analogue of the circle's
+                    // diameter readout - tagged with the side count.
                     glm::vec2 rvec = pe - ps;
                     float r = glm::length(rvec);
                     if (r > 1e-3f) {
                         char num[40];
-                        fmtLen(num, sizeof(num), r, "mm");
+                        fmtLen(num, sizeof(num), r);
                         std::snprintf(dbuf, sizeof(dbuf), "R %s \xC2\xB7 %d-gon",
                                       num, m_sketchTool->getPolygonSides());
                         drawDim(sketch2world(ps), sketch2world(pe), dbuf);
@@ -1921,7 +1970,7 @@ void Application::renderViewport() {
 
             // im-touch confirm bubble: a circle or rectangle drawn by press-
             // drag-release is HELD as a preview on lift (see the sketch
-            // release handler) — a small floating bar near the shape offers
+            // release handler) - a small floating bar near the shape offers
             // exact-value entry plus ✗/✓. Circle shows one readout + pad
             // (typed diameter wins over the dragged size, matching
             // applyDimension); rectangle shows TWO amount wells (Width /
@@ -1942,7 +1991,7 @@ void Application::renderViewport() {
                     // Undo / cancel / tool switch dissolved the hold.
                     m_sketchShapeConfirmPending = false;
                 } else {
-                    // FROZEN endpoints from the lift — not the live preview:
+                    // FROZEN endpoints from the lift - not the live preview:
                     // stray motion twitching the held preview must not move
                     // the input box (or flip the commit direction) mid-edit.
                     const glm::vec2 ps = m_sketchShapeAnchorPs;
@@ -1984,11 +2033,11 @@ void Application::renderViewport() {
                         const float keySide = 46.0f * sc;
                         if (holdMode == SketchToolMode::Circle) {
                             // Native keyboard (tap the field) instead of the
-                            // in-app number pad — the im-touch bubble now
+                            // in-app number pad - the im-touch bubble now
                             // matches Modern. The placeholder shows the dragged
                             // diameter until you type an exact value; empty
                             // buffer = keep the drag (handled at commit).
-                            ImGui::TextDisabled("%s", materializr::tr("Diameter (mm)"));
+                            ImGui::TextDisabled("%s", materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str());
                             char hint[32];
                             std::snprintf(hint, sizeof(hint), "%.1f (drag)", diaNow);
                             ImGui::SetNextItemWidth(touchui::numberPadWidth(keySide));
@@ -2003,7 +2052,7 @@ void Application::renderViewport() {
                             (void)materializr::parseFinite(m_sketchShapeDimBuf,
                                                            diaPadV);
                             if (touchui::numberField("##bubbleDia", nullptr,
-                                                     &diaPadV, "%.2f",
+                                                     &diaPadV, materializr::lengthFormat(),
                                                      nullptr, hint)) {
                                 if (diaPadV > 0.0)
                                     std::snprintf(m_sketchShapeDimBuf,
@@ -2015,20 +2064,18 @@ void Application::renderViewport() {
                             ImGui::PopStyleVar();
                         } else {
                             // Rectangle: two native Width/Height fields (tap to
-                            // raise the keyboard) — matches Modern and the
+                            // raise the keyboard) - matches Modern and the
                             // circle branch above. Seeded from the drag; ✓
                             // places the rectangle at the shown W x H.
                             const float fieldW = touchui::numberPadWidth(keySide);
                             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                                 ImVec2(uiW(10.0f), uiW(10.0f)));
-                            ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
+                            ImGui::TextDisabled("%s", materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str());
                             ImGui::SetNextItemWidth(fieldW);
-                            materializr::inputNumber("##bubbleW", &m_sketchShapeDimW,
-                                              0.0f, 0.0f, "%.2f");
-                            ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
+                            materializr::lengthField("##bubbleW", &m_sketchShapeDimW);
+                            ImGui::TextDisabled("%s", materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str());
                             ImGui::SetNextItemWidth(fieldW);
-                            materializr::inputNumber("##bubbleH", &m_sketchShapeDimH,
-                                              0.0f, 0.0f, "%.2f");
+                            materializr::lengthField("##bubbleH", &m_sketchShapeDimH);
                             ImGui::PopStyleVar();
                             if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                             if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;
@@ -2046,9 +2093,12 @@ void Application::renderViewport() {
                         if (commit && m_sketchShapeConfirmPending) {
                             if (holdMode == SketchToolMode::Circle) {
                                 float v = 0.0f;
-                                const bool useTyped =
-                                    materializr::parseFinite(m_sketchShapeDimBuf, v) &&
-                                    v > 0.0f;
+                                const bool useTyped = [&] {
+                                    double mm = 0.0;   // "2in" honoured; bare = display unit
+                                    if (!materializr::parseLength(m_sketchShapeDimBuf, mm) || mm <= 0.0) return false;
+                                    v = static_cast<float>(mm);
+                                    return true;
+                                }();
                                 recordSketchMutation([&] {
                                     if (useTyped)
                                         m_sketchTool->applyDimension(v);
@@ -2088,12 +2138,12 @@ void Application::renderViewport() {
                 }
             }
 
-            // Inference guides — the SketchUp-style "purple line down from
+            // Inference guides - the SketchUp-style "purple line down from
             // point 1" ghost markers. Drawn during placement / hover so the
             // user can see WHY the cursor is being snapped before they click.
             // Pure visual cue: nothing in the placed geometry remembers them.
             // Touch Move (nav-lock) mode isn't drawing/selecting, so the snap
-            // guides are just visual noise here — same reasoning as the Select
+            // guides are just visual noise here - same reasoning as the Select
             // tool suppressing them in SketchTool::onMouseMove.
             if (m_inSketchMode && m_activeSketch && m_sketchTool && !m_moveModeToggle) {
                 const gp_Ax3& iax = m_activeSketch->getPlane().Position();
@@ -2107,7 +2157,7 @@ void Application::renderViewport() {
                 // (light-blue host face, blue sketch lines, dark grid). Without
                 // this the mid-saturation guides are nearly invisible.
                 const ImU32 halo = IM_COL32(0, 0, 0, 220);
-                // All inferences share a single colour now — the markers'
+                // All inferences share a single colour now - the markers'
                 // distinct shapes (square / triangle / diamond) plus the
                 // cursor's text label carry the meaning; varied colours just
                 // added visual noise without communicating anything useful.
@@ -2129,16 +2179,18 @@ void Application::renderViewport() {
                         case InferenceGuide::AngleSnap:
                         case InferenceGuide::OnLineExtension:
                         case InferenceGuide::TangentToCircle:
+                        case InferenceGuide::CornerBisector:
+                        case InferenceGuide::CornerTangent:
                             dashed = true;
                             break;
                         case InferenceGuide::PerpToRef:
-                            // Hover-charged perpendicular ray — cyan to stand
+                            // Hover-charged perpendicular ray - cyan to stand
                             // apart from the chain-relative guides.
                             dashed = true;
                             col = IM_COL32(80, 220, 235, 255);
                             break;
                         case InferenceGuide::Symmetry:
-                            // Mirror pairing (source ↔ snapped point) — purple.
+                            // Mirror pairing (source ↔ snapped point) - purple.
                             dashed = true;
                             col = IM_COL32(200, 100, 255, 255);
                             break;
@@ -2166,7 +2218,7 @@ void Application::renderViewport() {
                                g.kind == InferenceGuide::OnCircle) {
                         // Diamond marker with halo. A rim landing gets the same
                         // shape as an on-edge landing because it means the same
-                        // thing to the user — the point is ON that geometry.
+                        // thing to the user - the point is ON that geometry.
                         const float r = 5.0f;
                         ImVec2 d0(sa.x,     sa.y - r);
                         ImVec2 d1(sa.x + r, sa.y);
@@ -2181,7 +2233,7 @@ void Application::renderViewport() {
                         if (len < 1.0f) continue;
                         d.x /= len; d.y /= len;
                         // Extend the guide past the ANCHOR end only so it
-                        // still reads as an axis — extending past the cursor
+                        // still reads as an axis - extending past the cursor
                         // end buried the endpoint marker under dashes ("I
                         // cannot see where the vertex actually is").
                         const float extend = 60.0f;
@@ -2199,7 +2251,9 @@ void Application::renderViewport() {
                         // which existing feature the guide is sourced from.
                         if (g.kind == InferenceGuide::AxisHFromPoint ||
                             g.kind == InferenceGuide::AxisVFromPoint ||
-                            g.kind == InferenceGuide::PerpToRef) {
+                            g.kind == InferenceGuide::PerpToRef ||
+                            g.kind == InferenceGuide::CornerBisector ||
+                            g.kind == InferenceGuide::CornerTangent) {
                             dl->AddCircleFilled(sa, 5.5f, halo);
                             dl->AddCircleFilled(sa, 4.0f, col);
                         }
@@ -2218,7 +2272,7 @@ void Application::renderViewport() {
                 // anchor (sketch point, sketch line midpoint, face vertex,
                 // or face-edge midpoint) so it's clear which feature is
                 // sourcing the guides. Anchor position is read from the
-                // tool directly — the kinds without a sketch-element id
+                // tool directly - the kinds without a sketch-element id
                 // (face refs) wouldn't survive a getPoint() lookup. Gated
                 // on m_inSketchMode above so face features only highlight
                 // during a sketch.
@@ -2233,7 +2287,7 @@ void Application::renderViewport() {
                 }
 
                 // Text / SVG placement: dashed rectangle following the
-                // cursor — the measured (rotated) extents of the artwork,
+                // cursor - the measured (rotated) extents of the artwork,
                 // so the user sees exactly where it will land before
                 // clicking. Baseline drawn solid for orientation.
                 if ((m_sketchTool->getMode() == SketchToolMode::Text ||
@@ -2287,14 +2341,14 @@ void Application::renderViewport() {
                         };
                         for (int i = 0; i < 4; ++i)
                             dashSeg(sc[i], sc[(i + 1) % 4]);
-                        // Solid baseline (y=0 of the glyphs) — shows which
+                        // Solid baseline (y=0 of the glyphs) - shows which
                         // way is "up" for the letters at a glance.
                         ImVec2 b0, b1;
                         if (toImg(sk2w(rot({mn.x, 0.0f})), b0) &&
                             toImg(sk2w(rot({mx.x, 0.0f})), b1))
                             dl->AddLine(b0, b1, boxCol, 2.0f);
                         // Live glyph preview: the actual letter contours, so the
-                        // user sees WHAT will land, not just where. (Text only —
+                        // user sees WHAT will land, not just where. (Text only -
                         // empty for SVG, which keeps the box.)
                         const auto& gloops = m_sketchTool->getTextPreviewLoops();
                         const ImU32 glyphCol = IM_COL32(150, 230, 255, 235);
@@ -2461,7 +2515,7 @@ void Application::renderViewport() {
                     }
                 }
 
-                // Inference label near the cursor — names which snap(s) are
+                // Inference label near the cursor - names which snap(s) are
                 // active so the user understands WHY the cursor jumped. The
                 // killer SketchUp feature ("Endpoint" / "On midpoint" /
                 // "Perpendicular" floating next to the crosshair).
@@ -2486,6 +2540,8 @@ void Application::renderViewport() {
                             case InferenceGuide::TangentToCircle: return "Tangent";
                             case InferenceGuide::PerpToRef:       return "Perpendicular from Point";
                             case InferenceGuide::Symmetry:        return "Symmetry";
+                            case InferenceGuide::CornerBisector:  return "Corner Bisector";
+                            case InferenceGuide::CornerTangent:   return "Corner Tangent";
                         }
                         return "";
                     };
@@ -2502,7 +2558,7 @@ void Application::renderViewport() {
                     if (!label.empty()) {
                         ImVec2 mp = ImGui::GetMousePos();
                         // One row LOWER than the dimension readout (which
-                        // pins ~14 px right of the cursor) — on short lines
+                        // pins ~14 px right of the cursor) - on short lines
                         // the two used to stack on the same spot and the
                         // guide name sat right on top of the measurement.
                         ImVec2 tp(mp.x + 16.0f, mp.y + 36.0f);
@@ -2518,7 +2574,7 @@ void Application::renderViewport() {
                 }
             }
 
-            // Dimension value labels — Distance / Radius / Angle constraints
+            // Dimension value labels - Distance / Radius / Angle constraints
             // get a numeric text overlay near their geometry so the user can
             // see (and later edit) the locked value. Free / undimensioned
             // geometry stays label-free.
@@ -2528,21 +2584,44 @@ void Application::renderViewport() {
                 glm::vec3 dX(dax.XDirection().X(), dax.XDirection().Y(), dax.XDirection().Z());
                 glm::vec3 dY(dax.YDirection().X(), dax.YDirection().Y(), dax.YDirection().Z());
                 auto dim2world = [&](glm::vec2 p) { return dO + p.x * dX + p.y * dY; };
-                // Reset the per-frame "click swallowed by a label" flag —
+                // Reset the per-frame "click swallowed by a label" flag -
                 // re-evaluated below as labels are drawn and hit-tested.
                 m_dimEditingClickedThisFrame = false;
                 // The Dimension tool's commit path (applyPendingDimension, in
                 // Application.cpp) sets m_dimEditingId + this flag from outside
                 // any ImGui window scope. OpenPopup only takes effect when
                 // called from the window that owns the popup's ID stack, so
-                // defer it to here — same scope as the label-click OpenPopup
+                // defer it to here - same scope as the label-click OpenPopup
                 // calls below.
                 if (m_dimOpenEditRequested) {
                     ImGui::OpenPopup("##DimEdit");
                     m_dimOpenEditRequested = false;
                 }
+                // Cursor in sketch mm - the space labelOffX/Y lives in, so a
+                // drag can be expressed as an offset directly.
+                const ImVec2 dimMp = ImGui::GetMousePos();
+                const glm::vec2 dimCursor = screenToSketch(
+                    dimMp.x - imgMin.x, dimMp.y - imgMin.y, imgSize.x, imgSize.y);
+                // Opens the value editor for a constraint. Called on RELEASE
+                // of a press that did not turn into a drag - see the label
+                // press/drag handling below.
+                auto openDimEdit = [&](const Constraint& c) {
+                    m_dimEditingId = c.id;
+                    // Seed what the label shows: degrees for an angle; the
+                    // DIAMETER for a circle's Radius constraint (Ø), the
+                    // radius for an arc's (R); lengths in the display unit.
+                    const auto kind = c.type == ConstraintType::Angle  ? materializr::DimKind::Angle
+                                    : c.type == ConstraintType::Radius ? materializr::DimKind::Radius
+                                                                       : materializr::DimKind::Length;
+                    materializr::seedDimensionText(m_dimEditingBuf, sizeof(m_dimEditingBuf), kind,
+                        kind == materializr::DimKind::Radius && materializr::constraintIsArcRadius(*m_activeSketch, c),
+                        c.value);
+                    m_dimEditingFocus = true;
+                    m_dimEditingClickedThisFrame = true;
+                    ImGui::OpenPopup("##DimEdit");
+                };
                 auto drawLabel = [&](glm::vec2 pos, const char* text,
-                                     const Constraint& c) {
+                                     const Constraint& c, glm::vec2 anchor) {
                     ImVec2 sp;
                     if (!toImg(dim2world(pos), sp)) return;
                     ImVec2 ts = ImGui::CalcTextSize(text);
@@ -2559,39 +2638,62 @@ void Application::renderViewport() {
                     // the shape" from "this number just reports it".
                     dl->AddText(tp, c.isDriving ? IM_COL32(255, 235, 120, 255)
                                                 : IM_COL32(170, 178, 190, 255), text);
-                    // Click → open edit popup. Skipped if we're already
-                    // editing this same constraint to avoid re-triggering
-                    // the open every frame the popup is up.
+                    // A press LATCHES the label for dragging. The edit popup
+                    // is deferred to release (below, after the loop) and only
+                    // fires if the pointer stayed put - otherwise the tag can
+                    // never be repositioned, because every attempt to move it
+                    // opens the value editor instead.
                     if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                        m_dimEditingId != c.id) {
-                        m_dimEditingId = c.id;
-                        if (c.type == ConstraintType::Angle) {
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
-                                          "%.2f", c.value * 180.0 / M_PI);
-                        } else if (c.type == ConstraintType::Radius) {
-                            // Edited in whatever unit the label shows: radius
-                            // for an arc (R), diameter for a circle (Ø).
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.2f",
-                                          constraintIsArcRadiusIn(*m_activeSketch, c)
-                                              ? c.value : c.value * 2.0);
-                        } else {
-                            std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf),
-                                          "%.2f", c.value);
+                        m_dimDragId < 0 && m_dimEditingId != c.id) {
+                        m_dimDragId    = c.id;
+                        m_dimDragMoved = false;
+                        m_dimDragGrab  = pos - dimCursor;
+                    }
+                    // Live drag: rewrite this constraint's stored offset so the
+                    // label tracks the cursor. Offsets are relative to the
+                    // type's geometric anchor, so the tag keeps its place when
+                    // the solver later moves the geometry under it.
+                    if (m_dimDragId == c.id &&
+                        ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        // Threshold FIRST, and write nothing until it is
+                        // crossed. IsMouseDown is already true on the press
+                        // frame, so writing unconditionally would store an
+                        // offset for a plain click - and since `want` equals
+                        // the label's current position, that offset is the
+                        // AUTO one. The label would silently become
+                        // user-placed: it grows a leader line and stops
+                        // tracking automatic positioning (Distance's auto
+                        // offset scales with segment length, so a frozen one
+                        // no longer rescales). Clicking to edit must leave the
+                        // stored offset exactly as it found it.
+                        const ImVec2 d = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+                        if (materializr::dimDragExceedsThreshold(d.x, d.y))
+                            m_dimDragMoved = true;
+                        if (m_dimDragMoved) {
+                            const glm::vec2 want = dimCursor + m_dimDragGrab;
+                            double offX = 0.0, offY = 0.0;
+                            materializr::dimLabelOffset(want.x, want.y,
+                                                        anchor.x, anchor.y,
+                                                        offX, offY);
+                            for (auto& mc : m_activeSketch->getMutableConstraints()) {
+                                if (mc.id != c.id) continue;
+                                mc.labelOffX = offX;
+                                mc.labelOffY = offY;
+                                break;
+                            }
                         }
-                        m_dimEditingFocus = true;
-                        m_dimEditingClickedThisFrame = true;
-                        ImGui::OpenPopup("##DimEdit");
+                        m_dimEditingClickedThisFrame = true;  // don't also pick
                     }
                 };
                 // Resolves a constraint's label position from its stored
                 // offset (Constraint::labelOffX/Y, relative to the type's
-                // geometric anchor — see dimensionAutoAnchor) or the auto
+                // geometric anchor - see dimensionAutoAnchor) or the auto
                 // position when unset (legacy / not yet user-placed). Draws a
                 // thin leader from the anchor to the label whenever the user
                 // has moved it off the auto spot.
                 // `leaderFrom` overrides where a placed label's leader starts
                 // (default: the anchor). DistancePointLine passes its dim
-                // line's midpoint — the offset math must stay anchored on
+                // line's midpoint - the offset math must stay anchored on
                 // dimensionAutoAnchor (what applyPendingDimension stored
                 // against), but a leader drawn from that anchor points at the
                 // constraint's pinned corner, not the dimension line.
@@ -2612,13 +2714,13 @@ void Application::renderViewport() {
                     // Reference (non-driving) dimensions are bracketed, the
                     // standard drafting notation for a measurement that does
                     // not control the geometry. One place, so every dimension
-                    // type picks it up — drawLabel handles the colour.
+                    // type picks it up - drawLabel handles the colour.
                     if (!c.isDriving) {
                         char ref[48];
                         std::snprintf(ref, sizeof(ref), "[%s]", text);
-                        drawLabel(lpos, ref, c);
+                        drawLabel(lpos, ref, c, anchor);
                     } else {
-                        drawLabel(lpos, text, c);
+                        drawLabel(lpos, text, c, anchor);
                     }
                 };
                 char lbl[40];
@@ -2640,7 +2742,7 @@ void Application::renderViewport() {
                             float off = std::max(3.0f, segLen * 0.18f);
                             perp = perp / pl * off;
                         }
-                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
+                        std::snprintf(lbl, sizeof(lbl), "%s", materializr::fmtLength(c.value).c_str());
                         placeLabel(mid, perp, lbl, c);
                     } else if (c.type == ConstraintType::Radius) {
                         glm::vec2 center(0.0f);
@@ -2678,11 +2780,11 @@ void Application::renderViewport() {
                         glm::vec2 autoOff =
                             glm::vec2(0.7071f, 0.7071f) * (radius + 1.2f);
                         // Drafting convention: arcs read as R, circles as Ø.
-                        if (constraintIsArcRadiusIn(*m_activeSketch, c))
-                            std::snprintf(lbl, sizeof(lbl), "R %.2f mm", c.value);
+                        if (materializr::constraintIsArcRadius(*m_activeSketch, c))
+                            std::snprintf(lbl, sizeof(lbl), "R %s", materializr::fmtLength(c.value).c_str());
                         else
-                            std::snprintf(lbl, sizeof(lbl), "\xC3\x98 %.2f mm",
-                                          c.value * 2.0);
+                            std::snprintf(lbl, sizeof(lbl), "\xC3\x98 %s",
+                                          materializr::fmtLength(c.value * 2.0).c_str());
                         placeLabel(center, autoOff, lbl, c);
                     } else if (c.type == ConstraintType::Angle) {
                         // SolidWorks-style angle dim: find the vertex where the
@@ -2738,7 +2840,7 @@ void Application::renderViewport() {
                         while (diff >  M_PI) diff -= 2.0f * M_PI;
                         while (diff < -M_PI) diff += 2.0f * M_PI;
 
-                        // Sample the arc and AddPolyline through screen-space —
+                        // Sample the arc and AddPolyline through screen-space -
                         // sketches can sit on arbitrarily-oriented planes, so
                         // we can't draw a flat 2D arc; each sample goes through
                         // dim2world → toImg like the rest of the sketch overlay.
@@ -2769,7 +2871,7 @@ void Application::renderViewport() {
                         std::snprintf(lbl, sizeof(lbl), "%.1f\xC2\xB0", deg);
                         // The stored offset is relative to dimensionAutoAnchor's
                         // Angle anchor (mean of all four line endpoints), NOT
-                        // `vertex` — applyPendingDimension() computed it that
+                        // `vertex` - applyPendingDimension() computed it that
                         // way, so the leader/placed-position math has to match
                         // or a placed label would drift from where it was
                         // dropped. autoOff folds that mismatch away: it's
@@ -2782,7 +2884,7 @@ void Application::renderViewport() {
                         placeLabel(angleAnchor, autoOff, lbl, c);
                     } else if (c.type == ConstraintType::DistancePointLine) {
                         // Validate the entities exist before trusting
-                        // dimensionAutoAnchor's result — it silently returns
+                        // dimensionAutoAnchor's result - it silently returns
                         // (0,0) on a dangling id, which would otherwise plant
                         // a stray label at the sketch origin.
                         const SketchPoint* dp = m_activeSketch->getPoint(c.entityA);
@@ -2811,7 +2913,7 @@ void Application::renderViewport() {
                             : anchor;
                         // CAD-style perpendicular dimension line, drawn at the
                         // label's station along the line. The constraint pins
-                        // one endpoint of the measured pair — in rectangles
+                        // one endpoint of the measured pair - in rectangles
                         // that's a corner sitting on a NEIGHBORING edge, and a
                         // leader pointing there read as "the dim attached to a
                         // third line". The dim line spans the measured gap
@@ -2825,7 +2927,7 @@ void Application::renderViewport() {
                             dl->AddLine(pA, pB, IM_COL32(20, 20, 28, 200), 3.0f);
                             dl->AddLine(pA, pB, IM_COL32(255, 235, 120, 230), 1.5f);
                         }
-                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
+                        std::snprintf(lbl, sizeof(lbl), "%s", materializr::fmtLength(c.value).c_str());
                         glm::vec2 midDim = 0.5f * (baseA + baseB);
                         placeLabel(anchor, midDim - anchor, lbl, c, &midDim);
                     } else if (c.type == ConstraintType::CircleGap) {
@@ -2861,9 +2963,27 @@ void Application::renderViewport() {
                         pd.type = c.type; pd.entityA = c.entityA;
                         pd.entityB = c.entityB; pd.valid = true;
                         glm::vec2 anchor = dimensionAutoAnchor(pd);
-                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", c.value);
+                        std::snprintf(lbl, sizeof(lbl), "%s", materializr::fmtLength(c.value).c_str());
                         placeLabel(anchor, glm::vec2(0.0f), lbl, c, &anchor);
                     }
+                }
+
+                // Release ends a label drag. A press that never really moved is
+                // a click, and opens the editor - so tapping a tag still edits
+                // it, while dragging one repositions it.
+                if (m_dimDragId >= 0 &&
+                    ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                    if (!m_dimDragMoved) {
+                        for (const auto& c : m_activeSketch->getConstraints())
+                            if (c.id == m_dimDragId) { openDimEdit(c); break; }
+                    } else {
+                        // The offset was written live during the drag, so the
+                        // sketch already holds the new position; just mark the
+                        // project dirty so it is saved.
+                        markDirty();
+                    }
+                    m_dimDragId    = -1;
+                    m_dimDragMoved = false;
                 }
 
                 // Dimension tool feedback: highlight the hovered pickable
@@ -2942,15 +3062,15 @@ void Application::renderViewport() {
                             std::snprintf(gbuf, sizeof(gbuf), "%.1f\xC2\xB0",
                                           std::abs(pend.measured) * 180.0 / M_PI);
                         else if (pend.type == ConstraintType::Radius)
-                            std::snprintf(gbuf, sizeof(gbuf), "\xC3\x98%.2f",
-                                          pend.measured * 2.0);
+                            std::snprintf(gbuf, sizeof(gbuf), "\xC3\x98 %s",
+                                          materializr::fmtLength(pend.measured * 2.0).c_str());
                         else
-                            std::snprintf(gbuf, sizeof(gbuf), "%.2f mm", pend.measured);
+                            std::snprintf(gbuf, sizeof(gbuf), "%s", materializr::fmtLength(pend.measured).c_str());
                         glm::vec2 ganchor = dimensionAutoAnchor(pend);
                         // Pending point-to-line / parallel-line dims preview
                         // the same CAD-style perpendicular dimension line the
                         // committed render draws, following the cursor's
-                        // station — the leader then hugs the dim line rather
+                        // station - the leader then hugs the dim line rather
                         // than the corner point carrying the constraint.
                         if (pend.type == ConstraintType::DistancePointLine) {
                             const SketchPoint* gp = m_activeSketch->getPoint(pend.entityA);
@@ -2984,7 +3104,7 @@ void Application::renderViewport() {
                         // A pending diameter (single circle/arc picked, still
                         // deciding whether a second circle turns it into a
                         // gap) draws a diameter line ACROSS the circle rather
-                        // than a leader from the centre — a centre-anchored
+                        // than a leader from the centre - a centre-anchored
                         // leader reads as "measuring from the centre" and hid
                         // that a second circle click makes a rim gap.
                         bool drewSpecial = false;
@@ -3038,7 +3158,7 @@ void Application::renderViewport() {
                 // A left click landing while the edit popup is up belongs to
                 // the popup (typically the dismiss-click outside it). The
                 // Dimension tool's routing later this frame checks this flag
-                // so that click can't double as a fresh entity pick — without
+                // so that click can't double as a fresh entity pick - without
                 // it, dismissing the popup over a line started an unwanted
                 // new dimension on that line.
                 m_dimPopupSwallowClick =
@@ -3047,7 +3167,7 @@ void Application::renderViewport() {
                 if (m_dimEditingId >= 0) {
                     // Latch "the popup just consumed an Escape" BEFORE
                     // BeginPopup below can act on it and clear
-                    // m_dimEditingId — the global Escape chain in
+                    // m_dimEditingId - the global Escape chain in
                     // handleShortcuts() runs AFTER this render pass, so by
                     // then m_dimEditingId would already read -1 and the
                     // chain would wrongly treat the press as a fresh
@@ -3055,14 +3175,14 @@ void Application::renderViewport() {
                     // closed the popup". Covers both ImGui Escape behaviours
                     // here: while the InputText has focus, the first Escape
                     // only defocuses it (BeginPopup still returns true,
-                    // m_dimEditingId unchanged) — this block is still
+                    // m_dimEditingId unchanged) - this block is still
                     // entered next frame with the popup still up, so a
                     // second Escape (the one that actually closes it) is
                     // caught the same way.
                     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
                         m_dimPopupConsumedEsc = true;
                     }
-                    // Restore normal padding — the viewport window's
+                    // Restore normal padding - the viewport window's
                     // WindowPadding(0,0) is still pushed here, and the popup
                     // captures the style at its own Begin.
                     ImGui::PushStyleVar(
@@ -3076,55 +3196,76 @@ void Application::renderViewport() {
                             m_dimEditingFocus = false;
                         }
                         ImGui::SetNextItemWidth(120.0f);
-                        // Number wearing a text coat (see the pad sweep): the
-                        // buffer stays authoritative — every seed site writes
-                        // it — so parse it in, let inputNumber edit the value
-                        // (pad on touch, InputDouble otherwise), and write the
-                        // commit back for the parse below.
-                        double dimPadV = 0.0;
-                        (void)materializr::parseFinite(m_dimEditingBuf, dimPadV);
-                        if (materializr::inputNumber(
-                                "##dimval", &dimPadV, 0.0, 0.0, "%.2f",
-                                ImGuiInputTextFlags_EnterReturnsTrue)) {
-                            std::snprintf(m_dimEditingBuf,
-                                          sizeof(m_dimEditingBuf), "%.6g",
-                                          dimPadV);
-                            // parseFinite: CharsDecimal blocks "nan" but not
-                            // "1e999" → inf, which passed the v > 0 guards
-                            // below into the constraint solver.
-                            double v = 0.0;
-                            (void)materializr::parseFinite(m_dimEditingBuf, v);
+                        // What is being edited decides the widget. Angles are
+                        // degrees and never see a unit. Lengths take a TEXT
+                        // field on desktop so "2in" / "50mm" can be typed;
+                        // under touch the number pad edits the value in the
+                        // display unit (the pad has no letters).
+                        materializr::DimKind dimKind = materializr::DimKind::Length;
+                        bool dimIsArc = false;
+                        for (const auto& cc : m_activeSketch->getConstraints()) {
+                            if (cc.id != m_dimEditingId) continue;
+                            dimKind = cc.type == ConstraintType::Angle  ? materializr::DimKind::Angle
+                                    : cc.type == ConstraintType::Radius ? materializr::DimKind::Radius
+                                                                        : materializr::DimKind::Length;
+                            dimIsArc = dimKind == materializr::DimKind::Radius &&
+                                       materializr::constraintIsArcRadius(*m_activeSketch, cc);
+                            break;
+                        }
+                        bool dimCommitted = false;
+                        if (dimKind == materializr::DimKind::Angle || materializr::touchMode()) {
+                            // Buffer stays authoritative - every seed site
+                            // writes it - so parse it in, let the numeric
+                            // widget edit it, and write the commit back.
+                            double dimPadV = 0.0;
+                            (void)materializr::parseFinite(m_dimEditingBuf, dimPadV);
+                            char padFmt[8] = "%.2f";
+                            if (dimKind != materializr::DimKind::Angle)
+                                std::snprintf(padFmt, sizeof(padFmt), "%%.%df",
+                                              materializr::unitInfo(materializr::currentUnit()).decimals);
+                            if (materializr::inputNumber("##dimval", &dimPadV, 0.0, 0.0, padFmt,
+                                                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+                                std::snprintf(m_dimEditingBuf, sizeof(m_dimEditingBuf), "%.6g", dimPadV);
+                                dimCommitted = true;
+                            }
+                        } else {
+                            // Enter, or focus leaving after an edit, commits.
+                            if (ImGui::InputText("##dimval", m_dimEditingBuf, sizeof(m_dimEditingBuf),
+                                                 ImGuiInputTextFlags_EnterReturnsTrue) ||
+                                ImGui::IsItemDeactivatedAfterEdit())
+                                dimCommitted = true;
+                            ImGui::SetItemTooltip("%s", materializr::tr(
+                                "A bare number is in the display unit; add a unit to "
+                                "override it, e.g. 2in or 50mm."));
+                        }
+                        if (dimCommitted) {
                             // recordSketchMutation snapshots before/after and
                             // pushes a SketchEditOp so the dimension edit is
                             // Ctrl-Z-able and visible in the History panel.
                             recordSketchMutation([&]{
                                 for (auto& cn : m_activeSketch->getMutableConstraints()) {
                                     if (cn.id != m_dimEditingId) continue;
-                                    if (cn.type == ConstraintType::Angle) {
-                                        cn.value = v * M_PI / 180.0;
-                                    } else if (cn.type == ConstraintType::Radius) {
-                                        // Circles are typed as diameter; arcs
-                                        // as radius, matching the R/Ø label.
-                                        if (v > 0.0)
-                                            cn.value = constraintIsArcRadiusIn(*m_activeSketch, cn)
-                                                           ? v : v * 0.5;
-                                    } else if (v > 0.0) {
-                                        cn.value = v;
-                                    }
-                                    // Typing a number is an explicit statement
-                                    // that this measurement should CONTROL the
+                                    // Convert to mm FIRST, then halve a circle's
+                                    // typed diameter - applyDimensionEdit owns
+                                    // that order. A refusal (garbage, <= 0)
+                                    // leaves the value alone. Typing a number
+                                    // says this measurement should CONTROL the
                                     // geometry, so it promotes a reference
-                                    // dimension to driving. Placing a dimension
-                                    // stays a pure measurement; committing a
-                                    // value is what opts into driving.
-                                    if (constraintSupportsReference(cn.type))
+                                    // dimension to driving.
+                                    if (materializr::applyDimensionEdit(dimKind, dimIsArc,
+                                                                        m_dimEditingBuf, cn.value) &&
+                                        constraintSupportsReference(cn.type))
                                         cn.isDriving = true;
                                     break;
                                 }
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                             });
                             markDirty();
-                            m_meshesDirty = true;
+                            // No mesh flag: this path changes sketch geometry only and
+                            // never reaches a body (it neither publishes SketchEditedEvent
+                            // nor calls cascadeFromSketchEdit). The old flag re-tessellated
+                            // every visible body on every dimension keystroke to redraw
+                            // meshes that had not changed.
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
@@ -3151,13 +3292,12 @@ void Application::renderViewport() {
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                                     });
                                     markDirty();
-                                    m_meshesDirty = true;
                                 }
                                 ImGui::SameLine();
                                 ImGui::TextDisabled(drv ? "(controls geometry)"
                                                         : "(measures only)");
                             }
-                            // "Make equal" — converts a two-entity dimension
+                            // "Make equal" - converts a two-entity dimension
                             // into an Equal constraint on the same pair (equal
                             // length for lines, equal radius for circles/arcs).
                             // Equal carries no measurement, so it is always a
@@ -3181,7 +3321,6 @@ void Application::renderViewport() {
                                         if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                                     });
                                     markDirty();
-                                    m_meshesDirty = true;
                                     m_dimEditingId = -1;
                                     ImGui::CloseCurrentPopup();
                                 }
@@ -3201,7 +3340,6 @@ void Application::renderViewport() {
                                 if (m_sketchSolver) m_sketchSolver->solve(*m_activeSketch);
                             });
                             markDirty();
-                            m_meshesDirty = true;
                             m_dimEditingId = -1;
                             ImGui::CloseCurrentPopup();
                         }
@@ -3209,14 +3347,14 @@ void Application::renderViewport() {
                         ImGui::TextDisabled("%s", materializr::tr("(Del)"));
                         ImGui::EndPopup();
                     } else {
-                        // Popup closed without committing — drop edit state.
+                        // Popup closed without committing - drop edit state.
                         m_dimEditingId = -1;
                     }
                     ImGui::PopStyleVar(); // ##DimEdit WindowPadding
                 }
             }
 
-            // Measure tool — Line mode: render the two captured points and the
+            // Measure tool - Line mode: render the two captured points and the
             // segment between them in screen space, in a colour deliberately
             // unlike anything else (body edges = white/cyan, sketches = blue,
             // selection highlight = yellow). Magenta-purple here. The first
@@ -3247,7 +3385,7 @@ void Application::renderViewport() {
                     const auto& results = m_measureTool->getResults();
                     if (!results.empty()) {
                         char lbl[40];
-                        std::snprintf(lbl, sizeof(lbl), "%.2f mm", results[0].value);
+                        std::snprintf(lbl, sizeof(lbl), "%s", materializr::fmtLength(results[0].value).c_str());
                         ImVec2 ts = ImGui::CalcTextSize(lbl);
                         ImVec2 mid((sp1.x + sp2.x) * 0.5f - ts.x * 0.5f,
                                    (sp1.y + sp2.y) * 0.5f - ts.y - 6.0f);
@@ -3262,7 +3400,7 @@ void Application::renderViewport() {
 
         bool viewportHovered = ImGui::IsItemHovered();
         if (materializr::touchMode()) {
-            // ImGui drops IsItemHovered() a couple of frames into a press-drag — the
+            // ImGui drops IsItemHovered() a couple of frames into a press-drag - the
             // window-move grab claims the ActiveId, so the plain Image stops reading
             // as hovered and this whole input block (incl. the live sketch preview's
             // onMouseMove) would freeze until release. Latch it: once a left press
@@ -3282,15 +3420,15 @@ void Application::renderViewport() {
         }
         // Tell the input layer whether a long-press may arm right now. Over a
         // slider/panel it must not (slow slider drags popped the ring); while a
-        // sketch DRAWING tool is active it must not either — a slow, precise
+        // sketch DRAWING tool is active it must not either - a slow, precise
         // press-drag-release (within the drag slop) would arm the hold, skip
         // the placement, and pop a context menu instead. Same while an
         // interactive op's arrow owns the one-finger drag. Select mode keeps
         // it: hold-still = context menu, hold-then-drag = box select.
         {
             // Viewport OR the Items panel (its rows have context menus and it has
-            // no sliders, so it's safe). Items hover is from last frame — it
-            // renders after the viewport — but a stationary long-press is stable
+            // no sliders, so it's safe). Items hover is from last frame - it
+            // renders after the viewport - but a stationary long-press is stable
             // across frames, so the lag is harmless.
             bool allowLongPress = viewportHovered ||
                                   (m_itemsPanel && m_itemsPanel->isHovered()) ||
@@ -3336,7 +3474,7 @@ void Application::renderViewport() {
                 // Zoom toward whatever the cursor is over (Blender/Fusion-360
                 // feel). Ray-cast against the document for a real hit point;
                 // fall back to the ray's intersection with the plane through
-                // the current target perpendicular to the view direction —
+                // the current target perpendicular to the view direction -
                 // that gives a sensible focus even over empty space and means
                 // empty-space scrolling matches the legacy dolly-to-target
                 // behaviour.
@@ -3346,7 +3484,7 @@ void Application::renderViewport() {
                 float ly = mp.y - wpz.y;
                 glm::vec3 focus = cam.getTarget();
                 bool gotHit = false;
-                // Reuse this frame's (or last frame's) hover pick — same
+                // Reuse this frame's (or last frame's) hover pick - same
                 // cursor, same ray. A fresh full-document ray-cast per
                 // wheel tick was the zoom stutter on dense scenes; when
                 // the hover pick was skipped (mid-drag etc.) the plane
@@ -3387,13 +3525,13 @@ void Application::renderViewport() {
             // orbit button pans instead when Shift is held; a distinct pan button
             // always pans.
             //
-            // In TRACKPAD mode both orbit and pan are bound to the LEFT button —
+            // In TRACKPAD mode both orbit and pan are bound to the LEFT button -
             // the same button the gizmo and picker use. Without suppression, a
             // gizmo-handle drag would also yank the camera, so the gizmo and
             // picker block the camera-drag while they own the interaction.
             // Scale Face joins gizmoOwnsDrag the moment its click handler
             // claims an axis (sets dragAxis on the down-frame). Without
-            // this, trackpad mode — left-orbit, left-pan — would steal the
+            // this, trackpad mode - left-orbit, left-pan - would steal the
             // subsequent drag-threshold frame and run orbit instead of the
             // axis drag, so the gizmo "felt unclickable". Same story for
             // the fillet / chamfer arrow handles via m_edgeCtl.dragging(),
@@ -3405,7 +3543,7 @@ void Application::renderViewport() {
                                  m_ppCtl.sticky() ||
                                  m_extrudeCtl.sticky();
             if (materializr::touchMode()) {
-                // A one-finger press-and-hold drives box-select, not orbit/pan — so
+                // A one-finger press-and-hold drives box-select, not orbit/pan - so
                 // suppress the camera drag (and the two-finger consume below) while
                 // it's engaged.
                 if (m_window && m_window->isTouchHoldSelect()) gizmoOwnsDrag = true;
@@ -3413,14 +3551,14 @@ void Application::renderViewport() {
             // Camera-drag suppression for the one-finger orbit only. In sketch
             // mode (touch) a one-finger drag drives the sketch rubber-band preview
             // (touch has no hover), so don't orbit. Two-finger pan/zoom still
-            // works — it's gated on gizmoOwnsDrag, not this local.
+            // works - it's gated on gizmoOwnsDrag, not this local.
             bool suppressCamDrag = gizmoOwnsDrag;
             // Shift+Left is the trackpad-mode pan gesture (orbit and pan are
             // both bound to Left, so Shift is the only thing telling them
             // apart). It has to lock the tools out from the PRESS frame, not
             // just once the drag is recognised: camDragging below only turns
             // true after ImGui's drag threshold, and a drawing tool places its
-            // point on the press — so Shift+drag panned AND left a stray line
+            // point on the press - so Shift+drag panned AND left a stray line
             // or circle behind, unless the user first switched to Select
             // (Steve: "i cannot do that without first changing to select/move,
             // otherwise i am drawing sketch elements even if i shift+click").
@@ -3434,7 +3572,7 @@ void Application::renderViewport() {
             // A primary drag should drive the ACTIVE TOOL, not the camera, while a
             // tool owns it. In sketch mode that's the rubber-band; during an
             // interactive op it's the op's arrow/handle (push/pull, extrude, edge
-            // fillet/chamfer, move/scale face) — read below as a LEFT-button drag
+            // fillet/chamfer, move/scale face) - read below as a LEFT-button drag
             // gated on `!camDragging`. If that drag also orbits/pans the camera,
             // the gate never fires and the op "doesn't work".
             const bool toolWantsDrag =
@@ -3449,7 +3587,7 @@ void Application::renderViewport() {
             } else {
                 // Desktop: the op reads a LEFT-button drag. Only steal the camera
                 // drag when the orbit OR pan button IS Left (left-orbit / trackpad
-                // mode) — that's the case where left-drag would orbit instead of
+                // mode) - that's the case where left-drag would orbit instead of
                 // driving the op (the bug). With the default bindings (orbit=middle,
                 // pan=right) Left is already free for the op, so we change nothing
                 // and middle/right stay live for orbit/pan DURING the op.
@@ -3464,12 +3602,16 @@ void Application::renderViewport() {
                 // Handle-aware, not blanket. The blanket version locked the
                 // camera for the WHOLE op, so in trackpad mode (orbit and pan
                 // both on Left) there was no way to orbit while a fillet /
-                // chamfer / push-pull was underway. The controllers hit-test
-                // on the press frame (edge arrows within 12 px, gizmo axes,
-                // push-pull sticky), so gizmoOwnsDrag already says whether
-                // THIS drag is the op's -- an empty-canvas drag orbits, a
-                // handle drag drives the value, exactly like default
-                // bindings where middle-orbit stays live during an op.
+                // chamfer was underway. The edge ops and gizmo axes hit-test
+                // on the press frame (edge arrows within 12 px, gizmo axes),
+                // so gizmoOwnsDrag already says whether THIS drag is the
+                // op's -- an empty-canvas drag orbits, a handle drag drives
+                // the value, exactly like default bindings where
+                // middle-orbit stays live during an op. Push/Pull and
+                // Extrude have no sub-region to test against - the whole
+                // viewport is the drag surface - so they claim on every
+                // press instead and behave like the old blanket rule for
+                // just those two: no orbit while they're underway.
                 // Sketch mode keeps the blanket: the rubber-band preview
                 // owns the cursor with no handle to test against.
                 if (leftIsCamera && !shiftPanGesture) {
@@ -3477,7 +3619,7 @@ void Application::renderViewport() {
                     else if (toolWantsDrag) suppressCamDrag = gizmoOwnsDrag;
                 }
                 // Alt+Left-drag is reserved for box-select when left IS the camera
-                // (trackpad / left-orbit mode) — Alt is otherwise unused, and Shift
+                // (trackpad / left-orbit mode) - Alt is otherwise unused, and Shift
                 // is already pan. Don't let it orbit; the box-select code below
                 // claims the drag. Only in the bare 3D view (no sketch/op running).
                 if (leftIsCamera && io.KeyAlt && !m_inSketchMode && !m_extrudeCtl.active() &&
@@ -3485,12 +3627,12 @@ void Application::renderViewport() {
                     suppressCamDrag = true;
             }
             // Pan depth anchor: Camera::pan is exact 1:1 screen tracking, but in
-            // perspective "one pixel's world size" depends on DEPTH — and the
+            // perspective "one pixel's world size" depends on DEPTH - and the
             // camera target is a bad proxy for it on large projects (cursor-zoom
             // leaves it metres from, or millimetres in front of, the geometry on
             // screen; that's what made pan twitchy up close and frozen far out).
             // Anchor each pan gesture to the hover pick from the mouse-down
-            // frame instead — the same cached pick cursor-zoom reuses — so the
+            // frame instead - the same cached pick cursor-zoom reuses - so the
             // point you grab moves with the cursor. No fresh hit (empty space)
             // → -1 → Camera falls back to the target distance. The anchor is
             // captured ONCE per button-hold: picking pauses during camera drags,
@@ -3576,7 +3718,7 @@ void Application::renderViewport() {
                 // the viewport-hovered gate and gizmo-ownership suppression above.
                 float tdx = 0.0f, tdy = 0.0f, tdz = 0.0f;
                 // Pan: 1:1 (content glued to the fingers, like scrolling a web
-                // page — Camera::pan is pixel-exact now), with a small deadzone
+                // page - Camera::pan is pixel-exact now), with a small deadzone
                 // so two-finger jitter doesn't creep the view. The old 0.275
                 // damping compensated for the legacy distance-fraction pan
                 // being several times faster than 1:1; with exact tracking the
@@ -3587,7 +3729,7 @@ void Application::renderViewport() {
                         if (fc - m_lastTouchPanFrame > 10) {
                             // New two-finger gesture. Touch has no hover pick to
                             // reuse, so ray-cast the viewport centre once per
-                            // gesture (not per frame — the picker walk is the
+                            // gesture (not per frame - the picker walk is the
                             // dominant per-frame cost on dense scenes) to anchor
                             // the pan depth to the content actually in view.
                             float d = -1.0f;
@@ -3616,11 +3758,11 @@ void Application::renderViewport() {
             }
 
             // Pause interactive operations while a camera button is also being
-            // dragged — otherwise the changing view matrix re-projects the same
+            // dragged - otherwise the changing view matrix re-projects the same
             // mouse motion onto a moving target each frame and the value jolts.
             // suppressCamDrag means the left-drag is NOT orbiting the camera (in
             // sketch mode it's drawing the rubber-band). When it's suppressed the
-            // view isn't moving, so this must read false — otherwise it would gate
+            // view isn't moving, so this must read false - otherwise it would gate
             // off the sketch input block and freeze the live preview a few px into
             // the drag (once IsMouseDragging crosses its threshold). Outside sketch
             // mode suppressCamDrag == gizmoOwnsDrag, so this changes nothing there.
@@ -3776,7 +3918,7 @@ void Application::renderViewport() {
                 vp.down     = ImGui::IsMouseDown(ImGuiMouseButton_Left);
                 // Trackpad mode: orbit AND pan are both on Left, so a handle
                 // can only be worked click-move-click (Push/Pull's sticky
-                // drag). Never on touch — a tap would toggle sticky on AND
+                // drag). Never on touch - a tap would toggle sticky on AND
                 // feed the direct drag, doubling the distance.
                 vp.trackpadInput = (m_orbitButton == ImGuiMouseButton_Left &&
                                     m_panButton   == ImGuiMouseButton_Left) &&
@@ -3841,7 +3983,7 @@ void Application::renderViewport() {
                     //    rest of the app's angle-snap behaviour (line-draw
                     //    angle snap, sketch rotate popup, etc.).
                     auto softSnap45 = [this](float deg) {
-                        // Construction-plane drags need finer granularity —
+                        // Construction-plane drags need finer granularity -
                         // plane orientation is often a precise angle (15°
                         // chamfer-line, 30° draft, etc.). Use 5° hard snap
                         // when snap is on and a soft 15° anchor otherwise,
@@ -3859,7 +4001,7 @@ void Application::renderViewport() {
                     // Start drag: save originals for every selected body (so Move
                     // can apply to all of them) and reset accumulators. When the
                     // selection has no bodies but does have standalone sketches,
-                    // capture their before-planes instead — the per-frame drag
+                    // capture their before-planes instead - the per-frame drag
                     // path below mutates plane(s); on release we push one
                     // SketchTransformOp per dragged sketch.
                     if (gResult.activeAxis != GizmoAxis::None && !m_gizmoDragging) {
@@ -3927,7 +4069,7 @@ void Application::renderViewport() {
                                 m_gizmoDragBodyId = -1;
                                 m_gizmoDragOriginalShape = TopoDS_Shape();
                             }
-                            // Primary body's bbox, captured ONCE — the original
+                            // Primary body's bbox, captured ONCE - the original
                             // never changes during the drag, and BRepBndLib per
                             // frame is 50-150 ms on a complex body (the Scale
                             // branch reads the diagonal every drag frame). The
@@ -3953,11 +4095,11 @@ void Application::renderViewport() {
                             m_gizmoTotalAngle = 0.0f;
                             m_gizmoScaleAccum = glm::vec3(0.0f);
                             m_gizmoTotalScale = glm::vec3(1.0f);
-                            // Pre-compute the shared pivot once — the originals
+                            // Pre-compute the shared pivot once - the originals
                             // don't change during the drag, so this is constant.
                             // For sketch-only drag we use the GEOMETRIC
                             // CENTROID of each sketch's points (mapped through
-                            // its plane), then average across sketches — same
+                            // its plane), then average across sketches - same
                             // pivot the gizmo's display uses. This makes
                             // Rotate spin the sketch in place instead of
                             // around a remote plane-anchor point.
@@ -4002,7 +4144,7 @@ void Application::renderViewport() {
                             }
                             // Construction planes pivot at the plane's origin
                             // (no point cloud to centroid). Rotation thus
-                            // spins the plane around its own anchor — what
+                            // spins the plane around its own anchor - what
                             // you'd expect when nudging a placement plane.
                             for (auto& [pid, plnBefore] : m_planeGizmoDrag) {
                                 const gp_Pnt& o = plnBefore.Position().Location();
@@ -4025,14 +4167,14 @@ void Application::renderViewport() {
                     // shape each frame, so snapping and per-axis scale stay stable.
                     if (gResult.changed && m_gizmoDragging) {
                         try {
-                            // BBox of the primary body — only valid when at least
+                            // BBox of the primary body - only valid when at least
                             // one body is in the drag. For sketch-only drag we
                             // fall back to a zero-extent box centred on the
                             // gizmo pivot so the Scale branch's `os` ends up at
                             // 1 (Scale isn't meaningful for a sketch's plane
-                            // anyway — translate and rotate are the supported
+                            // anyway - translate and rotate are the supported
                             // modes for the sketch-only path below).
-                            // Primary bbox from the drag-start capture — see
+                            // Primary bbox from the drag-start capture - see
                             // the drag-start block; recomputing BRepBndLib per
                             // frame was a big slice of the drag lag on complex
                             // bodies. Sketch-only drag: zero-extent at the
@@ -4055,7 +4197,7 @@ void Application::renderViewport() {
                                 if (m_snapToGrid && m_sketchGridStep > 0.0f) {
                                     // Absolute-position snap: the pivot lands on
                                     // grid intersections (matches sketch grid
-                                    // behaviour). Snap ONLY the axes that moved —
+                                    // behaviour). Snap ONLY the axes that moved -
                                     // an axis-constrained drag (e.g. Y only)
                                     // leaves the other components ~0, and snapping
                                     // those too yanked a resting off-grid X/Z onto
@@ -4072,7 +4214,7 @@ void Application::renderViewport() {
                                 // GPU-only preview: push the translation as a
                                 // model matrix onto the dragged bodies' mesh
                                 // slots. No document write, no re-tessellation,
-                                // no edge re-discretization — a drag frame on a
+                                // no edge re-discretization - a drag frame on a
                                 // dense body costs uniform updates instead of a
                                 // remesh (the "moving one part lags on complex
                                 // projects" report). The real transform lands
@@ -4115,7 +4257,7 @@ void Application::renderViewport() {
                                 m_gizmoRotAxis = ad;
                                 m_gizmoTotalAngle += glm::dot(gResult.delta, ad);
                                 float ang = softSnap45(m_gizmoTotalAngle);
-                                // Pivot was captured once at drag start —
+                                // Pivot was captured once at drag start -
                                 // reusing it avoids 65 bbox computations per
                                 // frame for a large multi-selection.
                                 const glm::vec3& pivot = m_gizmoSharedPivot;
@@ -4123,7 +4265,7 @@ void Application::renderViewport() {
                                 trsf.SetRotation(gp_Ax1(gp_Pnt(pivot.x, pivot.y, pivot.z),
                                                         gp_Dir(ad.x, ad.y, ad.z)),
                                                  ang * M_PI / 180.0);
-                                // GPU-only preview — see the Translate branch.
+                                // GPU-only preview - see the Translate branch.
                                 glm::mat4 pm(1.0f);
                                 pm = glm::translate(pm, pivot);
                                 pm = glm::rotate(pm, glm::radians(ang), ad);
@@ -4143,7 +4285,7 @@ void Application::renderViewport() {
                                     pln.Transform(trsf);
                                     m_document->setPlane(pid, pln);
                                 }
-                            } else { // Scale — per-axis, non-uniform about the centre
+                            } else { // Scale - per-axis, non-uniform about the centre
                                 float os = static_cast<float>(glm::length(
                                     glm::vec3(ox2-ox1, oy2-oy1, oz2-oz1)));
                                 if (os < 0.001f) os = 1.0f;
@@ -4160,9 +4302,9 @@ void Application::renderViewport() {
                                         m_gizmoTotalScale[k] = std::round(f * 100.0f) / 100.0f;
                                     }
                                 }
-                                // Cached pivot — see Rotate branch above.
+                                // Cached pivot - see Rotate branch above.
                                 const glm::vec3& pivot = m_gizmoSharedPivot;
-                                // GPU-only preview — see the Translate branch.
+                                // GPU-only preview - see the Translate branch.
                                 // Same affine map as the commit's gp_GTrsf:
                                 // x' = pivot + S * (x - pivot).
                                 glm::mat4 pm(1.0f);
@@ -4183,7 +4325,7 @@ void Application::renderViewport() {
                     if (m_gizmoDragging && gResult.activeAxis == GizmoAxis::None && !mouseDown) {
                         // The live drag was GPU-only (model matrices on the mesh
                         // slots; the document never moved). Reset the matrices
-                        // first — the ops below apply the REAL transform to the
+                        // first - the ops below apply the REAL transform to the
                         // document and the partial remesh redraws the bodies at
                         // their committed pose.
                         gizmoPreviewReset();
@@ -4200,7 +4342,7 @@ void Application::renderViewport() {
                             for (auto& [id, orig] : m_gizmoDragOriginals) {
                                 m_document->updateBody(id, orig);
                             }
-                            // Sketch planes WERE live-written during the drag —
+                            // Sketch planes WERE live-written during the drag -
                             // restore before the SketchTransformOps run their
                             // own execute() with the cumulative gp_Trsf.
                             for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
@@ -4212,7 +4354,7 @@ void Application::renderViewport() {
                             // A 3D move breaks the parametric link and is applied as
                             // a RIGID transform: the body translates/rotates as-is
                             // (fillets, chamfers and features from other sketches all
-                            // ride along), which never fails — unlike re-deriving the
+                            // ride along), which never fails - unlike re-deriving the
                             // body at a new position, which can't re-attach a fillet
                             // or a cut from an un-moved sketch. So a moved sketch (and
                             // any sketch driving a moved body) is detached; parametric
@@ -4245,7 +4387,7 @@ void Application::renderViewport() {
                             }
                             // Hybrid: a unison move on a body that can be safely
                             // re-derived (no fillet/chamfer/boolean/other feature)
-                            // STAYS LINKED — the body follows by re-derivation and
+                            // STAYS LINKED - the body follows by re-derivation and
                             // remains editable. A body with features can't re-bind
                             // after the move, so it moves rigidly and de-links.
                             std::set<int> rederiveSketches, rederiveBodies;
@@ -4273,7 +4415,7 @@ void Application::renderViewport() {
                             glm::vec3 d = m_gizmoTotalDelta;
                             if (gm == GizmoMode::Translate &&
                                 m_snapToGrid && m_sketchGridStep > 0.0f) {
-                                // Absolute snap — same rule as the live drag:
+                                // Absolute snap - same rule as the live drag:
                                 // snap ONLY the axes that moved, so an
                                 // axis-constrained move doesn't drift the others
                                 // onto the grid (bug #6).
@@ -4296,7 +4438,7 @@ void Application::renderViewport() {
                                                (gm == GizmoMode::Scale     && validScale);
 
                             // Plane drags write to Document::setPlane during the
-                            // live drag — no body op is needed (or correct: a
+                            // live drag - no body op is needed (or correct: a
                             // TransformOp with bodyId=-1 would later crash on
                             // history replay via getBody(-1)). Skip the body /
                             // sketch commit branches entirely when only planes
@@ -4391,7 +4533,7 @@ void Application::renderViewport() {
                                 // re-derivation (those rebuild via the cascade
                                 // below). A real op (not a baked ReplayOp) so it
                                 // reloads editable and re-applies to the LIVE bodies
-                                // on replay — see BatchTransformOp / the
+                                // on replay - see BatchTransformOp / the
                                 // "batchtransform bakes" bug.
                                 std::vector<int> batchIds;
                                 for (auto& [id, orig] : m_gizmoDragOriginals)
@@ -4400,7 +4542,7 @@ void Application::renderViewport() {
                                 // Move/Rotate and non-uniform Scale uniformly). The
                                 // doc bodies are still at their originals (the drag
                                 // preview is GPU-only), so op->execute re-applies
-                                // this to them — exactly as the single-body path does.
+                                // this to them - exactly as the single-body path does.
                                 gp_GTrsf batchG;
                                 if (gm == GizmoMode::Scale) {
                                     batchG.SetVectorialPart(gp_Mat(
@@ -4430,8 +4572,7 @@ void Application::renderViewport() {
                                 if (gm == GizmoMode::Translate) {
                                     label = "Move (" + std::to_string(nBodies) + " bodies)";
                                     char buf[96];
-                                    std::snprintf(buf, sizeof(buf), "Move %d bodies by (%.2f, %.2f, %.2f) mm",
-                                                  (int)nBodies, d.x, d.y, d.z);
+                                    std::snprintf(buf, sizeof(buf), "Move %d bodies by %s", (int)nBodies, materializr::fmtVec3(d.x, d.y, d.z).c_str());
                                     desc = buf;
                                 } else if (gm == GizmoMode::Rotate) {
                                     label = "Rotate (" + std::to_string(nBodies) + " bodies)";
@@ -4501,7 +4642,7 @@ void Application::renderViewport() {
                             // Standalone-sketch commit: push one
                             // SketchTransformOp per dragged sketch with the
                             // same cumulative gp_Trsf applied during the live
-                            // drag. Scale is intentionally ignored — scaling
+                            // drag. Scale is intentionally ignored - scaling
                             // a sketch's plane is a no-op (the plane is
                             // 2D-infinite); fall through to the body Scale
                             // branch when bodies are also present.
@@ -4520,7 +4661,7 @@ void Application::renderViewport() {
                                 }
                                 for (auto& [sid, plnBefore] : m_sketchGizmoDragSketches) {
                                     // Unison sketch already moved atomically inside the
-                                    // body's TransformOp (single-body path) — don't move
+                                    // body's TransformOp (single-body path) - don't move
                                     // it twice.
                                     if (bodyFollowHandled.count(sid)) continue;
                                     auto op = std::make_unique<materializr::SketchTransformOp>();
@@ -4539,7 +4680,7 @@ void Application::renderViewport() {
                             if (isMulti)
                                 for (int s : bodyAloneDetach)
                                     if (auto sk = m_document->getSketch(s)) sk->setDetachedFromBody(true);
-                            // Linked unison: the body's TransformOp was skipped — let it
+                            // Linked unison: the body's TransformOp was skipped - let it
                             // follow its now-moved sketch by re-derivation (stays editable).
                             for (int s : rederiveSketches)
                                 cascadeFromSketchEdit(s);
@@ -4550,7 +4691,7 @@ void Application::renderViewport() {
                             // (cascadeFromSketchEdit marks its own re-derived
                             // bodies; sketch/plane/axis writes don't have body
                             // meshes.) The old full m_meshesDirty re-tessellated
-                            // every visible body once per release — a visible
+                            // every visible body once per release - a visible
                             // hitch on a many-body project.
                             for (auto& [id, orig] : m_gizmoDragOriginals)
                                 m_dirtyBodyIds.insert(id);
@@ -4581,7 +4722,7 @@ void Application::renderViewport() {
                 }
 
                 // Skip hover-pick during active camera drag. Picker iterates
-                // every visible body and ray-tests their faces — on a
+                // every visible body and ray-tests their faces - on a
                 // complex project (50+ bodies, dense meshes) that's the
                 // dominant per-frame cost. During orbit/pan/zoom the user
                 // isn't going to pick anything anyway, so we keep the last
@@ -4607,7 +4748,7 @@ void Application::renderViewport() {
                     // when present). This one pick serves BOTH hover and
                     // clicks, so region caches are only allowed to BUILD on a
                     // click frame: hover must never trigger the OCCT fuse on
-                    // a cold (freshly-unhidden) complex sketch — that read as
+                    // a cold (freshly-unhidden) complex sketch - that read as
                     // "unhide sketch → app not responding". Until first
                     // click, a cold sketch simply has no hover fill.
                     const bool regionClickFrame =
@@ -4616,7 +4757,7 @@ void Application::renderViewport() {
                     SketchRegionHit regionHit = pickSketchRegion(localX, localY,
                         contentSize.x, contentSize.y,
                         /*buildIfCold=*/regionClickFrame);
-                    // Reject a sketch region that sits behind a body under the cursor —
+                    // Reject a sketch region that sits behind a body under the cursor -
                     // only what's visible should be selectable. Compare hit distances
                     // from the camera (origin-independent) and drop the region if the
                     // body face is meaningfully nearer.
@@ -4648,10 +4789,10 @@ void Application::renderViewport() {
                             onHostFace = sk->getSourceFace().IsSame(result.pickedShape);
                         }
                         // NEAREST-FIRST + BIDIRECTIONAL CYCLING. The two
-                        // ambiguous cases — a sketch slot between bodies
+                        // ambiguous cases - a sketch slot between bodies
                         // pulled FROM it (intent: the face behind) vs a
                         // sketch floating in front of unrelated geometry
-                        // (intent: the sketch) — are indistinguishable by
+                        // (intent: the sketch) - are indistinguishable by
                         // any stateless distance rule; we tried them all.
                         // So: whatever is nearest along the ray wins the
                         // FIRST click, and clicking the SAME spot again
@@ -4668,13 +4809,13 @@ void Application::renderViewport() {
                         // this guard its SECOND click triggers depth
                         // cycling and tunnels to the sketch behind a body
                         // instead of selecting the body. Double-click has
-                        // one job — select the whole body — so it's immune
+                        // one job - select the whole body - so it's immune
                         // to cycling.
                         const bool dbl =
                             ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
                         // When the intent is clearly to TOGGLE regions in a
-                        // multi-selection — during Project Sketch, or with Ctrl
-                        // held — a same-spot re-click must stay on the region so
+                        // multi-selection - during Project Sketch, or with Ctrl
+                        // held - a same-spot re-click must stay on the region so
                         // it deselects, NOT cycle down to the face behind it
                         // (which cleared the selection / stole the click).
                         const bool stickToRegion =
@@ -4704,7 +4845,7 @@ void Application::renderViewport() {
                         // hatch on deliberate same-spot re-clicks.
                         // Ties go to the FACE: a body whose surface sits
                         // within tolerance of the sketch plane (thin or
-                        // symmetric pulls — the plane runs through the
+                        // symmetric pulls - the plane runs through the
                         // body's middle) must not have its caps stolen by
                         // the region. The region wins only when STRICTLY
                         // nearer; everything demoted is one same-spot
@@ -4720,7 +4861,7 @@ void Application::renderViewport() {
                             bodyD < sketchD - tol;
                         bool pickRegion;
                         if (dbl) {
-                            // Fast double-click is for the BODY — the region
+                            // Fast double-click is for the BODY - the region
                             // (even an on-host one) must step aside so the
                             // body-select branch below fires.
                             pickRegion = false;
@@ -4746,7 +4887,7 @@ void Application::renderViewport() {
                     // preview is live (push/pull, extrude, pattern, resize,
                     // thread): those previews undo + re-push their op every
                     // frame, so the document's bodies flicker out of
-                    // existence and change ids mid-frame — a click can land
+                    // existence and change ids mid-frame - a click can land
                     // in the gap and select nothing, the stale id, or the
                     // sketch region behind the preview ("the pulled face is
                     // unclickable"). Controller iops (Shell/Taper/Scale/
@@ -4760,7 +4901,7 @@ void Application::renderViewport() {
                         !m_moveModeToggle &&  // Move (nav lock): taps don't select
                         !shiftPanGesture;     // Shift+Left is a pan, not a pick
                     // Touch: commit selection on a GENUINE tap-LIFT (Window::
-                    // consumeSingleTap), not the press frame — else the first
+                    // consumeSingleTap), not the press frame - else the first
                     // finger-down of a following nav gesture (one-finger orbit /
                     // two-finger pan-zoom) re-picks or clears the selection before
                     // the drag is even recognized (#68). The pick `result` on the
@@ -4782,7 +4923,7 @@ void Application::renderViewport() {
                         entry.subShapeIndex = regionHit.regionIndex;
                         if (io.KeyCtrl || m_projectSketchCtl.active()) {
                             // Toggle: Ctrl+clicking an already-selected
-                            // region deselects it — fixing a bad pick in a
+                            // region deselects it - fixing a bad pick in a
                             // multi-region selection shouldn't mean starting
                             // the whole selection over. During Project Sketch
                             // every click toggles, so building up the set of
@@ -4799,8 +4940,8 @@ void Application::renderViewport() {
                         m_pickCycleLast = 1; // region picked; same-spot → face
                         regionConsumedClick = true;
                     }
-                    // Edge-only hit (open profile — arc, spline, polyline that
-                    // doesn't close) — emit a whole-sketch selection so users
+                    // Edge-only hit (open profile - arc, spline, polyline that
+                    // doesn't close) - emit a whole-sketch selection so users
                     // can pick open vertical sketches that would otherwise be
                     // unpickable from the viewport. Skipped when a body face
                     // sits in front of the edge.
@@ -4808,7 +4949,7 @@ void Application::renderViewport() {
                              regionHit.regionIndex < 0 && regionHit.sketchId >= 0 &&
                              selectClicked) {
                         // Same generous occlusion tolerance + source-face
-                        // exemption as the region branch above — sketches on
+                        // exemption as the region branch above - sketches on
                         // body faces are coplanar by intent.
                         bool occluded = false;
                         if (result.hit) {
@@ -4860,6 +5001,7 @@ void Application::renderViewport() {
                                 TopoDS_Face face = TopoDS::Face(result.pickedShape);
                                 Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
                                 if (!surf.IsNull() && surf->IsKind(STANDARD_TYPE(Geom_Plane))) {
+                                    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                                     gp_Pln pln = Handle(Geom_Plane)::DownCast(surf)->Pln();
                                     const gp_Ax3& ax = pln.Position();
                                     auto op = std::make_unique<MirrorOp>();
@@ -4867,8 +5009,7 @@ void Application::renderViewport() {
                                     op->setPlane(MirrorPlane::Custom);
                                     op->setCustomPlane(gp_Ax2(ax.Location(), ax.Direction()));
                                     op->setKeepOriginal(true);
-                                    if (m_history->pushOperation(std::move(op), *m_document))
-                                        m_meshesDirty = true;
+                                    m_history->pushOperation(std::move(op), *m_document);
                                 }
                             } catch (...) {}
                         }
@@ -4892,7 +5033,7 @@ void Application::renderViewport() {
                     (void)measureConsumedClick;
 
                     // Click-resolution diagnostic: one line per left click,
-                    // stating exactly what the pick decided — body/face hit,
+                    // stating exactly what the pick decided - body/face hit,
                     // region hit, and which path consumed the click. This is
                     // the "face won't select" field tool, so it lives behind
                     // --verbose: normal launches don't pay the stderr flush
@@ -4912,7 +5053,7 @@ void Application::renderViewport() {
                             regionConsumedClick ? 1 : 0);
                         // When the pick MISSED, re-run it verbosely so each
                         // body reports bbox/triangle verdicts, and dump the
-                        // renderer's slot table — a slot whose body isn't in
+                        // renderer's slot table - a slot whose body isn't in
                         // the document (or whose mesh is stale) is the
                         // phantom the user is clicking.
                         if (!result.hit) {
@@ -4942,7 +5083,7 @@ void Application::renderViewport() {
                     // Body escalation: desktop double-CLICK, or touch double-TAP
                     // (consumeDoubleTap, fired on the 2nd quick release). Running it
                     // as the IF branch means the single-select else-if below is
-                    // SKIPPED on the escalation frame — so the body can't be reverted
+                    // SKIPPED on the escalation frame - so the body can't be reverted
                     // back to a face even when a quick tap's down+up share one frame.
                     const bool touchDbl =
                         materializr::touchMode() && m_window && m_window->consumeDoubleTap();
@@ -4971,7 +5112,7 @@ void Application::renderViewport() {
                         entry.bodyId = dbid;
                         try { entry.shape = m_document->getBody(dbid); } catch (...) {}
                         if (io.KeyCtrl) {
-                            // Replace this body's faces/edges with the body itself —
+                            // Replace this body's faces/edges with the body itself -
                             // keep other selected items, no stray faces.
                             std::vector<SelectionEntry> drop;
                             for (const auto& e : m_selection->getSelection())
@@ -4988,7 +5129,7 @@ void Application::renderViewport() {
                         // and left the cycle state at face (m_pickCycleLast=0)
                         // on this spot. Clear it so the next HOVER frame here
                         // doesn't think it's mid-cycle and highlight the sketch
-                        // region hidden behind the body (purely visual — a
+                        // region hidden behind the body (purely visual - a
                         // click never selected it, but it looked clickable).
                         m_pickCycleLast = -1;
                     } else if (clickSelectionAllowed && !regionConsumedClick &&
@@ -4997,12 +5138,12 @@ void Application::renderViewport() {
                                  ImGui::GetTime() < m_suppressFaceClickUntil)) {
                         int ownerStep = -1; // fillet/chamfer step to open in the editor
                         // Multi-Select forces io.KeyCtrl for this viewport scope, so
-                        // the normal pick below adds/toggles the SUB-SHAPE you tap —
-                        // edges (the common fillet/chamfer target), faces, vertices —
+                        // the normal pick below adds/toggles the SUB-SHAPE you tap -
+                        // edges (the common fillet/chamfer target), faces, vertices -
                         // additively. Whole-body multi-select is via the long-press
                         // menu's Body branch (also additive while Multi-Select is on).
                         if (result.hit && result.axisId >= 0) {
-                            // Construction-axis hit — own selection path,
+                            // Construction-axis hit - own selection path,
                             // skip body/face/edge branching.
                             SelectionEntry entry;
                             entry.type = SelectionType::Axis;
@@ -5010,7 +5151,7 @@ void Application::renderViewport() {
                             if (io.KeyCtrl) m_selection->toggleSelection(entry);
                             else            m_selection->select(entry);
                         } else if (result.hit && result.planeId >= 0) {
-                            // Construction-plane hit takes its own selection path —
+                            // Construction-plane hit takes its own selection path -
                             // no edge / face / fillet-edit branching applies.
                             SelectionEntry entry;
                             entry.type = SelectionType::Plane;
@@ -5024,7 +5165,7 @@ void Application::renderViewport() {
                             // closer to that corner than to the nearest edge.
                             // Selection EXPANDS to every edge meeting at the
                             // vertex, so a single click on a box corner picks all
-                            // three adjacent edges in one go — fillet/chamfer that
+                            // three adjacent edges in one go - fillet/chamfer that
                             // whole corner without re-picking. Threshold matches
                             // the edge-vs-face one and is clamped to ¼ of the
                             // face's on-screen size so tiny faces don't lose
@@ -5118,7 +5259,7 @@ void Application::renderViewport() {
                                     // already selected deselects just that
                                     // one (matches the plane / axis paths
                                     // above). Was addToSelection, which
-                                    // could only grow the set — making the
+                                    // could only grow the set - making the
                                     // user clear and re-pick to drop one
                                     // item. (Steve: trackpad-mode multi-
                                     // select had no way to drop a member.)
@@ -5143,7 +5284,7 @@ void Application::renderViewport() {
                             // it as a plain click and clear.
                             // During Project Sketch an empty-space click is
                             // almost always a near-miss on a tiny region (e.g.
-                            // where the aperture rings converge). Do NOTHING —
+                            // where the aperture rings converge). Do NOTHING -
                             // don't clear the region set, don't box-select. The
                             // "Clear" button is the deliberate reset.
                             const bool projecting = m_projectSketchCtl.active();
@@ -5249,7 +5390,7 @@ void Application::renderViewport() {
                                 // circles / arcs / splines / polygons all share
                                 // the SketchPoint table for their endpoints,
                                 // start/end, controls, and vertices respectively
-                                // — circles add a centre + radius extent which
+                                // - circles add a centre + radius extent which
                                 // we account for explicitly). Sketches with no
                                 // points are skipped. Active sketch included.
                                 auto projectSketch = [&](const Sketch& sk,
@@ -5297,7 +5438,7 @@ void Application::renderViewport() {
                                         return;
                                     // Region-granular: box-select picks up
                                     // the sketch's closed REGIONS, exactly
-                                    // like Ctrl+clicking each one — so the
+                                    // like Ctrl+clicking each one - so the
                                     // toolbar offers the same per-region
                                     // tools and downstream ops take the
                                     // same (working) path. The whole-sketch
@@ -5343,7 +5484,7 @@ void Application::renderViewport() {
                                 }
                                 if (m_activeSketch && m_activeSketchId < 0) {
                                     // In-progress sketch (not yet committed to
-                                    // the document) — its id is -1, which the
+                                    // the document) - its id is -1, which the
                                     // selection layer accepts.
                                     considerSketch(m_activeSketchId, *m_activeSketch);
                                 }
@@ -5365,7 +5506,7 @@ void Application::renderViewport() {
                             m_contextMenuFace.Nullify();
                             m_contextMenuPending = true;
                         } else {
-                            // Unified object menu — any of face / body / sketch
+                            // Unified object menu - any of face / body / sketch
                             // in the clicked area gets its own submenu (touch
                             // can't disambiguate the pick, so we offer all).
                             if (result.hit && !result.pickedShape.IsNull()) {
@@ -5384,10 +5525,10 @@ void Application::renderViewport() {
                 }
             }
 
-            // Sketch mode mouse input — ray-plane intersection. Skipped while
+            // Sketch mode mouse input - ray-plane intersection. Skipped while
             // the camera is being dragged so the in-progress preview (e.g. the
             // line endpoint following the cursor) doesn't jolt as the view moves,
-            // and while Shift is held in trackpad mode — that press belongs to
+            // and while Shift is held in trackpad mode - that press belongs to
             // the pan gesture, and a drawing tool would otherwise place its point
             // on it before the drag was ever recognised (see shiftPanGesture).
             // Suppress while the ViewCube widget is being hovered/dragged so its
@@ -5408,7 +5549,12 @@ void Application::renderViewport() {
                 // instead of going through SketchTool's normal input.
                 bool patternPickingNow = m_sketchPatternActive && m_sketchPatternPickingOrigin;
                 if (patternPickingNow) {
-                    float step = std::max(m_sketchGridStep, 0.01f);
+                    // The EFFECTIVE step, like the grid being drawn under this
+                    // cursor and like SketchTool's own snapping. This picker
+                    // places a point ON THE SKETCH PLANE, so the base would put
+                    // the origin between the lines the user can see whenever the
+                    // zoom has scaled the lattice.
+                    float step = std::max(m_effectiveGridStepMm, 0.01f);
                     glm::vec2 snapped(std::round(sketchCoord.x / step) * step,
                                       std::round(sketchCoord.y / step) * step);
                     ImVec2 sp(mousePos.x, mousePos.y);
@@ -5699,14 +5845,14 @@ void Application::renderViewport() {
                             // Track the popup's screen-space anchor each frame so
                             // the camera can pan/orbit and the popup follows the
                             // centroid. Actual popup rendering happens at top scope
-                            // below — keeping it out of these nested ifs is what
+                            // below - keeping it out of these nested ifs is what
                             // killed the hover flicker.
                             m_sketchGizmoAdjustAnchor = glm::vec2(sc.x + 20.0f, sc.y + 16.0f);
 
                             // Start drag: clicking a handle arms the gizmo, snapshots
                             // the involved points, and stops the click from reaching
                             // the SketchTool below. Ctrl+click is the multi-select
-                            // modifier for sketch elements — never intercept it for
+                            // modifier for sketch elements - never intercept it for
                             // the gizmo, even if the click happens to land on a
                             // handle (the ring is large and crosses sketch lines).
                             if (!gizmoOwnsInput && hover != SketchGizmoHandle::None &&
@@ -5727,7 +5873,7 @@ void Application::renderViewport() {
                 }
 
                 // Apply the gizmo drag (skipped once Rotate has transitioned to
-                // popup-adjust mode — there's no live drag anymore at that point).
+                // popup-adjust mode - there's no live drag anymore at that point).
                 // MoveX/MoveY clamp the cursor delta to the chosen sketch axis and
                 // snap the resulting centroid to grid; MoveFree snaps both axes;
                 // Rotate spins around the centroid with a 15° soft snap.
@@ -5771,7 +5917,7 @@ void Application::renderViewport() {
                             m_activeSketch->movePoint(id, orig + delta);
                     }
                     // Re-solve so dimensional/geometric constraints hold while
-                    // the gizmo drags geometry — otherwise a constrained
+                    // the gizmo drags geometry - otherwise a constrained
                     // circle/line could be dragged off its dimension and the
                     // stale value would keep displaying (the select-drag path
                     // already solves via SketchTool::onMouseMove; the gizmo
@@ -5781,7 +5927,7 @@ void Application::renderViewport() {
                     if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
                         if (m_sketchGizmoHandle == SketchGizmoHandle::Rotate) {
                             // Transition to popup-adjust mode instead of committing
-                            // straight away — the user can refine the angle by
+                            // straight away - the user can refine the angle by
                             // typing, then Apply / Enter commits. Use a real ImGui
                             // popup so focus semantics don't fight the viewport
                             // window (a Begin/End float here flickers on hover).
@@ -5802,7 +5948,7 @@ void Application::renderViewport() {
                                 auto after = std::make_shared<Sketch>(*m_activeSketch);
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
-                                m_history->pushExecuted(std::move(op));
+                                m_history->pushExecuted(std::move(op), *m_document);
                                 // Cascade the gizmo move/rotate to any body built
                                 // from this sketch. Point-drag and dimensional edits
                                 // already publish this; the gizmo path didn't, so a
@@ -5810,7 +5956,6 @@ void Application::renderViewport() {
                                 // the body stale.
                                 if (m_eventBus && m_activeSketchId >= 0)
                                     m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -5828,7 +5973,7 @@ void Application::renderViewport() {
                     ImGui::SetNextWindowPos(ImVec2(m_sketchGizmoAdjustAnchor.x,
                                                    m_sketchGizmoAdjustAnchor.y),
                                             ImGuiCond_Appearing);
-                    // Restore normal padding — the viewport window's
+                    // Restore normal padding - the viewport window's
                     // WindowPadding(0,0) is still pushed here, and the popup
                     // captures the style at its own Begin.
                     ImGui::PushStyleVar(
@@ -5891,7 +6036,7 @@ void Application::renderViewport() {
                                 auto after = std::make_shared<Sketch>(*m_activeSketch);
                                 auto op = std::make_unique<SketchEditOp>(
                                     m_activeSketch, m_sketchGizmoBefore, after);
-                                m_history->pushExecuted(std::move(op));
+                                m_history->pushExecuted(std::move(op), *m_document);
                                 // Cascade the gizmo move/rotate to any body built
                                 // from this sketch. Point-drag and dimensional edits
                                 // already publish this; the gizmo path didn't, so a
@@ -5899,7 +6044,6 @@ void Application::renderViewport() {
                                 // the body stale.
                                 if (m_eventBus && m_activeSketchId >= 0)
                                     m_eventBus->publish(SketchEditedEvent{m_activeSketchId});
-                                m_meshesDirty = true;
                             }
                             m_sketchGizmoHandle = SketchGizmoHandle::None;
                             m_sketchGizmoBefore.reset();
@@ -5932,7 +6076,7 @@ void Application::renderViewport() {
                             auto after = std::make_shared<Sketch>(*m_activeSketch);
                             auto op = std::make_unique<SketchEditOp>(
                                 m_activeSketch, m_sketchGizmoBefore, after);
-                            m_history->pushExecuted(std::move(op));
+                            m_history->pushExecuted(std::move(op), *m_document);
                         }
                         m_sketchGizmoHandle = SketchGizmoHandle::None;
                         m_sketchGizmoBefore.reset();
@@ -5968,7 +6112,7 @@ void Application::renderViewport() {
                             outLineId = l.id; bestD = d;
                         }
                     }
-                    // Circle / arc perimeters — only consulted when no line landed,
+                    // Circle / arc perimeters - only consulted when no line landed,
                     // mirroring SketchTool::handleSelectTool. Clicking the blue rim
                     // (not just the tiny centre point) counts as hitting the element.
                     if (outLineId < 0) {
@@ -6036,7 +6180,7 @@ void Application::renderViewport() {
                     m_sketchDragBefore.reset(); // not a drag
                 } else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
                     // Right-click in sketch mode opens the constraint context menu
-                    // — but only when (a) the click wasn't a camera-orbit drag and
+                    // - but only when (a) the click wasn't a camera-orbit drag and
                     // (b) the user has at least one sketch element selected. The
                     // formal-constraints UI lives entirely here so the toolbar
                     // stays clean for newcomers.
@@ -6052,10 +6196,10 @@ void Application::renderViewport() {
                     // placement (commits with the points already placed)
                     // without leaving sketch mode. The existing "click the
                     // last control point again" exit works but only when the
-                    // user lands within 0.4 mm of the previous click —
+                    // user lands within 0.4 mm of the previous click -
                     // double-clicking is the universal "I'm done" gesture
                     // (Inkscape / SketchUp / etc.). (Steve: "ending splines
-                    // is awkward — click, Enter, click instead of just
+                    // is awkward - click, Enter, click instead of just
                     // clicking the same point twice".)
                     recordSketchMutation([&]{ m_sketchTool->onConfirm(); });
                 } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
@@ -6078,16 +6222,16 @@ void Application::renderViewport() {
                         m_sketchBoxSelectActive = true;
                         m_sketchDragBefore.reset();
                     } else if (m_sketchTool->getMode() == SketchToolMode::Select) {
-                        // Select/drag mutates point positions only — no structural
-                        // change — so recordSketchMutation's signature wouldn't see
+                        // Select/drag mutates point positions only - no structural
+                        // change - so recordSketchMutation's signature wouldn't see
                         // it. Snapshot manually for the drag-commit on mouse-up.
                         m_sketchDragBefore = std::make_shared<Sketch>(*m_activeSketch);
                         recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
                     } else if (m_sketchTool->getMode() == SketchToolMode::Dimension) {
-                        // Picking mutates nothing — no undo record. The commit
+                        // Picking mutates nothing - no undo record. The commit
                         // below records the constraint add as one SketchEditOp.
                         // A click that landed while the ##DimEdit popup was up
-                        // belongs to the popup (dismiss) — never a fresh pick.
+                        // belongs to the popup (dismiss) - never a fresh pick.
                         if (!m_dimPopupSwallowClick) {
                             m_sketchTool->onMouseDown(sketchCoord, false);
                             if (m_sketchTool->dimReadyToCommit())
@@ -6128,7 +6272,7 @@ void Application::renderViewport() {
                         // Line gets the same press-drag-release feel for its
                         // FIRST vertex: dropping the start point on press lets the
                         // drag rubber-band the segment (with the live length read-
-                        // out) and the release commit the end — instead of the
+                        // out) and the release commit the end - instead of the
                         // unnatural tap-here, tap-there. Only the first vertex
                         // pre-places (guarded by !isPlacing); once a chain is going
                         // its start is already the previous endpoint, so each
@@ -6138,7 +6282,7 @@ void Application::renderViewport() {
                         //
                         // Arc rides the same path for its first two points: press
                         // drops the start, the drag previews the chord, release
-                        // sets the end — then a second tap sets the bulge/angle.
+                        // sets the end - then a second tap sets the bulge/angle.
                         SketchToolMode m = m_sketchTool->getMode();
                         if ((m == SketchToolMode::Circle || m == SketchToolMode::Rectangle ||
                              m == SketchToolMode::Line || m == SketchToolMode::Arc) &&
@@ -6149,7 +6293,7 @@ void Application::renderViewport() {
                     } else if (m_sketchTool->getMode() == SketchToolMode::Line) {
                         // Line, desktop: press-drag-release, coexisting with
                         // click-chain (#25). Drop the start on press if fresh; the
-                        // release commits the endpoint — a drag draws one segment,
+                        // release commits the endpoint - a drag draws one segment,
                         // click-click chains a polyline. Tracking mirrors the touch
                         // path so the release handler can measure the drag.
                         m_sketchPressActive = true;
@@ -6178,7 +6322,7 @@ void Application::renderViewport() {
                         m_sketchBoxSelectActive = false;
 
                         if (glm::distance(mn, mx) < 4.0f) {
-                            // Tiny rect — plain click on empty space. Clear unless Ctrl.
+                            // Tiny rect - plain click on empty space. Clear unless Ctrl.
                             if (!io.KeyCtrl) m_sketchTool->clearElementSelection();
                         } else {
                             // Project sketch points to viewport-local screen pixels,
@@ -6224,7 +6368,7 @@ void Application::renderViewport() {
                                     selLns.insert(l.id);
                                 }
                             }
-                            // Curves were previously skipped — box-select only
+                            // Curves were previously skipped - box-select only
                             // caught points + lines. Test each curve's projected
                             // sample points against the rect so a drag grabs
                             // circles, arcs and splines too.
@@ -6296,7 +6440,7 @@ void Application::renderViewport() {
                             // rectangle centre, or line's start vertex): complete
                             // it only if the finger dragged out a size/length. A
                             // no-drag tap leaves it placing, so a second tap sets
-                            // the radius / corner / endpoint — a stationary tap
+                            // the radius / corner / endpoint - a stationary tap
                             // mustn't commit a zero-size shape (tap-tap still works).
                             if (moved) {
                                 const SketchToolMode sm = m_sketchTool->getMode();
@@ -6311,7 +6455,7 @@ void Application::renderViewport() {
                                     m_sketchShapeConfirmPending = true;
                                     m_sketchShapePendingPos = sketchCoord;
                                     m_sketchShapeDimBuf[0] = '\0';
-                                    // Freeze the preview endpoints at lift —
+                                    // Freeze the preview endpoints at lift -
                                     // the bubble anchors to these so it can't
                                     // move if the held preview twitches.
                                     // (Preview start is the EFFECTIVE opposite
@@ -6325,7 +6469,7 @@ void Application::renderViewport() {
                                     m_sketchShapeDimH = std::abs(pe.y - ps.y);
                                 } else {
                                     recordSketchMutation([&]{ m_sketchTool->onMouseDown(sketchCoord, io.KeyCtrl); });
-                                    // LINE: a genuine drag draws ONE segment — end
+                                    // LINE: a genuine drag draws ONE segment - end
                                     // the chain so a lone line doesn't leave the
                                     // tool placing. Tap-tap still chains (#25).
                                     if (m_sketchTool->getMode() == SketchToolMode::Line)
@@ -6335,7 +6479,7 @@ void Application::renderViewport() {
                         } else if (m_sketchTool->getMode() == SketchToolMode::Line &&
                                    m_sketchTool->isPlacing()) {
                             // LINE, chain live: commit the segment at the tap /
-                            // release position — no typing required (#25). A drag
+                            // release position - no typing required (#25). A drag
                             // draws a single segment and ends the chain; a
                             // stationary tap commits and keeps chaining a polyline.
                             // A zero-length tap on the anchor is rejected inside
@@ -6355,10 +6499,11 @@ void Application::renderViewport() {
                                !m_moveModeToggle &&
                                m_window && m_window->lastLeftReleaseWasGesture() &&
                                m_sketchTool->isPlacing()) {
+                        auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                         // A two-finger pan/zoom began right after this finger's
                         // press started a drawing placement. Roll that placement
                         // back so two-finger navigation needs no Move button and
-                        // leaves nothing behind — no stray start vertex, and no
+                        // leaves nothing behind - no stray start vertex, and no
                         // half-placed state to corrupt the next tap. Undo the step
                         // the press pushed (Line drops its fresh start vertex here;
                         // circle/rect/arc push nothing, so the guard skips), then
@@ -6376,7 +6521,6 @@ void Application::renderViewport() {
                             if (m_activeSketchId >= 0)
                                 cascadeFromSketchEdit(m_activeSketchId);
                         }
-                        m_meshesDirty = true;
                     }
                     m_sketchPressActive = false;
                     m_sketchDragCenterPlaced = false;
@@ -6386,7 +6530,7 @@ void Application::renderViewport() {
                         // Desktop line press-drag-release (#25): commit the
                         // endpoint at the release position. A stationary click
                         // that only just dropped the fresh start waits for the
-                        // next click (click-chain); otherwise commit — and a
+                        // next click (click-chain); otherwise commit - and a
                         // genuine drag ends the chain (a single segment).
                         float ddx = io.MousePos.x - m_sketchDownX;
                         float ddy = io.MousePos.y - m_sketchDownY;
@@ -6412,7 +6556,7 @@ void Application::renderViewport() {
                             auto after_ptr = std::make_shared<Sketch>(*m_activeSketch);
                             auto op = std::make_unique<SketchEditOp>(
                                 m_activeSketch, m_sketchDragBefore, after_ptr);
-                            m_history->pushExecuted(std::move(op));
+                            m_history->pushExecuted(std::move(op), *m_document);
                             // Cascade the move to any body built from this sketch.
                             // Dimensional edits (circle Ø / constraints) publish
                             // this so the body follows; a drag-move pushed the
@@ -6421,7 +6565,6 @@ void Application::renderViewport() {
                             if (m_eventBus && m_activeSketchId >= 0)
                                 m_eventBus->publish(
                                     SketchEditedEvent{m_activeSketchId});
-                            m_meshesDirty = true;
                         }
                         m_sketchDragBefore.reset();
                     }
@@ -6439,7 +6582,7 @@ void Application::renderViewport() {
     }
 
     // ViewCube overlay. In im-touch-lite the top-right button cluster floats
-    // over the viewport corner where the cube lives — drop the cube below it.
+    // over the viewport corner where the cube lives - drop the cube below it.
     const float uisVc = uiScale();
     if (imTouchLayout())
         m_viewCube->setExtraOffset(0.0f, 68.0f * uisVc); // clear the im-touch top-right cluster
@@ -6455,13 +6598,13 @@ void Application::renderViewport() {
         handleViewCubeAction(static_cast<int>(vcAction));
     }
 
-    // Snap-grid corner widget — small square next to the ViewCube showing the
+    // Snap-grid corner widget - small square next to the ViewCube showing the
     // current grid step. Click to open settings (snap toggle + step radios);
     // changes save immediately.
     renderSnapWidget();
 
     // Context action bars overlaid on the viewport (touch mode). Each is a
-    // SEPARATE window so a tap on — or a few px around — a button is captured by
+    // SEPARATE window so a tap on - or a few px around - a button is captured by
     // ImGui and can't fall through to the canvas and drop a stray vertex. The
     // window padding is that surrounding hit-target margin.
     if (materializr::touchMode()) {
@@ -6485,7 +6628,7 @@ void Application::renderViewport() {
         bool placing = m_inSketchMode && m_sketchTool && m_sketchTool->isPlacing();
         // In the modern/im-touch layouts the Multi-Select toggle is hosted in
         // their own chrome instead (down here it overlapped the FULL pill).
-        // Keep the rest of this bar — Delete, and the chain-tool Finish/Back —
+        // Keep the rest of this bar - Delete, and the chain-tool Finish/Back -
         // which those layouts don't replicate.
         const bool multiInLegacy = classicLayout();
         const bool deleteHere = m_inSketchMode && m_sketchTool &&
@@ -6493,9 +6636,9 @@ void Application::renderViewport() {
         // Move (navigation lock) lives in this bar too. While on, a one-finger
         // drag orbits and taps don't draw/select, so pan/zoom can't
         // inadvertently start a drawing. Shown while a one-finger drag is
-        // reserved for a tool — sketch editing, or an interactive op whose
+        // reserved for a tool - sketch editing, or an interactive op whose
         // arrow/handle owns the drag (push/pull, extrude, edge ops, move/scale
-        // face) — since that's exactly when orbit needs an escape hatch.
+        // face) - since that's exactly when orbit needs an escape hatch.
         // Hidden (and forced off) elsewhere: a plain drag already orbits
         // there, so the lock is redundant. (It used to sit bottom-RIGHT, but
         // the im-touch layout parks its sketch Finish/Discard FABs in that
@@ -6551,7 +6694,7 @@ void Application::renderViewport() {
                     if (hov) ImGui::SetTooltip("%s", materializr::tr("Add taps to the current selection\n(the touch equivalent of holding Ctrl)"));
                 }
 
-                // Delete the selected sketch elements — the touch twin of the
+                // Delete the selected sketch elements - the touch twin of the
                 // Delete key (which a bare tablet doesn't have). Only shown in
                 // sketch Select mode with elements actually selected.
                 if (deleteHere) {
@@ -6570,7 +6713,7 @@ void Application::renderViewport() {
                 SketchToolMode mode = m_sketchTool->getMode();
                 // Circle/Rectangle are a single press-drag-release gesture now,
                 // so their only "placing" window is mid-drag with the finger
-                // down — a button there is unreachable (it just flickered in and
+                // down - a button there is unreachable (it just flickered in and
                 // out). Show no bar for them; Undo backs out an unwanted
                 // circle/rect. The bar stays for the genuinely multi-step tools:
                 // line/spline chains, and arc.
@@ -6609,7 +6752,7 @@ void Application::renderViewport() {
                         if (back) sketchChainBack();
                         if (bhov) ImGui::SetTooltip("%s", materializr::tr("Remove the last segment and keep drawing"));
                     }
-                    // "Cancel" — for a chain, discard the WHOLE chain; for arc,
+                    // "Cancel" - for a chain, discard the WHOLE chain; for arc,
                     // discard the in-progress shape.
                     if (prev) ImGui::SameLine();
                     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.68f, 0.24f, 0.24f, 0.97f));
@@ -6634,7 +6777,7 @@ void Application::renderViewport() {
 
     // Right-click face context menu. The viewport window pushed
     // WindowPadding(0,0) (the 3D scene must fill the window rect), and a popup
-    // captures the style at its own Begin — so without this restore the
+    // captures the style at its own Begin - so without this restore the
     // context menus render their items flush against the popup edges.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                         ImVec2(8.0f * uiScale(), 8.0f * uiScale()));
@@ -6644,7 +6787,7 @@ void Application::renderViewport() {
         m_contextMenuPending = false;
     }
     if (ImGui::BeginPopup("FaceContextMenu")) {
-        // Two branches — Face and Body — so the user picks which the actions
+        // Two branches - Face and Body - so the user picks which the actions
         // apply to (the touch long-press can't distinguish a single-click face
         // pick from a double-click body pick the way a mouse does). Each branch
         // first selects its entity, then lists its specific actions; body-level
@@ -6654,7 +6797,7 @@ void Application::renderViewport() {
 
         const int bid = m_contextMenuBodyId;
 
-        // Shared body-level actions — they operate on the whole body the face
+        // Shared body-level actions - they operate on the whole body the face
         // belongs to, so they appear under both the Face and Body branches.
         auto sharedBodyOps = [&]() {
             // Lay Flat: planar faces only -- the alignment needs a face
@@ -6672,27 +6815,28 @@ void Application::renderViewport() {
                 }
             }
             // Both actions change visibility flags, and the renderer only
-            // reflects those on a rebuild — m_meshesDirty is required or the
-            // menu item "doesn't seem to do anything" (markDirty() alone only
-            // flags the PROJECT as unsaved). The full rebuild skips invisible
-            // bodies, so post-isolate it re-tessellates just the one body.
+            // reflects those on a rebuild - without one the menu item
+            // "doesn't seem to do anything" (markDirty() alone only flags the
+            // PROJECT as unsaved). The scope marks exactly the bodies whose
+            // visibility flipped; the partial pass drops the ones now hidden
+            // and meshes the one left visible.
             if (ImGui::MenuItem(materializr::tr("Isolate"))) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, o == bid);
                 markDirty();
-                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
-            // The way back from Isolate — without this the only recovery is
+            // The way back from Isolate - without this the only recovery is
             // re-ticking every body's checkbox in the Items panel.
             if (ImGui::MenuItem(materializr::tr("Show All Bodies"))) {
+                auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                 for (int o : m_document->getAllBodyIds())
                     m_document->setBodyVisible(o, true);
                 markDirty();
-                m_meshesDirty = true;
                 m_contextMenuFace.Nullify();
             }
-            // Export ▸ — the same submenu the Items panel offers, from the
+            // Export ▸ - the same submenu the Items panel offers, from the
             // same registry, acting on the whole body selection when this
             // body is part of one. Two menus for the same action have to
             // stay in step: the Items panel grew the format list and this
@@ -6724,7 +6868,7 @@ void Application::renderViewport() {
                     ImGui::EndMenu();
                 }
             }
-            // Baked copy of this body into a fresh project — the "use this
+            // Baked copy of this body into a fresh project - the "use this
             // part elsewhere" flow. Single body by design (it names the new
             // file after the part), so it stays out of the Export submenu.
             if (ImGui::MenuItem(materializr::tr("Export to New Project"))) {
@@ -6744,17 +6888,17 @@ void Application::renderViewport() {
             }
             // Separate: only when the body actually holds more than one
             // disconnected solid (air-gapped lumps fused into one body).
-            // Mirrors the Items-panel entry — splits them into individual
+            // Mirrors the Items-panel entry - splits them into individual
             // bodies, largest keeping this one.
             TopoDS_Shape bshape;
             try { bshape = m_document->getBody(bid); } catch (...) {}
             if (m_history && SeparateBodyOp::solidCount(bshape) > 1) {
                 if (ImGui::MenuItem(materializr::tr("Separate"))) {
+                    auto trackBodies = trackBodyChanges(); // re-tessellate only what changes
                     auto op = std::make_unique<SeparateBodyOp>();
                     op->setBody(bid);
                     m_history->pushOperation(std::move(op), *m_document);
                     markDirty();
-                    m_meshesDirty = true;
                     m_contextMenuFace.Nullify();
                 }
             }
@@ -6765,7 +6909,7 @@ void Application::renderViewport() {
         // faces/bodies via long-press too.
         const bool addToSel = m_multiSelectToggle;
 
-        // Select every unique edge of a shape — a face's rim, or a whole body.
+        // Select every unique edge of a shape - a face's rim, or a whole body.
         // Lets the user set up a fillet/chamfer over an entire face or body in
         // one shot. Edges are keyed by shape identity in the SelectionManager,
         // and a face's edges share the body's TShapes, so these entries are
@@ -6796,7 +6940,7 @@ void Application::renderViewport() {
                 m_contextMenuFace.Nullify();
             }
             if (ImGui::MenuItem(materializr::tr("Select All Edges of Face"))) {
-                // All edges bounding this face — e.g. fillet a pocket's whole rim.
+                // All edges bounding this face - e.g. fillet a pocket's whole rim.
                 selectAllEdgesOf(m_contextMenuFace);
                 m_contextMenuFace.Nullify();
             }
@@ -6829,7 +6973,7 @@ void Application::renderViewport() {
                 m_contextMenuFace.Nullify();
             }
             if (ImGui::MenuItem(materializr::tr("Select All Edges of Body"))) {
-                // Every edge on the body — e.g. break all sharp edges at once.
+                // Every edge on the body - e.g. break all sharp edges at once.
                 TopoDS_Shape body;
                 try { body = m_document->getBody(bid); } catch (...) {}
                 selectAllEdgesOf(body);
@@ -6839,7 +6983,7 @@ void Application::renderViewport() {
             sharedBodyOps();
             ImGui::EndMenu();
         }
-        // Sketch submenu — shown when a committed sketch is in the clicked area
+        // Sketch submenu - shown when a committed sketch is in the clicked area
         // (possibly alongside a Face/Body, e.g. a sketch lying on a face). The
         // transform actions select the sketch first so the gizmo targets it.
         if (m_contextMenuSketchId >= 0 && ImGui::BeginMenu(materializr::tr("Sketch"))) {
@@ -6896,7 +7040,7 @@ void Application::renderViewport() {
         ImGui::EndPopup();
     }
 
-    // Right-click construction-plane context menu — the same normal-adjustment
+    // Right-click construction-plane context menu - the same normal-adjustment
     // actions the Items panel offers, but reachable directly on the plane in
     // the viewport.
     if (ImGui::BeginPopup("PlaneContextMenu")) {
@@ -6919,7 +7063,7 @@ void Application::renderViewport() {
         ImGui::EndPopup();
     }
 
-    // Sketch constraint context menu — appears on right-click in the sketch
+    // Sketch constraint context menu - appears on right-click in the sketch
     // viewport when at least one sketch element is selected. Items are filtered
     // by selection arity so the user never sees an option that can't apply
     // (e.g. "Parallel" only shows with 2+ lines selected).
@@ -6997,15 +7141,15 @@ void Application::renderViewport() {
                                     "Arrows: Move | Rings: Rotate | Cubes: Scale");
     }
 
-    // Interactive extrude UI — banner + distance well live in the
+    // Interactive extrude UI - banner + distance well live in the
     // controller; called here because the well anchors to THIS window.
     m_extrudeCtl.renderExtrudePanel(iopContext());
 
-    // Interactive Push/Pull UI — banner + distance well live in the
+    // Interactive Push/Pull UI - banner + distance well live in the
     // controller; called here because the well anchors to THIS window.
     m_ppCtl.renderPushPullPanel(iopContext());
 
-    // Interactive fillet/chamfer UI — banner + value well live in the
+    // Interactive fillet/chamfer UI - banner + value well live in the
     // controller; called here because the well anchors to THIS window.
     m_edgeCtl.renderEdgeOpPanel(iopContext());
 
@@ -7027,17 +7171,17 @@ void Application::renderViewport() {
     }
 
     // Inline dimension input while placing a sketch shape. Suppressed while
-    // the im-touch confirm bubble holds the shape — the bubble carries its
+    // the im-touch confirm bubble holds the shape - the bubble carries its
     // own value field, and two live inputs for one dimension is confusing.
     if (m_inSketchMode && m_sketchTool && m_sketchTool->hasPreview() &&
         !m_sketchShapeConfirmPending) {
         SketchToolMode mode = m_sketchTool->getPreviewType();
         // im-touch on touch: circles and rectangles get the near-shape
-        // confirm bubble on lift (their exact-value input) — the top-right
+        // confirm bubble on lift (their exact-value input) - the top-right
         // dialog would be a SECOND diameter/size input flashing during the
         // drag, so it doesn't show for them at all. Lines keep it (no
         // bubble). Desktop im-touch (mouse, click-click placement) keeps it
-        // too — the bubble only exists on the touch release path.
+        // too - the bubble only exists on the touch release path.
         // Only cede the inline field to the bubble when the bubble is ACTUALLY
         // up (im-touch press-drag-release hold). Otherwise the inline field
         // shows, so a shape never gets NO input. Modern always uses the inline
@@ -7052,22 +7196,22 @@ void Application::renderViewport() {
             "Type a value and press Enter. The shape extends from your first click toward the cursor.";
         if (!bubbleOwnsInput)
         switch (mode) {
-            case SketchToolMode::Line:      dimLabel = "Length (mm)"; break;
-            case SketchToolMode::Circle:    dimLabel = "Diameter (mm)"; break;
+            case SketchToolMode::Line:      dimLabel = "Length (%s)"; break;
+            case SketchToolMode::Circle:    dimLabel = "Diameter (%s)"; break;
             // Polygon side count is picked from the toolbar popout now, and
-            // radius/rotation come from the drag — so no typed dialog (it was
+            // radius/rotation come from the drag - so no typed dialog (it was
             // the one that clipped). dimLabel stays null → no input window.
             case SketchToolMode::Rectangle:
                 // Touch shows BOTH Width and Height fields at once (below);
                 // desktop keeps its two-stage single field.
                 dimLabel = materializr::touchMode()
-                             ? "Rectangle (mm)"
+                             ? "Rectangle (%s)"
                              : (m_sketchTool->getRectDimStage() == 0
-                                    ? "Width (mm)" : "Height (mm)");
+                                    ? "Width (%s)" : "Height (%s)");
                 dimHint  = materializr::touchMode()
                   ? "Type Width and Height, then Apply."
                   : (m_sketchTool->getRectDimStage() == 0
-                       ? "Type width and Enter to lock horizontal — cursor still "
+                       ? "Type width and Enter to lock horizontal - cursor still "
                          "drives height. Or click for both at once."
                        : "Type height and Enter to commit the rectangle.");
                 break;
@@ -7076,13 +7220,13 @@ void Application::renderViewport() {
                 // number for the bow. Click 3 has no input until the chord
                 // exists, so clickCount drives which is on offer.
                 if (m_sketchTool->getClickCount() == 1) {
-                    dimLabel = "Chord (mm)";
+                    dimLabel = "Chord (%s)";
                     dimHint  = "Type the straight-line distance between the arc's "
-                               "two ends and press Enter — or just click the end.";
+                               "two ends and press Enter - or just click the end.";
                 } else if (m_sketchTool->getClickCount() == 2) {
                     const bool sweep = m_sketchTool->getArcDimMode() ==
                                        SketchTool::ArcDimMode::Sweep;
-                    dimLabel = sweep ? "Sweep (deg)" : "Radius (mm)";
+                    dimLabel = sweep ? "Sweep (deg)" : "Radius (%s)";
                     dimHint  = sweep
                       ? "Type the swept angle and Enter. 180 is a semicircle. "
                         "Move the cursor across the chord to flip which way it bows."
@@ -7098,11 +7242,11 @@ void Application::renderViewport() {
             // The old version used AlwaysAutoResize with an unsized InputText,
             // which put the field in ImGui's auto-resize feedback loop (field
             // width wants the window width, window width wants the content width)
-            // — so some steps (the rectangle's 2nd "Height" entry, the line)
+            // - so some steps (the rectangle's 2nd "Height" entry, the line)
             // came out too narrow and clipped the typed digits off the left.
             // Anchor to the RIGHT SIDE OF THE VIEWPORT (Steve): in Modern the
             // viewport ends where the right panel begins (m_touchVpX +
-            // m_touchVpW), so park it just inside that edge — in the drawing
+            // m_touchVpW), so park it just inside that edge - in the drawing
             // area, not over the panel. Falls back to the screen's right edge
             // when the viewport rect isn't tracked (Classic).
             const float winW = uiW(230.0f);
@@ -7120,7 +7264,10 @@ void Application::renderViewport() {
                 ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking);
             opDialogDragGrip(uiScale());
 
-            ImGui::TextColored(materializr::accentText(), "%s", materializr::tr(dimLabel));
+            ImGui::TextColored(materializr::accentText(), "%s",
+                               std::strstr(dimLabel, "%s")
+                                   ? materializr::trFormat(dimLabel, materializr::unitSuffix()).c_str()
+                                   : materializr::tr(dimLabel));
             ImGui::Separator();
             // Window width is fixed now, so wrapping at the window edge is safe
             // (no feedback loop).
@@ -7146,15 +7293,14 @@ void Application::renderViewport() {
                 if (!sweep) {
                     // The chord's half-length is a hard floor; say so rather
                     // than let a too-small radius be silently refused.
-                    ImGui::TextDisabled(materializr::tr("min %.2f mm (half the chord)"),
-                                        m_sketchTool->arcMinRadius());
+                    ImGui::TextDisabled("%s", materializr::trFormat("min %s (half the chord)", materializr::fmtLength(m_sketchTool->arcMinRadius())).c_str());
                 }
                 ImGui::Spacing();
             }
 
             if (materializr::touchMode()) {
                 // Native keyboard via a focused ImGui field (io.WantTextInput ->
-                // Window::updateTextInput raises the system IME — same path as
+                // Window::updateTextInput raises the system IME - same path as
                 // the Properties editor). TAP TO FOCUS, no auto-raise: click-
                 // drag still draws and text entry is opt-in (Steve).
                 if (mode == SketchToolMode::Rectangle) {
@@ -7170,12 +7316,12 @@ void Application::renderViewport() {
                     }
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                         ImVec2(uiW(10.0f), uiW(10.0f)));
-                    ImGui::TextDisabled("%s", materializr::tr("Width (mm)"));
+                    ImGui::TextDisabled("%s", materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str());
                     ImGui::SetNextItemWidth(-1.0f);
-                    materializr::inputNumber("##dimW", &m_sketchShapeDimW, 0.0f, 0.0f, "%.2f");
-                    ImGui::TextDisabled("%s", materializr::tr("Height (mm)"));
+                    materializr::lengthField("##dimW", &m_sketchShapeDimW);
+                    ImGui::TextDisabled("%s", materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str());
                     ImGui::SetNextItemWidth(-1.0f);
-                    materializr::inputNumber("##dimH", &m_sketchShapeDimH, 0.0f, 0.0f, "%.2f");
+                    materializr::lengthField("##dimH", &m_sketchShapeDimH);
                     ImGui::PopStyleVar();
                     if (m_sketchShapeDimW < 0.01f) m_sketchShapeDimW = 0.01f;
                     if (m_sketchShapeDimH < 0.01f) m_sketchShapeDimH = 0.01f;
@@ -7202,13 +7348,18 @@ void Application::renderViewport() {
                     ImGui::SetNextItemWidth(-1.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
                                         ImVec2(uiW(12.0f), uiW(12.0f)));
-                    // VALUE-based, like the Rectangle W/H fields above — so
+                    // VALUE-based, like the Rectangle W/H fields above - so
                     // touch mode gets the number pad instead of the OS
                     // keyboard. Enter (pad or hardware) and Apply both commit;
                     // Apply stays for the finger route, since the pad's own
                     // Enter is the only way digits reach us on a tablet.
+                    // The same predicate the commit uses: this field holds a
+                    // length, an arc's sweep in DEGREES, or a polygon's SIDE
+                    // COUNT. Only a length takes the unit's decimals.
+                    const bool dimIsLen = m_sketchTool->dimensionValueIsLength();
                     const bool entered = materializr::inputNumber(
-                        "##sketchDimT", &m_sketchDimValue, 0.0f, 0.0f, "%.2f",
+                        "##sketchDimT", &m_sketchDimValue, 0.0f, 0.0f,
+                        dimIsLen ? materializr::lengthFormat() : "%.2f",
                         ImGuiInputTextFlags_EnterReturnsTrue);
                     ImGui::PopStyleVar();
                     ImGui::Spacing();
@@ -7221,13 +7372,18 @@ void Application::renderViewport() {
                          m_sketchTool->getArcDimMode() ==
                              SketchTool::ArcDimMode::Radius)
                             ? m_sketchTool->arcMinRadius() : 0.0f;
+                    // The pad edits in the display unit; the floor is mm.
+                    // Same rule as the desktop path: only convert a LENGTH.
+                    auto dimToModel = [&](double shown) {
+                        return dimIsLen ? materializr::lengthFieldCommit(shown) : shown;
+                    };
                     ImGui::BeginDisabled(m_sketchDimValue <= 0.0f ||
-                                         m_sketchDimValue < dimFloor);
+                                         dimToModel(m_sketchDimValue) < dimFloor);
                     const bool applied =
                         ImGui::Button(materializr::tr("Apply"), ImVec2(-1.0f, uiW(44.0f)));
                     ImGui::EndDisabled();
                     if ((entered || applied) && m_sketchDimValue > 0.0f) {
-                        const float v = m_sketchDimValue;
+                        const float v = static_cast<float>(dimToModel(m_sketchDimValue));
                         recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
                         m_sketchDimValue = 0.0f;
                         m_sketchDimBuf[0] = '\0';
@@ -7242,12 +7398,22 @@ void Application::renderViewport() {
                 }
 
                 ImGui::SetNextItemWidth(winW - uiW(16.0f)); // fill the fixed width, minus padding
+                // No CharsDecimal: a typed unit ("2in") needs letters. parseLength
+                // is the gate instead, and it refuses anything but one number
+                // with an optional unit.
                 if (ImGui::InputText("##sketchDim", m_sketchDimBuf, sizeof(m_sketchDimBuf),
                                      ImGuiInputTextFlags_EnterReturnsTrue |
-                                     ImGuiInputTextFlags_CharsDecimal |
                                      ImGuiInputTextFlags_AutoSelectAll)) {
-                    float v = 0.0f;
-                    if (materializr::parseFinite(m_sketchDimBuf, v) && v > 0.0f) {
+                    // Not every typed dimension is a length: an arc's sweep is
+                    // DEGREES and a polygon's first value is a SIDE COUNT.
+                    // Converting those display->mm made a typed 180 deg arrive
+                    // as 4572 (clamped to 359.9) and 6 sides arrive as 152.
+                    double v0 = 0.0;
+                    const bool isLen = m_sketchTool->dimensionValueIsLength();
+                    const bool ok = isLen ? materializr::parseLength(m_sketchDimBuf, v0)
+                                          : materializr::parseFinite(m_sketchDimBuf, v0);
+                    if (ok && v0 > 0.0) {
+                        const float v = static_cast<float>(v0);
                         recordSketchMutation([&]{ m_sketchTool->applyDimension(v); });
                     }
                     m_sketchDimBuf[0] = '\0';
@@ -7275,6 +7441,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
 
     // Meshes can be stale when a save lands between frames (deferred slot).
     // Done BEFORE the bounding box so the box can ride on the triangulation.
+    landMeshes();
     if (m_meshesDirty || !m_dirtyBodyIds.empty()) {
         rebuildMeshes();
         m_meshesDirty = false;
@@ -7287,7 +7454,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
     // Add-with-triangulation, NOT AddOptimal: this box only frames a 512px
     // preview, so a slightly loose fit costs nothing visible, while
     // AddOptimal's exact geometry pass is expensive on precisely the surfaces
-    // this app produces — thread helicoids and lofted B-splines — and it ran
+    // this app produces - thread helicoids and lofted B-splines - and it ran
     // on EVERY Ctrl+S.
     Bnd_Box bb;
     for (int id : m_document->getAllBodyIds()) {
@@ -7299,7 +7466,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
     }
     if (bb.IsVoid()) return false;
 
-    // Dedicated one-shot FBO — deliberately NOT the live viewport FBO, whose
+    // Dedicated one-shot FBO - deliberately NOT the live viewport FBO, whose
     // texture ImGui may already have referenced this frame (destroying it
     // mid-frame leaves the draw list pointing at a dead texture). Rendered at
     // 2x and box-downscaled below: cheap antialiasing without MSAA plumbing.
@@ -7334,7 +7501,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
     }
     glViewport(0, 0, kRenderPx, kRenderPx);
 
-    // The camera is shared with the live viewport — restored by copy below.
+    // The camera is shared with the live viewport - restored by copy below.
     // Section planes and background colours are re-asserted by renderViewport()
     // every frame, so this pass may set them freely.
     Camera saved = m_viewport->getCamera();
@@ -7361,7 +7528,7 @@ bool Application::captureProjectThumbnailPNG(std::vector<uint8_t>& pngOut) {
     m_backgroundRenderer->render();
     glEnable(GL_DEPTH_TEST);
 
-    // A live section cut would carve the thumbnail too — always off here.
+    // A live section cut would carve the thumbnail too - always off here.
     m_shapeRenderer->setSectionPlane(false, glm::vec3(0.0f),
                                      glm::vec3(0.0f, 1.0f, 0.0f));
     m_edgeRenderer->setSectionPlane(false, glm::vec3(0.0f),

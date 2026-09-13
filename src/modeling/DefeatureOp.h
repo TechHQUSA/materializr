@@ -9,7 +9,7 @@
 
 // Remove selected face(s) from a body and heal the surrounding faces back
 // together (OCCT BRepAlgoAPI_Defeaturing). The headline use is taking a baked
-// fillet/chamfer back to a sharp edge so it can be re-applied — but it also
+// fillet/chamfer back to a sharp edge so it can be re-applied - but it also
 // cleans up unwanted rounds/holes on imported STEP geometry.
 class DefeatureOp : public Operation {
 public:
@@ -24,7 +24,7 @@ public:
 
     bool execute(Document& doc) override;
     bool undo(Document& doc) override;
-    std::string name() const override { return "Repair Geometry"; }
+    std::string name() const override { return "Remove Feature"; }
     std::string description() const override;
     void renderProperties() override;
     std::string typeId() const override { return "defeature"; }

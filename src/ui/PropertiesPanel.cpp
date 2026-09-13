@@ -1,5 +1,7 @@
+#include "ui/LengthField.h"
 #include "UiTheme.h"
 #include "PropertiesPanel.h"
+#include "core/HistoryPanelActions.h"
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepGProp.hxx>
@@ -21,6 +23,8 @@
 #include "../core/EventBus.h"
 #include "../core/Events.h"
 #include "../core/Verbose.h"
+#include "../plugin/PluginContext.h"
+#include "../plugin/PluginRegistry.h"
 #include "../core/NumParse.h"
 #include <imgui.h>
 #include <cmath>
@@ -46,7 +50,7 @@
 #include "../i18n.h"
 #include "../i18n.h"
 
-// Measurement-style readouts for selected FACES / EDGES / VERTICES — area,
+// Measurement-style readouts for selected FACES / EDGES / VERTICES - area,
 // length, surface/curve kind and dimensions, with totals across a
 // multi-select (doubles as a measure tool). Coordinates are shown in the
 // app's user Z-up convention (user Y = world Z, user Z = world Y), matching
@@ -79,8 +83,8 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     default: break;
                 }
                 ImGui::TextColored(materializr::accentText(), "%s", kind);
-                ImGui::Text(materializr::tr("Area: %.2f mm^2"), g.Mass());
-                ImGui::Text(materializr::tr("Centre: %.2f, %.2f, %.2f mm"), c.X(), c.Z(), c.Y());
+                ImGui::TextUnformatted(materializr::trFormat("Area: %s", materializr::fmtArea(g.Mass())).c_str());
+                ImGui::TextUnformatted(materializr::trFormat("Centre: %s", materializr::fmtVec3(c.X(), c.Z(), c.Y())).c_str());
                 if (surf.GetType() == GeomAbs_Plane) {
                     // From the SURFACE, not the plane's stored axis.
                     //
@@ -103,18 +107,14 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     } catch (...) {}
                     ImGui::Text(materializr::tr("Normal: %.3f, %.3f, %.3f"), n.X(), n.Z(), n.Y());
                 } else if (surf.GetType() == GeomAbs_Cylinder) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm  (dia %.3f)"),
-                                surf.Cylinder().Radius(),
-                                2.0 * surf.Cylinder().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s  (dia %s)", materializr::fmtLength(surf.Cylinder().Radius()), materializr::fmtLength(2.0 * surf.Cylinder().Radius())).c_str());
                 } else if (surf.GetType() == GeomAbs_Sphere) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm"), surf.Sphere().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s", materializr::fmtLength(surf.Sphere().Radius())).c_str());
                 } else if (surf.GetType() == GeomAbs_Cone) {
                     ImGui::Text(materializr::tr("Half-angle: %.1f deg"),
                                 surf.Cone().SemiAngle() * 180.0 / M_PI);
                 } else if (surf.GetType() == GeomAbs_Torus) {
-                    ImGui::Text(materializr::tr("Radii: %.3f / %.3f mm"),
-                                surf.Torus().MajorRadius(),
-                                surf.Torus().MinorRadius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radii: %s / %s", materializr::fmtLength(surf.Torus().MajorRadius()), materializr::fmtLength(surf.Torus().MinorRadius())).c_str());
                 }
                 ImGui::Spacing();
             } else if (e.type == SelectionType::Edge &&
@@ -134,11 +134,9 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                     default: break;
                 }
                 ImGui::TextColored(materializr::accentText(), "%s", kind);
-                ImGui::Text(materializr::tr("Length: %.3f mm"), g.Mass());
+                ImGui::TextUnformatted(materializr::trFormat("Length: %s", materializr::fmtLength(g.Mass())).c_str());
                 if (cu.GetType() == GeomAbs_Circle) {
-                    ImGui::Text(materializr::tr("Radius: %.3f mm  (dia %.3f)"),
-                                cu.Circle().Radius(),
-                                2.0 * cu.Circle().Radius());
+                    ImGui::TextUnformatted(materializr::trFormat("Radius: %s  (dia %s)", materializr::fmtLength(cu.Circle().Radius()), materializr::fmtLength(2.0 * cu.Circle().Radius())).c_str());
                     double sweep = (cu.LastParameter() - cu.FirstParameter())
                                    * 180.0 / M_PI;
                     if (sweep < 359.9)
@@ -146,15 +144,14 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
                 }
                 gp_Pnt m = cu.Value(0.5 * (cu.FirstParameter() +
                                            cu.LastParameter()));
-                ImGui::Text(materializr::tr("Midpoint: %.2f, %.2f, %.2f mm"),
-                            m.X(), m.Z(), m.Y());
+                ImGui::TextUnformatted(materializr::trFormat("Midpoint: %s", materializr::fmtVec3(m.X(), m.Z(), m.Y())).c_str());
                 ImGui::Spacing();
             } else if (e.type == SelectionType::Vertex &&
                        e.shape.ShapeType() == TopAbs_VERTEX) {
                 ++nVerts;
                 gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(e.shape));
                 ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Vertex"));
-                ImGui::Text(materializr::tr("At: %.3f, %.3f, %.3f mm"), p.X(), p.Z(), p.Y());
+                ImGui::TextUnformatted(materializr::trFormat("At: %s", materializr::fmtVec3(p.X(), p.Z(), p.Y())).c_str());
                 ImGui::Spacing();
             }
         } catch (...) {}
@@ -162,11 +159,11 @@ static void renderSubShapeProperties(const SelectionManager& sel) {
     // Multi-select totals = a quick measure tool.
     if (nFaces > 1) {
         ImGui::Separator();
-        ImGui::Text(materializr::tr("Total area (%d faces): %.2f mm^2"), nFaces, totalArea);
+        ImGui::TextUnformatted(materializr::trFormat("Total area (%d faces): %s", nFaces, materializr::fmtArea(totalArea)).c_str());
     }
     if (nEdges > 1) {
         ImGui::Separator();
-        ImGui::Text(materializr::tr("Total length (%d edges): %.3f mm"), nEdges, totalLen);
+        ImGui::TextUnformatted(materializr::trFormat("Total length (%d edges): %s", nEdges, materializr::fmtLength(totalLen)).c_str());
     }
     if (nFaces + nEdges + nVerts == 0)
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("No measurable sub-shapes selected."));
@@ -197,22 +194,19 @@ int PropertiesPanel::getEditingStep() const {
     return m_editingStep;
 }
 
-bool PropertiesPanel::render() {
+void PropertiesPanel::render() {
     ImGui::Begin("Properties", nullptr, ImGuiWindowFlags_NoCollapse);
-    const bool modified = renderContent();
+    renderContent();
     ImGui::End();
-    return modified;
 }
 
-bool PropertiesPanel::renderContent() {
-    bool modified = false;
-
-    // Case 0: In sketch mode — show the editable size of the selected element.
+void PropertiesPanel::renderContent() {
+    // Case 0: In sketch mode - show the editable size of the selected element.
     // Takes priority: while sketching, the panel is about the sketch, not the
     // history step or a 3D selection.
     if (m_inSketchMode && m_activeSketch && m_sketchTool) {
-        renderSketchElementPanel(modified);
-        return modified;
+        renderSketchElementPanel();
+        return;
     }
 
     // Case 1: Editing a history operation
@@ -229,7 +223,7 @@ bool PropertiesPanel::renderContent() {
             // Render the operation's parameter controls. Size the input for
             // ~7 digits plus the -/+ step buttons so a labelled InputInt/Double
             // neither runs its right-hand label off the panel nor clips the
-            // value — see HistoryPanel.
+            // value - see HistoryPanel.
             ImGui::PushItemWidth(
                 ImGui::CalcTextSize("0000000").x +
                 2.0f * (ImGui::GetFrameHeight() +
@@ -237,7 +231,7 @@ bool PropertiesPanel::renderContent() {
             const_cast<Operation*>(op)->renderProperties();
             ImGui::PopItemWidth();
 
-            // Enter commits the edit directly — the Apply button stays as the
+            // Enter commits the edit directly - the Apply button stays as the
             // mouse-driven alternative.
             bool enterCommits =
                 ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) &&
@@ -252,11 +246,7 @@ bool PropertiesPanel::renderContent() {
                     // Carry any inline circle-diameter edit into later snapshots
                     // of the same sketch before replaying (see HistoryPanel).
                     m_history->propagateSketchValueEdits(m_editingStep, *m_document);
-                    // Transactional: a failed replay restores the whole model
-                    // rather than leaving it half-built.
-                    m_history->editStep(m_editingStep, *m_document,
-                                        /*transactional=*/true);
-                    modified = true;
+                    applyStepEdit(*m_history, *m_document, m_editingStep, m_markBodyDirty);
                 }
             }
 
@@ -266,10 +256,10 @@ bool PropertiesPanel::renderContent() {
             bool enabled = op->isEnabled();
             if (ImGui::Checkbox(materializr::tr("Enabled"), &enabled)) {
                 if (m_document) {
-                    // In-place toggle — preserves base bodies the op modifies
+                    // In-place toggle - preserves base bodies the op modifies
                     // (replayAll's doc.clear() would delete them).
-                    m_history->setStepEnabled(m_editingStep, enabled, *m_document);
-                    modified = true;
+                    toggleStepEnabled(*m_history, *m_document, m_editingStep, enabled,
+                                      m_markBodyDirty);
                 }
             }
 
@@ -319,6 +309,7 @@ bool PropertiesPanel::renderContent() {
         bool visible = m_document->isBodyVisible(bodyId);
         if (ImGui::Checkbox(materializr::tr("Visible"), &visible)) {
             m_document->setBodyVisible(bodyId, visible);
+            if (m_markBodyDirty) m_markBodyDirty(bodyId);
         }
 
         // Parametric-link hint (which sketch drives this body, and whether the
@@ -342,7 +333,7 @@ bool PropertiesPanel::renderContent() {
 
         // Bounding-box readout (display only). Editing dimensions used to
         // live here as an inline editor, but it was functionally a glorified
-        // Scale — same TransformOp, same anchor, same ellipse-from-cylinder
+        // Scale - same TransformOp, same anchor, same ellipse-from-cylinder
         // surprise. Editing now lives on the Scale gizmo popup, which has a
         // % / mm toggle and shows live dimensions in mm mode.
         ImGui::TextColored(materializr::accentText(), "%s", materializr::tr("Dimensions"));
@@ -380,8 +371,7 @@ bool PropertiesPanel::renderContent() {
                 }
             }
             if (haveExtents) {
-                ImGui::Text(materializr::tr("Size: %.2f x %.2f x %.2f mm"),
-                            extents[0], extents[1], extents[2]);
+                ImGui::TextUnformatted(materializr::trFormat("Size: %s x %s x %s", materializr::fmtLength(extents[0]), materializr::fmtLength(extents[1]), materializr::fmtLength(extents[2])).c_str());
                 ImGui::TextDisabled("%s", materializr::tr("Edit dimensions via the Scale gizmo (R)."));
             } else {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Empty shape"));
@@ -469,7 +459,7 @@ bool PropertiesPanel::renderContent() {
         }
 
         if (sketchLike && m_document && m_history && parentSketchId >= 0) {
-            renderSketchConstraintsPanel(parentSketchId, modified);
+            renderSketchConstraintsPanel(parentSketchId);
         } else if (m_document) {
             // A single selected construction plane gets its orientation panel.
             int planeCount = 0, firstPlaneId = -1, axisCount = 0, firstAxisId = -1;
@@ -483,13 +473,13 @@ bool PropertiesPanel::renderContent() {
                 }
             }
             if (planeCount == 1 && m_document->getPlane(firstPlaneId)) {
-                renderPlanePanel(firstPlaneId, modified);
+                renderPlanePanel(firstPlaneId);
             } else if (axisCount == 1 && m_document->getAxis(firstAxisId)) {
-                renderAxisPanel(firstAxisId, modified);
+                renderAxisPanel(firstAxisId);
             } else {
                 // Construction-plane CREATION actions (Midplane / Tangent /
                 // Normal-to-axis) live in the Tools panel, alongside the other
-                // create operations — see Toolbar's context renderers.
+                // create operations - see Toolbar's context renderers.
                 renderSubShapeProperties(*m_selection);
             }
         } else {
@@ -501,7 +491,18 @@ bool PropertiesPanel::renderContent() {
         ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", materializr::tr("Select an object or operation"));
     }
 
-    return modified;
+    // Plugin-contributed sections (e.g. MatePlugin's "Mates" list, registered
+    // with SelectionContext::Always so it shows regardless of the case above -
+    // a mate is a document-wide relationship, not tied to whatever is
+    // currently selected). This was the only consumer of
+    // PluginRegistry::propertyContributions() until now; the loop was simply
+    // missing, so registerPropertySection() had no reader at all.
+    if (m_pluginContext && m_pluginContext->isBound()) {
+        for (const auto& contrib : materializr::PluginRegistry::instance().propertyContributions()) {
+            if (contrib.context != materializr::SelectionContext::Always) continue;
+            if (contrib.render) contrib.render(*m_pluginContext);
+        }
+    }
 }
 
 // Orientation readout + actions for a selected construction plane. Values are
@@ -509,7 +510,7 @@ bool PropertiesPanel::renderContent() {
 // to match every other coordinate readout. Flip Normal mutates the document
 // directly (marks dirty); Rotate About Axis… routes to Application's hinge
 // popup, which records an undoable PlaneTransformOp on Apply.
-void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
+void PropertiesPanel::renderPlanePanel(int planeId) {
     const auto* pe = m_document->getPlane(planeId);
     if (!pe) return;
 
@@ -519,7 +520,7 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     gp_Dir u = ax.XDirection();
 
     // World→user display swap (Y/Z) so "up" reads as the user's Z.
-    ImGui::Text(materializr::tr("Origin:  %.2f, %.2f, %.2f mm"), o.X(), o.Z(), o.Y());
+    ImGui::TextUnformatted(materializr::trFormat("Origin:  %s", materializr::fmtVec3(o.X(), o.Z(), o.Y())).c_str());
     ImGui::Text(materializr::tr("Normal:  %.3f, %.3f, %.3f"),     n.X(), n.Z(), n.Y());
     ImGui::Text(materializr::tr("In-plane X: %.3f, %.3f, %.3f"),  u.X(), u.Z(), u.Y());
 
@@ -532,8 +533,10 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Flip Normal"))) {
         m_document->flipPlaneNormal(planeId);
+        // No body-dirty call: a construction plane isn't a body and carries
+        // no mesh - nothing here needs re-tessellation. ItemsPanel's own
+        // Flip Normal/Direction menu items only call markDirty() too.
         if (m_markDirty) m_markDirty();
-        modified = true;
     }
     ImGui::SameLine();
     if (ImGui::Button(materializr::tr("Rotate About Axis..."))) {
@@ -557,8 +560,9 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
             ImGui::SameLine();
             if (ImGui::Button(materializr::tr("Remove Image"))) {
                 m_document->removeRefImage(planeId);
+                // A reference image is a plane overlay, not body geometry -
+                // no body-dirty call needed, same reasoning as Flip Normal above.
                 if (m_markDirty) m_markDirty();
-                modified = true;
             }
             ImGui::SetItemTooltip("%s", materializr::tr(
                 "Detach the image. The construction plane itself stays."));
@@ -568,22 +572,23 @@ void PropertiesPanel::renderPlanePanel(int planeId, bool& modified) {
 
 // Orientation readout + Flip Direction for a selected construction axis.
 // Values shown in user Z-up convention (user Y = world Z, user Z = world Y).
-void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
+void PropertiesPanel::renderAxisPanel(int axisId) {
     const auto* ae = m_document->getAxis(axisId);
     if (!ae) return;
 
     const gp_Pnt& o = ae->origin;
     const gp_Dir& d = ae->direction;
-    ImGui::Text(materializr::tr("Origin:    %.2f, %.2f, %.2f mm"), o.X(), o.Z(), o.Y());
+    ImGui::TextUnformatted(materializr::trFormat("Origin:    %s", materializr::fmtVec3(o.X(), o.Z(), o.Y())).c_str());
     ImGui::Text(materializr::tr("Direction: %.3f, %.3f, %.3f"),     d.X(), d.Z(), d.Y());
-    ImGui::Text(materializr::tr("Length:    %.1f mm"), ae->halfLength * 2.0);
+    ImGui::TextUnformatted(materializr::trFormat("Length:    %s", materializr::fmtLength(ae->halfLength * 2.0)).c_str());
 
     ImGui::Spacing();
     ImGui::Separator();
     if (ImGui::Button(materializr::tr("Flip Direction"))) {
         m_document->flipAxisDirection(axisId);
+        // No body-dirty call: a construction axis isn't a body, same
+        // reasoning as Flip Normal above.
         if (m_markDirty) m_markDirty();
-        modified = true;
     }
 }
 
@@ -594,7 +599,7 @@ void PropertiesPanel::renderAxisPanel(int axisId, bool& modified) {
 // panel reads/writes the current sketch directly, so the workflow works
 // across sessions.
 //
-void PropertiesPanel::renderSketchElementPanel(bool& modified) {
+void PropertiesPanel::renderSketchElementPanel() {
     Sketch* sk = m_activeSketch;
     if (!sk) return;
 
@@ -618,12 +623,12 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
 
     // Apply a size edit through the host so it's snapshot/undoable + cascades.
     auto apply = [&](const std::function<void()>& mut) {
-        if (m_sketchMutate) { m_sketchMutate(mut); modified = true; }
+        if (m_sketchMutate) m_sketchMutate(mut);
     };
 
     // Resolve what was clicked to an editable element. Clicking a circle near
     // its CENTRE grabs the centre point (so you can drag-move it), so a selected
-    // point that is a circle/arc centre still exposes that curve's size — you
+    // point that is a circle/arc centre still exposes that curve's size - you
     // can edit a circle by clicking anywhere on it, centre included.
     int circleId = -1, arcId = -1;
     if (!selC.empty()) circleId = *selC.begin();
@@ -642,8 +647,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         ImGui::Text("%s", materializr::tr("Circle"));
         double dia = c->radius * 2.0;
         ImGui::SetNextItemWidth(140);
-        if (materializr::inputNumber(materializr::tr("Diameter (mm)"), &dia, 0.0, 0.0, "%.3f",
-                               ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (materializr::lengthField(materializr::trFormat("Diameter (%s)", materializr::unitSuffix()).c_str(), &dia, ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(dia, 1e-6) * 0.5;
             apply([sk, circleId, r]() { sk->setCircleRadius(circleId, r); });
         }
@@ -656,8 +660,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         // Radius: centre fixed, endpoints slide radially (sweep preserved).
         double rad = a->radius;
         ImGui::SetNextItemWidth(140);
-        if (materializr::inputNumber(materializr::tr("Radius (mm)"), &rad, 0.0, 0.0, "%.3f",
-                               ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (materializr::lengthField(materializr::trFormat("Radius (%s)", materializr::unitSuffix()).c_str(), &rad, ImGuiInputTextFlags_EnterReturnsTrue)) {
             double r = std::max(rad, 1e-6);
             apply([sk, arcId, r]() { sk->resizeArc(arcId, r); });
         }
@@ -671,8 +674,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
             double chord = std::sqrt((e->pos.x - s->pos.x) * (e->pos.x - s->pos.x) +
                                      (e->pos.y - s->pos.y) * (e->pos.y - s->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (materializr::inputNumber(materializr::tr("Chord (mm)"), &chord, 0.0, 0.0, "%.3f",
-                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (materializr::lengthField(materializr::trFormat("Chord (%s)", materializr::unitSuffix()).c_str(), &chord, ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double ch = std::max(chord, 1e-6);
                 apply([sk, arcId, ch]() { sk->setArcChord(arcId, ch); });
             }
@@ -697,18 +699,16 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
         for (const auto& ll : sk->getLines()) if (ll.id == lid) { l = &ll; break; }
         if (!l) return;
         // If this line is a side of an axis-aligned rectangle, edit the whole
-        // rectangle (Width × Height) instead of a single side — that's what the
+        // rectangle (Width × Height) instead of a single side - that's what the
         // user means by "make the rectangle editable".
         Sketch::RectInfo rect;
         if (sk->findAxisAlignedRect(lid, rect)) {
             ImGui::Text("%s", materializr::tr("Rectangle"));
             double w = rect.width, h = rect.height;
             ImGui::SetNextItemWidth(140);
-            bool w_ed = materializr::inputNumber(materializr::tr("Width (mm)"), &w, 0.0, 0.0, "%.3f",
-                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            bool w_ed = materializr::lengthField(materializr::trFormat("Width (%s)", materializr::unitSuffix()).c_str(), &w, ImGuiInputTextFlags_EnterReturnsTrue).changed;
             ImGui::SetNextItemWidth(140);
-            bool h_ed = materializr::inputNumber(materializr::tr("Height (mm)"), &h, 0.0, 0.0, "%.3f",
-                                           ImGuiInputTextFlags_EnterReturnsTrue);
+            bool h_ed = materializr::lengthField(materializr::trFormat("Height (%s)", materializr::unitSuffix()).c_str(), &h, ImGuiInputTextFlags_EnterReturnsTrue).changed;
             if (w_ed || h_ed) {
                 double nw = std::max(w, 1e-6), nh = std::max(h, 1e-6);
                 apply([sk, lid, nw, nh]() { sk->setRectangleSize(lid, nw, nh); });
@@ -723,8 +723,7 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
                 len = std::sqrt((p2->pos.x - p1->pos.x) * (p2->pos.x - p1->pos.x) +
                                 (p2->pos.y - p1->pos.y) * (p2->pos.y - p1->pos.y));
             ImGui::SetNextItemWidth(140);
-            if (materializr::inputNumber(materializr::tr("Length (mm)"), &len, 0.0, 0.0, "%.3f",
-                                   ImGuiInputTextFlags_EnterReturnsTrue)) {
+            if (materializr::lengthField(materializr::trFormat("Length (%s)", materializr::unitSuffix()).c_str(), &len, ImGuiInputTextFlags_EnterReturnsTrue)) {
                 double nl = std::max(len, 1e-6);
                 apply([sk, lid, nl]() { sk->setLineLength(lid, nl); });
             }
@@ -740,9 +739,9 @@ void PropertiesPanel::renderSketchElementPanel(bool& modified) {
 // Commit policy: text edits commit on Enter or focus-out (the
 // IsItemDeactivatedAfterEdit signal). On commit we snapshot the pre-edit
 // sketch, apply the value, run the solver, and push a SketchEditOp
-// covering both states — so the change is undoable AND shows up as a
+// covering both states - so the change is undoable AND shows up as a
 // proper step in history.
-void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified) {
+void PropertiesPanel::renderSketchConstraintsPanel(int sketchId) {
     auto sk = m_document->getSketch(sketchId);
     if (!sk) return;
     // One-shot diagnostic (--verbose only): log when the panel first opens on
@@ -823,10 +822,9 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
         solver.solve(*sk);
         auto after = std::make_shared<Sketch>(*sk);
         auto op = std::make_unique<SketchEditOp>(sk, edit.beforeSnap, after);
-        m_history->pushExecuted(std::move(op));
+        m_history->pushExecuted(std::move(op), *m_document);
         edit.beforeSnap.reset();
         edit.focused = false;
-        modified = true;
         // Cascade trigger: Application listens for this and re-executes any
         // ExtrudeOp downstream of `sketchId` so the body follows the new
         // constraint value. No-op when nobody's subscribed.
@@ -846,7 +844,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
 
         // Render dimensional ones (Distance, Radius/Diameter, Angle,
         // point-to-line Distance) inline. Non-dimensional ones get a single
-        // muted bullet — there's nothing to tune, but listing them confirms
+        // muted bullet - there's nothing to tune, but listing them confirms
         // what's actually applied.
         bool isDim = (c.type == ConstraintType::Distance ||
                       c.type == ConstraintType::Radius   ||
@@ -858,24 +856,30 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             auto& edit = m_constraintEdits[c.id];
 
             // Display value: Radius shown as diameter (matches sketch popup).
-            double shown = (c.type == ConstraintType::Radius) ? (c.value * 2.0)
+            double shown = (c.type == ConstraintType::Radius) ? (materializr::toDisplay(c.value * 2.0))
                           : (c.type == ConstraintType::Angle)
                                 ? (c.value * 180.0 / M_PI)
-                                : c.value;
+                                : materializr::toDisplay(c.value);
 
             // Refill the buffer when the user is NOT actively editing this
             // field, so external changes (solver runs, undo/redo) propagate
             // into the visible text. While focused we leave the buffer alone
             // so we don't trample the user's keystrokes.
-            const char* unit = (c.type == ConstraintType::Angle) ? "\xC2\xB0" : "mm";
+            const char* unit = (c.type == ConstraintType::Angle) ? "\xC2\xB0" : materializr::unitSuffix();
             const char* label =
                 c.type == ConstraintType::Distance ? "Distance"
               : c.type == ConstraintType::Radius   ? "\xC3\x98 (diameter)"
               : c.type == ConstraintType::DistancePointLine ? "Dist \xE2\x8A\xA5"
               : c.type == ConstraintType::CircleGap ? "Gap"
                                                    : "Angle";
+            // Decimals from the unit table, not a hardcoded 3 - under metres
+            // or feet the table asks for 4, and "%.3f" quantised the stored
+            // value to a 1 mm grid on every commit. An Angle is degrees and
+            // keeps its own fixed precision.
+            const char* shownFmt =
+                (c.type == ConstraintType::Angle) ? "%.3f" : materializr::lengthFormat();
             if (!edit.focused) {
-                std::snprintf(edit.buf, sizeof(edit.buf), "%.3f", shown);
+                std::snprintf(edit.buf, sizeof(edit.buf), shownFmt, shown);
             }
 
             ImGui::TextUnformatted(label);
@@ -890,10 +894,10 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
             (void)materializr::parseFinite(edit.buf, padVal);
             bool justActivated   = false;
             bool justDeactivated =
-                materializr::inputNumber("##val", &padVal, 0.0, 0.0, "%.3f",
+                materializr::inputNumber("##val", &padVal, 0.0, 0.0, shownFmt,
                                          ImGuiInputTextFlags_EnterReturnsTrue,
                                          &justActivated);
-            // Keep the buffer authoritative — the commit path below parses it.
+            // Keep the buffer authoritative - the commit path below parses it.
             if (justDeactivated)
                 std::snprintf(edit.buf, sizeof(edit.buf), "%.6g", padVal);
             ImGui::SameLine(); ImGui::Text("%s", unit);
@@ -910,11 +914,13 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
                 // solver; garbage entry commits nothing (typed stays == value).
                 double typed = c.value;
                 (void)materializr::parseFinite(edit.buf, typed);
+                // Lengths: display unit -> mm FIRST, then halve a circle's
+                // diameter; angles never see the unit.
                 double newRaw = (c.type == ConstraintType::Radius)
-                                    ? typed * 0.5
+                                    ? materializr::toMm(typed) * 0.5
                               : (c.type == ConstraintType::Angle)
                                     ? typed * M_PI / 180.0
-                                    : typed;
+                                    : materializr::toMm(typed);
                 if (std::abs(newRaw - c.value) > 1e-6) {
                     commitEdit(c, newRaw, edit);
                 } else {
@@ -930,7 +936,7 @@ void PropertiesPanel::renderSketchConstraintsPanel(int sketchId, bool& modified)
 
     if (!anyDim) {
         ImGui::Spacing();
-        ImGui::TextWrapped("%s", materializr::tr("This sketch has no dimensional constraints — only Horizontal / Parallel / etc., which have nothing to tune."));
+        ImGui::TextWrapped("%s", materializr::tr("This sketch has no dimensional constraints - only Horizontal / Parallel / etc., which have nothing to tune."));
     } else {
         ImGui::Spacing();
         ImGui::TextDisabled("%s", materializr::tr("Press Enter or click elsewhere to commit a value."));

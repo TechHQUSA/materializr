@@ -1,3 +1,4 @@
+#include "ui/LengthField.h"
 #include "MoveFaceOp.h"
 #include "SubShapeIndex.h"
 #include "Sketch.h"
@@ -5,8 +6,10 @@
 #include <gp_Pln.hxx>
 
 #include <imgui.h>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include "../core/Verbose.h"
 
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
@@ -45,12 +48,19 @@
 #include <Standard_Failure.hxx>
 #include <algorithm>
 #include "../i18n.h"
+#include "ParamParse.h"
+#include "BoolArgs.h"
+
+namespace {
+std::atomic<int> g_moveFaceAdoptedCount{0};
+std::atomic<int> g_moveFaceRecomputedCount{0};
+} // namespace
 
 namespace {
 // The far cross-section of the feature attached to `face`: the edge LOOPS where
 // the side-wall faces sharing `face`'s boundary end (meet a step / other
 // geometry). On a plain prism that's the opposite cap; on a funnel→step→spout,
-// from the spout cap it's the spout-top — which is an ANNULUS (outer + inner
+// from the spout cap it's the spout-top - which is an ANNULUS (outer + inner
 // ring) when the spout is hollow, so this returns a SET of loops. Empty if it
 // can't assemble clean closed loops (caller falls back to the opposite cap).
 std::vector<TopoDS_Wire> featureFarLoops(const TopoDS_Shape& body,
@@ -109,6 +119,7 @@ std::vector<TopoDS_Wire> featureFarLoops(const TopoDS_Shape& body,
 } // namespace
 
 bool MoveFaceOp::execute(Document& doc) {
+    auto adopted = takePrecomputed();
     if (m_bodyId < 0 || m_face.IsNull()) return false;
     // Nothing-to-do guard, per kind.
     if (m_kind == Kind::Translate && m_move.Magnitude() < 1e-6) return false;
@@ -125,7 +136,7 @@ bool MoveFaceOp::execute(Document& doc) {
 
         // Name the target face on the first run (while m_face is still valid),
         // then re-resolve it whenever it's no longer a live sub-shape of the
-        // (possibly rebuilt) body — an upstream sketch edit that MOVED the face
+        // (possibly rebuilt) body - an upstream sketch edit that MOVED the face
         // leaves m_face pointing at the old body. Sketch-anchored, so it
         // follows; falls back to the stale handle if unnameable.
         if (m_faceRef.empty()) {
@@ -147,7 +158,7 @@ bool MoveFaceOp::execute(Document& doc) {
                     // SANITY GUARD: only adopt the resolved face if it points
                     // the same way as the stale one. The stale face's geometry
                     // is still readable (its TShape lives on), and it's what
-                    // the pre-topo code would have used — so a resolution that
+                    // the pre-topo code would have used - so a resolution that
                     // flips orientation is a MIS-resolve (this is what made a
                     // body "slump": a taper re-applied about a wrong plane).
                     // Reject it and keep the old behaviour instead.
@@ -187,7 +198,7 @@ bool MoveFaceOp::execute(Document& doc) {
             pivot = gp.CentreOfMass();
         }
 
-        // The single transform applied to the moving (top) loops — translate,
+        // The single transform applied to the moving (top) loops - translate,
         // rotate-about-pivot, or scale-about-pivot. Everything downstream (loft,
         // sketch follow, undo) just applies this one gp_Trsf.
         gp_Vec V = m_move - N * m_move.Dot(N); // in-plane slide (Translate)
@@ -240,7 +251,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // the moved top outer wire, then subtract a loft of each HOLE loop
         // (base inner -> moved top inner). Every loop moves by V here (the whole
         // face slides, holes included); per-loop control (move a hole on its
-        // own) layers on top later. All geometry is local wires — no whole-body
+        // own) layers on top later. All geometry is local wires - no whole-body
         // convert, so it survives bodies the shear crashed on. Non-prism bodies
         // refuse here instead of crashing.
 
@@ -248,7 +259,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // FARTHEST along -N from the selected face. The normal need only be
         // roughly opposite (dot < -0.3), NOT near-perfectly antiparallel: after
         // a TILT the top is tilted while the base stays flat, so they're no
-        // longer parallel — a strict test made a second op on a tilted face
+        // longer parallel - a strict test made a second op on a tilted face
         // refuse. The loose test still excludes the perpendicular side walls.
         TopoDS_Face baseFace;
         double bestDist = -1e300;
@@ -388,7 +399,7 @@ bool MoveFaceOp::execute(Document& doc) {
         // Build the feature solid base→top. applyMove OFF reconstructs the
         // ORIGINAL feature (the cut tool); ON builds the transformed one. The
         // hole rings ride/stay per the three-state flags (TILT must ride, else
-        // the face can't close — the "half cover" bug).
+        // the face can't close - the "half cover" bug).
         auto buildFeature = [&](bool applyMove) -> TopoDS_Shape {
             TopoDS_Wire bOuter = baseOuter; bOuter.Reverse();
             TopoDS_Shape feat;
@@ -425,9 +436,33 @@ bool MoveFaceOp::execute(Document& doc) {
         // the axis is known (topT was left identity in the switch for Twist).
         if (isTwist) topT.SetRotation(twAxis, m_twistAngle);
 
+        // The preview worker already loft-and-cut this exact face with these
+        // exact parameters: adopt its result instead of repeating the
+        // per-hole loft/cut work below, which is what makes Move Face slow
+        // on a many-hole face. Checked here (after the face re-bind above,
+        // after topT/twAxis are fully resolved for every Kind including
+        // Twist at line ~429) and NOT any earlier, because applyResult()
+        // needs a fully-resolved topT for the sketch-slide, and the adopt
+        // key needs the RE-BOUND m_face, not the pre-rebind handle.
+        if (adopted && canAdopt(*adopted, m_previousShape, previewKey(m_previousShape))) {
+            g_moveFaceAdoptedCount.fetch_add(1, std::memory_order_relaxed);
+            if (materializr::isVerbose())
+                std::fprintf(stderr, "[MoveFace] adopted precomputed result, skipped recompute\n");
+            applyResult(doc, adopted->result, topT);
+            return true;
+        }
+        g_moveFaceRecomputedCount.fetch_add(1, std::memory_order_relaxed);
+        if (materializr::isVerbose()) {
+            if (adopted)
+                std::fprintf(stderr, "[MoveFace] a precomputed candidate was offered but its "
+                                      "key/base no longer matched - recomputing\n");
+            else
+                std::fprintf(stderr, "[MoveFace] no precomputed candidate - recomputing\n");
+        }
+
         TopoDS_Shape newFeature = isTwist ? buildTwistFeature(true) : buildFeature(true);
         if (newFeature.IsNull()) {
-            std::fprintf(stderr, "[MoveFace] feature loft failed — refusing\n");
+            std::fprintf(stderr, "[MoveFace] feature loft failed - refusing\n");
             return false;
         }
 
@@ -436,7 +471,7 @@ bool MoveFaceOp::execute(Document& doc) {
             result = newFeature; // the loft IS the new body (plain prism)
         } else {
             // Cut the ORIGINAL feature out of the body, fuse the transformed one
-            // back — keeps every other feature (the funnel above the spout).
+            // back - keeps every other feature (the funnel above the spout).
             TopoDS_Shape oldFeature = isTwist ? buildTwistFeature(false) : buildFeature(false);
             if (oldFeature.IsNull()) {
                 std::fprintf(stderr, "[MoveFace] original-feature loft failed\n");
@@ -444,7 +479,8 @@ bool MoveFaceOp::execute(Document& doc) {
             }
             TopoDS_Shape rest;
             try {
-                BRepAlgoAPI_Cut c(m_previousShape, oldFeature);
+                BRepAlgoAPI_Cut c;
+                materializr::setBooleanShapes(c, m_previousShape, oldFeature);
                 c.Build(); if (c.IsDone()) rest = c.Shape();
             } catch (...) {}
             int restSolids = 0;
@@ -454,25 +490,26 @@ bool MoveFaceOp::execute(Document& doc) {
                 result = newFeature; // the feature was the whole body after all
             } else {
                 try {
-                    BRepAlgoAPI_Fuse f(rest, newFeature);
+                    BRepAlgoAPI_Fuse f;
+                    materializr::setBooleanShapes(f, rest, newFeature);
                     f.Build(); if (f.IsDone()) result = f.Shape();
                 } catch (...) {}
                 if (result.IsNull()) {
-                    std::fprintf(stderr, "[MoveFace] feature fuse failed — refusing\n");
+                    std::fprintf(stderr, "[MoveFace] feature fuse failed - refusing\n");
                     return false;
                 }
             }
         }
 
         if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) {
-            std::fprintf(stderr, "[MoveFace] result invalid — refusing\n");
+            std::fprintf(stderr, "[MoveFace] result invalid - refusing\n");
             return false;
         }
         int nsolids = 0;
         for (TopExp_Explorer sx(result, TopAbs_SOLID); sx.More(); sx.Next()) ++nsolids;
         if (nsolids < 1) return false;
 
-        // Sanity guards BRepCheck can't provide — a shelled (hollow) body run
+        // Sanity guards BRepCheck can't provide - a shelled (hollow) body run
         // through the loft/shear rebuild can come out topologically "valid" yet
         // WRONG: an inside-out solid (negative volume) or a re-solidified body
         // whose cavity was silently discarded. Refuse cleanly instead of
@@ -483,7 +520,7 @@ bool MoveFaceOp::execute(Document& doc) {
             BRepGProp::VolumeProperties(result, gOut);
             const double vIn = gIn.Mass(), vOut = gOut.Mass();
             if (!(vOut > 1e-9)) {
-                std::fprintf(stderr, "[MoveFace] result volume %.3f — inside-out/"
+                std::fprintf(stderr, "[MoveFace] result volume %.3f - inside-out/"
                              "degenerate, refusing\n", vOut);
                 return false;
             }
@@ -493,7 +530,7 @@ bool MoveFaceOp::execute(Document& doc) {
             for (TopExp_Explorer e(result, TopAbs_SHELL); e.More(); e.Next()) ++shOut;
             if (shOut < shIn) {
                 std::fprintf(stderr, "[MoveFace] would destroy the internal "
-                             "cavity (%d -> %d shells) — refusing\n", shIn, shOut);
+                             "cavity (%d -> %d shells) - refusing\n", shIn, shOut);
                 return false;
             }
             // A slide is a volume-preserving shear and a tilt is bounded; a
@@ -505,43 +542,22 @@ bool MoveFaceOp::execute(Document& doc) {
               : (m_kind == Kind::Rotate)    ? (ratio > 0.40 && ratio < 1.60)
               : true;   // Scale legitimately rescales volume; Twist self-checks
             if (!volumeSane) {
-                std::fprintf(stderr, "[MoveFace] volume %.1f -> %.1f — the "
+                std::fprintf(stderr, "[MoveFace] volume %.1f -> %.1f - the "
                              "rebuild lost the hollow interior, refusing\n",
                              vIn, vOut);
                 return false;
             }
         }
 
-        m_resultShape = result;
-        doc.updateBody(m_bodyId, result);
-
-        // Move on-face sketches by the SAME transform (slide / tilt / scale), so
-        // they stay glued to the face — but only when the face OUTLINE moves
-        // (sketches ride the face, not a hole). Stored for undo.
-        m_appliedXform = m_moveOuter ? topT : gp_Trsf();
-        if (m_moveOuter)
-        for (int sid : m_sketchIds) {
-            if (auto sk = doc.getSketch(sid)) {
-                gp_Pln pln = sk->getPlane();
-                pln.Transform(m_appliedXform);
-                sk->setPlane(pln);
-                // The cached host face is used to build the sketch's regions —
-                // move it too (copy=true forces a fresh TShape so the region
-                // cache, keyed on it, invalidates), or its stale geometry
-                // highlights at the OLD position when the region is clicked.
-                TopoDS_Face sf = sk->getSourceFace();
-                if (!sf.IsNull()) {
-                    TopoDS_Shape mv = BRepBuilderAPI_Transform(sf, m_appliedXform, Standard_True).Shape();
-                    if (!mv.IsNull() && mv.ShapeType() == TopAbs_FACE)
-                        sk->setSourceFace(TopoDS::Face(mv));
-                }
-            }
-        }
+        applyResult(doc, result, topT);
         return true;
     } catch (...) {
         return false;
     }
 }
+
+int MoveFaceOp::adoptedCount() { return g_moveFaceAdoptedCount.load(std::memory_order_relaxed); }
+int MoveFaceOp::recomputedCount() { return g_moveFaceRecomputedCount.load(std::memory_order_relaxed); }
 
 bool MoveFaceOp::undo(Document& doc) {
     if (m_bodyId < 0 || m_previousShape.IsNull()) return false;
@@ -566,6 +582,89 @@ bool MoveFaceOp::undo(Document& doc) {
     } catch (...) { return false; }
 }
 
+std::string MoveFaceOp::previewKey(const TopoDS_Shape& base) const {
+    // %a for every double: a decimal-rounded key (%f/%g) would let a
+    // 1e-15-different rotation falsely adopt a stale shape. Built as a
+    // std::string, not a fixed buffer - Rotate's explicit-transform case
+    // alone is 12 doubles, well past what a small snprintf buffer holds
+    // without silent truncation (see TaperOp::previewKey's identical note).
+    auto hex = [](double v) {
+        char b[32];
+        std::snprintf(b, sizeof(b), "%a", v);
+        return std::string(b);
+    };
+    // The kind tag goes first and is never omitted: two different Kinds must
+    // never produce the same key even if their numeric fields coincide.
+    std::string head = "moveface;k=" + std::to_string(static_cast<int>(m_kind));
+    switch (m_kind) {
+        case Kind::Translate:
+            head += ";mv=" + hex(m_move.X()) + "," + hex(m_move.Y()) + "," + hex(m_move.Z());
+            break;
+        case Kind::Rotate:
+            head += ";re=" + std::string(m_rotUseExplicit ? "1" : "0");
+            if (m_rotUseExplicit) {
+                gp_Trsf t = m_rotExplicit;
+                for (int r = 1; r <= 3; ++r)
+                    for (int c = 1; c <= 4; ++c)
+                        head += "," + hex(t.Value(r, c));
+            } else {
+                head += ";ax=" + hex(m_rotAxis.X()) + "," + hex(m_rotAxis.Y()) + "," +
+                        hex(m_rotAxis.Z()) + ";an=" + hex(m_rotAngle);
+            }
+            break;
+        case Kind::Twist:
+            head += ";tw=" + hex(m_twistAngle);
+            break;
+        case Kind::Scale:
+            head += ";sn=" + std::string(m_scaleNonUniform ? "1" : "0");
+            if (m_scaleNonUniform) {
+                head += ";aA=" + hex(m_scaleAxisA.X()) + "," + hex(m_scaleAxisA.Y()) + "," +
+                        hex(m_scaleAxisA.Z()) +
+                        ";aB=" + hex(m_scaleAxisB.X()) + "," + hex(m_scaleAxisB.Y()) + "," +
+                        hex(m_scaleAxisB.Z()) +
+                        ";sA=" + hex(m_scaleA) + ";sB=" + hex(m_scaleB);
+            } else {
+                head += ";sf=" + hex(m_scaleFactor);
+            }
+            break;
+    }
+    head += ";mo=" + std::string(m_moveOuter ? "1" : "0") + ";hs=";
+    for (bool b : m_holeSlant) head += (b ? '1' : '0');
+    head += ";hv=";
+    for (bool b : m_holeVertical) head += (b ? '1' : '0');
+    head += ";face=";
+
+    std::vector<TopoDS_Shape> faces{m_face};
+    std::string sel;
+    if (!SubShapeIndex::orientedKey(base, faces, TopAbs_FACE, sel)) return {};
+    return head + sel;
+}
+
+void MoveFaceOp::applyResult(Document& doc, const TopoDS_Shape& result,
+                             const gp_Trsf& topT) {
+    m_resultShape = result;
+    doc.updateBody(m_bodyId, result);
+
+    // Move on-face sketches by the SAME transform (slide / tilt / scale), so
+    // they stay glued to the face - but only when the face OUTLINE moves
+    // (sketches ride the face, not a hole). Stored for undo.
+    m_appliedXform = m_moveOuter ? topT : gp_Trsf();
+    if (m_moveOuter)
+    for (int sid : m_sketchIds) {
+        if (auto sk = doc.getSketch(sid)) {
+            gp_Pln pln = sk->getPlane();
+            pln.Transform(m_appliedXform);
+            sk->setPlane(pln);
+            TopoDS_Face sf = sk->getSourceFace();
+            if (!sf.IsNull()) {
+                TopoDS_Shape mv = BRepBuilderAPI_Transform(sf, m_appliedXform, Standard_True).Shape();
+                if (!mv.IsNull() && mv.ShapeType() == TopAbs_FACE)
+                    sk->setSourceFace(TopoDS::Face(mv));
+            }
+        }
+    }
+}
+
 std::string MoveFaceOp::description() const {
     char buf[96];
     if (m_kind == Kind::Twist) {
@@ -582,7 +681,7 @@ void MoveFaceOp::renderProperties() {
     ImGui::Text("%s", materializr::tr("Move Face"));
     ImGui::Separator();
     ImGui::Text(materializr::tr("Body ID: %d"), m_bodyId);
-    ImGui::Text(materializr::tr("Move: (%.2f, %.2f, %.2f) mm"), m_move.X(), m_move.Y(), m_move.Z());
+    ImGui::TextUnformatted(materializr::trFormat("Move: %s", materializr::fmtVec3(m_move.X(), m_move.Y(), m_move.Z())).c_str());
 }
 
 OperationDiff MoveFaceOp::captureDiff() const {
@@ -627,14 +726,15 @@ bool MoveFaceOp::deserializeParams(const std::string& blob) {
         size_t end = blob.find(';', eq);
         if (end == std::string::npos) end = blob.size();
         std::string key = blob.substr(pos, eq - pos);
-        // faceref is a length-prefixed opaque blob written last — read to end.
+        // faceref is a length-prefixed opaque blob written last - read to end.
         if (key == "faceref") {
             std::string rest = blob.substr(eq + 1);
             size_t c = rest.find(':');
             if (c != std::string::npos) {
-                size_t n = static_cast<size_t>(std::atoll(rest.substr(0, c).c_str()));
-                if (c + 1 + n <= rest.size())
-                    m_faceRef = materializr::topo::Ref::parse(rest.substr(c + 1, n));
+                // Checked length, bounded by subtraction (ParamParse.h).
+                size_t n = 0, payload = 0;
+                if (materializr::readLenPrefix(rest, 0, c, n, payload))
+                    m_faceRef = materializr::topo::Ref::parse(rest.substr(payload, n));
             }
             any = true;
             break;

@@ -53,6 +53,41 @@ std::string serialize(const TopoDS_Shape& shape,
     return out;
 }
 
+bool orientedKey(const TopoDS_Shape& shape, const std::vector<TopoDS_Shape>& subs,
+                 TopAbs_ShapeEnum type, std::string& out) {
+    out.clear();
+    if (shape.IsNull() || subs.empty()) return false;
+    try {
+        // Built once for the whole selection; FindIndex per face would rebuild
+        // this map on every call.
+        TopTools_IndexedMapOfShape map;
+        TopExp::MapShapes(shape, type, map);
+        std::string acc;
+        for (const auto& sub : subs) {
+            if (sub.IsNull()) return false;
+            const int idx = map.FindIndex(sub);
+            if (idx <= 0) return false;   // the whole key is void, not shorter
+            if (!acc.empty()) acc += ',';
+            acc += std::to_string(idx);
+            // All four, not just REVERSED: collapsing INTERNAL and EXTERNAL
+            // into FORWARD would let two genuinely different selections key
+            // the same, which is the whole thing this encoding exists to stop.
+            switch (sub.Orientation()) {
+                case TopAbs_FORWARD:  acc += 'F'; break;
+                case TopAbs_REVERSED: acc += 'R'; break;
+                case TopAbs_INTERNAL: acc += 'I'; break;
+                case TopAbs_EXTERNAL: acc += 'E'; break;
+                default: return false;   // unknown: void the whole key
+            }
+        }
+        out = std::move(acc);
+        return true;
+    } catch (...) {
+        out.clear();
+        return false;
+    }
+}
+
 std::vector<int> parse(const std::string& csv) {
     std::vector<int> out;
     size_t pos = 0;
@@ -126,7 +161,7 @@ TopoDS_Edge rebindOne(const TopTools_IndexedMapOfShape& map,
                     std::abs(c0.Axis().Direction().Dot(c1.Axis().Direction())) > kDirTol &&
                     std::abs(c0.Radius() - c1.Radius()) < kDistTol;
             } else {
-                // Free-form curves: midpoint proximity only, and tight — a
+                // Free-form curves: midpoint proximity only, and tight - a
                 // wrong match here would silently blend the wrong edge.
                 // (A relaxed unique-winner pass below rescues fragmented /
                 // merged curves whose midpoint shifted, #54.)
@@ -146,7 +181,7 @@ TopoDS_Edge rebindOne(const TopTools_IndexedMapOfShape& map,
     // Relaxed second chance (#54): a fragmented or merged curved edge keeps
     // its carrier but shifts its midpoint past the strict tolerance. Accept a
     // same-curve-type candidate within 2 mm ONLY when it wins unambiguously
-    // (runner-up at least twice as far) — never a coin-flip re-bind.
+    // (runner-up at least twice as far) - never a coin-flip re-bind.
     TopoDS_Edge loose;
     double d1 = 1e100, d2 = 1e100;
     for (int i = 1; i <= map.Extent(); ++i) {
@@ -176,12 +211,12 @@ bool rebindEdges(const TopoDS_Shape& shape, std::vector<TopoDS_Edge>& edges) {
         std::vector<TopoDS_Edge> rebound;
         rebound.reserve(edges.size());
         for (const auto& e : edges) {
-            if (map.Contains(e)) {          // still a live sub-shape — keep
+            if (map.Contains(e)) {          // still a live sub-shape - keep
                 rebound.push_back(e);
                 continue;
             }
             TopoDS_Edge r = rebindOne(map, e);
-            if (r.IsNull()) return false;   // genuinely gone — caller decides
+            if (r.IsNull()) return false;   // genuinely gone - caller decides
             rebound.push_back(r);
         }
         edges = std::move(rebound);
