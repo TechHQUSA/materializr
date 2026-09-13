@@ -7279,17 +7279,25 @@ void Application::restoreProjectRecoveryNow() {
     if (paths.empty()) return;
 
     int restored = 0, failed = 0;
+    bool firstLandedInNewTab = false;
     size_t firstTab = m_activeSession;   // where the newest snapshot lands
     for (size_t i = 0; i < paths.size(); ++i) {
         const std::string& recPath = paths[i];
         materializr::ProjectRecoveryMeta meta;
         materializr::readProjectRecoveryMetaAt(recPath, meta);
-        // Each snapshot after the first gets its own tab. A refused switch
-        // can't happen here (nothing is mid-sketch at startup), but honour it
-        // anyway rather than restoring into the wrong tab.
-        if (restored > 0) {
+        // Each snapshot after the first gets its own tab. The first one does
+        // too, UNLESS the active tab is an empty scratch workspace: this
+        // restore can run at any point in a live session, not just at a
+        // fresh launch, and the active tab may hold real, unrelated,
+        // unsaved work - an orphan from a completely different dead
+        // instance must never silently overwrite it (Steve's report: an
+        // orphan snapshot replaced an open, in-progress project). A refused
+        // switch can't happen at true startup, but honour it anyway rather
+        // than restoring into the wrong tab.
+        if (restored > 0 || !activeSessionIsScratch()) {
             const size_t idx = createSession();
             if (!switchToSession(idx)) { closeSession(idx); ++failed; continue; }
+            if (restored == 0) { firstTab = idx; firstLandedInNewTab = true; }
         }
         // Load through the normal project loader (rebuilds bodies + editable
         // history). loadProjectAt sets m_currentProjectPath to the sidecar and
@@ -7317,12 +7325,17 @@ void Application::restoreProjectRecoveryNow() {
                      meta.bodyCount, meta.stepCount, m_activeSession);
     }
     // Land on the tab the PROMPT described (the newest snapshot), not
-    // whichever one happened to load last.
-    if (restored > 1 && firstTab < m_sessions.size()) switchToSession(firstTab);
+    // whichever one happened to load last - including when that snapshot
+    // got redirected to a fresh tab above because the active one wasn't
+    // scratch.
+    if ((restored > 1 || firstLandedInNewTab) && firstTab < m_sessions.size())
+        switchToSession(firstTab);
     materializr::clearProjectRecoveryCandidate();  // whatever is left of it
     saveAppSettings();                             // fix lastProjectPath off the sidecar
     if (restored > 1)
         showToast("Recovered " + std::to_string(restored) + " projects.");
+    else if (restored == 1 && firstLandedInNewTab)
+        showToast("Recovered unsaved work into a new tab.");
     if (failed > 0)
         showToast(std::to_string(failed) + " recovered project(s) "
                   "couldn't be reopened.");
