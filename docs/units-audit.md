@@ -398,9 +398,9 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/io/Settings.h:180 | `// to mm on load, after the display unit is applied.` |
 | comment | src/io/Settings.h:205 | `// (0 mm, 1 cm, 2 m, 3 in, 4 ft). An int for the same reason language is -` |
 | comment | src/io/Settings.h:206 | `// this header stays free of core/Units.h. The model is always mm; this only` |
-| comment | src/io/StlExport.cpp:114 | `// OrcaSlicer silently dropped the bottom 5 mm of the print.` |
-| comment | src/io/StlExport.cpp:116 | `// Welding vertices at 1e-3 mm alone took those 6,904 open edges to ONE` |
-| comment | src/io/StlExport.cpp:147 | `{   // weld at 1e-3 mm` |
+| comment | src/io/StlExport.cpp:216 | `// OrcaSlicer silently dropped the bottom 5 mm of the print.` |
+| comment | src/io/StlExport.cpp:218 | `// Welding vertices at 1e-3 mm alone took those 6,904 open edges to ONE` |
+| comment | src/io/StlExport.cpp:248 | `{   // weld at 1e-3 mm` |
 | comment | src/io/StlExport.h:13 | `double linearDeflection = 0.01;  // mm - chord deviation (smaller = smoother)` |
 | comment | src/io/SvgExport.cpp:150 | `// 1 SVG user unit = 1 mm; Y flipped (CAD Y-up -> SVG Y-down).` |
 | comment | src/ios_platform.h:4 | `// iOS runtime services (implemented in ios_platform.mm). Safe to include` |
