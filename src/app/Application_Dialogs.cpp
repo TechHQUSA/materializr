@@ -9,8 +9,7 @@
 #include "url_open.h"
 #include "../platform_defs.h"
 #if !defined(MZ_MOBILE)
-#include "../ai/AnthropicClient.h"
-#include "../ai/OpenAiCompatibleClient.h"
+#include "../ai/AiConnectionTest.h"
 #endif
 
 #include <cstdlib>
@@ -665,11 +664,6 @@ void Application::renderSettings() {
                         "Point the base URL at http://localhost:11434/v1 for Ollama, or "
                         "LM Studio's local server address, to run without any cloud key.");
 
-                    // NOTE: this constructs AI clients and drives Test Connection directly
-                    // in Application_Dialogs.cpp rather than in the AiAssistant plugin,
-                    // which deviates from this repo's plugin-ownership rule (see
-                    // CONTRIBUTING.md). Known, accepted for v1; a real fix would move
-                    // client construction into the plugin and is out of scope here.
                     // Test Connection: fires one minimal, tool-free request against
                     // the current in-memory settings (auto-persisted the same frame
                     // they change, via saveAppSettings() below) so the user gets a
@@ -693,21 +687,8 @@ void Application::renderSettings() {
                     }
                     ImGui::BeginDisabled(testBusy);
                     if (ImGui::Button("Test Connection")) {
-                        std::unique_ptr<materializr::ai::LlmClient> client;
-                        if (m_aiSettings.provider == materializr::AiProvider::Anthropic)
-                            client = std::make_unique<materializr::ai::AnthropicClient>(
-                                m_aiSettings.anthropicApiKey, m_aiSettings.anthropicModel);
-                        else
-                            client = std::make_unique<materializr::ai::OpenAiCompatibleClient>(
-                                m_aiSettings.openAiApiKey, m_aiSettings.openAiBaseUrl,
-                                m_aiSettings.openAiModel);
                         testResultText.clear();
-                        testFuture = std::async(std::launch::async,
-                            [c = std::shared_ptr<materializr::ai::LlmClient>(std::move(client))]() {
-                                std::vector<materializr::ai::ChatMessage> msgs = {
-                                    {materializr::ai::ChatRole::User, "Reply with OK.", ""}};
-                                return c->sendTurn(msgs, {});
-                            });
+                        testFuture = materializr::ai::testConnection(m_aiSettings);
                     }
                     ImGui::EndDisabled();
                     if (testBusy) { ImGui::SameLine(); ImGui::TextDisabled("Testing..."); }

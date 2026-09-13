@@ -23,8 +23,8 @@ const std::vector<ToolDef>& allTools() {
     static const std::vector<ToolDef> kTools = {
         {"add_box", "Create a rectangular box body.",
          withOrigin({num("width", "Size along X in mm."),
-                     num("height", "Size along Y in mm."),
-                     num("depth", "Size along Z in mm.")})},
+                     num("height", "Size along the up axis (Z) in mm."),
+                     num("depth", "Size along the horizontal depth axis (Y) in mm.")})},
         {"add_cylinder", "Create a cylindrical body.",
          withOrigin({num("radius", "Radius in mm."),
                      num("height", "Height in mm.")})},

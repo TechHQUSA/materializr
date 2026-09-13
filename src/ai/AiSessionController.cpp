@@ -47,8 +47,15 @@ void AiSessionController::poll(materializr::PluginContext& ctx) {
         return;
     }
     if (result.toolCalls.empty()) {
-        m_scrollback.push_back({ScrollbackLine::Kind::Assistant, result.finalText});
-        m_messages.push_back({ChatRole::Assistant, result.finalText, "", {}});
+        // Anthropic can legitimately return an empty end_turn reply
+        // (particularly right after a tool result). Pushing an empty-content
+        // Assistant message into history poisons the NEXT submitPrompt():
+        // the provider rejects an empty message with HTTP 400, breaking
+        // every subsequent turn in the conversation, not just this one.
+        if (!result.finalText.empty()) {
+            m_scrollback.push_back({ScrollbackLine::Kind::Assistant, result.finalText});
+            m_messages.push_back({ChatRole::Assistant, result.finalText, "", {}});
+        }
         return;
     }
 

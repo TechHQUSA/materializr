@@ -286,6 +286,7 @@ add_executable(materializr
     src/ai/AnthropicClient.cpp
     src/ai/OpenAiCompatibleClient.cpp
     src/ai/AiSessionController.cpp
+    src/ai/AiConnectionTest.cpp
     src/core/Document.cpp
     src/core/History.cpp
     src/core/SelectionManager.cpp

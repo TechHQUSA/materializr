@@ -3,6 +3,7 @@
 
 #include <OSD.hxx>
 #include <Standard_Failure.hxx>
+#include <curl/curl.h>
 
 #include <cstddef>
 #include <cstdio>
@@ -125,6 +126,20 @@ void printHelp() {
         "  -h, --help\n"
         "      Print this help and exit.\n";
 }
+
+// libcurl's implicit global init on the first curl_easy_init() call is
+// documented as NOT thread-safe. Before the AI Assistant feature, every
+// curl user in this app (UpdateChecker) ran on its own single worker thread
+// started well after launch, so this was never exercised concurrently.
+// AiSessionController's std::async turns can now race UpdateChecker's own
+// launch-time check. A static-storage-duration guard runs its constructor
+// before main() and its destructor after, on the main thread, before any
+// worker thread can exist - covering every exit path (including --help)
+// with no per-return cleanup needed.
+struct CurlGlobalGuard {
+    CurlGlobalGuard() { curl_global_init(CURL_GLOBAL_DEFAULT); }
+    ~CurlGlobalGuard() { curl_global_cleanup(); }
+} g_curlGlobalGuard;
 
 } // namespace
 

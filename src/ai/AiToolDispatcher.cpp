@@ -132,6 +132,10 @@ ToolResult addPrimitive(PluginContext& ctx, PrimitiveOp::Kind kind,
     op->setOrigin(x, y, z);
     if (!ctx.history().pushOperation(std::move(op), ctx.document()))
         return {false, "the operation failed to execute"};
+    // pushOperation only touches the Document - without this, the new body
+    // never reaches the renderer (same class of bug as BooleanPlugin's
+    // partial-subtract gap: nothing marks the viewport dirty on its own).
+    ctx.markMeshesDirty();
     // PrimitiveOp appends the new body, so its id is the last one - see Document::addBody.
     int newId = ctx.document().getAllBodyIds().back();
     return {true, "Created body " + std::to_string(newId)};
@@ -157,6 +161,7 @@ ToolResult moveBody(PluginContext& ctx, const nlohmann::json& args) {
     op->setTranslation(dx, dz, dy);
     if (!ctx.history().pushOperation(std::move(op), ctx.document()))
         return {false, "the operation failed to execute"};
+    ctx.markMeshesDirty();
     return {true, "Moved body " + std::to_string(bodyId)};
 }
 
@@ -184,6 +189,7 @@ ToolResult rotateBody(PluginContext& ctx, const nlohmann::json& args) {
     op->setRotation(ax, az, ay, -angle);
     if (!ctx.history().pushOperation(std::move(op), ctx.document()))
         return {false, "the operation failed to execute"};
+    ctx.markMeshesDirty();
     return {true, "Rotated body " + std::to_string(bodyId)};
 }
 
@@ -200,6 +206,7 @@ ToolResult scaleBody(PluginContext& ctx, const nlohmann::json& args) {
     op->setScale(factor);
     if (!ctx.history().pushOperation(std::move(op), ctx.document()))
         return {false, "the operation failed to execute"};
+    ctx.markMeshesDirty();
     return {true, "Scaled body " + std::to_string(bodyId)};
 }
 
@@ -226,6 +233,7 @@ ToolResult booleanOp(PluginContext& ctx, const nlohmann::json& args) {
     op->setMode(mode);
     if (!ctx.history().pushOperation(std::move(op), ctx.document()))
         return {false, "the operation failed to execute"};
+    ctx.markMeshesDirty();
     return {true, "Combined bodies " + std::to_string(targetId) + " and " +
                   std::to_string(toolId) + " (" + modeStr + ")"};
 }

@@ -52,6 +52,7 @@ add_library(materializr_core STATIC
     ${CMAKE_SOURCE_DIR}/src/ai/AnthropicClient.cpp
     ${CMAKE_SOURCE_DIR}/src/ai/OpenAiCompatibleClient.cpp
     ${CMAKE_SOURCE_DIR}/src/ai/AiSessionController.cpp
+    ${CMAKE_SOURCE_DIR}/src/ai/AiConnectionTest.cpp
     ${CMAKE_SOURCE_DIR}/src/plugin/PluginContext.cpp
     ${CMAKE_SOURCE_DIR}/src/plugin/PluginRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/modeling/ShellOp.cpp
