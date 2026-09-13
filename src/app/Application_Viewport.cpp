@@ -1114,6 +1114,18 @@ void Application::renderViewport() {
         // Selected regions in solid yellow
         for (const auto& e : m_selection->getSelection()) {
             if (e.type == SelectionType::SketchRegion) {
+                // renderRegionFill/Boundary call into Sketch::buildRegions(),
+                // whose cache keys off every point's position - so while the
+                // ACTIVE sketch is being edited, any point move (placing a
+                // line, dragging a trim) invalidates it and re-runs a full
+                // BOPAlgo_Builder boolean fuse, once per frame. On messy/
+                // near-degenerate geometry (an unwelded gap, a dangling open
+                // chain) that boolean can take long enough per call to read
+                // as the app hanging. A region selection surviving from
+                // before the edit is what keeps re-arming this every frame;
+                // skip it for the sketch actually being edited - every other
+                // sketch's region highlight is untouched.
+                if (m_inSketchMode && e.sketchId == m_activeSketchId) continue;
                 highlightRegion(e.sketchId, e.subShapeIndex,
                                 glm::vec3(1.0f, 0.85f, 0.1f), 4.0f, 0.28f);
             } else if (e.type == SelectionType::Sketch && e.sketchId >= 0) {
@@ -1191,9 +1203,18 @@ void Application::renderViewport() {
             }
         }
 
-        // Hovered region in cyan (drawn last so it's on top)
-        highlightRegion(m_hoveredSketchId, m_hoveredRegionIndex,
-                        glm::vec3(0.2f, 0.9f, 1.0f), 3.0f, 0.12f);
+        // Hovered region in cyan (drawn last so it's on top). m_hoveredSketchId/
+        // m_hoveredRegionIndex are set only by 3D-view picking (guarded off
+        // while m_inSketchMode) and are never reset - so hovering/clicking a
+        // region before double-clicking into that sketch to edit it (an
+        // ordinary workflow) leaves this call re-arming Sketch::buildRegions()
+        // every frame for the rest of the session, including while the exact
+        // geometry it's hashing keeps changing under an edit. Same fix as the
+        // selection loop above: skip the sketch actually being edited.
+        if (!(m_inSketchMode && m_hoveredSketchId == m_activeSketchId)) {
+            highlightRegion(m_hoveredSketchId, m_hoveredRegionIndex,
+                            glm::vec3(0.2f, 0.9f, 1.0f), 3.0f, 0.12f);
+        }
 
         // Box-select rectangle (screen-space, drawn last so it's on top).
         if (m_boxSelect && m_boxSelect->isActive()) {
