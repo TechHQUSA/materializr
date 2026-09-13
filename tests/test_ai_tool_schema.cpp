@@ -4,14 +4,14 @@
 
 using namespace materializr::ai;
 
-TEST(AiToolSchema, AllToolsContainsExactlyTheThirteenV1Tools) {
+TEST(AiToolSchema, AllToolsContainsExactlyTheFourteenV1Tools) {
     const auto& tools = allTools();
     std::vector<std::string> names;
     for (const auto& t : tools) names.push_back(t.name);
     std::vector<std::string> expected = {
         "add_box", "add_cylinder", "add_sphere", "add_cone", "add_torus",
         "move_body", "rotate_body", "scale_body", "boolean_op",
-        "copy_body", "delete_body", "separate_body", "align_body"};
+        "copy_body", "delete_body", "separate_body", "align_body", "mirror_body"};
     EXPECT_EQ(names, expected);
 }
 

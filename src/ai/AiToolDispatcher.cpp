@@ -8,7 +8,9 @@
 #include "../modeling/CopyOp.h"
 #include "../modeling/DeleteOp.h"
 #include "../modeling/SeparateBodyOp.h"
+#include "../modeling/MirrorOp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -341,6 +343,50 @@ ToolResult alignBody(PluginContext& ctx, const nlohmann::json& args) {
     return {true, "Aligned body " + std::to_string(bodyId) + "."};
 }
 
+ToolResult mirrorBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    if (!args.contains("plane") || !args["plane"].is_string()) {
+        return {false, "plane is required and must be a string"};
+    }
+    std::string plane = args["plane"].get<std::string>();
+    std::transform(plane.begin(), plane.end(), plane.begin(), ::tolower);
+    // User-space xy (world X/Z) -> MirrorPlane::XZ; user-space xz (world X/Y)
+    // -> MirrorPlane::XY. See the Codex ruling above - do not map these two
+    // straight through by name, that mirrors the wrong axis.
+    MirrorPlane mp;
+    if (plane == "xy") mp = MirrorPlane::XZ;
+    else if (plane == "xz") mp = MirrorPlane::XY;
+    else if (plane == "yz") mp = MirrorPlane::YZ;
+    else return {false, "plane must be \"xy\", \"xz\", or \"yz\""};
+    bool keep = true;
+    if (args.contains("keep_original")) {
+        if (!args["keep_original"].is_string()) return {false, "keep_original must be a string"};
+        std::string k = args["keep_original"].get<std::string>();
+        if (k == "false") keep = false;
+        else if (k != "true") return {false, "keep_original must be \"true\" or \"false\""};
+    }
+    auto op = std::make_unique<MirrorOp>();
+    op->setBody(bodyId);
+    op->setPlane(mp);
+    op->setKeepOriginal(keep);
+    MirrorOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    // getMirroredBodyId() is -1 when keep_original is false (MirrorOp.cpp
+    // updates the original body in place instead of creating a new one) -
+    // report the retained bodyId in that case, not the sentinel.
+    if (keep) {
+        return {true, "Mirrored body " + std::to_string(bodyId) + " across the " + plane +
+                      " plane. New body id " + std::to_string(raw->getMirroredBodyId()) + "."};
+    }
+    return {true, "Mirrored body " + std::to_string(bodyId) + " across the " + plane +
+                  " plane in place (original replaced, body id " + std::to_string(bodyId) + " unchanged)."};
+}
+
 } // namespace
 
 ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
@@ -358,6 +404,7 @@ ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
     if (toolName == "delete_body") return deleteBody(ctx, args);
     if (toolName == "separate_body") return separateBody(ctx, args);
     if (toolName == "align_body") return alignBody(ctx, args);
+    if (toolName == "mirror_body") return mirrorBody(ctx, args);
     return {false, "unknown tool '" + toolName + "'"};
 }
 

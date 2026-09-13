@@ -72,6 +72,10 @@ const std::vector<ToolDef>& allTools() {
              num("target_x", "X of the destination point, in mm."),
              num("target_y", "Depth (user-space Y) of the destination point, in mm."),
              num("target_z", "Height (user-space Z, up) of the destination point, in mm.")}},
+        ToolDef{"mirror_body", "Create a mirrored copy of a body across a standard plane.",
+            {num("body_id", "The id of the body to mirror."),
+             str("plane", "Which standard plane to mirror across: \"xy\", \"xz\", or \"yz\"."),
+             str("keep_original", "\"true\" to keep the original body, \"false\" to replace it. Defaults to \"true\".", false)}},
     };
     return kTools;
 }

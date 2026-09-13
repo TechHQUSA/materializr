@@ -406,3 +406,64 @@ TEST(AiToolDispatcher, AlignBodyRejectsNonFiniteCoordinates) {
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(doc.getAllBodyIds().size(), 1u); // no mutation happened
 }
+
+TEST(AiToolDispatcher, MirrorBodyAcrossXyPlaneMirrorsTheHeightAxis) {
+    // xy in user-space maps to world XZ (see the ruling above): mirroring
+    // across it must flip user-space Z (height, world Y), not Y (depth,
+    // world Z). Place the test box off-origin on both axes so a wrong
+    // mapping (flipping depth instead of height) is distinguishable.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    ToolResult moved = executeTool(ctx, "move_body", {{"body_id", bodyId}, {"dx", 5.0}, {"dy", 3.0}, {"dz", 4.0}});
+    ASSERT_TRUE(moved.ok) << moved.message;
+    Bnd_Box before = bboxForBody(doc, bodyId);
+
+    nlohmann::json args = {{"body_id", bodyId}, {"plane", "xy"}};
+    ToolResult result = executeTool(ctx, "mirror_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    auto ids = doc.getAllBodyIds();
+    ASSERT_EQ(ids.size(), 2u); // keep_original defaults true
+    int newBodyId = (ids[0] == bodyId) ? ids[1] : ids[0];
+
+    Bnd_Box after = bboxForBody(doc, newBodyId);
+    double bx0, by0, bz0, bx1, by1, bz1, ax0, ay0, az0, ax1, ay1, az1;
+    before.Get(bx0, by0, bz0, bx1, by1, bz1);
+    after.Get(ax0, ay0, az0, ax1, ay1, az1);
+    // World X and world Z (user-space depth) stay the same; world Y
+    // (user-space height) is negated.
+    EXPECT_NEAR(ax0, bx0, 1e-6);
+    EXPECT_NEAR(ax1, bx1, 1e-6);
+    EXPECT_NEAR(az0, bz0, 1e-6);
+    EXPECT_NEAR(az1, bz1, 1e-6);
+    EXPECT_NEAR(ay0, -by1, 1e-6);
+    EXPECT_NEAR(ay1, -by0, 1e-6);
+}
+
+TEST(AiToolDispatcher, MirrorBodyRejectsAnInvalidPlane) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+
+    nlohmann::json args = {{"body_id", bodyId}, {"plane", "diagonal"}};
+    ToolResult result = executeTool(ctx, "mirror_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, MirrorBodyWithKeepOriginalFalseReplacesTheBody) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+
+    nlohmann::json args = {{"body_id", bodyId}, {"plane", "xy"}, {"keep_original", "false"}};
+    ToolResult result = executeTool(ctx, "mirror_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
+    // getMirroredBodyId() is -1 when keep_original is false - the message
+    // must report the retained bodyId, not that sentinel.
+    EXPECT_EQ(result.message.find("-1"), std::string::npos);
+    EXPECT_NE(result.message.find(std::to_string(bodyId)), std::string::npos);
+}
