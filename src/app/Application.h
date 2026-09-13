@@ -270,6 +270,8 @@ private:
 
     void importStepFile();
     void exportStepFile();
+    // Shared deferred+pumped+pooled import path; see PluginContext::queueHeavyImport.
+    void queueHeavyImport(std::string message, std::function<bool()> importFn);
     // Per-body STL export: opens a save dialog with the body's current name
     // (from the Items panel) as the default filename and writes JUST that
     // body's mesh. Triggered from the viewport right-click menu and the

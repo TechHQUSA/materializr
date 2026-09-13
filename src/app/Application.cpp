@@ -476,11 +476,16 @@ void Application::wireDocumentConsumers() {
     m_history->setEventBus(m_eventBus.get());
     m_selection->setEventBus(m_eventBus.get());
     m_history->setThreadsLastDeclineCallback([this]{ showThreadsLastToast(); });
-    if (m_pluginContext && m_viewport)
+    if (m_pluginContext && m_viewport) {
         m_pluginContext->_bind(m_document, m_history, m_selection,
                                m_eventBus.get(), &m_viewport->getCamera(),
                                &m_meshesDirty, &m_inSketchMode,
                                [this]{ markDirty(); });
+        m_pluginContext->_bindHeavyImport(
+            [this](std::string message, std::function<bool()> importFn) {
+                queueHeavyImport(std::move(message), std::move(importFn));
+            });
+    }
     // Tell everything that caches DOCUMENT-DERIVED state to rebuild. The
     // setters above only reach consumers Application knows by name; plugins
     // own their render caches in file-local statics this function cannot
@@ -4948,6 +4953,62 @@ void Application::importStepFile() {
                 std::fprintf(stderr, "Import failed: %s\n", result.errorMessage.c_str());
             }
         });
+}
+
+void Application::queueHeavyImport(std::string message, std::function<bool()> importFn) {
+    // Shared by any import that can add many bodies at once (STEP today):
+    // defer the call itself, then mesh under the same pool+pump machinery
+    // loadProjectAt uses, instead of a plain m_meshesDirty=true that leaves
+    // the next full rebuild to tessellate everything serially on the main
+    // thread - see the STEP-import freeze this was written for.
+    m_deferredHeavy.queue([this, message, importFn]() {
+        m_progressCancelled = false;
+        renderProgressFrame(-1.0f, message.c_str());
+        if (!importFn()) return;
+        markDirty();
+        struct PumpGuard {
+            bool& flag;
+            bool previous;
+            ~PumpGuard() { flag = previous; }
+        } guard{m_pumpMeshProgress, m_pumpMeshProgress};
+        m_pumpMeshProgress = true;
+#if defined(MZR_PARALLEL_MESH_SUPPORTED)
+        float deflection, angularDeflection;
+        meshQualityParams(deflection, angularDeflection);
+        ParallelMeshOptions options;
+        std::vector<ParallelMeshJob> jobs;
+        for (int id : m_document->getAllBodyIds()) {
+            if (id < 0 || !m_document->isBodyVisible(id)) continue;
+            TopoDS_Shape shape;
+            try { shape = m_document->getBody(id); } catch (...) { continue; }
+            if (!m_shapeRenderer->isPreMeshed(shape, deflection, angularDeflection))
+                jobs.push_back({id, shape});
+        }
+        DrawThrottle throttle;
+        options.onTick = [&](size_t done, size_t total) {
+            const float frac = parallelMeshFraction(done, total);
+            pumpStep(throttle, progressFrameWouldDraw(frac),
+                     [] { return DrawThrottle::clock::now(); },
+                     [&] {
+                         renderProgressFrame(frac, message.c_str());
+                         return DrawThrottle::clock::now();
+                     },
+                     [&] { if (m_window) m_window->pollEvents(); });
+        };
+        const auto batch = parallelMesh(jobs, deflection, angularDeflection, options);
+        for (size_t i = 0; i < jobs.size(); ++i) {
+            if (batch.results[i].ok) {
+                m_shapeRenderer->notePreMeshed(jobs[i].shape, deflection, angularDeflection);
+                m_meshDispatch.meshedInFrame(jobs[i].bodyId, batch.results[i].millis);
+            } else {
+                m_shapeRenderer->forgetPreMeshed(jobs[i].shape);
+                m_meshDispatch.forget(jobs[i].bodyId);
+            }
+        }
+#endif
+        rebuildMeshes();
+        m_meshesDirty = false;
+    });
 }
 
 void Application::exportStepFile() {
