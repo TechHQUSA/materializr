@@ -4,23 +4,23 @@
 
 **Goal:** Fix issue #110 (steady-state viewport FPS drops to ~8fps once ~400+ bodies are loaded, even fully idle). Root-caused via GL timer queries and wall-clock bisection (spike, not committed): `renderViewport()`'s minor-grid-tier check (`src/app/Application_Viewport.cpp:567-598`) re-walks every visible body's exact B-Rep bounding box via `BRepBndLib::Add` on a fixed 0.25s wall-clock timer, regardless of whether anything changed. On this project's 423-body scene that walk costs 95-110ms per call; because the 0.25s timer aliases against the idle-floor's ~83-183ms frame cadence, it fires roughly every other frame, producing the alternating "cheap frame / ~100ms frame" pattern that reads as ~8fps. The block's own code comment (added 2026-06-02, blame `4bbf2fd0`) was written against and measured on a 65-body project; it was never re-profiled at this scale.
 
-**Architecture:** Replace the wall-clock *poll* with a wall-clock *rate limiter* gated by real invalidation. Add an `Application` member flag, `m_gridExtentStale`, defaulted `true` (so the first frame still computes it, matching current behavior). Set it wherever the scene's body set or visibility can actually change by hooking the single existing choke point both full and partial mesh rebuilds already pass through — `Application::rebuildMeshes()` — right after it captures whether this call was a full rebuild (`m_meshesDirty`) or a partial one (`m_dirtyBodyIds` non-empty), which are exactly the two conditions under which a body could have been added, removed, or had its visibility toggled. The grid-tier check in `renderViewport()` then recomputes the cached verdict only when `m_gridExtentStale` is true **and** the existing 0.25s cooldown has elapsed, clearing staleness only once it actually recomputes (a request that arrives mid-cooldown stays pending, it is not dropped).
+**Architecture:** Replace the wall-clock *poll* with a wall-clock *rate limiter* gated by real invalidation. Add an `Application` member flag, `m_gridExtentStale`, defaulted `true` (so the first frame still computes it, matching current behavior). Set it wherever the scene's body set or visibility can actually change by hooking the single existing choke point both full and partial mesh rebuilds already pass through - `Application::rebuildMeshes()` - right after it captures whether this call was a full rebuild (`m_meshesDirty`) or a partial one (`m_dirtyBodyIds` non-empty), which are exactly the two conditions under which a body could have been added, removed, or had its visibility toggled. The grid-tier check in `renderViewport()` then recomputes the cached verdict only when `m_gridExtentStale` is true **and** the existing 0.25s cooldown has elapsed, clearing staleness only once it actually recomputes (a request that arrives mid-cooldown stays pending, it is not dropped).
 
-The cooldown is kept specifically because `m_dirtyBodyIds` is not exclusively a "topology changed" signal — routed through the single shared `markBodyDirty()` callback, it also fires for changes that never touch the bounding box (a body rename, a body-color edit dragged live off a color wheel via `ImGui::ColorEdit3`, which can call back many times per second while held). Without the cooldown, a rapid string of such non-geometric edits would re-trigger the full `BRepBndLib::Add` scan on every one of those frames instead of at most 4 times/second, which is worse than the current behavior for that case even though it is a large win for the (far more common) truly-idle case this issue is actually about. Keeping the cooldown as a cap, with staleness deciding whether there is anything to check at all, gets both: zero cost while idle, no worse than today's cost while being edited.
+The cooldown is kept specifically because `m_dirtyBodyIds` is not exclusively a "topology changed" signal - routed through the single shared `markBodyDirty()` callback, it also fires for changes that never touch the bounding box (a body rename, a body-color edit dragged live off a color wheel via `ImGui::ColorEdit3`, which can call back many times per second while held). Without the cooldown, a rapid string of such non-geometric edits would re-trigger the full `BRepBndLib::Add` scan on every one of those frames instead of at most 4 times/second, which is worse than the current behavior for that case even though it is a large win for the (far more common) truly-idle case this issue is actually about. Keeping the cooldown as a cap, with staleness deciding whether there is anything to check at all, gets both: zero cost while idle, no worse than today's cost while being edited.
 
 **Tech Stack:** C++17, Dear ImGui, OCCT (`BRepBndLib`, `Bnd_Box`), CMake, GoogleTest/ctest.
 
-**Spec:** This plan document (no separate spec file — issue #110 and the spike findings above are the task brief).
+**Spec:** This plan document (no separate spec file - issue #110 and the spike findings above are the task brief).
 
 ## Global Constraints
 
 - Touch only the minor-grid-tier caching mechanism. Do not change the 100mm threshold, the grid rendering itself, or any other part of `renderViewport()`.
 - No new heap allocations or per-frame OCCT geometry calls beyond what already exists for the "stale" case.
 - `m_gridExtentStale` must default to `true` so a freshly constructed `Application` still computes the verdict on its first eligible frame (parity with the current `s_nextCheckTime = 0.0` initial-fire behavior).
-- `rebuildMeshes()` is called far more often than the grid-tier check actually needs (e.g. on every partial per-body edit), which is fine — the cost moved from "unconditional every 0.25s" to "only when something that could change the bounds actually happened", and `rebuildMeshes()` runs regardless of whether the grid staleness flag existed, so this adds no new work to that function, only a bool write.
-- After the change, run the full suite from `build/` UNSANDBOXED: `ctest --test-dir build --output-on-failure` (sandboxed ctest false-fails 5 file-IO suites on denied `/tmp` writes — project memory). No test count may drop and no new failures may appear.
+- `rebuildMeshes()` is called far more often than the grid-tier check actually needs (e.g. on every partial per-body edit), which is fine - the cost moved from "unconditional every 0.25s" to "only when something that could change the bounds actually happened", and `rebuildMeshes()` runs regardless of whether the grid staleness flag existed, so this adds no new work to that function, only a bool write.
+- After the change, run the full suite from `build/` UNSANDBOXED: `ctest --test-dir build --output-on-failure` (sandboxed ctest false-fails 5 file-IO suites on denied `/tmp` writes - project memory). No test count may drop and no new failures may appear.
 - No `Co-Authored-By: Claude` trailer on any commit in this repo (existing project convention for materializr commits).
-- This PR already has an open upstream issue (#110) and lives on its own branch — do not bundle it into `fix/step-import-freeze` (PR #111); it is unrelated to that fix.
+- This PR already has an open upstream issue (#110) and lives on its own branch - do not bundle it into `fix/step-import-freeze` (PR #111); it is unrelated to that fix.
 
 ---
 
@@ -179,7 +179,7 @@ The cooldown is kept specifically because `m_dirtyBodyIds` is not exclusively a 
               }
   ```
 
-  Note the two incidental fixes riding along with the invalidation change, both flagged in Codex review round 1 as pre-existing defects in the code being touched: (a) the old code left `s_hideMinor` at its previous value when the scene had no visible bodies (`any == false` or `bb.IsVoid()`), so deleting/hiding every body in a large project never brought the minor grid back — the rewrite resets to a fresh `false` every recomputation; (b) the old code wrapped the entire loop in one `try`, so a single body that throws mid-scan (e.g. a stale id) discarded every other body's contribution for that pass — the rewrite catches per-body and continues.
+  Note the two incidental fixes riding along with the invalidation change, both flagged in Codex review round 1 as pre-existing defects in the code being touched: (a) the old code left `s_hideMinor` at its previous value when the scene had no visible bodies (`any == false` or `bb.IsVoid()`), so deleting/hiding every body in a large project never brought the minor grid back - the rewrite resets to a fresh `false` every recomputation; (b) the old code wrapped the entire loop in one `try`, so a single body that throws mid-scan (e.g. a stale id) discarded every other body's contribution for that pass - the rewrite catches per-body and continues.
 
 - [x] **Step 4: Build and run the full suite**
 
@@ -188,7 +188,7 @@ The cooldown is kept specifically because `m_dirtyBodyIds` is not exclusively a 
   ctest --test-dir build --output-on-failure
   ```
 
-  Expect the existing test count (113) to still pass, 0 failures. No test in the suite currently exercises this exact code path (it is UI/viewport-only, not covered by the headless `materializr_core` test suite), so a passing run means "did not break anything else" — it is not itself proof the fix works.
+  Expect the existing test count (113) to still pass, 0 failures. No test in the suite currently exercises this exact code path (it is UI/viewport-only, not covered by the headless `materializr_core` test suite), so a passing run means "did not break anything else" - it is not itself proof the fix works.
 
 - [x] **Step 5: Manually verify against the real repro**
 

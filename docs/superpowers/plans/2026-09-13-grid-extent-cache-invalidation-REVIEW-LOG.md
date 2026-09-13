@@ -1,7 +1,7 @@
 # Plan Review Log: Grid minor-tier extent cache invalidation (issue #110)
 Started 2026-09-13 12:10 local. MAX_ROUNDS=5. Codex model: gpt-6-astra (from ~/.codex/config.toml), via `codex exec`.
 
-## Round 1 — Codex
+## Round 1 - Codex
 
 The rebuild hook covers the checked mutation paths, but the plan has four material gaps.
 
@@ -29,7 +29,7 @@ Adopted the concrete half of point 3 (moved the per-body `try` inside the loop i
 
 Adopted point 4: rewrote Step 5 to test both tier directions across the 100mm threshold, the empty/all-hidden reset from point 2, and specifically the colour-drag scenario the point-1 fix targets, plus an optional throwaway scan-counter diagnostic to directly confirm zero idle recomputation and rate-limited (not per-frame) recomputation during the colour-drag case. Removed the orbit-and-confirm-no-stutter check since orbiting alone never touches the invalidation trigger either before or after this change, so it doesn't test anything the review didn't already flag as vacuous.
 
-## Round 2 — Codex
+## Round 2 - Codex
 
 No remaining material blockers. The retained cooldown prevents per-frame scans during repeated edits, pending invalidations survive skipped frames, and empty/all-hidden scenes now reset the verdict.
 
