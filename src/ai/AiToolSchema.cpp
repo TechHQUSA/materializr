@@ -55,6 +55,23 @@ const std::vector<ToolDef>& allTools() {
          {num("target_body_id", "The body kept after the operation."),
           num("tool_body_id", "The body combined into the target."),
           str("mode", "One of: union, subtract, intersect.")}},
+        ToolDef{"copy_body", "Duplicate an existing body, optionally offset by (dx, dy, dz).",
+            {num("body_id", "The id of the body to copy."),
+             num("dx", "Offset along X in mm.", false),
+             num("dy", "Offset along Y (user-space depth) in mm.", false),
+             num("dz", "Offset along Z (user-space height/up) in mm.", false)}},
+        ToolDef{"delete_body", "Permanently remove a body from the document.",
+            {num("body_id", "The id of the body to delete.")}},
+        ToolDef{"separate_body", "Split a body with multiple disconnected solid shells into separate bodies, one per shell.",
+            {num("body_id", "The id of the body to separate.")}},
+        ToolDef{"align_body", "Move a body so a chosen point on it lands on a chosen target point in space.",
+            {num("body_id", "The id of the body to align."),
+             num("source_x", "X of the point on the body, in mm."),
+             num("source_y", "Depth (user-space Y) of the point on the body, in mm."),
+             num("source_z", "Height (user-space Z, up) of the point on the body, in mm."),
+             num("target_x", "X of the destination point, in mm."),
+             num("target_y", "Depth (user-space Y) of the destination point, in mm."),
+             num("target_z", "Height (user-space Z, up) of the destination point, in mm.")}},
     };
     return kTools;
 }

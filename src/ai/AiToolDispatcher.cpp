@@ -5,6 +5,9 @@
 #include "../modeling/PrimitiveOp.h"
 #include "../modeling/TransformOp.h"
 #include "../modeling/BooleanOp.h"
+#include "../modeling/CopyOp.h"
+#include "../modeling/DeleteOp.h"
+#include "../modeling/SeparateBodyOp.h"
 
 #include <cmath>
 #include <limits>
@@ -65,6 +68,23 @@ bool optionalNumber(const nlohmann::json& args, const char* key, double& out,
         return false;
     }
     out = args[key].get<double>();
+    return true;
+}
+bool requireFiniteNumber(const nlohmann::json& args, const char* key, double& out, std::string& err) {
+    if (!requireNumber(args, key, out, err)) return false;
+    if (!std::isfinite(out)) {
+        err = std::string(key) + " must be a finite number";
+        return false;
+    }
+    return true;
+}
+
+bool optionalFiniteNumber(const nlohmann::json& args, const char* key, double& out, double fallback, std::string& err) {
+    if (!optionalNumber(args, key, out, fallback, err)) return false;
+    if (!std::isfinite(out)) {
+        err = std::string(key) + " must be a finite number";
+        return false;
+    }
     return true;
 }
 
@@ -238,6 +258,89 @@ ToolResult booleanOp(PluginContext& ctx, const nlohmann::json& args) {
                   std::to_string(toolId) + " (" + modeStr + ")"};
 }
 
+ToolResult copyBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    double dx = 0, dy = 0, dz = 0;
+    if (!optionalFiniteNumber(args, "dx", dx, 0.0, err)) return {false, err};
+    if (!optionalFiniteNumber(args, "dy", dy, 0.0, err)) return {false, err};
+    if (!optionalFiniteNumber(args, "dz", dz, 0.0, err)) return {false, err};
+    auto op = std::make_unique<CopyOp>();
+    op->setSourceBodyId(bodyId);
+    op->setOffset(dx, dz, dy);
+    CopyOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Copied body " + std::to_string(bodyId) + " to new body " +
+                  std::to_string(raw->getCreatedBodyId()) + "."};
+}
+
+ToolResult deleteBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    auto op = std::make_unique<DeleteOp>();
+    op->setBodyId(bodyId);
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Deleted body " + std::to_string(bodyId) + "."};
+}
+
+ToolResult separateBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    auto op = std::make_unique<SeparateBodyOp>();
+    op->setBody(bodyId);
+    SeparateBodyOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    // getNewBodyIds() returns only the NEW bodies split off, not counting the
+    // original body id that survives - include both counts explicitly.
+    std::string idList;
+    for (int id : raw->getNewBodyIds()) idList += std::to_string(id) + " ";
+    return {true, "Separated body " + std::to_string(bodyId) + " into " +
+                  std::to_string(raw->getNewBodyIds().size() + 1) + " bodies total: original id " +
+                  std::to_string(bodyId) + ", new ids " + idList + "."};
+}
+
+ToolResult alignBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    double sx, sy, sz, tx, ty, tz;
+    if (!requireFiniteNumber(args, "source_x", sx, err)) return {false, err};
+    if (!requireFiniteNumber(args, "source_y", sy, err)) return {false, err};
+    if (!requireFiniteNumber(args, "source_z", sz, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_x", tx, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_y", ty, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_z", tz, err)) return {false, err};
+    double dx = tx - sx, dy = ty - sy, dz = tz - sz;
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
+        return {false, "the distance between source and target is too large to represent"};
+    }
+    // Implemented as a TransformOp translation by (target - source), the same
+    // verified path move_body already uses, rather than AlignOp directly - see
+    // the Codex round-1 ruling above (AlignOp drops face lineage and has no
+    // verified call-site in this branch).
+    auto op = std::make_unique<TransformOp>();
+    op->setBodyId(bodyId);
+    op->setType(TransformType::Translate);
+    op->setTranslation(dx, dz, dy);
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Aligned body " + std::to_string(bodyId) + "."};
+}
+
 } // namespace
 
 ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
@@ -251,6 +354,10 @@ ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
     if (toolName == "rotate_body") return rotateBody(ctx, args);
     if (toolName == "scale_body") return scaleBody(ctx, args);
     if (toolName == "boolean_op") return booleanOp(ctx, args);
+    if (toolName == "copy_body") return copyBody(ctx, args);
+    if (toolName == "delete_body") return deleteBody(ctx, args);
+    if (toolName == "separate_body") return separateBody(ctx, args);
+    if (toolName == "align_body") return alignBody(ctx, args);
     return {false, "unknown tool '" + toolName + "'"};
 }
 

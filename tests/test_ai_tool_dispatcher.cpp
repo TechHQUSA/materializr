@@ -41,6 +41,16 @@ void bboxWorldOrigin(Document& doc, int bodyId, double& x, double& y, double& z)
     double x1, y1, z1;
     box.Get(x, y, z, x1, y1, z1);
 }
+Bnd_Box bboxForBody(Document& doc, int bodyId) {
+    Bnd_Box box;
+    BRepBndLib::Add(doc.getBody(bodyId), box);
+    return box;
+}
+int addTestBox(PluginContext& ctx, Document& doc) {
+    ToolResult r = executeTool(ctx, "add_box", {{"width", 10.0}, {"height", 10.0}, {"depth", 10.0}});
+    (void)r;
+    return doc.getAllBodyIds().back();
+}
 } // namespace
 
 TEST(AiToolDispatcher, AddBoxCreatesABodyWithTheGivenDimensions) {
@@ -260,4 +270,139 @@ TEST(AiToolDispatcher, AddBoxRejectsANonNumericOptionalPosition) {
     EXPECT_FALSE(r.ok);
     EXPECT_TRUE(doc.getAllBodyIds().empty())
         << "a malformed optional argument must not silently default";
+}
+
+TEST(AiToolDispatcher, CopyBodyCreatesANewBody) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+
+    nlohmann::json args = {{"body_id", bodyId}, {"dx", 5.0}, {"dy", 0.0}, {"dz", 0.0}};
+    ToolResult result = executeTool(ctx, "copy_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 2u);
+}
+
+TEST(AiToolDispatcher, CopyBodyRejectsAnUnknownBodyId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    nlohmann::json args = {{"body_id", 9999}};
+    ToolResult result = executeTool(ctx, "copy_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, DeleteBodyRemovesIt) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+
+    ToolResult result = executeTool(ctx, "delete_body", {{"body_id", bodyId}});
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 0u);
+}
+
+TEST(AiToolDispatcher, DeleteBodyRejectsAnUnknownBodyId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    ToolResult result = executeTool(ctx, "delete_body", {{"body_id", 9999}});
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, SeparateBodyRejectsAnUnknownBodyId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    ToolResult result = executeTool(ctx, "separate_body", {{"body_id", 9999}});
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, SeparateBodySplitsATwoShellBodyIntoTwoBodies) {
+    // Union two disjoint boxes so the resulting body has two disconnected
+    // solid shells for separate_body to split, not just an id-rejection path.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    ToolResult a = executeTool(ctx, "add_box", {{"width", 5.0}, {"height", 5.0}, {"depth", 5.0}});
+    ToolResult b = executeTool(ctx, "add_box",
+        {{"width", 5.0}, {"height", 5.0}, {"depth", 5.0}, {"x", 100.0}});
+    ASSERT_TRUE(a.ok);
+    ASSERT_TRUE(b.ok);
+    auto ids = doc.getAllBodyIds();
+    ASSERT_EQ(ids.size(), 2u);
+
+    ToolResult unioned = executeTool(ctx, "boolean_op",
+        {{"target_body_id", ids[0]}, {"tool_body_id", ids[1]}, {"mode", "union"}});
+    ASSERT_TRUE(unioned.ok) << unioned.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    int bodyId = doc.getAllBodyIds().front();
+
+    ToolResult result = executeTool(ctx, "separate_body", {{"body_id", bodyId}});
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 2u);
+}
+
+TEST(AiToolDispatcher, AlignBodyMovesTheSourcePointToTheTargetPoint) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc); // box created at the world origin
+
+    Bnd_Box before = bboxForBody(doc, bodyId);
+    nlohmann::json args = {
+        {"body_id", bodyId},
+        {"source_x", 0.0}, {"source_y", 0.0}, {"source_z", 0.0},
+        {"target_x", 10.0}, {"target_y", 3.0}, {"target_z", 7.0}
+    };
+    ToolResult result = executeTool(ctx, "align_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    Bnd_Box after = bboxForBody(doc, bodyId);
+    // Deliberately asymmetric (10, 3, 7) offset: a wrong y/z remap in align_body
+    // would shift the bbox by (10, 7, 3) instead, which this assertion catches
+    // and a symmetric or on-axis-only offset would not.
+    double bx0, by0, bz0, bx1, by1, bz1, ax0, ay0, az0, ax1, ay1, az1;
+    before.Get(bx0, by0, bz0, bx1, by1, bz1);
+    after.Get(ax0, ay0, az0, ax1, ay1, az1);
+    EXPECT_NEAR(ax0 - bx0, 10.0, 1e-6);
+    EXPECT_NEAR(ay0 - by0, 7.0, 1e-6);  // world Y == user-space Z (up)
+    EXPECT_NEAR(az0 - bz0, 3.0, 1e-6);  // world Z == user-space Y (depth)
+}
+
+TEST(AiToolDispatcher, AlignBodyRejectsAnUnknownBodyId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    nlohmann::json args = {
+        {"body_id", 9999},
+        {"source_x", 0.0}, {"source_y", 0.0}, {"source_z", 0.0},
+        {"target_x", 1.0}, {"target_y", 1.0}, {"target_z", 1.0}
+    };
+    ToolResult result = executeTool(ctx, "align_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, AlignBodyRejectsNonFiniteCoordinates) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+
+    // Not non-finite on its own, but paired with a source at the opposite
+    // extreme the subtraction overflows to infinity.
+    nlohmann::json args = {
+        {"body_id", bodyId},
+        {"source_x", -1e308}, {"source_y", 0.0}, {"source_z", 0.0},
+        {"target_x", 1e308}, {"target_y", 0.0}, {"target_z", 0.0}
+    };
+    ToolResult result = executeTool(ctx, "align_body", args);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(doc.getAllBodyIds().size(), 1u); // no mutation happened
 }
