@@ -467,3 +467,284 @@ TEST(AiToolDispatcher, MirrorBodyWithKeepOriginalFalseReplacesTheBody) {
     EXPECT_EQ(result.message.find("-1"), std::string::npos);
     EXPECT_NE(result.message.find(std::to_string(bodyId)), std::string::npos);
 }
+
+TEST(AiToolDispatcher, PatternBodyLinearCreatesTheRightCount) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "linear"}, {"count", 3}, {"spacing_x", 10.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 3u);
+}
+
+TEST(AiToolDispatcher, PatternBodyRadialCreatesTheRightCount) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "radial"}, {"count", 4}, {"total_angle_degrees", 360.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_TRUE(result.ok) << result.message;
+    EXPECT_EQ(doc.getAllBodyIds().size(), 4u);
+}
+
+TEST(AiToolDispatcher, PatternBodyRadialMatchesRotateBodysHandedness) {
+    // count=2, total_angle_degrees=180 places the second instance at
+    // angle/count = 90 degrees (see the spacing-convention ruling above) -
+    // NOT 180. Compare against a single rotate_body call of 90 degrees on an
+    // identical box at an off-axis position (x=10, away from the Z axis) so
+    // a wrong handedness or a wrong spacing convention both produce a
+    // detectable mismatch.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int a = addTestBox(ctx, doc);
+    ASSERT_TRUE(executeTool(ctx, "move_body", {{"body_id", a}, {"dx", 10.0}, {"dy", 0.0}, {"dz", 0.0}}).ok);
+    nlohmann::json patternArgs = {{"body_id", a}, {"type", "radial"}, {"count", 2},
+                                   {"total_angle_degrees", 180.0},
+                                   {"axis_x", 0.0}, {"axis_y", 0.0}, {"axis_z", 1.0},
+                                   {"origin_x", 0.0}, {"origin_y", 0.0}, {"origin_z", 0.0}};
+    ToolResult patternResult = executeTool(ctx, "pattern_body", patternArgs);
+    ASSERT_TRUE(patternResult.ok) << patternResult.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 2u);
+    auto patternIds = doc.getAllBodyIds();
+    int patternedId = (patternIds[0] == a) ? patternIds[1] : patternIds[0];
+    Bnd_Box patternedBox = bboxForBody(doc, patternedId);
+
+    Document doc2;
+    History hist2;
+    PluginContext ctx2 = makeCtx(doc2, hist2);
+    int b = addTestBox(ctx2, doc2);
+    ASSERT_TRUE(executeTool(ctx2, "move_body", {{"body_id", b}, {"dx", 10.0}, {"dy", 0.0}, {"dz", 0.0}}).ok);
+    nlohmann::json rotateArgs = {{"body_id", b}, {"angle_degrees", 90.0}, {"axis_x", 0.0},
+                                  {"axis_y", 0.0}, {"axis_z", 1.0}};
+    ToolResult rotateResult = executeTool(ctx2, "rotate_body", rotateArgs);
+    ASSERT_TRUE(rotateResult.ok) << rotateResult.message;
+    Bnd_Box rotatedBox = bboxForBody(doc2, b);
+
+    double px0, py0, pz0, px1, py1, pz1, rx0, ry0, rz0, rx1, ry1, rz1;
+    patternedBox.Get(px0, py0, pz0, px1, py1, pz1);
+    rotatedBox.Get(rx0, ry0, rz0, rx1, ry1, rz1);
+    EXPECT_NEAR(px0, rx0, 1e-6);
+    EXPECT_NEAR(py0, ry0, 1e-6);
+    EXPECT_NEAR(pz0, rz0, 1e-6);
+    EXPECT_NEAR(px1, rx1, 1e-6);
+    EXPECT_NEAR(py1, ry1, 1e-6);
+    EXPECT_NEAR(pz1, rz1, 1e-6);
+}
+
+TEST(AiToolDispatcher, PatternBodyRadialWithNonzeroOriginRotatesAboutThatPoint) {
+    // count=2, total_angle_degrees=180 -> the second instance sits at 90
+    // degrees (angle/count, per the spacing convention above) about
+    // origin=(5, 3, 0), rotating about the up axis. Origin has unequal
+    // nonzero x/y so a dropped or mis-signed origin term is detectable.
+    //
+    // add_box places the box's CORNER at the given origin, not its center
+    // (PrimitiveOp.cpp) - do NOT assume a fixed box position and hand-compute
+    // the expected result from box dimensions. Instead: measure the box's
+    // actual bbox CENTER before the pattern call, apply the standard
+    // rotate-about-a-point formula to that measured center, and assert the
+    // new instance's bbox center matches the computed value. For a standard
+    // +90-degree rotation about (ox, oy) in the user X/(user-depth Y) plane:
+    // x' = ox - (y - oy), y' = oy + (x - ox), z' = z (unchanged, axis is up).
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int a = addTestBox(ctx, doc);
+    ASSERT_TRUE(executeTool(ctx, "move_body", {{"body_id", a}, {"dx", 15.0}, {"dy", 0.0}, {"dz", 0.0}}).ok);
+    Bnd_Box beforeBox = bboxForBody(doc, a);
+    double bx0, by0, bz0, bx1, by1, bz1;
+    beforeBox.Get(bx0, by0, bz0, bx1, by1, bz1);
+    // World Y == user height (Z), world Z == user depth (Y) (see the
+    // bboxWorldYZ comment above).
+    double cxUser = (bx0 + bx1) / 2.0;
+    double cyUser = (bz0 + bz1) / 2.0;
+    double czUser = (by0 + by1) / 2.0;
+    double ox = 5.0, oy = 3.0;
+    double expectedXUser = ox - (cyUser - oy);
+    double expectedYUser = oy + (cxUser - ox);
+
+    nlohmann::json patternArgs = {{"body_id", a}, {"type", "radial"}, {"count", 2},
+                                   {"total_angle_degrees", 180.0},
+                                   {"axis_x", 0.0}, {"axis_y", 0.0}, {"axis_z", 1.0},
+                                   {"origin_x", ox}, {"origin_y", oy}, {"origin_z", 0.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", patternArgs);
+    ASSERT_TRUE(result.ok) << result.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 2u);
+    auto ids = doc.getAllBodyIds();
+    int newBodyId = (ids[0] == a) ? ids[1] : ids[0];
+    Bnd_Box afterBox = bboxForBody(doc, newBodyId);
+    double ax0, ay0, az0, ax1, ay1, az1;
+    afterBox.Get(ax0, ay0, az0, ax1, ay1, az1);
+    double actualXUser = (ax0 + ax1) / 2.0;
+    double actualYUser = (az0 + az1) / 2.0;
+    double actualZUser = (ay0 + ay1) / 2.0;
+    EXPECT_NEAR(actualXUser, expectedXUser, 1e-6);
+    EXPECT_NEAR(actualYUser, expectedYUser, 1e-6);
+    EXPECT_NEAR(actualZUser, czUser, 1e-6);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsOversizedLinearSpacing) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "linear"}, {"count", 3},
+                            {"spacing_x", 1e300}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsOversizedRadialOrigin) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "radial"}, {"count", 3},
+                            {"origin_x", 1e300}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsOversizedRadialAngle) {
+    // A finite angle can still overflow PatternOp's internal degrees-to-
+    // radians-per-instance conversion even though it passes a plain
+    // std::isfinite check - this must be caught by the magnitude cap, not
+    // just the finiteness check.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "radial"}, {"count", 3},
+                            {"total_angle_degrees", 1.7e308}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(doc.getAllBodyIds().size(), 1u);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsAnInvalidType) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "spiral"}, {"count", 3}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsANonIntegerCount) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "linear"}, {"count", 2.5}, {"spacing_x", 10.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsACountBelowTwo) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "linear"}, {"count", 1}, {"spacing_x", 10.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsACountAboveFiveHundred) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "linear"}, {"count", 501}, {"spacing_x", 10.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, PatternBodyRejectsAZeroRadialAxis) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int bodyId = addTestBox(ctx, doc);
+    nlohmann::json args = {{"body_id", bodyId}, {"type", "radial"}, {"count", 4},
+                            {"axis_x", 0.0}, {"axis_y", 0.0}, {"axis_z", 0.0}};
+    ToolResult result = executeTool(ctx, "pattern_body", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ConstructionAxisWorldXSucceeds) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_axis", {{"type", "x"}});
+    EXPECT_TRUE(result.ok) << result.message;
+}
+
+TEST(AiToolDispatcher, ConstructionAxisTwoPointsSucceeds) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    nlohmann::json args = {{"type", "two_points"},
+        {"p1_x", 0.0}, {"p1_y", 0.0}, {"p1_z", 0.0},
+        {"p2_x", 10.0}, {"p2_y", 0.0}, {"p2_z", 0.0}};
+    ToolResult result = executeTool(ctx, "construction_axis", args);
+    EXPECT_TRUE(result.ok) << result.message;
+}
+
+TEST(AiToolDispatcher, ConstructionAxisRejectsCoincidentPoints) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    nlohmann::json args = {{"type", "two_points"},
+        {"p1_x", 5.0}, {"p1_y", 5.0}, {"p1_z", 5.0},
+        {"p2_x", 5.0}, {"p2_y", 5.0}, {"p2_z", 5.0}};
+    ToolResult result = executeTool(ctx, "construction_axis", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ConstructionAxisRejectsAnInvalidType) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_axis", {{"type", "diagonal"}});
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ConstructionAxisRejectsANonStringName) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    nlohmann::json args = {{"type", "x"}, {"name", 42}};
+    ToolResult result = executeTool(ctx, "construction_axis", args);
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ConstructionPlaneXySucceeds) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_plane", {{"type", "xy"}, {"offset", 5.0}});
+    EXPECT_TRUE(result.ok) << result.message;
+}
+
+TEST(AiToolDispatcher, ConstructionPlaneRejectsAnInvalidType) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_plane", {{"type", "diagonal"}});
+    EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ConstructionPlaneRejectsANonStringName) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    nlohmann::json args = {{"type", "xy"}, {"name", 42}};
+    ToolResult result = executeTool(ctx, "construction_plane", args);
+    EXPECT_FALSE(result.ok);
+}
