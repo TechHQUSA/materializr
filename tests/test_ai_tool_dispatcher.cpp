@@ -696,6 +696,58 @@ TEST(AiToolDispatcher, ConstructionAxisTwoPointsSucceeds) {
     EXPECT_TRUE(result.ok) << result.message;
 }
 
+TEST(AiToolDispatcher, ConstructionAxisWorldYSucceeds) {
+    // Baseline only (see ConstructionAxisWorldYUsesWorldZDirection below for
+    // the actual remap proof) - "y" must at least be accepted.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_axis", {{"type", "y"}});
+    EXPECT_TRUE(result.ok) << result.message;
+}
+
+TEST(AiToolDispatcher, ConstructionAxisWorldYUsesWorldZDirection) {
+    // User-space "y" (depth) must map to AxisCreationType::WorldZ, i.e. the
+    // literal world direction (0,0,1) - NOT world Y (0,1,0). A swapped
+    // "y"->WorldY mapping would produce a detectably different direction.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_axis", {{"type", "y"}});
+    ASSERT_TRUE(result.ok) << result.message;
+    int axisId = doc.getAllAxisIds().empty() ? -1 : doc.getAllAxisIds().front();
+    ASSERT_NE(axisId, -1);
+    const AxisEntry* axis = doc.getAxis(axisId);
+    ASSERT_NE(axis, nullptr);
+    EXPECT_NEAR(axis->direction.X(), 0.0, 1e-9);
+    EXPECT_NEAR(axis->direction.Y(), 0.0, 1e-9);
+    EXPECT_NEAR(axis->direction.Z(), 1.0, 1e-9);
+}
+
+TEST(AiToolDispatcher, ConstructionAxisTwoPointsAsymmetricSwapsYAndZ) {
+    // p1=(0,0,0), p2=(0, 3, 7): the dispatcher must build gp_Pnt(x, z, y) for
+    // each point (world Y = user height/Z, world Z = user depth/Y). With an
+    // asymmetric second point (y != z, both nonzero) a swapped p1z/p1y or
+    // p2z/p2y bug produces a detectably different axis direction than the
+    // correct world vector (0, 7, 3) (normalized).
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    nlohmann::json args = {{"type", "two_points"},
+        {"p1_x", 0.0}, {"p1_y", 0.0}, {"p1_z", 0.0},
+        {"p2_x", 0.0}, {"p2_y", 3.0}, {"p2_z", 7.0}};
+    ToolResult result = executeTool(ctx, "construction_axis", args);
+    ASSERT_TRUE(result.ok) << result.message;
+    int axisId = doc.getAllAxisIds().empty() ? -1 : doc.getAllAxisIds().front();
+    ASSERT_NE(axisId, -1);
+    const AxisEntry* axis = doc.getAxis(axisId);
+    ASSERT_NE(axis, nullptr);
+    double mag = std::sqrt(7.0 * 7.0 + 3.0 * 3.0);
+    EXPECT_NEAR(axis->direction.X(), 0.0, 1e-9);
+    EXPECT_NEAR(axis->direction.Y(), 7.0 / mag, 1e-9);
+    EXPECT_NEAR(axis->direction.Z(), 3.0 / mag, 1e-9);
+}
+
 TEST(AiToolDispatcher, ConstructionAxisRejectsCoincidentPoints) {
     Document doc;
     History hist;
@@ -729,6 +781,14 @@ TEST(AiToolDispatcher, ConstructionPlaneXySucceeds) {
     History hist;
     PluginContext ctx = makeCtx(doc, hist);
     ToolResult result = executeTool(ctx, "construction_plane", {{"type", "xy"}, {"offset", 5.0}});
+    EXPECT_TRUE(result.ok) << result.message;
+}
+
+TEST(AiToolDispatcher, ConstructionPlaneXzSucceeds) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult result = executeTool(ctx, "construction_plane", {{"type", "xz"}, {"offset", 5.0}});
     EXPECT_TRUE(result.ok) << result.message;
 }
 

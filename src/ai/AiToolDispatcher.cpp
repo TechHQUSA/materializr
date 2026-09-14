@@ -15,7 +15,6 @@
 
 #include <gp_Pnt.hxx>
 
-#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -356,7 +355,6 @@ ToolResult mirrorBody(PluginContext& ctx, const nlohmann::json& args) {
         return {false, "plane is required and must be a string"};
     }
     std::string plane = args["plane"].get<std::string>();
-    std::transform(plane.begin(), plane.end(), plane.begin(), ::tolower);
     // User-space xy (world X/Z) -> MirrorPlane::XZ; user-space xz (world X/Y)
     // -> MirrorPlane::XY. See the Codex ruling above - do not map these two
     // straight through by name, that mirrors the wrong axis.
