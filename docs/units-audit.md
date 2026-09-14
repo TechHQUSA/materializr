@@ -258,7 +258,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 ## `mm` literals by class
 
 - CONVERTED: 1
-- allowed-by-hand: 36
+- allowed-by-hand: 49
 - comment: 261
 - diagnostic: 10
 - identifier/other: 9
@@ -282,6 +282,19 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | allowed-by-hand | src/ai/AiToolSchema.cpp:42 | `num("dx", "Move along X in mm."),` |
 | allowed-by-hand | src/ai/AiToolSchema.cpp:43 | `num("dy", "Move along Y in mm."),` |
 | allowed-by-hand | src/ai/AiToolSchema.cpp:44 | `num("dz", "Move along Z in mm.")}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:60 | `num("dx", "Offset along X in mm.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:61 | `num("dy", "Offset along Y (user-space depth) in mm.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:62 | `num("dz", "Offset along Z (user-space height/up) in mm.", false)}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:69 | `num("source_x", "X of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:70 | `num("source_y", "Depth (user-space Y) of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:71 | `num("source_z", "Height (user-space Z, up) of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:72 | `num("target_x", "X of the destination point, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:73 | `num("target_y", "Depth (user-space Y) of the destination point, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:74 | `num("target_z", "Height (user-space Z, up) of the destination point, in mm.")}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:83 | `num("spacing_x", "Linear pattern: spacing along X per step, in mm. Ignored for radial.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:84 | `num("spacing_y", "Linear pattern: spacing along user-space depth (Y) per step, in mm. Ignored for radial.", fa` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:85 | `num("spacing_z", "Linear pattern: spacing along user-space height (Z, up) per step, in mm. Ignored for radial.` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:104 | `num("offset", "Offset distance from the plane along its normal, in mm. Defaults to 0.", false),` |
 | comment | src/app/Application.cpp:909 | `// ios_platform.mm).` |
 | comment | src/app/Application.cpp:1167 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
 | comment | src/app/Application.cpp:1952 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |

@@ -5,6 +5,15 @@
 #include "../modeling/PrimitiveOp.h"
 #include "../modeling/TransformOp.h"
 #include "../modeling/BooleanOp.h"
+#include "../modeling/CopyOp.h"
+#include "../modeling/DeleteOp.h"
+#include "../modeling/SeparateBodyOp.h"
+#include "../modeling/MirrorOp.h"
+#include "../modeling/PatternOp.h"
+#include "../modeling/ConstructionAxisOp.h"
+#include "../modeling/ConstructionPlaneOp.h"
+
+#include <gp_Pnt.hxx>
 
 #include <cmath>
 #include <limits>
@@ -65,6 +74,23 @@ bool optionalNumber(const nlohmann::json& args, const char* key, double& out,
         return false;
     }
     out = args[key].get<double>();
+    return true;
+}
+bool requireFiniteNumber(const nlohmann::json& args, const char* key, double& out, std::string& err) {
+    if (!requireNumber(args, key, out, err)) return false;
+    if (!std::isfinite(out)) {
+        err = std::string(key) + " must be a finite number";
+        return false;
+    }
+    return true;
+}
+
+bool optionalFiniteNumber(const nlohmann::json& args, const char* key, double& out, double fallback, std::string& err) {
+    if (!optionalNumber(args, key, out, fallback, err)) return false;
+    if (!std::isfinite(out)) {
+        err = std::string(key) + " must be a finite number";
+        return false;
+    }
     return true;
 }
 
@@ -238,6 +264,291 @@ ToolResult booleanOp(PluginContext& ctx, const nlohmann::json& args) {
                   std::to_string(toolId) + " (" + modeStr + ")"};
 }
 
+ToolResult copyBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    double dx = 0, dy = 0, dz = 0;
+    if (!optionalFiniteNumber(args, "dx", dx, 0.0, err)) return {false, err};
+    if (!optionalFiniteNumber(args, "dy", dy, 0.0, err)) return {false, err};
+    if (!optionalFiniteNumber(args, "dz", dz, 0.0, err)) return {false, err};
+    auto op = std::make_unique<CopyOp>();
+    op->setSourceBodyId(bodyId);
+    op->setOffset(dx, dz, dy);
+    CopyOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Copied body " + std::to_string(bodyId) + " to new body " +
+                  std::to_string(raw->getCreatedBodyId()) + "."};
+}
+
+ToolResult deleteBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    auto op = std::make_unique<DeleteOp>();
+    op->setBodyId(bodyId);
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Deleted body " + std::to_string(bodyId) + "."};
+}
+
+ToolResult separateBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    auto op = std::make_unique<SeparateBodyOp>();
+    op->setBody(bodyId);
+    SeparateBodyOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    // getNewBodyIds() returns only the NEW bodies split off, not counting the
+    // original body id that survives - include both counts explicitly.
+    std::string idList;
+    for (int id : raw->getNewBodyIds()) idList += std::to_string(id) + " ";
+    return {true, "Separated body " + std::to_string(bodyId) + " into " +
+                  std::to_string(raw->getNewBodyIds().size() + 1) + " bodies total: original id " +
+                  std::to_string(bodyId) + ", new ids " + idList + "."};
+}
+
+ToolResult alignBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    double sx, sy, sz, tx, ty, tz;
+    if (!requireFiniteNumber(args, "source_x", sx, err)) return {false, err};
+    if (!requireFiniteNumber(args, "source_y", sy, err)) return {false, err};
+    if (!requireFiniteNumber(args, "source_z", sz, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_x", tx, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_y", ty, err)) return {false, err};
+    if (!requireFiniteNumber(args, "target_z", tz, err)) return {false, err};
+    double dx = tx - sx, dy = ty - sy, dz = tz - sz;
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dz)) {
+        return {false, "the distance between source and target is too large to represent"};
+    }
+    // Implemented as a TransformOp translation by (target - source), the same
+    // verified path move_body already uses, rather than AlignOp directly - see
+    // the Codex round-1 ruling above (AlignOp drops face lineage and has no
+    // verified call-site in this branch).
+    auto op = std::make_unique<TransformOp>();
+    op->setBodyId(bodyId);
+    op->setType(TransformType::Translate);
+    op->setTranslation(dx, dz, dy);
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Aligned body " + std::to_string(bodyId) + "."};
+}
+
+ToolResult mirrorBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    if (!args.contains("plane") || !args["plane"].is_string()) {
+        return {false, "plane is required and must be a string"};
+    }
+    std::string plane = args["plane"].get<std::string>();
+    // User-space xy (world X/Z) -> MirrorPlane::XZ; user-space xz (world X/Y)
+    // -> MirrorPlane::XY. See the Codex ruling above - do not map these two
+    // straight through by name, that mirrors the wrong axis.
+    MirrorPlane mp;
+    if (plane == "xy") mp = MirrorPlane::XZ;
+    else if (plane == "xz") mp = MirrorPlane::XY;
+    else if (plane == "yz") mp = MirrorPlane::YZ;
+    else return {false, "plane must be \"xy\", \"xz\", or \"yz\""};
+    bool keep = true;
+    if (args.contains("keep_original")) {
+        if (!args["keep_original"].is_string()) return {false, "keep_original must be a string"};
+        std::string k = args["keep_original"].get<std::string>();
+        if (k == "false") keep = false;
+        else if (k != "true") return {false, "keep_original must be \"true\" or \"false\""};
+    }
+    auto op = std::make_unique<MirrorOp>();
+    op->setBody(bodyId);
+    op->setPlane(mp);
+    op->setKeepOriginal(keep);
+    MirrorOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    // getMirroredBodyId() is -1 when keep_original is false (MirrorOp.cpp
+    // updates the original body in place instead of creating a new one) -
+    // report the retained bodyId in that case, not the sentinel.
+    if (keep) {
+        return {true, "Mirrored body " + std::to_string(bodyId) + " across the " + plane +
+                      " plane. New body id " + std::to_string(raw->getMirroredBodyId()) + "."};
+    }
+    return {true, "Mirrored body " + std::to_string(bodyId) + " across the " + plane +
+                  " plane in place (original replaced, body id " + std::to_string(bodyId) + " unchanged)."};
+}
+
+ToolResult patternBody(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int bodyId;
+    if (!requireBodyId(ctx.document(), args, "body_id", bodyId, err)) return {false, err};
+    if (!args.contains("type") || !args["type"].is_string()) {
+        return {false, "type is required and must be a string"};
+    }
+    std::string type = args["type"].get<std::string>();
+    double countRaw;
+    if (!requirePositive(args, "count", countRaw, err)) return {false, err};
+    if (!std::isfinite(countRaw) || countRaw != std::floor(countRaw)) {
+        return {false, "count must be a finite whole number"};
+    }
+    if (countRaw < 2.0 || countRaw > 500.0) {
+        return {false, "count must be between 2 and 500"};
+    }
+    int count = static_cast<int>(countRaw);
+
+    auto op = std::make_unique<PatternOp>();
+    op->setBody(bodyId);
+    op->setCount(count);
+    PatternOp* rawPattern = op.get();
+
+    // PatternOp multiplies spacing/angle by instance index internally
+    // (count up to 500) - a per-step value near the double range limit
+    // would overflow partway through the array. Cap per-step inputs so
+    // count * value stays comfortably finite (1e15 leaves enormous
+    // headroom below overflow even at count=500 while accepting every
+    // realistic model dimension).
+    constexpr double kMaxPerStepMagnitude = 1e15;
+
+    if (type == "linear") {
+        double sx = 0, sy = 0, sz = 0;
+        if (!optionalFiniteNumber(args, "spacing_x", sx, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "spacing_y", sy, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "spacing_z", sz, 0.0, err)) return {false, err};
+        if (std::fabs(sx) > kMaxPerStepMagnitude || std::fabs(sy) > kMaxPerStepMagnitude ||
+            std::fabs(sz) > kMaxPerStepMagnitude) {
+            return {false, "spacing values are too large"};
+        }
+        op->setType(PatternType::Linear);
+        op->setLinearSpacing(sx, sz, sy);
+    } else if (type == "radial") {
+        double ax = 0, ay = 0, az = 1, ox = 0, oy = 0, oz = 0, angle = 360;
+        if (!optionalFiniteNumber(args, "axis_x", ax, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "axis_y", ay, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "axis_z", az, 1.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "origin_x", ox, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "origin_y", oy, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "origin_z", oz, 0.0, err)) return {false, err};
+        if (!optionalFiniteNumber(args, "total_angle_degrees", angle, 360.0, err)) return {false, err};
+        double axisLen = std::sqrt(ax * ax + ay * ay + az * az);
+        if (!std::isfinite(axisLen) || axisLen < 1e-9) {
+            return {false, "the radial axis must not be the zero vector or too large to represent"};
+        }
+        if (std::fabs(ox) > kMaxPerStepMagnitude || std::fabs(oy) > kMaxPerStepMagnitude ||
+            std::fabs(oz) > kMaxPerStepMagnitude || std::fabs(angle) > kMaxPerStepMagnitude) {
+            // PatternOp.cpp converts (angle / count) to radians per instance -
+            // a finite but huge angle (e.g. 1.7e308) overflows that
+            // multiplication even though it passed the plain isfinite check.
+            return {false, "origin or angle values are too large"};
+        }
+        op->setType(PatternType::Radial);
+        op->setRadialAxis(ax, az, ay);
+        op->setRadialOrigin(ox, oz, oy);
+        // Negate, matching rotateBody's existing -angle: the user-to-world
+        // coordinate swap has determinant -1, reversing rotation handedness.
+        op->setTotalAngle(-angle);
+    } else {
+        return {false, "type must be \"linear\" or \"radial\""};
+    }
+
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    std::string newIds;
+    for (int id : rawPattern->getCreatedBodyIds()) newIds += std::to_string(id) + " ";
+    return {true, "Created a " + type + " pattern of body " + std::to_string(bodyId) +
+                  " with " + std::to_string(count) + " instances. New body ids: " + newIds};
+}
+
+ToolResult constructionAxis(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    if (!args.contains("type") || !args["type"].is_string()) {
+        return {false, "type is required and must be a string"};
+    }
+    std::string type = args["type"].get<std::string>();
+    auto op = std::make_unique<ConstructionAxisOp>();
+    if (type == "x") {
+        op->setType(AxisCreationType::WorldX);
+    } else if (type == "y") {
+        // User-space Y (depth) maps to world Z - confirmed against
+        // Application_InteractiveOps.cpp:2157.
+        op->setType(AxisCreationType::WorldZ);
+    } else if (type == "z") {
+        // User-space Z (up) maps to world Y - confirmed against
+        // Application_InteractiveOps.cpp:2157.
+        op->setType(AxisCreationType::WorldY);
+    } else if (type == "two_points") {
+        double p1x, p1y, p1z, p2x, p2y, p2z;
+        if (!requireFiniteNumber(args, "p1_x", p1x, err)) return {false, err};
+        if (!requireFiniteNumber(args, "p1_y", p1y, err)) return {false, err};
+        if (!requireFiniteNumber(args, "p1_z", p1z, err)) return {false, err};
+        if (!requireFiniteNumber(args, "p2_x", p2x, err)) return {false, err};
+        if (!requireFiniteNumber(args, "p2_y", p2y, err)) return {false, err};
+        if (!requireFiniteNumber(args, "p2_z", p2z, err)) return {false, err};
+        double dist = std::sqrt((p2x - p1x) * (p2x - p1x) + (p2y - p1y) * (p2y - p1y) +
+                                 (p2z - p1z) * (p2z - p1z));
+        if (!std::isfinite(dist) || dist < 1e-6) {
+            // ConstructionAxisOp itself silently falls back to World X for
+            // near-coincident points (< 1e-9) - reject explicitly instead of
+            // letting the model get an axis it never asked for.
+            return {false, "p1 and p2 must not be the same point"};
+        }
+        op->setType(AxisCreationType::TwoPoints);
+        op->setPoints(gp_Pnt(p1x, p1z, p1y), gp_Pnt(p2x, p2z, p2y));
+    } else {
+        return {false, "type must be \"x\", \"y\", \"z\", or \"two_points\""};
+    }
+    if (args.contains("name")) {
+        if (!args["name"].is_string()) return {false, "name must be a string"};
+        op->setName(args["name"].get<std::string>());
+    }
+    ConstructionAxisOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Created construction axis " + std::to_string(raw->getCreatedAxisId()) + "."};
+}
+
+ToolResult constructionPlane(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    if (!args.contains("type") || !args["type"].is_string()) {
+        return {false, "type is required and must be a string"};
+    }
+    std::string type = args["type"].get<std::string>();
+    PlaneCreationType pt;
+    if (type == "xy") pt = PlaneCreationType::XY;
+    else if (type == "xz") pt = PlaneCreationType::XZ;
+    else if (type == "yz") pt = PlaneCreationType::YZ;
+    else return {false, "type must be \"xy\", \"xz\", or \"yz\""};
+    double offset = 0;
+    if (!optionalFiniteNumber(args, "offset", offset, 0.0, err)) return {false, err};
+    auto op = std::make_unique<ConstructionPlaneOp>();
+    op->setType(pt);
+    op->setOffset(offset);
+    if (args.contains("name")) {
+        if (!args["name"].is_string()) return {false, "name must be a string"};
+        op->setName(args["name"].get<std::string>());
+    }
+    if (!ctx.history().pushOperation(std::move(op), ctx.document())) {
+        return {false, "the operation failed to execute"};
+    }
+    ctx.markMeshesDirty();
+    return {true, "Created a " + type + " construction plane."};
+}
+
 } // namespace
 
 ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
@@ -251,6 +562,14 @@ ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
     if (toolName == "rotate_body") return rotateBody(ctx, args);
     if (toolName == "scale_body") return scaleBody(ctx, args);
     if (toolName == "boolean_op") return booleanOp(ctx, args);
+    if (toolName == "copy_body") return copyBody(ctx, args);
+    if (toolName == "delete_body") return deleteBody(ctx, args);
+    if (toolName == "separate_body") return separateBody(ctx, args);
+    if (toolName == "align_body") return alignBody(ctx, args);
+    if (toolName == "mirror_body") return mirrorBody(ctx, args);
+    if (toolName == "pattern_body") return patternBody(ctx, args);
+    if (toolName == "construction_axis") return constructionAxis(ctx, args);
+    if (toolName == "construction_plane") return constructionPlane(ctx, args);
     return {false, "unknown tool '" + toolName + "'"};
 }
 
