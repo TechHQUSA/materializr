@@ -9,6 +9,9 @@ ToolParam num(const char* name, const char* desc, bool required = true) {
 ToolParam str(const char* name, const char* desc, bool required = true) {
     return {name, ToolParamType::String, required, desc};
 }
+ToolParam intArray(const char* name, const char* desc, bool required = true) {
+    return {name, ToolParamType::IntegerArray, required, desc};
+}
 // x, y, z default to the world origin - see AiToolDispatcher (Task 5) for
 // where the default is actually applied when the model omits them.
 std::vector<ToolParam> withOrigin(std::vector<ToolParam> params) {
@@ -103,11 +106,20 @@ const std::vector<ToolDef>& allTools() {
             {str("type", "\"xy\", \"xz\", or \"yz\" (user-space)."),
              num("offset", "Offset distance from the plane along its normal, in mm. Defaults to 0.", false),
              str("name", "Optional name for the new plane.", false)}},
+        ToolDef{"extrude_sketch", "Extrude one or more regions of an existing sketch (or its whole profile) into a solid body.",
+            {num("sketch_id", "The id of the sketch to extrude."),
+             intArray("region_indices", "Which closed regions of the sketch to extrude, by index into its region list. Omit or pass an empty list to extrude the whole sketch profile.", false),
+             num("distance", "Sweep distance in mm. Must be nonzero. The sign picks a direction (positive = along the profile's face normal, negative = the opposite way) UNLESS symmetric is true, in which case only the magnitude matters: the total thickness is abs(distance), split evenly on both sides of the sketch plane."),
+             str("symmetric", "\"true\" to extrude equally in both directions (total thickness abs(distance)), \"false\" for a one-sided extrude. Defaults to \"false\".", false),
+             str("mode", "One of: new_body, union, subtract, intersect. Defaults to new_body.", false),
+             num("target_body_id", "Required unless mode is new_body: the existing body to combine the extrusion with.", false)}},
     };
     return kTools;
 }
 
 namespace {
+// Only for the two scalar types - IntegerArray needs the array/items shape
+// below, which doesn't fit a bare "type" string.
 const char* typeName(ToolParamType t) {
     return t == ToolParamType::String ? "string" : "number";
 }
@@ -118,7 +130,13 @@ nlohmann::json paramsToJsonSchema(const std::vector<ToolParam>& params) {
     nlohmann::json properties = nlohmann::json::object();
     nlohmann::json required = nlohmann::json::array();
     for (const auto& p : params) {
-        properties[p.name] = {{"type", typeName(p.type)}, {"description", p.description}};
+        if (p.type == ToolParamType::IntegerArray) {
+            properties[p.name] = {{"type", "array"},
+                                   {"items", {{"type", "integer"}}},
+                                   {"description", p.description}};
+        } else {
+            properties[p.name] = {{"type", typeName(p.type)}, {"description", p.description}};
+        }
         if (p.required) required.push_back(p.name);
     }
     return {{"type", "object"}, {"properties", properties}, {"required", required}};

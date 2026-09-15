@@ -12,11 +12,17 @@
 #include "../modeling/PatternOp.h"
 #include "../modeling/ConstructionAxisOp.h"
 #include "../modeling/ConstructionPlaneOp.h"
+#include "../modeling/ExtrudeOp.h"
+#include "../modeling/Sketch.h"
 
 #include <gp_Pnt.hxx>
+#include <TopoDS_Face.hxx>
+#include <TopoDS_Compound.hxx>
+#include <BRep_Builder.hxx>
 
 #include <cmath>
 #include <limits>
+#include <set>
 
 namespace materializr { namespace ai {
 
@@ -43,25 +49,56 @@ bool requirePositive(const nlohmann::json& args, const char* key, double& out,
     }
     return true;
 }
+// Shared by requireBodyId/requireSketchId/validateRegionIndex: finite ->
+// representable as int -> integral, in that order (reject before cast - a
+// value like 1e100 is finite and would satisfy floor(v)==v, but is not a
+// safe int conversion). `label` names the value in error messages (e.g.
+// "'body_id'" or "a 'region_indices' value").
+bool parseWholeNumber(double raw, int& out, const std::string& label, std::string& err) {
+    if (!std::isfinite(raw) ||
+        raw < static_cast<double>(std::numeric_limits<int>::min()) ||
+        raw > static_cast<double>(std::numeric_limits<int>::max())) {
+        err = label + " is out of range";
+        return false;
+    }
+    if (raw != std::floor(raw)) {
+        err = label + " must be a whole number, got " + std::to_string(raw);
+        return false;
+    }
+    out = static_cast<int>(raw);
+    return true;
+}
 bool requireBodyId(Document& doc, const nlohmann::json& args, const char* key,
                    int& out, std::string& err) {
     double raw;
     if (!requireNumber(args, key, raw, err)) return false;
-    if (!std::isfinite(raw) ||
-        raw < static_cast<double>(std::numeric_limits<int>::min()) ||
-        raw > static_cast<double>(std::numeric_limits<int>::max())) {
-        err = std::string("'") + key + "' is out of range";
-        return false;
-    }
-    if (raw != std::floor(raw)) {
-        err = std::string("'") + key + "' must be a whole number, got " +
-              std::to_string(raw);
-        return false;
-    }
-    out = static_cast<int>(raw);
+    if (!parseWholeNumber(raw, out, std::string("'") + key + "'", err)) return false;
     for (int id : doc.getAllBodyIds()) if (id == out) return true;
     err = std::string("no body with id ") + std::to_string(out);
     return false;
+}
+bool requireSketchId(Document& doc, const nlohmann::json& args, const char* key,
+                     int& out, std::string& err) {
+    double raw;
+    if (!requireNumber(args, key, raw, err)) return false;
+    if (!parseWholeNumber(raw, out, std::string("'") + key + "'", err)) return false;
+    for (int id : doc.getAllSketchIds()) if (id == out) return true;
+    err = std::string("no sketch with id ") + std::to_string(out);
+    return false;
+}
+// Validates one region_indices element: finite -> representable as int ->
+// integral -> non-negative, in that order.
+bool validateRegionIndex(const nlohmann::json& v, std::string& err, int& out) {
+    if (!v.is_number()) {
+        err = "'region_indices' must contain only numbers";
+        return false;
+    }
+    if (!parseWholeNumber(v.get<double>(), out, "a 'region_indices' value", err)) return false;
+    if (out < 0) {
+        err = "'region_indices' must not contain negative values";
+        return false;
+    }
+    return true;
 }
 // Distinguishes "absent" (use fallback) from "present but wrong type" (reject) -
 // optNumber's single-return-value shape couldn't tell those apart, silently
@@ -549,6 +586,123 @@ ToolResult constructionPlane(PluginContext& ctx, const nlohmann::json& args) {
     return {true, "Created a " + type + " construction plane."};
 }
 
+ToolResult extrudeSketch(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int sketchId;
+    if (!requireSketchId(ctx.document(), args, "sketch_id", sketchId, err))
+        return {false, err};
+    auto sketch = ctx.document().getSketch(sketchId);
+    // requireSketchId already confirmed sketchId is in getAllSketchIds(),
+    // which getSketch() reads from the same store - this should never be
+    // null, but don't dereference blindly.
+    if (!sketch) return {false, "no sketch with id " + std::to_string(sketchId)};
+
+    if (args.contains("region_indices") && !args["region_indices"].is_array())
+        return {false, "'region_indices' must be an array"};
+
+    // Cheap argument checks first, real OCCT geometry work (region
+    // resolution below) last - matches every sibling handler's order
+    // (booleanOp validates both ids and mode before touching the kernel;
+    // patternBody validates count before building the op).
+    double distance;
+    if (!requireFiniteNumber(args, "distance", distance, err)) return {false, err};
+    if (distance == 0.0) return {false, "'distance' must not be zero"};
+
+    bool symmetric = false;
+    if (args.contains("symmetric")) {
+        if (!args["symmetric"].is_string()) return {false, "'symmetric' must be a string"};
+        std::string s = args["symmetric"].get<std::string>();
+        if (s == "true") symmetric = true;
+        else if (s != "false") return {false, "'symmetric' must be \"true\" or \"false\""};
+    }
+
+    ExtrudeMode mode = ExtrudeMode::NewBody;
+    std::string modeStr = "new_body";
+    if (args.contains("mode")) {
+        if (!args["mode"].is_string()) return {false, "'mode' must be a string"};
+        modeStr = args["mode"].get<std::string>();
+        if (modeStr == "new_body") mode = ExtrudeMode::NewBody;
+        else if (modeStr == "union") mode = ExtrudeMode::Union;
+        else if (modeStr == "subtract") mode = ExtrudeMode::Subtract;
+        else if (modeStr == "intersect") mode = ExtrudeMode::Intersect;
+        else return {false, "'mode' must be one of: new_body, union, subtract, intersect"};
+    }
+
+    int targetBodyId = -1;
+    if (mode != ExtrudeMode::NewBody) {
+        if (!requireBodyId(ctx.document(), args, "target_body_id", targetBodyId, err))
+            return {false, err};
+    }
+
+    bool haveIndices = args.contains("region_indices") && !args["region_indices"].empty();
+    TopoDS_Shape profile;
+    if (haveIndices) {
+        const auto& arr = args["region_indices"];
+        // A valid array can never usefully hold more entries than the
+        // sketch has regions (duplicates are rejected below) - bounding
+        // against the real region count, not an arbitrary constant, means
+        // an oversized array fails on its very first element rather than
+        // being fully validated/deduped before any bounds check runs.
+        auto regions = sketch->buildRegions();
+        if (arr.size() > regions.size())
+            return {false, "'region_indices' has more entries (" + std::to_string(arr.size()) +
+                          ") than the sketch has regions (" + std::to_string(regions.size()) + ")"};
+        std::set<int> seen;
+        std::vector<TopoDS_Face> faces;
+        for (const auto& v : arr) {
+            int idx;
+            if (!validateRegionIndex(v, err, idx)) return {false, err};
+            if (!seen.insert(idx).second)
+                return {false, "'region_indices' contains a duplicate index: " +
+                              std::to_string(idx)};
+            if (idx >= static_cast<int>(regions.size())) {
+                return {false, "region_index " + std::to_string(idx) +
+                              " out of range (sketch has " + std::to_string(regions.size()) +
+                              " regions)"};
+            }
+            faces.push_back(regions[idx].face);
+        }
+        if (faces.size() == 1) {
+            profile = faces.front();
+        } else {
+            // One extrude producing N independent solids - MakePrism sweeps
+            // each face of a compound separately, it does not fuse them
+            // (Symmetric mode is the exception: it fuses the whole
+            // profile's up/down sweep regardless of region count - see
+            // ExtrudeOp::execute()). Same shape as the interactive multi-
+            // region extrude in Application.cpp.
+            TopoDS_Compound comp;
+            BRep_Builder bb;
+            bb.MakeCompound(comp);
+            for (const auto& f : faces) bb.Add(comp, f);
+            profile = comp;
+        }
+    } else {
+        profile = sketch->buildProfileShape();
+    }
+    if (profile.IsNull()) {
+        return {false, "sketch " + std::to_string(sketchId) + " has no valid profile to extrude"};
+    }
+
+    auto op = std::make_unique<ExtrudeOp>();
+    op->setProfile(profile);
+    op->setSketchSource(sketchId);
+    op->setDistance(distance);
+    op->setDirection(symmetric ? ExtrudeDirection::Symmetric : ExtrudeDirection::Normal);
+    op->setMode(mode);
+    op->setTargetBody(targetBodyId);
+    ExtrudeOp* raw = op.get();
+    if (!ctx.history().pushOperation(std::move(op), ctx.document()))
+        return {false, "the operation failed to execute"};
+    ctx.markMeshesDirty();
+    if (mode == ExtrudeMode::NewBody) {
+        return {true, "Extruded sketch " + std::to_string(sketchId) + " into new body " +
+                      std::to_string(raw->createdBodyId()) + "."};
+    }
+    return {true, "Extruded sketch " + std::to_string(sketchId) + " and combined it into body " +
+                  std::to_string(targetBodyId) + " (" + modeStr + ")."};
+}
+
 } // namespace
 
 ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
@@ -570,6 +724,7 @@ ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
     if (toolName == "pattern_body") return patternBody(ctx, args);
     if (toolName == "construction_axis") return constructionAxis(ctx, args);
     if (toolName == "construction_plane") return constructionPlane(ctx, args);
+    if (toolName == "extrude_sketch") return extrudeSketch(ctx, args);
     return {false, "unknown tool '" + toolName + "'"};
 }
 

@@ -2,10 +2,14 @@
 #include "core/Document.h"
 #include "core/History.h"
 #include "plugin/PluginContext.h"
+#include "modeling/Sketch.h"
 
 #include <gtest/gtest.h>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
+#include <memory>
 
 using namespace materializr::ai;
 using materializr::PluginContext;
@@ -50,6 +54,26 @@ int addTestBox(PluginContext& ctx, Document& doc) {
     ToolResult r = executeTool(ctx, "add_box", {{"width", 10.0}, {"height", 10.0}, {"depth", 10.0}});
     (void)r;
     return doc.getAllBodyIds().back();
+}
+double volumeOf(Document& doc, int bodyId) {
+    GProp_GProps g;
+    BRepGProp::VolumeProperties(doc.getBody(bodyId), g);
+    return g.Mass();
+}
+void addRect(materializr::Sketch& sk, float x0, float y0, float x1, float y1) {
+    int a = sk.addPoint({x0, y0}), b = sk.addPoint({x1, y0});
+    int c = sk.addPoint({x1, y1}), d = sk.addPoint({x0, y1});
+    sk.addLine(a, b); sk.addLine(b, c); sk.addLine(c, d); sk.addLine(d, a);
+}
+// A sketch with two disjoint rectangular regions: A is 10x10 (100 mm^2) at
+// the origin, B is 6x4 (24 mm^2) well clear of A - same shapes/pattern as
+// tests/test_extrude_regions.cpp, reused here for region_indices coverage.
+int addTwoRegionSketch(Document& doc) {
+    auto sk = std::make_shared<materializr::Sketch>();
+    sk->setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0), gp_Dir(1, 0, 0))));
+    addRect(*sk, 0, 0, 10, 10);   // region 0: 100 mm^2
+    addRect(*sk, 20, 0, 26, 4);   // region 1: 24 mm^2
+    return doc.addSketch(sk, "Test Sketch");
 }
 } // namespace
 
@@ -807,4 +831,277 @@ TEST(AiToolDispatcher, ConstructionPlaneRejectsANonStringName) {
     nlohmann::json args = {{"type", "xy"}, {"name", 42}};
     ToolResult result = executeTool(ctx, "construction_plane", args);
     EXPECT_FALSE(result.ok);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchWithNoRegionIndicesExtrudesTheWholeProfile) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch", {{"sketch_id", sid}, {"distance", 5.0}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    // Whole profile = both regions combined: (100 + 24) * 5.
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), 124.0 * 5.0, 1e-6);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchSingleRegionMatchesThatRegionsVolume) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", 5.0}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), 100.0 * 5.0, 1e-6);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchMultiRegionTotalVolumeIsTheSumOfBothPrisms) {
+    // Ordinary new_body extrude of a compound profile produces N separate
+    // prism solids, not one fused solid - assert the SUM, not a single-
+    // solid shape (see PLAN.md's compound-semantics correction).
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0, 1}}, {"distance", 5.0}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), (100.0 + 24.0) * 5.0, 1e-6);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchNegativeDistanceSweepsTheOppositeDirection) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", -5.0}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), 100.0 * 5.0, 1e-6)
+        << "sign reverses direction, not the resulting volume";
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchSymmetricIgnoresSignAndUsesAbsoluteDistanceAsTotalThickness) {
+    Document doc;
+    History histPos, histNeg;
+    PluginContext ctxPos = makeCtx(doc, histPos);
+    int sid = addTwoRegionSketch(doc);
+
+    Document doc2;
+    PluginContext ctxNeg = makeCtx(doc2, histNeg);
+    int sid2 = addTwoRegionSketch(doc2);
+
+    ToolResult rPos = executeTool(ctxPos, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", 6.0}, {"symmetric", "true"}});
+    ToolResult rNeg = executeTool(ctxNeg, "extrude_sketch",
+        {{"sketch_id", sid2}, {"region_indices", {0}}, {"distance", -6.0}, {"symmetric", "true"}});
+    ASSERT_TRUE(rPos.ok) << rPos.message;
+    ASSERT_TRUE(rNeg.ok) << rNeg.message;
+    // Total thickness is abs(distance) = 6, split 3 each way - same result
+    // regardless of sign.
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), 100.0 * 6.0, 1e-6);
+    EXPECT_NEAR(volumeOf(doc2, doc2.getAllBodyIds().front()), 100.0 * 6.0, 1e-6);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsAnOutOfRangeRegionIndex) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+    int before = hist.stepCount();
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {5}}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_NE(r.message.find("5"), std::string::npos) << r.message;
+    EXPECT_EQ(hist.stepCount(), before);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsANonIntegerRegionIndex) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0.5}}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsAnOutOfIntRangeRegionIndex) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {1e100}}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsANonArrayRegionIndices) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", 0}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsDuplicateRegionIndices) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0, 0}}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsAnUnknownSketchId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch", {{"sketch_id", 999}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsZeroDistance) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch", {{"sketch_id", sid}, {"distance", 0.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsNonFiniteDistance) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    nlohmann::json nanArgs = {{"sketch_id", sid}, {"distance", std::nan("")}};
+    nlohmann::json infArgs = {{"sketch_id", sid}, {"distance", std::numeric_limits<double>::infinity()}};
+    EXPECT_FALSE(executeTool(ctx, "extrude_sketch", nanArgs).ok);
+    EXPECT_FALSE(executeTool(ctx, "extrude_sketch", infArgs).ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchModeSubtractRequiresTargetBodyId) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", 5.0}, {"mode", "subtract"}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchModeSubtractCutsTheTargetBody) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    // Target: a 30x30x30 box straddling the sketch plane (y in [-15,15] world,
+    // matching the sketch plane through the origin) so the small region-0
+    // prism cuts into it rather than missing it entirely.
+    ToolResult box = executeTool(ctx, "add_box",
+        {{"width", 30.0}, {"height", 30.0}, {"depth", 30.0}, {"x", -10.0}, {"y", -15.0}, {"z", -15.0}});
+    ASSERT_TRUE(box.ok) << box.message;
+    int targetId = doc.getAllBodyIds().front();
+    double before = volumeOf(doc, targetId);
+
+    int sid = addTwoRegionSketch(doc);
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", 5.0},
+         {"mode", "subtract"}, {"target_body_id", targetId}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_LT(volumeOf(doc, doc.getAllBodyIds().front()), before)
+        << "subtract must reduce the target body's volume";
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchRejectsAnEmptySketchWithNoValidProfile) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    auto sk = std::make_shared<materializr::Sketch>();
+    sk->setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0), gp_Dir(1, 0, 0))));
+    int sid = doc.addSketch(sk, "Empty Sketch"); // no geometry at all
+
+    ToolResult r = executeTool(ctx, "extrude_sketch", {{"sketch_id", sid}, {"distance", 5.0}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_NE(r.message.find("no valid profile"), std::string::npos) << r.message;
+    EXPECT_TRUE(doc.getAllBodyIds().empty());
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchSubtractConsumingTheEntireTargetFailsAndLeavesItUnchanged) {
+    // Exercises the checked pushOperation() path itself: ExtrudeOp::execute()
+    // structurally succeeds the boolean build but its own commitGuard rejects
+    // a near-zero-mass result (the cut consumed the whole target) and
+    // returns false - the dispatcher must surface that as a failure and
+    // leave the target body untouched, not silently report success.
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    ToolResult box = executeTool(ctx, "add_box", {{"width", 5.0}, {"height", 5.0}, {"depth", 5.0}});
+    ASSERT_TRUE(box.ok) << box.message;
+    int targetId = doc.getAllBodyIds().front();
+    double before = volumeOf(doc, targetId);
+    int stepsBefore = hist.stepCount();
+
+    // A sketch region far larger than the 5x5x5 box, swept far enough to
+    // fully engulf it in every axis.
+    auto sk = std::make_shared<materializr::Sketch>();
+    sk->setPlane(gp_Pln(gp_Ax3(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0), gp_Dir(1, 0, 0))));
+    addRect(*sk, -10, -10, 10, 10);
+    int sid = doc.addSketch(sk, "Engulfing Sketch");
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"distance", 20.0}, {"mode", "subtract"}, {"target_body_id", targetId}});
+    EXPECT_FALSE(r.ok);
+    EXPECT_EQ(hist.stepCount(), stepsBefore)
+        << "a failed extrude must not append a history step";
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_NEAR(volumeOf(doc, targetId), before, 1e-6)
+        << "the target body's geometry must be unchanged after a failed subtract";
+}
+
+TEST(AiToolDispatcher, ExtrudeSketchUndoRemovesTheNewBodyAndRedoRestoresIt) {
+    Document doc;
+    History hist;
+    PluginContext ctx = makeCtx(doc, hist);
+    int sid = addTwoRegionSketch(doc);
+
+    ToolResult r = executeTool(ctx, "extrude_sketch",
+        {{"sketch_id", sid}, {"region_indices", {0}}, {"distance", 5.0}});
+    ASSERT_TRUE(r.ok) << r.message;
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+
+    ASSERT_TRUE(hist.undo(doc));
+    EXPECT_TRUE(doc.getAllBodyIds().empty()) << "undo must remove the extruded body";
+
+    ASSERT_TRUE(hist.redo(doc));
+    ASSERT_EQ(doc.getAllBodyIds().size(), 1u);
+    EXPECT_NEAR(volumeOf(doc, doc.getAllBodyIds().front()), 100.0 * 5.0, 1e-6);
 }

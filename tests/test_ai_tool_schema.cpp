@@ -5,7 +5,7 @@
 
 using namespace materializr::ai;
 
-TEST(AiToolSchema, AllToolsContainsExactlySeventeenTools) {
+TEST(AiToolSchema, AllToolsContainsExactlyEighteenTools) {
     const auto& tools = allTools();
     std::vector<std::string> names;
     for (const auto& t : tools) names.push_back(t.name);
@@ -13,9 +13,9 @@ TEST(AiToolSchema, AllToolsContainsExactlySeventeenTools) {
         "add_box", "add_cylinder", "add_sphere", "add_cone", "add_torus",
         "move_body", "rotate_body", "scale_body", "boolean_op",
         "copy_body", "delete_body", "separate_body", "align_body", "mirror_body",
-        "pattern_body", "construction_axis", "construction_plane"};
+        "pattern_body", "construction_axis", "construction_plane", "extrude_sketch"};
     EXPECT_EQ(names, expected);
-    EXPECT_EQ(tools.size(), 17u);
+    EXPECT_EQ(tools.size(), 18u);
 }
 
 TEST(AiToolSchema, AllNineOriginalToolNamesAreStillPresent) {
@@ -74,6 +74,40 @@ TEST(AiToolSchema, ConstructionPlaneParamShapeMatchesBrief) {
     const auto* t = findTool(allTools(), "construction_plane");
     ASSERT_NE(t, nullptr);
     expectParamSplit(*t, {"type"}, {"offset", "name"});
+}
+
+TEST(AiToolSchema, ExtrudeSketchParamShapeMatchesPlan) {
+    const auto* t = findTool(allTools(), "extrude_sketch");
+    ASSERT_NE(t, nullptr);
+    expectParamSplit(*t, {"sketch_id", "distance"},
+                     {"region_indices", "symmetric", "mode", "target_body_id"});
+}
+
+TEST(AiToolSchema, ExtrudeSketchRegionIndicesSerializesAsAnIntegerArray) {
+    // expectParamSplit only checks the ToolParam struct's required flag,
+    // not what actually gets serialized - a broken paramsToJsonSchema
+    // branch could still pass it. Assert the real wire shape both
+    // providers receive.
+    nlohmann::json anthropic = toolsToAnthropicJson(allTools());
+    nlohmann::json openai = toolsToOpenAiJson(allTools());
+    auto findSchema = [](const nlohmann::json& tools, bool isOpenAi) -> const nlohmann::json* {
+        for (const auto& t : tools) {
+            const std::string& name = isOpenAi ? t["function"]["name"].get_ref<const std::string&>()
+                                                : t["name"].get_ref<const std::string&>();
+            if (name == "extrude_sketch")
+                return isOpenAi ? &t["function"]["parameters"] : &t["input_schema"];
+        }
+        return nullptr;
+    };
+    const nlohmann::json* a = findSchema(anthropic, false);
+    const nlohmann::json* o = findSchema(openai, true);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(o, nullptr);
+    for (const nlohmann::json* schema : {a, o}) {
+        const auto& regionIndices = (*schema)["properties"]["region_indices"];
+        EXPECT_EQ(regionIndices["type"], "array");
+        EXPECT_EQ(regionIndices["items"]["type"], "integer");
+    }
 }
 
 TEST(AiToolSchema, EveryToolHasANonEmptyDescription) {

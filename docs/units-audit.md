@@ -258,43 +258,44 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 ## `mm` literals by class
 
 - CONVERTED: 1
-- allowed-by-hand: 49
+- allowed-by-hand: 50
 - comment: 261
 - diagnostic: 10
 - identifier/other: 9
 
 | class | file:line | code |
 |---|---|---|
-| allowed-by-hand | src/ai/AiToolSchema.cpp:15 | `params.push_back(num("x", "World X position in mm (default 0).", false));` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:16 | `params.push_back(num("y", "World Y position in mm (default 0).", false));` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:17 | `params.push_back(num("z", "World Z position in mm (default 0).", false));` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:25 | `withOrigin({num("width", "Size along X in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:26 | `num("height", "Size along the up axis (Z) in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:27 | `num("depth", "Size along the horizontal depth axis (Y) in mm.")})},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:29 | `withOrigin({num("radius", "Radius in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:30 | `num("height", "Height in mm.")})},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:32 | `withOrigin({num("radius", "Radius in mm.")})},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:34 | `withOrigin({num("bottom_radius", "Base radius in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:35 | `num("top_radius", "Top radius in mm; 0 for a point."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:36 | `num("height", "Height in mm.")})},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:38 | `withOrigin({num("major_radius", "Distance from centre to tube centre, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:39 | `num("minor_radius", "Tube radius in mm.")})},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:42 | `num("dx", "Move along X in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:43 | `num("dy", "Move along Y in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:44 | `num("dz", "Move along Z in mm.")}},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:60 | `num("dx", "Offset along X in mm.", false),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:61 | `num("dy", "Offset along Y (user-space depth) in mm.", false),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:62 | `num("dz", "Offset along Z (user-space height/up) in mm.", false)}},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:69 | `num("source_x", "X of the point on the body, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:70 | `num("source_y", "Depth (user-space Y) of the point on the body, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:71 | `num("source_z", "Height (user-space Z, up) of the point on the body, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:72 | `num("target_x", "X of the destination point, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:73 | `num("target_y", "Depth (user-space Y) of the destination point, in mm."),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:74 | `num("target_z", "Height (user-space Z, up) of the destination point, in mm.")}},` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:83 | `num("spacing_x", "Linear pattern: spacing along X per step, in mm. Ignored for radial.", false),` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:84 | `num("spacing_y", "Linear pattern: spacing along user-space depth (Y) per step, in mm. Ignored for radial.", fa` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:85 | `num("spacing_z", "Linear pattern: spacing along user-space height (Z, up) per step, in mm. Ignored for radial.` |
-| allowed-by-hand | src/ai/AiToolSchema.cpp:104 | `num("offset", "Offset distance from the plane along its normal, in mm. Defaults to 0.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:18 | `params.push_back(num("x", "World X position in mm (default 0).", false));` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:19 | `params.push_back(num("y", "World Y position in mm (default 0).", false));` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:20 | `params.push_back(num("z", "World Z position in mm (default 0).", false));` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:28 | `withOrigin({num("width", "Size along X in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:29 | `num("height", "Size along the up axis (Z) in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:30 | `num("depth", "Size along the horizontal depth axis (Y) in mm.")})},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:32 | `withOrigin({num("radius", "Radius in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:33 | `num("height", "Height in mm.")})},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:35 | `withOrigin({num("radius", "Radius in mm.")})},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:37 | `withOrigin({num("bottom_radius", "Base radius in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:38 | `num("top_radius", "Top radius in mm; 0 for a point."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:39 | `num("height", "Height in mm.")})},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:41 | `withOrigin({num("major_radius", "Distance from centre to tube centre, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:42 | `num("minor_radius", "Tube radius in mm.")})},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:45 | `num("dx", "Move along X in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:46 | `num("dy", "Move along Y in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:47 | `num("dz", "Move along Z in mm.")}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:63 | `num("dx", "Offset along X in mm.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:64 | `num("dy", "Offset along Y (user-space depth) in mm.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:65 | `num("dz", "Offset along Z (user-space height/up) in mm.", false)}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:72 | `num("source_x", "X of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:73 | `num("source_y", "Depth (user-space Y) of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:74 | `num("source_z", "Height (user-space Z, up) of the point on the body, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:75 | `num("target_x", "X of the destination point, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:76 | `num("target_y", "Depth (user-space Y) of the destination point, in mm."),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:77 | `num("target_z", "Height (user-space Z, up) of the destination point, in mm.")}},` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:86 | `num("spacing_x", "Linear pattern: spacing along X per step, in mm. Ignored for radial.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:87 | `num("spacing_y", "Linear pattern: spacing along user-space depth (Y) per step, in mm. Ignored for radial.", fa` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:88 | `num("spacing_z", "Linear pattern: spacing along user-space height (Z, up) per step, in mm. Ignored for radial.` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:107 | `num("offset", "Offset distance from the plane along its normal, in mm. Defaults to 0.", false),` |
+| allowed-by-hand | src/ai/AiToolSchema.cpp:112 | `num("distance", "Sweep distance in mm. Must be nonzero. The sign picks a direction (positive = along the profi` |
 | comment | src/app/Application.cpp:909 | `// ios_platform.mm).` |
 | comment | src/app/Application.cpp:1167 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
 | comment | src/app/Application.cpp:1952 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
