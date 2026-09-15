@@ -1,6 +1,12 @@
 src/ios_platform.h:4:
 src/ios_storekit.h:6:
 src/mobile_files.h:9:
+src/ai/AiToolDispatcher.cpp:194:
+src/ai/AiToolDispatcher.cpp:901:
+src/ai/AiToolDispatcher.cpp:903:
+src/ai/AiToolDispatcher.cpp:924:
+src/ai/AiToolDispatcher.cpp:939:
+src/ai/AiToolDispatcher.cpp:956:
 src/ai/AiToolSchema.cpp:18:
 src/ai/AiToolSchema.cpp:19:
 src/ai/AiToolSchema.cpp:20:

@@ -16,13 +16,21 @@
 #include "../modeling/Sketch.h"
 
 #include <gp_Pnt.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Dir.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Compound.hxx>
 #include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
+#include <Standard_Failure.hxx>
 
 #include <cmath>
 #include <limits>
 #include <set>
+#include <algorithm>
+#include <sstream>
+#include <iomanip>
 
 namespace materializr { namespace ai {
 
@@ -99,6 +107,132 @@ bool validateRegionIndex(const nlohmann::json& v, std::string& err, int& out) {
         return false;
     }
     return true;
+}
+// An optional pagination cursor: absent means "no filter" (sentinel =
+// INT_MIN, so `id > cursor` is true for every real id). Unlike
+// requireBodyId/requireSketchId, a cursor does NOT need to name an
+// existing id - a stale cursor from a since-deleted object should just
+// filter out nothing extra, not error.
+bool optionalCursor(const nlohmann::json& args, const char* key, int& out, std::string& err) {
+    if (!args.contains(key)) { out = std::numeric_limits<int>::min(); return true; }
+    if (!args[key].is_number()) {
+        err = std::string("'") + key + "' must be a number";
+        return false;
+    }
+    return parseWholeNumber(args[key].get<double>(), out, std::string("'") + key + "'", err);
+}
+// Repairs a string into structurally valid UTF-8: decodes each sequence
+// and validates its codepoint range and shortest-form encoding (not just
+// "does each byte look like a continuation byte" - that alone still
+// admits overlong encodings, encoded UTF-16 surrogates U+D800-U+DFFF, and
+// values above U+10FFFF). Any byte that isn't part of a fully valid
+// sequence at its position is replaced with '?'. Must run BEFORE
+// truncateUtf8 below, so the boundary walk there only ever sees
+// already-valid input.
+std::string sanitizeUtf8(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char b0 = static_cast<unsigned char>(s[i]);
+        int len; unsigned int cp, minCp;
+        if (b0 < 0x80) { len = 1; cp = b0; minCp = 0; }
+        else if ((b0 & 0xE0) == 0xC0) { len = 2; cp = b0 & 0x1F; minCp = 0x80; }
+        else if ((b0 & 0xF0) == 0xE0) { len = 3; cp = b0 & 0x0F; minCp = 0x800; }
+        else if ((b0 & 0xF8) == 0xF0) { len = 4; cp = b0 & 0x07; minCp = 0x10000; }
+        else { out += '?'; ++i; continue; }
+        bool ok = (i + static_cast<size_t>(len) <= s.size());
+        for (int k = 1; ok && k < len; ++k) {
+            unsigned char bk = static_cast<unsigned char>(s[i + k]);
+            if ((bk & 0xC0) != 0x80) { ok = false; break; }
+            cp = (cp << 6) | (bk & 0x3F);
+        }
+        if (!ok || cp < minCp || cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) {
+            out += '?';
+            ++i;
+            continue;
+        }
+        out.append(s, i, static_cast<size_t>(len));
+        i += static_cast<size_t>(len);
+    }
+    return out;
+}
+// Truncates already-UTF-8-valid input to at most maxBytes, backing off a
+// mid-character cut to the last full character boundary.
+std::string truncateUtf8(const std::string& s, size_t maxBytes) {
+    if (s.size() <= maxBytes) return s;
+    size_t cut = maxBytes;
+    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
+    return s.substr(0, cut) + "...";
+}
+// A body/sketch/axis/plane name embedded raw into describe_scene's output
+// becomes trusted-looking context for the SAME model on its next turn -
+// Document::setBodyName et al. accept any string with no validation, so an
+// unsanitized name could inject a newline plus a fabricated "id=..." line
+// (forging a scene object) or blow the per-category output budget with one
+// oversized name. Strip control bytes, neutralize the quote the output
+// wraps names in, repair invalid UTF-8, then cap the length.
+std::string sanitizeName(const std::string& name) {
+    std::string clean;
+    clean.reserve(name.size());
+    for (char c : name) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (uc < 0x20) clean += ' ';
+        else if (c == '"') clean += '\'';
+        else clean += c;
+    }
+    return truncateUtf8(sanitizeUtf8(clean), 80);
+}
+// Inverse of PrimitiveOp.cpp's worldPnt(ox,oy,oz) = gp_Pnt(ox,oz,oy): user
+// (x,y,z) = world (X,Z,Y). describe_scene is the only tool that goes
+// World -> user-space; every other tool only goes user-space -> world.
+void worldToUser(double wx, double wy, double wz, double& ux, double& uy, double& uz) {
+    ux = wx;
+    uy = wz;
+    uz = wy;
+}
+// mm value formatted with up to 2 decimals, trailing zeros trimmed
+// (10.00 -> "10", 12.5 -> "12.5").
+std::string fmtMM(double v) {
+    if (std::signbit(v) && v == 0.0) v = 0.0; // -0 -> +0, so it never prints as "-0"
+    std::ostringstream s;
+    s << std::fixed << std::setprecision(2) << v;
+    std::string r = s.str();
+    if (r.find('.') != std::string::npos) {
+        while (r.back() == '0') r.pop_back();
+        if (r.back() == '.') r.pop_back();
+    }
+    return r;
+}
+// Extracts a body's world bounding box for scene reporting without ever
+// throwing or aborting the whole describe_scene call - one bad body must
+// not hide every other one. Guards, in order: null shape (skip
+// BRepBndLib::Add entirely), this repo's own established 3-tier OCCT
+// catch idiom around Add()/Get() (Standard_Failure -> std::exception ->
+// ..., the exact pattern at BrepIO.cpp:261-268 and 7+ other sites -
+// Standard_Failure derives from Standard_Transient, NOT std::exception,
+// so a bare std::exception catch alone would miss it), box.IsVoid(),
+// box.IsOpen() (OCCT's "unbounded side" flag - its infinity sentinel,
+// Precision::Infinite(), is a large but FINITE double, so isfinite() alone
+// would not catch it), and a final isfinite check on all six bounds as an
+// independent second guard.
+bool tryGetBodyBBox(const TopoDS_Shape& shape, double& x0, double& y0, double& z0,
+                    double& x1, double& y1, double& z1) {
+    if (shape.IsNull()) return false;
+    try {
+        Bnd_Box box;
+        BRepBndLib::Add(shape, box);
+        if (box.IsVoid() || box.IsOpen()) return false;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        return std::isfinite(x0) && std::isfinite(y0) && std::isfinite(z0) &&
+               std::isfinite(x1) && std::isfinite(y1) && std::isfinite(z1);
+    } catch (const Standard_Failure&) {
+        return false;
+    } catch (const std::exception&) {
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 // Distinguishes "absent" (use fallback) from "present but wrong type" (reject) -
 // optNumber's single-return-value shape couldn't tell those apart, silently
@@ -703,6 +837,131 @@ ToolResult extrudeSketch(PluginContext& ctx, const nlohmann::json& args) {
                   std::to_string(targetBodyId) + " (" + modeStr + ")."};
 }
 
+constexpr size_t kScenePageSize = 100;
+
+// Shared skeleton for describeScene's four category listings: sort ids,
+// filter to id > cursorAfter, cap at kScenePageSize, and format the
+// header/empty/continuation-trailer lines identically. Only the per-id
+// name/visibility lookup and the category-specific detail (bbox vs. plane
+// origin+normal vs. axis origin+direction) differ between categories, so
+// only those are parameterized - everything else here was ~15 lines
+// repeated byte-for-byte four times before this was factored out.
+template <typename NameFn, typename VisibleFn, typename DetailFn>
+void appendPagedSection(std::ostringstream& out, const char* label, const char* cursorKey,
+                        std::vector<int> ids, int cursorAfter,
+                        NameFn getName, VisibleFn isVisible, DetailFn appendDetail) {
+    std::sort(ids.begin(), ids.end());
+    std::vector<int> page;
+    for (int id : ids) if (id > cursorAfter) page.push_back(id);
+    size_t total = page.size();
+    if (page.size() > kScenePageSize) page.resize(kScenePageSize);
+    if (total == 0) {
+        out << label << " (0): (none)\n";
+        return;
+    }
+    out << label << " (" << total << "):\n";
+    for (int id : page) {
+        out << "  id=" << id << " \"" << sanitizeName(getName(id)) << "\""
+            << " visible=" << (isVisible(id) ? "true" : "false");
+        appendDetail(out, id);
+        out << "\n";
+    }
+    if (total > page.size())
+        out << "  ... " << (total - page.size()) << " more (continue with " << cursorKey << "="
+            << page.back() << ")\n";
+}
+
+ToolResult describeScene(PluginContext& ctx, const nlohmann::json& args) {
+    std::string err;
+    int afterBody, afterSketch, afterAxis, afterPlane;
+    if (!optionalCursor(args, "after_body_id", afterBody, err)) return {false, err};
+    if (!optionalCursor(args, "after_sketch_id", afterSketch, err)) return {false, err};
+    if (!optionalCursor(args, "after_axis_id", afterAxis, err)) return {false, err};
+    if (!optionalCursor(args, "after_plane_id", afterPlane, err)) return {false, err};
+
+    Document& doc = ctx.document();
+    std::ostringstream out;
+
+    appendPagedSection(out, "Bodies", "after_body_id", doc.getAllBodyIds(), afterBody,
+        [&](int id) { return doc.getBodyName(id); },
+        [&](int id) { return doc.isBodyVisible(id); },
+        [&](std::ostringstream& o, int id) {
+            double x0, y0, z0, x1, y1, z1;
+            if (tryGetBodyBBox(doc.getBody(id), x0, y0, z0, x1, y1, z1)) {
+                double ox, oy, oz;
+                worldToUser(x0, y0, z0, ox, oy, oz);
+                // size = raw world extents, NOT worldToUser'd like origin above -
+                // worldToUser's Y/Z permutation happens to leave a (width,
+                // height, depth)-labeled extent triple in the same order it
+                // already needs (world X extent = width, world Y = height,
+                // world Z = depth, matching add_box's own convention), so
+                // applying the swap here would be a no-op done for the wrong
+                // reason. Not a coincidence to rely on if worldToUser ever
+                // stops being a pure axis permutation.
+                o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"
+                  << " size=" << fmtMM(x1 - x0) << "x" << fmtMM(y1 - y0) << "x" << fmtMM(z1 - z0)
+                  << "mm (w x h x d)";
+            } else {
+                o << " bounds=unavailable";
+            }
+        });
+    out << "\n";
+
+    appendPagedSection(out, "Sketches", "after_sketch_id", doc.getAllSketchIds(), afterSketch,
+        [&](int id) { return doc.getSketchName(id); },
+        [&](int id) { return doc.isSketchVisible(id); },
+        [&](std::ostringstream& o, int id) {
+            auto sketch = doc.getSketch(id);
+            // getAllSketchIds() and getSketch() read the same store, so this
+            // should never be null - guard anyway rather than dereference blindly.
+            if (sketch) {
+                const gp_Pln& pln = sketch->getPlane();
+                double ox, oy, oz, nx, ny, nz;
+                gp_Pnt loc = pln.Location();
+                gp_Dir dir = pln.Axis().Direction();
+                worldToUser(loc.X(), loc.Y(), loc.Z(), ox, oy, oz);
+                worldToUser(dir.X(), dir.Y(), dir.Z(), nx, ny, nz);
+                o << " plane_origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"
+                  << " plane_normal=(" << fmtMM(nx) << "," << fmtMM(ny) << "," << fmtMM(nz) << ")";
+            }
+        });
+    out << "\n";
+
+    appendPagedSection(out, "Construction Axes", "after_axis_id", doc.getAllAxisIds(), afterAxis,
+        [&](int id) { return doc.getAxisName(id); },
+        [&](int id) { return doc.isAxisVisible(id); },
+        [&](std::ostringstream& o, int id) {
+            const AxisEntry* ax = doc.getAxis(id);
+            if (ax) {
+                double ox, oy, oz, dx, dy, dz;
+                worldToUser(ax->origin.X(), ax->origin.Y(), ax->origin.Z(), ox, oy, oz);
+                worldToUser(ax->direction.X(), ax->direction.Y(), ax->direction.Z(), dx, dy, dz);
+                o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"
+                  << " direction=(" << fmtMM(dx) << "," << fmtMM(dy) << "," << fmtMM(dz) << ")";
+            }
+        });
+    out << "\n";
+
+    appendPagedSection(out, "Construction Planes", "after_plane_id", doc.getAllPlaneIds(), afterPlane,
+        [&](int id) { return doc.getPlaneName(id); },
+        [&](int id) { return doc.isPlaneVisible(id); },
+        [&](std::ostringstream& o, int id) {
+            const PlaneEntry* pe = doc.getPlane(id);
+            if (pe) {
+                double ox, oy, oz, nx, ny, nz;
+                gp_Pnt loc = pe->plane.Location();
+                gp_Dir dir = pe->plane.Axis().Direction();
+                worldToUser(loc.X(), loc.Y(), loc.Z(), ox, oy, oz);
+                worldToUser(dir.X(), dir.Y(), dir.Z(), nx, ny, nz);
+                o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"
+                  << " normal=(" << fmtMM(nx) << "," << fmtMM(ny) << "," << fmtMM(nz) << ")";
+            }
+        });
+
+    // Read-only: no pushOperation, no markMeshesDirty - nothing changed.
+    return {true, out.str()};
+}
+
 } // namespace
 
 ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
@@ -725,6 +984,7 @@ ToolResult executeTool(PluginContext& ctx, const std::string& toolName,
     if (toolName == "construction_axis") return constructionAxis(ctx, args);
     if (toolName == "construction_plane") return constructionPlane(ctx, args);
     if (toolName == "extrude_sketch") return extrudeSketch(ctx, args);
+    if (toolName == "describe_scene") return describeScene(ctx, args);
     return {false, "unknown tool '" + toolName + "'"};
 }
 

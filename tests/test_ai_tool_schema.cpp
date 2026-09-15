@@ -5,7 +5,7 @@
 
 using namespace materializr::ai;
 
-TEST(AiToolSchema, AllToolsContainsExactlyEighteenTools) {
+TEST(AiToolSchema, AllToolsContainsExactlyNineteenTools) {
     const auto& tools = allTools();
     std::vector<std::string> names;
     for (const auto& t : tools) names.push_back(t.name);
@@ -13,9 +13,10 @@ TEST(AiToolSchema, AllToolsContainsExactlyEighteenTools) {
         "add_box", "add_cylinder", "add_sphere", "add_cone", "add_torus",
         "move_body", "rotate_body", "scale_body", "boolean_op",
         "copy_body", "delete_body", "separate_body", "align_body", "mirror_body",
-        "pattern_body", "construction_axis", "construction_plane", "extrude_sketch"};
+        "pattern_body", "construction_axis", "construction_plane", "extrude_sketch",
+        "describe_scene"};
     EXPECT_EQ(names, expected);
-    EXPECT_EQ(tools.size(), 18u);
+    EXPECT_EQ(tools.size(), 19u);
 }
 
 TEST(AiToolSchema, AllNineOriginalToolNamesAreStillPresent) {
@@ -108,6 +109,13 @@ TEST(AiToolSchema, ExtrudeSketchRegionIndicesSerializesAsAnIntegerArray) {
         EXPECT_EQ(regionIndices["type"], "array");
         EXPECT_EQ(regionIndices["items"]["type"], "integer");
     }
+}
+
+TEST(AiToolSchema, DescribeSceneParamsAreAllOptional) {
+    const auto* t = findTool(allTools(), "describe_scene");
+    ASSERT_NE(t, nullptr);
+    expectParamSplit(*t, {},
+                     {"after_body_id", "after_sketch_id", "after_axis_id", "after_plane_id"});
 }
 
 TEST(AiToolSchema, EveryToolHasANonEmptyDescription) {
