@@ -1,4 +1,4 @@
-# Sketch Polygon Trim Pick-Priority Fix — Implementation Plan
+# Sketch Polygon Trim Pick-Priority Fix - Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -14,13 +14,13 @@ the polygon's bookkeeping.
    loop. Both loops call `distSqPointSegment` on the identical two endpoint positions for a
    polygon edge, producing an identical `dsq`. The Polygons loop's `dsq < bestDistSq` is a tie
    (never strictly true) because the Lines loop already claimed that exact distance, so
-   `pickType` always resolves to `"line"` for a polygon edge — `planTrim`'s
+   `pickType` always resolves to `"line"` for a polygon edge - `planTrim`'s
    `pickType == "polygon"` branch (`SketchTool.cpp:3262`, `TrimAction::Kind::FullDelete`) is
    dead code for direct clicks.
 3. Because `pickType == "line"`, `planTrim`'s Line branch (`SketchTool.cpp:3267-3310`) plans a
    partial trim (or full delete) of that one `SketchLine` by id. `applyTrim`'s Line branch
    (`SketchTool.cpp:3516-3528`) calls `sketch.removeElement(lineId)` and re-adds the surviving
-   sub-segment(s) as new freestanding lines — never touching `SketchPolygon::lineIds`. The
+   sub-segment(s) as new freestanding lines - never touching `SketchPolygon::lineIds`. The
    polygon record survives in `Sketch::m_polygons` with one `lineIds` entry now dangling
    (pointing at a removed line id) and, in the multi-intersection case, a piece of its own
    perimeter silently replaced by an unrelated freestanding line.
@@ -28,29 +28,29 @@ the polygon's bookkeeping.
    `pickType == "polygon"` is reachable, `applyTrim`'s FullDelete branch
    (`SketchTool.cpp:3511-3513`) just calls `sketch.removeElement(polygonId)`, and
    `Sketch::removeElement` (`Sketch.cpp:690-720`) only erases the matching id from
-   `m_polygons` — it does **not** cascade to the polygon's `lineIds`. Per
+   `m_polygons` - it does **not** cascade to the polygon's `lineIds`. Per
    `SketchRenderer.cpp:576` ("Polygons are already made of lines, so they render automatically
    through drawLines()"), the renderer draws every `SketchLine` in `m_lines` regardless of
    polygon ownership. So "delete a polygon" would remove the `SketchPolygon` bookkeeping record
-   but leave all N edge lines rendering forever — the polygon visually never disappears. This
+   but leave all N edge lines rendering forever - the polygon visually never disappears. This
    must be fixed in the same change, or fixing bug #2/#3 just trades one corruption for another
    user-visible one.
 
 **Fix, two parts:**
 
-- **A — pick priority:** in `pickSketchElement`, build the set of every polygon's `lineIds`
+- **A - pick priority:** in `pickSketchElement`, build the set of every polygon's `lineIds`
   once, and skip those ids in the Lines loop (`continue`) so a polygon edge can only ever be
   claimed by the Polygons loop. Chosen over reordering the two loops (checking Polygons before
   Lines) because reordering only fixes this by relying on the two `distSqPointSegment` call
-  sites producing a bit-exact tie — true today (no `-ffast-math`/`-ffp-contract=fast` in this
+  sites producing a bit-exact tie - true today (no `-ffast-math`/`-ffp-contract=fast` in this
   project's `CMakeLists.txt`, confirmed by grep) but an undocumented invariant a future compiler
   flag or refactor could silently break. Explicit dedup encodes the actual intent and has no FP
   dependence.
-- **B — delete cascade:** in `Sketch::removeElement`, when `id` matches a `SketchPolygon`,
+- **B - delete cascade:** in `Sketch::removeElement`, when `id` matches a `SketchPolygon`,
   also erase every id in that polygon's `lineIds` from `m_lines` (in addition to erasing the
   polygon record). This is the single place both `SketchTool::handleTrimTool`'s FullDelete path
   and any future "delete this polygon by id" caller go through, and it matches the class's
-  existing contract of fully removing an element — `pruneOrphanPoints()` (already called by
+  existing contract of fully removing an element - `pruneOrphanPoints()` (already called by
   every existing `removeElement` caller) then sweeps the now-unreferenced vertex/center points,
   so no change needed there.
 
@@ -59,7 +59,7 @@ the polygon's bookkeeping.
 change to `TrimAction`, `planTrim`'s dispatch, or `collectLineIntersections`.
 
 **Tech Stack:** C++17, GoogleTest, existing `Sketch`/`SketchTool` classes. `tests/CMakeLists.txt`
-registers each test executable explicitly (no glob) — the new test file needs its own
+registers each test executable explicitly (no glob) - the new test file needs its own
 `add_executable`/`target_link_libraries`/`add_test` block, mirroring `test_sticky_rim`'s
 (`tests/CMakeLists.txt:463-465`).
 
@@ -69,15 +69,16 @@ registers each test executable explicitly (no glob) — the new test file needs 
 ## Global Constraints
 
 - Do not change `TrimAction::Kind` values, `planTrim`'s branch structure, or any public
-  `SketchTool` method signature — only the body of `pickSketchElement` (part A) and
+  `SketchTool` method signature - only the body of `pickSketchElement` (part A) and
   `Sketch::removeElement` (part B).
 - `pruneOrphanPoints()`'s existing "used" scan already treats a still-present
   `SketchPolygon::vertexPointIds`/`centerPointId` as used and drops points no longer referenced
-  once the polygon record is gone — verify this stays true after part B (it does; part B removes
+  once the polygon record is gone - verify this stays true after part B (it does; part B removes
   the polygon record and its lines in the same `removeElement` call, before
   `handleTrimTool`'s subsequent `pruneOrphanPoints()` call runs).
-- No em dashes (`—`, `--`, or `\xE2\x80\x94`) in any new code comment or commit message — this
-  repo gates on `tools/no_em_dashes.py`. Fix silently if introduced; do not narrate the cleanup.
+- No em dashes, in any spelling (the literal character or its UTF-8 escape), in any new code
+  comment or commit message - this repo gates on `tools/no_em_dashes.py`. Fix silently if
+  introduced; do not narrate the cleanup.
 - Run `ctest` UNSANDBOXED after the build (project memory: sandboxed ctest fails unrelated
   file-IO suites on denied `/tmp` writes and looks like a regression when it is not).
 - `rm` stale test object files before rebuilding after any header/source edit inside a fast
@@ -113,14 +114,14 @@ registers each test executable explicitly (no glob) — the new test file needs 
       ...
   ```
 
-  Add `#include <unordered_set>` to `SketchTool.cpp` if not already present (check first —
+  Add `#include <unordered_set>` to `SketchTool.cpp` if not already present (check first - 
   the file already includes several STL containers).
 
   A plain standalone line (not part of any polygon) is unaffected: it is never in
   `polygonLineIds`, so the Lines loop still claims it exactly as before, and the Polygons loop
   (unchanged) still only fires for actual polygon edges.
 
-- [x] **Step 2: Verify** — `grep -n "no_em_dashes\|#include <unordered_set>" src/modeling/SketchTool.cpp`
+- [x] **Step 2: Verify** - `grep -n "no_em_dashes\|#include <unordered_set>" src/modeling/SketchTool.cpp`
   to confirm the include is present and no em dash was introduced in the new comment/code.
 
 ### Task 2: Cascade-delete a polygon's owned lines in `Sketch::removeElement`
@@ -151,14 +152,14 @@ registers each test executable explicitly (no glob) — the new test file needs 
   Placement: after the existing `m_lines.erase(...)` block that matches `id` directly (so a
   plain line-by-id removal is untouched) and before `m_polygons.erase(...)`. The existing
   top-of-function `m_lines.erase` for `id` itself is a no-op here since `id` is a polygon id,
-  not a line id — this new block is what actually removes the polygon's N edges.
+  not a line id - this new block is what actually removes the polygon's N edges.
 
   Update the doc comment above `removeElement` in `Sketch.h:142-143` if one is added elsewhere
   in this pass; the existing `pruneOrphanPoints` comment at `Sketch.h:147-148` ("removeElement
-  deliberately does NOT prune [points]") stays accurate and does not need editing — this change
+  deliberately does NOT prune [points]") stays accurate and does not need editing - this change
   only affects line cascade, not point pruning.
 
-- [x] **Step 2: Verify** — re-read the edited `removeElement` to confirm ordering (lines cascade
+- [x] **Step 2: Verify** - re-read the edited `removeElement` to confirm ordering (lines cascade
   before `m_polygons.erase`, since the loop reads `p.lineIds` from the still-present record).
 
 ### Task 3: Regression test
@@ -167,15 +168,20 @@ registers each test executable explicitly (no glob) — the new test file needs 
 - Create: `tests/test_sketch_trim_polygon.cpp`
 - Modify: `tests/CMakeLists.txt` (add the explicit registration block, no glob exists)
 
-**Interfaces:** Test-only; exercises `SketchTool::handleTrimTool` and `SketchTool::computeTrimHover`
-(both already public, `SketchTool.h:631-632`), plus `Sketch::getPolygons()`/`getLines()`/`getPoints()`.
+**Interfaces:** Test-only. `handleTrimTool`/`computeTrimHover` (`SketchTool.h:631-632`) turned out
+to be **private** on inspection during implementation (this plan's original draft wrongly assumed
+public, which would not have compiled) - drive Trim through the public dispatch instead:
+`SketchTool::setMode(SketchToolMode::Trim)` then `onMouseDown`/`onMouseMove`, which call the
+private methods internally with the same raw, unsnapped cursor (`SketchTool.cpp:127-128,
+231-232`), so it is behaviorally identical. Also uses `Sketch::getPolygons()`/`getLines()`/
+`getPoints()`/`getConstraints()`/`addRawConstraint()`.
 
 - [x] **Step 1: Write the test file**
 
   Follow the wiring pattern from `tests/test_sticky_rim.cpp` (stub the two link-time
   dependencies `SvgImport::place`/`TextSketch::generate` that `SketchTool.cpp` references but
   are not part of this test's link set) and `tests/test_sketch_offset.cpp` (direct `Sketch`
-  construction, no OCCT/document/viewport involved — `Sketch`/`SketchTool` are pure 2D-geometry
+  construction, no OCCT/document/viewport involved - `Sketch`/`SketchTool` are pure 2D-geometry
   classes).
 
   Confirmed by reading `tests/CMakeLists.txt:463-465`: this repo registers each test
@@ -207,18 +213,27 @@ registers each test executable explicitly (no glob) — the new test file needs 
   using materializr::SketchPolygon;
   using materializr::SketchSolver;
   using materializr::SketchTool;
+  using materializr::SketchToolMode;
 
   namespace {
   constexpr float kStep = 1.0f;
   constexpr float kTol = 1e-4f;
 
-  SketchTool makeTool(Sketch& sk, SketchSolver& solver) {
+  // handleTrimTool/computeTrimHover are private; drive them the same way the
+  // app does, through the public Trim-mode dispatch in onMouseDown/onMouseMove
+  // (SketchTool.cpp:127-128, 231-232). Trim uses the raw, unsnapped cursor in
+  // both, so this is exactly equivalent to calling the private methods.
+  SketchTool makeTrimTool(Sketch& sk, SketchSolver& solver) {
       SketchTool tool;
       tool.setSketch(&sk);
       tool.setSolver(&solver);
       tool.setGridStep(kStep);
+      tool.setMode(SketchToolMode::Trim);
       return tool;
   }
+
+  void clickTrim(SketchTool& tool, glm::vec2 pos) { tool.onMouseDown(pos); }
+  void hoverTrim(SketchTool& tool, glm::vec2 pos) { tool.onMouseMove(pos); }
 
   const SketchPolygon* findPolygon(const Sketch& sk, int id) {
       for (const auto& p : sk.getPolygons()) if (p.id == id) return &p;
@@ -252,7 +267,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
   TEST(SketchTrimPolygon, ClickOnEdgeDeletesWholePolygonCascadeOnly) {
       Sketch sk;
       SketchSolver solver;
-      SketchTool tool = makeTool(sk, solver);
+      SketchTool tool = makeTrimTool(sk, solver);
 
       int centerId = sk.addPoint({0.0f, 0.0f});
       int polyId = sk.addPolygon(centerId, /*radius=*/10.0, /*sides=*/6, /*rotationRad=*/0.0);
@@ -287,7 +302,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
       const auto* b = sk.getPoint(poly->vertexPointIds[1]);
       glm::vec2 mid = (a->pos + b->pos) * 0.5f;
 
-      tool.handleTrimTool(mid);
+      clickTrim(tool, mid);
 
       EXPECT_EQ(findPolygon(sk, polyId), nullptr);
       for (int lid : ownedLineIds) {
@@ -314,7 +329,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
   TEST(SketchTrimPolygon, StandaloneLineStillPartialTrimsExactly) {
       Sketch sk;
       SketchSolver solver;
-      SketchTool tool = makeTool(sk, solver);
+      SketchTool tool = makeTrimTool(sk, solver);
 
       glm::vec2 leftEnd{-10.0f, 0.0f};
       glm::vec2 origin{0.0f, 0.0f};
@@ -329,7 +344,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
       int p4 = sk.addPoint(crossTop);
       int crossId = sk.addLine(p3, p4);
 
-      tool.handleTrimTool({-5.0f, 0.0f}); // left half of the horizontal line
+      clickTrim(tool, {-5.0f, 0.0f}); // left half of the horizontal line
 
       EXPECT_FALSE(lineExists(sk, lineId));
       // Exactly the right half must survive: origin -> rightEnd.
@@ -348,7 +363,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
   TEST(SketchTrimPolygon, HoverOnEdgePreviewsWholeLoop) {
       Sketch sk;
       SketchSolver solver;
-      SketchTool tool = makeTool(sk, solver);
+      SketchTool tool = makeTrimTool(sk, solver);
 
       int centerId = sk.addPoint({0.0f, 0.0f});
       int polyId = sk.addPolygon(centerId, 10.0, 6, 0.0);
@@ -359,16 +374,18 @@ registers each test executable explicitly (no glob) — the new test file needs 
       const auto* b = sk.getPoint(poly->vertexPointIds[1]);
       glm::vec2 mid = (a->pos + b->pos) * 0.5f;
 
-      tool.computeTrimHover(mid);
+      hoverTrim(tool, mid);
       // FullDelete preview densifies every vertex plus a closing repeat of
       // the first (densifyTrimPreview's polygon branch, SketchTool.cpp:3447-3454).
       EXPECT_GT(tool.getTrimHoverPoints().size(), poly->vertexPointIds.size());
   }
   ```
 
-  `getTrimHoverPoints()` is confirmed public (`SketchTool.h:463`).
+  `getTrimHoverPoints()` is confirmed public (`SketchTool.h:463`). `onMouseDown`/`onMouseMove`/
+  `setMode` (used by `clickTrim`/`hoverTrim`/`makeTrimTool` above) are confirmed public too
+  (`SketchTool.h`, before the `private:` at line 524).
 
-- [x] **Step 2: Register the test executable** — this repo does not glob test files. Add, in
+- [x] **Step 2: Register the test executable** - this repo does not glob test files. Add, in
   the same alphabetical/grouped spot as the other `test_sketch_*` entries in
   `tests/CMakeLists.txt` (mirroring `test_sticky_rim`'s three lines at `tests/CMakeLists.txt:463-465`):
 
@@ -378,7 +395,7 @@ registers each test executable explicitly (no glob) — the new test file needs 
   add_test(NAME test_sketch_trim_polygon COMMAND test_sketch_trim_polygon)
   ```
 
-- [x] **Step 3: Build and run** — from `build/`, rebuild and run just the new suite:
+- [x] **Step 3: Build and run** - from `build/`, rebuild and run just the new suite:
   `ctest -R '^test_sketch_trim_polygon$' --no-tests=error --output-on-failure` (UNSANDBOXED per
   project memory; the executable name is the ctest name, not the `TEST(...)` suite name;
   `--no-tests=error` makes a registration miss fail loud instead of reporting a silent pass),

@@ -1,7 +1,7 @@
 # Plan Review Log: Sketch polygon trim pick-priority fix
 Started 2026-09-15. MAX_ROUNDS=5. Model: gpt-6-astra (CLI default, `~/.codex/config.toml`).
 
-## Round 1 — Codex
+## Round 1 - Codex
 
 The production fix is plausible, but the regression plan has material problems:
 
@@ -14,7 +14,7 @@ The production fix is plausible, but the regression plan has material problems:
    passes, including a wrong "kept the whole line" result). Fix: assert the exact surviving
    segment.
 4. The cascade test cannot detect deletion of unrelated geometry or failed constraint
-   cleanup — a single polygon with no other geometry would pass even if `removeElement`
+   cleanup - a single polygon with no other geometry would pass even if `removeElement`
    nuked the whole sketch. Fix: add unrelated geometry + a dangling constraint and assert
    both are handled correctly (unrelated survives, constraint is pruned).
 
@@ -37,12 +37,12 @@ Accepted all four points as correct, in full:
    only removes the polygon's own `lineIds`, via an exact line-count-delta assertion) and a
    `Horizontal` constraint on one of the polygon's edges (proves `pruneOrphanPoints()`'s
    existing dangling-constraint sweep, `Sketch.cpp:754-760`, actually fires once the cascade
-   invalidates that line id — confirmed by reading that this sweep is generic across all
+   invalidates that line id - confirmed by reading that this sweep is generic across all
    entity types already, so no new constraint-cleanup code is needed in Task 2, only the test).
 
-Nothing rejected — all four critiques were concrete, correct, and cheap to fix.
+Nothing rejected - all four critiques were concrete, correct, and cheap to fix.
 
-## Round 2 — Codex
+## Round 2 - Codex
 
 The revisions resolve the compile error, test registration mismatch, weak segment assertion,
 and main cascade-isolation gap. No remaining implementation blocker found.
@@ -64,7 +64,7 @@ focused ctest command). Declined the shared-vertex/orphan-point test addition fo
 it is explicitly flagged nonblocking, the plan already demonstrates the cascade is scoped
 correctly via the disjoint-geometry assertion, and `pruneOrphanPoints()`'s point-sharing
 behavior (a polygon vertex point also used by unrelated geometry survives) is pre-existing,
-unmodified logic this change does not touch — adding it would test code this plan does not
+unmodified logic this change does not touch - adding it would test code this plan does not
 change, not the fix itself.
 
 ## Outcome
