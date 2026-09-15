@@ -264,6 +264,7 @@ add_executable(materializr
     src/plugins/ShellPlugin.cpp
     src/plugins/ConstructionPlanePlugin.cpp
     src/plugins/RefImagePlugin.cpp
+    src/plugins/MeshTracePlugin.cpp
     src/plugins/BoundaryFillPlugin.cpp
     src/plugins/PatchPlugin.cpp
     src/plugins/SewPlugin.cpp
@@ -341,6 +342,7 @@ add_executable(materializr
     src/modeling/SewOp.cpp
     src/modeling/SketchTransformOp.cpp
     src/modeling/ConstructionPlaneOp.cpp
+    src/modeling/MeshTraceSetupOp.cpp
     src/modeling/ConstructionAxisOp.cpp
     src/modeling/PlaneTransformOp.cpp
     src/modeling/AxisTransformOp.cpp
@@ -369,6 +371,7 @@ add_executable(materializr
     src/viewport/EdgeRenderer.cpp
     src/viewport/PlaneRenderer.cpp
     src/viewport/RefImageRenderer.cpp
+    src/viewport/MeshTraceRenderer.cpp
     src/viewport/AxisRenderer.cpp
     src/viewport/BackgroundRenderer.cpp
     src/viewport/Gizmo.cpp
