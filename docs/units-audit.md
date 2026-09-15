@@ -259,13 +259,19 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 ## `mm` literals by class
 
 - CONVERTED: 1
-- allowed-by-hand: 51
-- comment: 265
+- allowed-by-hand: 56
+- comment: 266
 - diagnostic: 10
 - identifier/other: 9
 
 | class | file:line | code |
 |---|---|---|
+| comment | src/ai/AiToolDispatcher.cpp:194 | `// mm value formatted with up to 2 decimals, trailing zeros trimmed` |
+| allowed-by-hand | src/ai/AiToolDispatcher.cpp:901 | `o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"` |
+| allowed-by-hand | src/ai/AiToolDispatcher.cpp:903 | `<< "mm (w x h x d)";` |
+| allowed-by-hand | src/ai/AiToolDispatcher.cpp:924 | `o << " plane_origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"` |
+| allowed-by-hand | src/ai/AiToolDispatcher.cpp:939 | `o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"` |
+| allowed-by-hand | src/ai/AiToolDispatcher.cpp:956 | `o << " origin=(" << fmtMM(ox) << "," << fmtMM(oy) << "," << fmtMM(oz) << ")mm"` |
 | allowed-by-hand | src/ai/AiToolSchema.cpp:18 | `params.push_back(num("x", "World X position in mm (default 0).", false));` |
 | allowed-by-hand | src/ai/AiToolSchema.cpp:19 | `params.push_back(num("y", "World Y position in mm (default 0).", false));` |
 | allowed-by-hand | src/ai/AiToolSchema.cpp:20 | `params.push_back(num("z", "World Z position in mm (default 0).", false));` |

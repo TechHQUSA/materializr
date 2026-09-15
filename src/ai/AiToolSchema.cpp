@@ -113,6 +113,11 @@ const std::vector<ToolDef>& allTools() {
              str("symmetric", "\"true\" to extrude equally in both directions (total thickness abs(distance)), \"false\" for a one-sided extrude. Defaults to \"false\".", false),
              str("mode", "One of: new_body, union, subtract, intersect. Defaults to new_body.", false),
              num("target_body_id", "Required unless mode is new_body: the existing body to combine the extrusion with.", false)}},
+        ToolDef{"describe_scene", "List every body, sketch, construction axis, and construction plane currently in the document (id, name, visibility, and a cheap geometric summary), to discover ids for other tools. Read-only. Each category is paginated at 100 items; pass the matching after_*_id from a truncated result to continue.",
+            {num("after_body_id", "Only list bodies with an id greater than this, to continue a truncated body listing. Omit to start from the beginning.", false),
+             num("after_sketch_id", "Same as after_body_id, for sketches.", false),
+             num("after_axis_id", "Same as after_body_id, for construction axes.", false),
+             num("after_plane_id", "Same as after_body_id, for construction planes.", false)}},
     };
     return kTools;
 }

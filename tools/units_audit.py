@@ -245,6 +245,14 @@ LITERAL_ALLOW = [
     ("src/ai/AiToolSchema.cpp",         "in mm.",              "AI tool parameter description for LLM"),
     ("src/ai/AiToolSchema.cpp",         "in mm;",              "AI tool parameter description for LLM"),
     ("src/app/Application_Dialogs.cpp", '"%.1f mm")) {',       "mesh-trace slice-position readout, same absolute-mm choice as the control"),
+    # describe_scene's tool RESULT text (the readout side of the same AI
+    # tool schema, via fmtMM - a local absolute-mm formatter, not one of
+    # the app's user-configurable-unit fmtLength/fmtArea/... family). The
+    # model is always told distances are in mm (see the schema entries
+    # above); there is no user-facing display-unit setting to honour here.
+    ("src/ai/AiToolDispatcher.cpp",     " origin=(\" << fmtMM",  "AI tool result readout for the LLM (describe_scene)"),
+    ("src/ai/AiToolDispatcher.cpp",     "plane_origin=(\" << fmtMM", "AI tool result readout for the LLM (describe_scene)"),
+    ("src/ai/AiToolDispatcher.cpp",     "mm (w x h x d)",        "AI tool result readout for the LLM (describe_scene)"),
 ]
 
 def classify_literal(f, code, ln=None):
