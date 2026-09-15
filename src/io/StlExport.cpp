@@ -19,6 +19,8 @@
 #include <TopExp_Explorer.hxx>
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -28,6 +30,106 @@
 #include <vector>
 
 namespace materializr {
+
+namespace {
+struct V3 { double x, y, z; };
+
+// Triangulate a small (already-closed) boundary loop for the STL export
+// pinhole repair, WITHOUT assuming it's convex or that vertex 0 sees every
+// other vertex - a blind fan from loop[0] folds back over itself whenever
+// the loop bends the "wrong" way, which reads as the model being "folded in
+// on itself" right at that spot even though the rest of the mesh is fine.
+//
+// The loop is a genuine 3D polygon (BRep imprecision keeps it only
+// approximately planar), so: fit a best-fit normal (Newell's method, robust
+// to that imprecision), project into that plane, then ear-clip in 2D - the
+// standard approach for a simple polygon that may be non-convex. Returns
+// triangles as indices INTO `loop` (the caller maps back to global vertex
+// ids); empty if ear-clipping couldn't fully resolve it (a self-intersecting
+// boundary, vanishingly rare for a real BRep edge loop), in which case the
+// caller falls back to the old fan so a mesh is never LESS watertight than
+// before, only better-shaped when there's a valid triangulation to find.
+std::vector<std::array<int, 3>> triangulateLoop(const std::vector<V3>& loop) {
+    const int m = static_cast<int>(loop.size());
+    std::vector<std::array<int, 3>> out;
+    if (m < 3) return out;
+
+    // Best-fit normal via Newell's method.
+    V3 n{0, 0, 0};
+    for (int i = 0; i < m; ++i) {
+        const V3& a = loop[i];
+        const V3& b = loop[(i + 1) % m];
+        n.x += (a.y - b.y) * (a.z + b.z);
+        n.y += (a.z - b.z) * (a.x + b.x);
+        n.z += (a.x - b.x) * (a.y + b.y);
+    }
+    double nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (nlen < 1e-12) return out;   // degenerate (collinear) loop
+    n.x /= nlen; n.y /= nlen; n.z /= nlen;
+
+    // An in-plane basis (u, v) orthogonal to the normal.
+    V3 arb = (std::fabs(n.x) < 0.9) ? V3{1, 0, 0} : V3{0, 1, 0};
+    double d = arb.x * n.x + arb.y * n.y + arb.z * n.z;
+    V3 u{arb.x - d * n.x, arb.y - d * n.y, arb.z - d * n.z};
+    double ulen = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z);
+    u.x /= ulen; u.y /= ulen; u.z /= ulen;
+    V3 v{n.y * u.z - n.z * u.y, n.z * u.x - n.x * u.z, n.x * u.y - n.y * u.x};
+
+    std::vector<std::pair<double, double>> p2(m);
+    for (int i = 0; i < m; ++i)
+        p2[i] = {loop[i].x * u.x + loop[i].y * u.y + loop[i].z * u.z,
+                 loop[i].x * v.x + loop[i].y * v.y + loop[i].z * v.z};
+
+    auto cross2 = [](double ax, double ay, double bx, double by) { return ax * by - ay * bx; };
+
+    // Ear-clipping wants the polygon wound CCW in (u, v).
+    std::vector<int> idx(m);
+    for (int i = 0; i < m; ++i) idx[i] = i;
+    double signedArea = 0.0;
+    for (int i = 0; i < m; ++i) {
+        const auto& a = p2[idx[i]]; const auto& b = p2[idx[(i + 1) % m]];
+        signedArea += cross2(a.first, a.second, b.first, b.second);
+    }
+    if (signedArea < 0.0) std::reverse(idx.begin(), idx.end());
+
+    auto isConvex = [&](int ip, int i, int inx) {
+        const auto& A = p2[idx[ip]]; const auto& B = p2[idx[i]]; const auto& C = p2[idx[inx]];
+        return cross2(B.first - A.first, B.second - A.second,
+                      C.first - B.first, C.second - B.second) > 0.0;
+    };
+    auto pointInTri = [&](std::pair<double, double> P, std::pair<double, double> A,
+                          std::pair<double, double> B, std::pair<double, double> C) {
+        const double d1 = cross2(B.first - A.first, B.second - A.second, P.first - A.first, P.second - A.second);
+        const double d2 = cross2(C.first - B.first, C.second - B.second, P.first - B.first, P.second - B.second);
+        const double d3 = cross2(A.first - C.first, A.second - C.second, P.first - C.first, P.second - C.second);
+        const bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+        const bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+        return !(hasNeg && hasPos);
+    };
+
+    int guard = 0;
+    while (idx.size() > 2 && guard++ < 4 * m + 16) {
+        bool clipped = false;
+        const int n2 = static_cast<int>(idx.size());
+        for (int i = 0; i < n2; ++i) {
+            const int ip = (i - 1 + n2) % n2, inx = (i + 1) % n2;
+            if (!isConvex(ip, i, inx)) continue;
+            bool anyInside = false;
+            for (int j = 0; j < n2; ++j) {
+                if (j == ip || j == i || j == inx) continue;
+                if (pointInTri(p2[idx[j]], p2[idx[ip]], p2[idx[i]], p2[idx[inx]])) { anyInside = true; break; }
+            }
+            if (anyInside) continue;
+            out.push_back({idx[ip], idx[i], idx[inx]});
+            idx.erase(idx.begin() + i);
+            clipped = true;
+            break;
+        }
+        if (!clipped) return {};   // couldn't resolve - let the caller fall back
+    }
+    return out;
+}
+} // namespace
 
 static int countTriangles(const TopoDS_Shape& shape) {
     int count = 0;
@@ -118,7 +220,6 @@ StlExportResult StlExport::exportShape(const std::string& filePath, const TopoDS
     // fresh degeneracies -- so the radius stays fixed and small). The fan
     // fill then closes any remaining pinhole loop up to 12 edges. Residual
     // boundaries are reported, not hidden.
-    struct V3 { double x, y, z; };
     struct T3 { int a, b, c; };
     std::vector<V3> verts;
     std::vector<T3> tris;
@@ -159,12 +260,60 @@ StlExportResult StlExport::exportShape(const std::string& filePath, const TopoDS
                                     remap[i] = (int)nv.size(); nv.push_back(verts[i]); }
             else remap[i] = it->second;
         }
-        std::vector<T3> nt;
-        nt.reserve(tris.size());
-        for (const T3& t : tris) {
-            const int a = remap[t.a], b = remap[t.b], c = remap[t.c];
-            if (a == b || b == c || a == c) continue;   // degenerate after weld
-            nt.push_back({a, b, c});
+        auto buildTris = [&](const std::vector<int>& rmap) {
+            std::vector<T3> out;
+            out.reserve(tris.size());
+            for (const T3& t : tris) {
+                const int a = rmap[t.a], b = rmap[t.b], c = rmap[t.c];
+                if (a == b || b == c || a == c) continue;   // degenerate after weld
+                out.push_back({a, b, c});
+            }
+            return out;
+        };
+        std::vector<T3> nt = buildTris(remap);
+
+        // A weld only reconnects a real crack (2 faces' independent
+        // triangulations of the SAME B-Rep edge) when it leaves that edge
+        // shared by exactly 2 triangles, same as any interior edge. A grid
+        // cell can also catch two vertices that are merely close in SPACE
+        // for an unrelated reason - two turns of a fine-pitch thread, or a
+        // fillet wrapping tightly around one - and welding those bridges
+        // geometry that was never adjacent, which bakes as the mesh folding
+        // over itself right there (not a crack: a fold). Detect any edge a
+        // merge pushed past 2 users and undo THOSE vertices' merges - they
+        // revert to their pre-weld, per-face identity, becoming open edges
+        // instead (handled by the pinhole fill below, or reported as still
+        // open) rather than silently-wrong folded geometry.
+        std::map<std::pair<int,int>, int> ec;
+        for (const T3& t : nt) {
+            const int e[3][2] = {{t.a,t.b},{t.b,t.c},{t.c,t.a}};
+            for (const auto& ed : e) { int a=ed[0], b=ed[1]; if (a>b) std::swap(a,b); ++ec[{a,b}]; }
+        }
+        std::unordered_map<int, char> poisoned;   // welded-id -> present
+        for (const auto& kv : ec) if (kv.second > 2) { poisoned[kv.first.first] = 1; poisoned[kv.first.second] = 1; }
+        if (!poisoned.empty()) {
+            std::vector<int> remap2 = remap;
+            for (std::size_t i = 0; i < remap.size(); ++i)
+                if (poisoned.count(remap[i])) remap2[i] = static_cast<int>(nv.size() + i); // unique per vertex
+
+            std::unordered_map<long long, int> compact;
+            std::vector<V3> nv2;
+            std::vector<int> remap3(remap2.size());
+            for (std::size_t i = 0; i < remap2.size(); ++i) {
+                const long long key = remap2[i];
+                auto it = compact.find(key);
+                if (it == compact.end()) {
+                    const int nid = static_cast<int>(nv2.size());
+                    compact[key] = nid;
+                    nv2.push_back(key >= static_cast<long long>(nv.size()) ? verts[i] : nv[remap2[i]]);
+                    remap3[i] = nid;
+                } else {
+                    remap3[i] = it->second;
+                }
+            }
+            nv.swap(nv2);
+            remap.swap(remap3);
+            nt = buildTris(remap);
         }
         verts.swap(nv); tris.swap(nt);
     }
@@ -201,8 +350,21 @@ StlExportResult StlExport::exportShape(const std::string& filePath, const TopoDS
             }
             ++loops;
             if (closed && loop.size() >= 3 && loop.size() <= 12) {
-                for (std::size_t k = 1; k + 1 < loop.size(); ++k)
-                    tris.push_back({loop[0], loop[(int)k+1], loop[(int)k]});
+                std::vector<V3> loopPos;
+                loopPos.reserve(loop.size());
+                for (int id : loop) loopPos.push_back(verts[id]);
+                std::vector<std::array<int, 3>> capTris = triangulateLoop(loopPos);
+                if (!capTris.empty()) {
+                    for (const auto& t : capTris)
+                        tris.push_back({loop[t[0]], loop[t[1]], loop[t[2]]});
+                } else {
+                    // Ear-clipping couldn't resolve this one (a genuinely
+                    // self-intersecting boundary) - fall back to the old
+                    // blind fan so the mesh is never LESS watertight than
+                    // before, even though this specific cap may still fold.
+                    for (std::size_t k = 1; k + 1 < loop.size(); ++k)
+                        tris.push_back({loop[0], loop[(int)k+1], loop[(int)k]});
+                }
                 ++filled;
             }
         }
