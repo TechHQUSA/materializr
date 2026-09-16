@@ -266,39 +266,39 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 
 | class | file:line | code |
 |---|---|---|
-| comment | src/app/Application.cpp:909 | `// ios_platform.mm).` |
-| comment | src/app/Application.cpp:1167 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
-| comment | src/app/Application.cpp:1952 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
-| comment | src/app/Application.cpp:2025 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
-| comment | src/app/Application.cpp:4377 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
-| comment | src/app/Application.cpp:4403 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
-| comment | src/app/Application.cpp:4848 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
-| comment | src/app/Application.cpp:4856 | `// 152 mm - see 0733a59, which reverted exactly that.` |
-| comment | src/app/Application.cpp:5458 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
-| comment | src/app/Application.cpp:5520 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
-| comment | src/app/Application.cpp:5585 | `// then keeps the wrong band, landing 0.6 mm off with a` |
-| comment | src/app/Application.cpp:5634 | `// 0.64 mm off-axis at the surface origin) that WON` |
-| comment | src/app/Application.cpp:5728 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
-| comment | src/app/Application.cpp:5743 | `const double eps = 1.0; // mm` |
-| comment | src/app/Application.cpp:6371 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
-| comment | src/app/Application.cpp:6406 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
-| comment | src/app/Application.cpp:6745 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
-| comment | src/app/Application.cpp:6805 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
-| comment | src/app/Application.cpp:6806 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
-| comment | src/app/Application.h:657 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
-| comment | src/app/Application.h:936 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
-| comment | src/app/Application.h:938 | `// 300 mm because it reads as a round number in the units that needed` |
-| comment | src/app/Application.h:940 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
-| comment | src/app/Application.h:943 | `// 40 mm and this never engages, so the common case does not move.` |
-| comment | src/app/Application.h:945 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
-| comment | src/app/Application.h:951 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
-| comment | src/app/Application.h:1149 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
-| comment | src/app/Application.h:1360 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
-| comment | src/app/Application.h:1366 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
-| comment | src/app/Application.h:1446 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
-| comment | src/app/Application.h:1448 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
-| comment | src/app/Application.h:1664 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
-| comment | src/app/Application.h:2163 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
+| comment | src/app/Application.cpp:919 | `// ios_platform.mm).` |
+| comment | src/app/Application.cpp:1177 | `// Create a demo box so there's something to see (a 20 mm cube) - but only` |
+| comment | src/app/Application.cpp:1962 | `// Absolute linear deflection (mm) and angular deflection (radians). Lower` |
+| comment | src/app/Application.cpp:2035 | `// or, from before the presets converted, wrote 1 and reloaded as a 1 mm` |
+| comment | src/app/Application.cpp:4390 | `// Sketch origin should lie on the face's plane within 0.05 mm.` |
+| comment | src/app/Application.cpp:4416 | `// origin on the face plane within 0.05 mm). Used to re-adopt a sketch whose` |
+| comment | src/app/Application.cpp:4802 | `// step is the snap lattice and the visible grid, so leaving it at 1 mm` |
+| comment | src/app/Application.cpp:4810 | `// 152 mm - see 0733a59, which reverted exactly that.` |
+| comment | src/app/Application.cpp:5583 | `// the surface's parametric origin ~0.3 mm off-axis - the fitted anchor` |
+| comment | src/app/Application.cpp:5645 | `// 0.64 mm off-axis). Fit a circle to the OUTER wire instead, then` |
+| comment | src/app/Application.cpp:5710 | `// then keeps the wrong band, landing 0.6 mm off with a` |
+| comment | src/app/Application.cpp:5759 | `// 0.64 mm off-axis at the surface origin) that WON` |
+| comment | src/app/Application.cpp:5853 | `// sides at a generous offset (1 mm) so tessellation slack near the` |
+| comment | src/app/Application.cpp:5868 | `const double eps = 1.0; // mm` |
+| comment | src/app/Application.cpp:6496 | `// lines wrote raw millimetres: placing a dimension under any non-mm unit` |
+| comment | src/app/Application.cpp:6531 | `// Hash point positions and circle/arc radii too (quantised to 1e-4 mm)` |
+| comment | src/app/Application.cpp:6870 | `// millimetres. 40 mm is a reasonable first view in millimetres and an` |
+| comment | src/app/Application.cpp:6930 | `// Measured offsets were 10–50% of a cell. At a 1 mm grid that reads as` |
+| comment | src/app/Application.cpp:6931 | `// slightly-fat lines; at 0.1 mm it is most of a cell, i.e. "I can't draw a` |
+| comment | src/app/Application.h:674 | `// buttons are an explicit fine override (a 0.1 nudge under a 1 mm grid must` |
+| comment | src/app/Application.h:953 | `// Ceiling on the opening view of an EMPTY sketch, in mm of half-span.` |
+| comment | src/app/Application.h:955 | `// 300 mm because it reads as a round number in the units that needed` |
+| comment | src/app/Application.h:957 | `// the unit-aware 40-unit span is 12192 mm - a twelve-metre view, which put` |
+| comment | src/app/Application.h:960 | `// 40 mm and this never engages, so the common case does not move.` |
+| comment | src/app/Application.h:962 | `// Metres are the unit this serves least well: a 300 mm view makes every` |
+| comment | src/app/Application.h:968 | `// Sketch grid step in mm. This is the BASE the user chose (a display` |
+| comment | src/app/Application.h:1166 | `// sketch mm, so the tag keeps its grab point instead of snapping its centre` |
+| comment | src/app/Application.h:1377 | `// Scale popup unit mode. Percent is the multi-body-safe default; mm only` |
+| comment | src/app/Application.h:1383 | `// mm-mode text buffer + focus state per user axis (X, Y, Z in Z-up` |
+| comment | src/app/Application.h:1463 | `float  m_threadClearance = 0.0f; // radial fit gap for printed threads (mm)` |
+| comment | src/app/Application.h:1465 | `float  m_threadGrooveWidth = 0.0f; // explicit cut width (mm); 0 = from pitch` |
+| comment | src/app/Application.h:1681 | `float m_patternDistance = 5.0f; // linear: spacing in mm along chosen axis` |
+| comment | src/app/Application.h:2180 | `// (0.1 / 1 / 10 mm) and gets a solid-blue border when snap is on. Click` |
 | comment | src/app/Application_Dialogs.cpp:922 | `// mm mode only makes sense for a single body - multi-body scale needs a` |
 | comment | src/app/Application_Dialogs.cpp:928 | `// Resolve the (single-body) bbox now so mm-mode fields can pre-fill from` |
 | identifier/other | src/app/Application_Dialogs.cpp:967 | `const bool mm = (m_scaleUnitMode == ScaleUnitMode::Millimeter);` |
@@ -400,9 +400,9 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/io/Settings.h:179 | `// to mm on load, after the display unit is applied.` |
 | comment | src/io/Settings.h:204 | `// (0 mm, 1 cm, 2 m, 3 in, 4 ft). An int for the same reason language is -` |
 | comment | src/io/Settings.h:205 | `// this header stays free of core/Units.h. The model is always mm; this only` |
-| comment | src/io/StlExport.cpp:216 | `// OrcaSlicer silently dropped the bottom 5 mm of the print.` |
-| comment | src/io/StlExport.cpp:218 | `// Welding vertices at 1e-3 mm alone took those 6,904 open edges to ONE` |
-| comment | src/io/StlExport.cpp:248 | `{   // weld at 1e-3 mm` |
+| comment | src/io/StlExport.cpp:252 | `// OrcaSlicer silently dropped the bottom 5 mm of the print.` |
+| comment | src/io/StlExport.cpp:254 | `// Welding vertices at 1e-3 mm alone took those 6,904 open edges to ONE` |
+| comment | src/io/StlExport.cpp:294 | `{   // weld at 1e-3 mm` |
 | comment | src/io/StlExport.h:13 | `double linearDeflection = 0.01;  // mm - chord deviation (smaller = smoother)` |
 | comment | src/io/SvgExport.cpp:150 | `// 1 SVG user unit = 1 mm; Y flipped (CAD Y-up -> SVG Y-down).` |
 | comment | src/ios_platform.h:4 | `// iOS runtime services (implemented in ios_platform.mm). Safe to include` |
@@ -449,7 +449,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:517 | `"[Resize] cap-following fill built (final vol=%.3f mm³)\n",` |
 | allowed-by-hand | src/modeling/ResizeCylindricalOp.cpp:542 | `"[Resize] fuse: bodyVol %.3f → %.3f mm³ (delta=%+.3f)\n",` |
 | comment | src/modeling/ScaleFaceOp.cpp:368 | `// they were converted display->mm on commit, so typing 100 under inches` |
-| allowed-by-hand | src/modeling/SewOp.cpp:199 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
+| allowed-by-hand | src/modeling/SewOp.cpp:214 | `ImGui::TextDisabled(materializr::tr("Joined at %.4f mm."), m_tolUsed);` |
 | allowed-by-hand | src/modeling/ShellOp.cpp:221 | `"body (thickness %.3f mm).\n", m_thickness);` |
 | allowed-by-hand | src/modeling/ShellOp.cpp:337 | `"[Shell] failed at thickness %.3f mm - the wall is too thick, "` |
 | comment | src/modeling/Sketch.cpp:556 | `// these a later dimension (e.g. a 2 mm gap to another edge) lets the naive` |
@@ -459,47 +459,47 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/SketchEditOp.cpp:140 | `// "Add sketch element" into "Rectangle 80 × 45 mm", "Circle Ø20 mm", etc.,` |
 | comment | src/modeling/SketchOffset.cpp:796 | `// comfortably more than 1e-3 mm - so an analytic epsilon condemns perfectly` |
 | comment | src/modeling/SketchOffset.cpp:959 | `// accept the (sub-0.1 mm) deviation that comes with it.` |
-| comment | src/modeling/SketchTool.cpp:488 | `// Popup asks for DIAMETER (matching the on-canvas "X.X mm dia"` |
-| comment | src/modeling/SketchTool.cpp:684 | `// comes out NEARLY axis-aligned, "nearly" is the bug: 1° over 80 mm is` |
-| comment | src/modeling/SketchTool.cpp:711 | `// 4° rule. (Steve: a 1 mm rise over a long run must not snap to horizontal.)` |
-| comment | src/modeling/SketchTool.cpp:915 | `// neighbouring grid intersection. The old absolute 0.25 mm floor meant a` |
-| comment | src/modeling/SketchTool.cpp:916 | `// fine grid was swamped by it: at a 0.1 mm grid a second point placed one` |
-| comment | src/modeling/SketchTool.cpp:917 | `// or two steps (0.1–0.2 mm) from the first snapped straight back onto it -` |
-| comment | src/modeling/SketchTool.cpp:918 | `// so nothing shorter than ~0.3 mm could be drawn, and an endpoint snap` |
-| comment | src/modeling/SketchTool.cpp:919 | `// hijacked the cursor within 0.3 mm of any point (Steve's report). Coarse` |
-| comment | src/modeling/SketchTool.cpp:921 | `// ~0.42 mm). Grid OFF: the cursor is freehand, so keep an absolute band to` |
-| comment | src/modeling/SketchTool.cpp:974 | `// 0.25 mm even with snap off), which is why Steve couldn't make a line` |
-| comment | src/modeling/SketchTool.cpp:975 | `// under ~0.25 mm with grid AND inferences both off. Loop closure welds` |
-| comment | src/modeling/SketchTool.cpp:1342 | `// snap above: with grid snap on, an absolute 0.2 mm floor would fire a` |
-| comment | src/modeling/SketchTool.cpp:1343 | `// horizontal/vertical guide off a point within 0.2 mm on a fine grid,` |
-| comment | src/modeling/SketchTool.cpp:1350 | `// shrinks to sub-pixel at low zoom (e.g. on an 80 mm part viewed whole),` |
-| comment | src/modeling/SketchTool.cpp:1363 | `// at 100 mm = 5 mm of cursor theft). An inference may only pull the` |
-| comment | src/modeling/SketchTool.cpp:1366 | `// absolute 1.5 mm floor let a directional guide yank the cursor ~1.5 mm -` |
-| comment | src/modeling/SketchTool.cpp:1367 | `// 15 increments at a 0.1 mm grid - so once the (now tight) endpoint band` |
-| comment | src/modeling/SketchTool.cpp:1369 | `// ~1.3 mm out. Tie the pull to the grid so it can't reach past ~1.5` |
-| comment | src/modeling/SketchTool.cpp:1798 | `// angular window up: at a 1 mm grid it means 5.7 deg of catch` |
-| comment | src/modeling/SketchTool.cpp:1799 | `// on a 3 mm leg and worse below that, which is exactly the` |
-| comment | src/modeling/SketchTool.cpp:1974 | `// x=9.0033 on a 0.1 mm grid, a guide pair at y=12.2012. Over a few` |
-| comment | src/modeling/SketchTool.cpp:1996 | `// a 1 mm grid: 8.4 deg on a 3 mm leg off a 70 deg corner, 3.4 deg at` |
-| comment | src/modeling/SketchTool.cpp:1997 | `// 5 mm, decaying as 1/length). The guide still highlights, because it` |
-| comment | src/modeling/SketchTool.cpp:2012 | `// charged vertical, that can be a few mm off the cursor's perpendicular` |
-| comment | src/modeling/SketchTool.cpp:2013 | `// path. With posCap (1.5 mm) we'd silently fall through to single-line` |
-| comment | src/modeling/SketchTool.cpp:2015 | `// which is what Steve hit in the 18.9 mm screenshot.` |
-| comment | src/modeling/SketchTool.cpp:2020 | `// does is relative to the segment being drawn - 1.5 mm off a 100 mm line` |
-| comment | src/modeling/SketchTool.cpp:2021 | `// is nothing, 1.5 mm off a 2 mm line is the line. That asymmetry is why` |
-| comment | src/modeling/SketchTool.cpp:2023 | `// near the anchor (Steve, 2026-09-03: a 2 mm line placed fine, 1 mm and` |
-| comment | src/modeling/SketchTool.cpp:2024 | `// 3 mm were unreachable, the only alternatives being no line at all - an` |
-| comment | src/modeling/SketchTool.cpp:2026 | `// 19 mm jump to a farther intersection still inside the 5x pair cap).` |
-| comment | src/modeling/SketchTool.cpp:2029 | `// out of the way: past ~6 mm of draw the absolute caps bind again, so` |
-| comment | src/modeling/SketchTool.cpp:2169 | `// (Steve.) Grid off keeps the original mm-based cap.` |
-| comment | src/modeling/SketchTool.cpp:2208 | `// when they explicitly asked for 1 mm precision. The toolbar "Snap to` |
-| comment | src/modeling/SketchTool.cpp:2218 | `// declaration for why. 0.3 mm is the radius every caller here used before the` |
-| comment | src/modeling/SketchTool.cpp:2237 | `// A weld radius is a SCREEN distance. As a fixed 0.3 mm it shrank with the` |
-| comment | src/modeling/SketchTool.cpp:2242 | `// welded. Change the lattice underfoot and it stops - switching feet -> mm` |
-| comment | src/modeling/SketchTool.cpp:2244 | `// (304.8-based vs 1-based), the closing click snaps elsewhere, and 0.3 mm` |
-| comment | src/modeling/SketchTool.cpp:2247 | `// Same shape as tolStep()'s screen term, and the 0.3 mm stays as a floor so` |
-| comment | src/modeling/SketchTool.cpp:2428 | `// It used to be a hand-rolled scan at 1e-4 mm, which is exact equality` |
-| comment | src/modeling/SketchTool.cpp:2435 | `// sketch to extrude" after switching feet -> mm, then as "I can't close` |
+| comment | src/modeling/SketchTool.cpp:491 | `// Popup asks for DIAMETER (matching the on-canvas "X.X mm dia"` |
+| comment | src/modeling/SketchTool.cpp:687 | `// comes out NEARLY axis-aligned, "nearly" is the bug: 1° over 80 mm is` |
+| comment | src/modeling/SketchTool.cpp:714 | `// 4° rule. (Steve: a 1 mm rise over a long run must not snap to horizontal.)` |
+| comment | src/modeling/SketchTool.cpp:918 | `// neighbouring grid intersection. The old absolute 0.25 mm floor meant a` |
+| comment | src/modeling/SketchTool.cpp:919 | `// fine grid was swamped by it: at a 0.1 mm grid a second point placed one` |
+| comment | src/modeling/SketchTool.cpp:920 | `// or two steps (0.1–0.2 mm) from the first snapped straight back onto it -` |
+| comment | src/modeling/SketchTool.cpp:921 | `// so nothing shorter than ~0.3 mm could be drawn, and an endpoint snap` |
+| comment | src/modeling/SketchTool.cpp:922 | `// hijacked the cursor within 0.3 mm of any point (Steve's report). Coarse` |
+| comment | src/modeling/SketchTool.cpp:924 | `// ~0.42 mm). Grid OFF: the cursor is freehand, so keep an absolute band to` |
+| comment | src/modeling/SketchTool.cpp:977 | `// 0.25 mm even with snap off), which is why Steve couldn't make a line` |
+| comment | src/modeling/SketchTool.cpp:978 | `// under ~0.25 mm with grid AND inferences both off. Loop closure welds` |
+| comment | src/modeling/SketchTool.cpp:1345 | `// snap above: with grid snap on, an absolute 0.2 mm floor would fire a` |
+| comment | src/modeling/SketchTool.cpp:1346 | `// horizontal/vertical guide off a point within 0.2 mm on a fine grid,` |
+| comment | src/modeling/SketchTool.cpp:1353 | `// shrinks to sub-pixel at low zoom (e.g. on an 80 mm part viewed whole),` |
+| comment | src/modeling/SketchTool.cpp:1366 | `// at 100 mm = 5 mm of cursor theft). An inference may only pull the` |
+| comment | src/modeling/SketchTool.cpp:1369 | `// absolute 1.5 mm floor let a directional guide yank the cursor ~1.5 mm -` |
+| comment | src/modeling/SketchTool.cpp:1370 | `// 15 increments at a 0.1 mm grid - so once the (now tight) endpoint band` |
+| comment | src/modeling/SketchTool.cpp:1372 | `// ~1.3 mm out. Tie the pull to the grid so it can't reach past ~1.5` |
+| comment | src/modeling/SketchTool.cpp:1801 | `// angular window up: at a 1 mm grid it means 5.7 deg of catch` |
+| comment | src/modeling/SketchTool.cpp:1802 | `// on a 3 mm leg and worse below that, which is exactly the` |
+| comment | src/modeling/SketchTool.cpp:1977 | `// x=9.0033 on a 0.1 mm grid, a guide pair at y=12.2012. Over a few` |
+| comment | src/modeling/SketchTool.cpp:1999 | `// a 1 mm grid: 8.4 deg on a 3 mm leg off a 70 deg corner, 3.4 deg at` |
+| comment | src/modeling/SketchTool.cpp:2000 | `// 5 mm, decaying as 1/length). The guide still highlights, because it` |
+| comment | src/modeling/SketchTool.cpp:2015 | `// charged vertical, that can be a few mm off the cursor's perpendicular` |
+| comment | src/modeling/SketchTool.cpp:2016 | `// path. With posCap (1.5 mm) we'd silently fall through to single-line` |
+| comment | src/modeling/SketchTool.cpp:2018 | `// which is what Steve hit in the 18.9 mm screenshot.` |
+| comment | src/modeling/SketchTool.cpp:2023 | `// does is relative to the segment being drawn - 1.5 mm off a 100 mm line` |
+| comment | src/modeling/SketchTool.cpp:2024 | `// is nothing, 1.5 mm off a 2 mm line is the line. That asymmetry is why` |
+| comment | src/modeling/SketchTool.cpp:2026 | `// near the anchor (Steve, 2026-09-03: a 2 mm line placed fine, 1 mm and` |
+| comment | src/modeling/SketchTool.cpp:2027 | `// 3 mm were unreachable, the only alternatives being no line at all - an` |
+| comment | src/modeling/SketchTool.cpp:2029 | `// 19 mm jump to a farther intersection still inside the 5x pair cap).` |
+| comment | src/modeling/SketchTool.cpp:2032 | `// out of the way: past ~6 mm of draw the absolute caps bind again, so` |
+| comment | src/modeling/SketchTool.cpp:2172 | `// (Steve.) Grid off keeps the original mm-based cap.` |
+| comment | src/modeling/SketchTool.cpp:2211 | `// when they explicitly asked for 1 mm precision. The toolbar "Snap to` |
+| comment | src/modeling/SketchTool.cpp:2221 | `// declaration for why. 0.3 mm is the radius every caller here used before the` |
+| comment | src/modeling/SketchTool.cpp:2240 | `// A weld radius is a SCREEN distance. As a fixed 0.3 mm it shrank with the` |
+| comment | src/modeling/SketchTool.cpp:2245 | `// welded. Change the lattice underfoot and it stops - switching feet -> mm` |
+| comment | src/modeling/SketchTool.cpp:2247 | `// (304.8-based vs 1-based), the closing click snaps elsewhere, and 0.3 mm` |
+| comment | src/modeling/SketchTool.cpp:2250 | `// Same shape as tolStep()'s screen term, and the 0.3 mm stays as a floor so` |
+| comment | src/modeling/SketchTool.cpp:2439 | `// It used to be a hand-rolled scan at 1e-4 mm, which is exact equality` |
+| comment | src/modeling/SketchTool.cpp:2446 | `// sketch to extrude" after switching feet -> mm, then as "I can't close` |
 | comment | src/modeling/SketchTool.h:26 | `// current geometry value: mm for distances, RADIUS in mm for Radius (UI` |
 | comment | src/modeling/SketchTool.h:172 | `// Unrotated text extents relative to the anchor (mm), pushed by the app` |
 | comment | src/modeling/SketchTool.h:182 | `// Actual glyph contours (anchor-relative, unrotated mm - same space as the` |
@@ -518,12 +518,12 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/modeling/SketchTool.h:344 | `// ~1.5 mm pick radius into 10 mm - an 80-pixel grab - for no reason` |
 | comment | src/modeling/SketchTool.h:400 | `// on the drawing (a 90-degree corner versus a 6 mm fillet run). The cursor's` |
 | comment | src/modeling/SketchTool.h:407 | `// display->mm on the way in, so under inches a typed 180 deg arrived as` |
-| comment | src/modeling/SketchTool.h:608 | `// or diameter (2-point mode) to whole grid units, so a 1 mm grid can't` |
-| comment | src/modeling/SketchTool.h:609 | `// produce a 10.05 mm circle. No-op when grid snap is off.` |
-| comment | src/modeling/SketchTool.h:664 | `float m_textHeight = 8.0f;  // capital height, mm` |
-| comment | src/modeling/SketchTool.h:674 | `float m_airfoilChord = 100.0f;  // mm, a typical model-wing root chord` |
-| comment | src/modeling/SketchTool.h:676 | `float m_svgWidth = 50.0f; // target artwork width, mm` |
-| comment | src/modeling/SketchTool.h:702 | `float m_gridStep = 1.0f; // default 1 mm grid (zoom-scaled; snapping)` |
+| comment | src/modeling/SketchTool.h:612 | `// or diameter (2-point mode) to whole grid units, so a 1 mm grid can't` |
+| comment | src/modeling/SketchTool.h:613 | `// produce a 10.05 mm circle. No-op when grid snap is off.` |
+| comment | src/modeling/SketchTool.h:668 | `float m_textHeight = 8.0f;  // capital height, mm` |
+| comment | src/modeling/SketchTool.h:678 | `float m_airfoilChord = 100.0f;  // mm, a typical model-wing root chord` |
+| comment | src/modeling/SketchTool.h:680 | `float m_svgWidth = 50.0f; // target artwork width, mm` |
+| comment | src/modeling/SketchTool.h:706 | `float m_gridStep = 1.0f; // default 1 mm grid (zoom-scaled; snapping)` |
 | comment | src/modeling/SubShapeIndex.cpp:136 | `constexpr double kDistTol = 1e-3;   // mm` |
 | comment | src/modeling/SubShapeIndex.cpp:183 | `// same-curve-type candidate within 2 mm ONLY when it wins unambiguously` |
 | allowed-by-hand | src/modeling/SvgImport.cpp:706 | `NSVGimage* img = nsvgParse(text.data(), "mm", 96.0f);` |
@@ -549,7 +549,7 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | comment | src/ui/PropertiesPanel.cpp:917 | `// Lengths: display unit -> mm FIRST, then halve a circle's` |
 | comment | src/ui/PropertiesPanel.h:137 | `// Per-body bbox-extent cache for the "Size: X × Y × Z mm" readout.` |
 | comment | src/ui/StepperRow.h:18 | `// value, and pulling an 80 mm extrude down to 50 because you pressed +1 loses` |
-| allowed-by-hand | src/ui/Toolbar.cpp:534 | `tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens` |
+| allowed-by-hand | src/ui/Toolbar.cpp:537 | `tip(materializr::tr("Create a stock OCCT primitive (box / cylinder / sphere / cone / torus). Picking one opens` |
 | allowed-by-hand | src/ui/TouchWidgets.h:94 | `const char* suffix = "mm", int decimals = 1,` |
 | allowed-by-hand | src/ui/TouchWidgets.h:137 | `const char* suffix = "mm", int decimals = 1,` |
 | comment | src/viewport/Camera.cpp:215 | `// least 0.1 mm of standoff so the view doesn't degenerate.` |
@@ -614,11 +614,11 @@ classifier is heuristic; rows it cannot decide are pinned in the script's OVERRI
 | no-length | src/modeling/RevolveOp.cpp:267 | `RevolveOp` |
 | CONVERTED | src/modeling/ScaleFaceOp.cpp:357 | `ScaleFaceOp` |
 | no-length | src/modeling/SeparateBodyOp.cpp:85 | `SeparateBodyOp` |
-| no-length | src/modeling/SewOp.cpp:181 | `SewOp` |
+| no-length | src/modeling/SewOp.cpp:196 | `SewOp` |
 | CONVERTED | src/modeling/ShellOp.cpp:366 | `ShellOp` |
 | CONVERTED | src/modeling/SketchEditOp.cpp:59 | `SketchEditOp` |
 | stored-string | src/modeling/SketchTransformOp.h:31 | `SketchTransformOp` |
-| no-length | src/modeling/SplitBodyOp.cpp:112 | `SplitBodyOp` |
+| no-length | src/modeling/SplitBodyOp.cpp:116 | `SplitBodyOp` |
 | no-length | src/modeling/SweepOp.cpp:64 | `SweepOp` |
 | no-length | src/modeling/TaperOp.cpp:149 | `TaperOp` |
 | CONVERTED | src/modeling/ThreadOp.cpp:2100 | `ThreadOp` |
