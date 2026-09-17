@@ -2,6 +2,7 @@
 #include "Contributions.h"
 #include "InteractiveOp.h"
 #include "../io/Settings.h"
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -63,6 +64,15 @@ public:
     void requestInteractiveOp(InteractiveOp op);
     InteractiveOp takeRequestedInteractiveOp();
 
+    // For an import that can add many bodies at once (a large STEP assembly,
+    // say): runs importFn in the host's between-frames deferred slot with a
+    // progress frame, then meshes the result through the same pool+pump path
+    // project load uses, instead of a synchronous import + m_meshesDirty that
+    // freezes the window on the next full mesh rebuild. importFn returns
+    // whether the import succeeded; on false, no mesh work runs.
+    void queueHeavyImport(std::string message, std::function<bool()> importFn);
+    void _bindHeavyImport(std::function<void(std::string, std::function<bool()>)> fn);
+
     void registerToolbarButton(ToolbarContribution contrib);
     void registerCommand(CommandContribution contrib);
     void registerMenuItem(MenuContribution contrib);
@@ -87,6 +97,7 @@ private:
     const bool* m_sketchModeFlag = nullptr;
     const AppSettings::AiSettings* m_aiSettings = nullptr;
     std::function<void()> m_markDirtyFn;
+    std::function<void(std::string, std::function<bool()>)> m_queueHeavyImportFn;
     InteractiveOp m_pendingInteractiveOp = InteractiveOp::None;
 };
 
